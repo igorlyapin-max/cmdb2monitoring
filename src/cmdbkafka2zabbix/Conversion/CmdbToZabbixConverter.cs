@@ -25,6 +25,7 @@ public sealed class CmdbToZabbixConverter(
 
         var methodName = route.Method;
         var templateName = route.TemplateName;
+        string? fallbackForMethod = null;
         if (route.RequiresZabbixHostId && string.IsNullOrWhiteSpace(source.ZabbixHostId))
         {
             if (string.IsNullOrWhiteSpace(route.FallbackMethod) || string.IsNullOrWhiteSpace(route.FallbackTemplateName))
@@ -32,6 +33,7 @@ public sealed class CmdbToZabbixConverter(
                 return ZabbixConversionResult.Skipped(source, methodName, "missing_zabbix_hostid");
             }
 
+            fallbackForMethod = methodName;
             methodName = route.FallbackMethod;
             templateName = route.FallbackTemplateName;
         }
@@ -42,7 +44,7 @@ public sealed class CmdbToZabbixConverter(
             return ZabbixConversionResult.Skipped(source, methodName, validationError);
         }
 
-        var model = BuildModel(source, rules);
+        var model = BuildModel(source, rules, methodName, fallbackForMethod);
         var templateLines = ResolveTemplateLines(rules, templateName);
         if (templateLines.Length == 0)
         {
@@ -66,7 +68,11 @@ public sealed class CmdbToZabbixConverter(
             SkipReason: null);
     }
 
-    private ZabbixHostCreateModel BuildModel(CmdbSourceEvent source, ConversionRulesDocument rules)
+    private ZabbixHostCreateModel BuildModel(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        string currentMethod,
+        string? fallbackForMethod)
     {
         var initialModel = new ZabbixHostCreateModel
         {
@@ -77,6 +83,9 @@ public sealed class CmdbToZabbixConverter(
             ZabbixHostId = source.ZabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
+            EventType = source.EventType,
+            CurrentMethod = currentMethod,
+            FallbackForMethod = fallbackForMethod,
             Status = rules.Defaults.Host.Status,
             InventoryMode = rules.Defaults.Host.InventoryMode
         };
@@ -95,6 +104,9 @@ public sealed class CmdbToZabbixConverter(
             ZabbixHostId = source.ZabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
+            EventType = source.EventType,
+            CurrentMethod = currentMethod,
+            FallbackForMethod = fallbackForMethod,
             Status = rules.Defaults.Host.Status,
             InventoryMode = rules.Defaults.Host.InventoryMode,
             Interface = MapInterface(SelectInterface(source, rules)),
@@ -289,7 +301,8 @@ public sealed class CmdbToZabbixConverter(
             IpAddress = source.IpAddress ?? string.Empty,
             ZabbixHostId = source.ZabbixHostId,
             OperatingSystem = source.OperatingSystem,
-            ZabbixTag = source.ZabbixTag
+            ZabbixTag = source.ZabbixTag,
+            EventType = source.EventType
         };
 
         var tags = new List<TagDefinition>();

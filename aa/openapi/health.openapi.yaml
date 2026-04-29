@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: cmdb2monitoring Health API
+  version: 0.1.0
+servers:
+  - url: http://localhost:5080
+    description: cmdbwebhooks2kafka dev
+  - url: http://localhost:5081
+    description: cmdbkafka2zabbix dev
+  - url: http://localhost:5082
+    description: zabbixrequests2api dev
+paths:
+  /health:
+    get:
+      summary: Service health check
+      operationId: getServiceHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, status]
+                properties:
+                  service:
+                    type: string
+                  status:
+                    type: string
+                    example: ok

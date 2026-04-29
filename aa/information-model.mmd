@@ -1,0 +1,16 @@
+flowchart LR
+    cmdb[CMDBuild] -->|IF-001 HTTP webhook| wh[cmdbwebhooks2kafka]
+    wh -->|IF-002 cmdbuild.webhooks.*| kafka[(Kafka)]
+    kafka -->|cmdbuild.webhooks.*| conv[cmdbkafka2zabbix]
+    rules[(Git rules JSON)] -->|IF-007| conv
+    conv -->|IF-003 zabbix.host.requests.*| kafka
+    kafka -->|zabbix.host.requests.*| api[zabbixrequests2api]
+    api -->|IF-004 JSON-RPC| zbx[Zabbix API]
+    api -->|IF-005 zabbix.host.responses.*| kafka
+    wh -->|IF-006 logs| kafka
+    conv -->|IF-006 logs| kafka
+    api -->|IF-006 logs| kafka
+    wh -->|IF-008 state| fs[(Local FS)]
+    conv -->|IF-008 state| fs
+    api -->|IF-008 state| fs
+    kafka -. future ship .-> elk[ELK]

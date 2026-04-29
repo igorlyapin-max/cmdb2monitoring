@@ -48,6 +48,12 @@ public sealed class ZabbixHostCreateModel
 
     public string? ZabbixTag { get; init; }
 
+    public string EventType { get; init; } = string.Empty;
+
+    public string CurrentMethod { get; init; } = string.Empty;
+
+    public string? FallbackForMethod { get; init; }
+
     public ZabbixInterfaceModel Interface { get; init; } = new();
 
     public List<ZabbixGroupModel> Groups { get; init; } = [];

@@ -6,6 +6,8 @@ public sealed class ZabbixRequestDocument
 {
     public string RawJson { get; init; } = string.Empty;
 
+    public string ZabbixJson { get; init; } = string.Empty;
+
     public JsonElement Root { get; init; }
 
     public JsonElement Params { get; init; }
@@ -19,4 +21,8 @@ public sealed class ZabbixRequestDocument
     public string? EntityId { get; init; }
 
     public string? Host { get; init; }
+
+    public string? FallbackForMethod { get; init; }
+
+    public JsonElement FallbackUpdateParams { get; init; }
 }

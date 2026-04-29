@@ -1,0 +1,19 @@
+flowchart TD
+    user[Пользователь CMDBuild] --> ui[CMDBuild Web UI]
+    ui --> cmdb[CMDBuild]
+    cmdb -->|POST /webhooks/cmdbuild| wh[cmdbwebhooks2kafka]
+    wh -->|cmdbuild.webhooks.*| kafka[(Kafka)]
+    kafka --> conv[cmdbkafka2zabbix]
+    conv -->|zabbix.host.requests.*| kafka
+    kafka --> api[zabbixrequests2api]
+    api -->|JSON-RPC| zabbix[Zabbix API]
+    api -->|zabbix.host.responses.*| kafka
+    wh -->|logs| logs[Kafka log topics]
+    conv -->|logs| logs
+    api -->|logs| logs
+    logs -. future .-> elk[ELK]
+
+    subgraph fallback[Fallback для update/delete без zabbix_hostid]
+        api -->|host.get| zabbix
+        api -->|host.update или host.delete| zabbix
+    end

@@ -1,0 +1,25 @@
+flowchart TB
+    subgraph devhost[Dev/Test host]
+        wh[cmdbwebhooks2kafka :5080]
+        conv[cmdbkafka2zabbix :5081]
+        api[zabbixrequests2api :5082]
+        rules[rules JSON]
+        state[state/*.json]
+    end
+
+    subgraph docker[Docker host]
+        kafka[(Kafka :9092)]
+        cmdb[CMDBuild :8090]
+        zbx[Zabbix :8081]
+    end
+
+    cmdb -->|HTTP webhook| wh
+    wh --> kafka
+    kafka --> conv
+    rules --> conv
+    conv --> kafka
+    kafka --> api
+    api --> zbx
+    wh --> state
+    conv --> state
+    api --> state

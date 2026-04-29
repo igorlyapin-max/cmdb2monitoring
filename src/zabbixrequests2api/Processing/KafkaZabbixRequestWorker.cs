@@ -187,8 +187,291 @@ public sealed class KafkaZabbixRequestWorker(
         }
 
         var apiResult = await zabbixClient.ExecuteAsync(request, cancellationToken);
+        if (IsDeleteFallbackRequest(request))
+        {
+            return await ProcessDeleteFallbackAsync(request, apiResult, cancellationToken);
+        }
+
+        if (IsUpdateFallbackRequest(request))
+        {
+            return await ProcessUpdateFallbackAsync(request, apiResult, cancellationToken);
+        }
+
         return ZabbixProcessingResult.FromApiResult(request, apiResult);
     }
+
+    private async Task<ZabbixProcessingResult> ProcessDeleteFallbackAsync(
+        ZabbixRequestDocument lookupRequest,
+        ZabbixApiCallResult lookupResult,
+        CancellationToken cancellationToken)
+    {
+        if (!lookupResult.Success)
+        {
+            return ZabbixProcessingResult.FromApiResult(lookupRequest, lookupResult);
+        }
+
+        var hostId = ReadFirstHostId(lookupResult.ResponseJson);
+        if (string.IsNullOrWhiteSpace(hostId))
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                lookupRequest,
+                "host_not_found",
+                $"Zabbix host '{lookupRequest.Host ?? "<unknown>"}' was not found for delete fallback.",
+                [],
+                [],
+                []);
+        }
+
+        var deleteRequestJson = JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            method = "host.delete",
+            @params = new[] { hostId },
+            id = ResolveJsonRpcId(lookupRequest)
+        });
+        var deleteRequest = requestReader.Read(lookupRequest.EntityId, deleteRequestJson, lookupRequest.Host);
+        var deleteValidation = await requestValidator.ValidateAsync(deleteRequest, cancellationToken);
+        if (!deleteValidation.IsValid)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                deleteRequest,
+                deleteValidation.PrimaryErrorCode(),
+                deleteValidation.PrimaryErrorMessage(),
+                deleteValidation.MissingHostGroups.ToArray(),
+                deleteValidation.MissingTemplates.ToArray(),
+                deleteValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var deleteResult = await zabbixClient.ExecuteAsync(deleteRequest, cancellationToken);
+        return ZabbixProcessingResult.FromApiResult(deleteRequest, deleteResult);
+    }
+
+    private async Task<ZabbixProcessingResult> ProcessUpdateFallbackAsync(
+        ZabbixRequestDocument lookupRequest,
+        ZabbixApiCallResult lookupResult,
+        CancellationToken cancellationToken)
+    {
+        if (!lookupResult.Success)
+        {
+            return ZabbixProcessingResult.FromApiResult(lookupRequest, lookupResult);
+        }
+
+        var hostInfo = ReadFirstHostLookupInfo(lookupResult.ResponseJson);
+        if (hostInfo is null)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                lookupRequest,
+                "host_not_found",
+                $"Zabbix host '{lookupRequest.Host ?? "<unknown>"}' was not found for update fallback.",
+                [],
+                [],
+                []);
+        }
+
+        if (lookupRequest.FallbackUpdateParams.ValueKind != JsonValueKind.Object)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                lookupRequest,
+                "missing_update_payload",
+                "Fallback host.update params are missing in cmdb2monitoring metadata.",
+                [],
+                [],
+                []);
+        }
+
+        var updateRequestJson = BuildHostUpdateRequestJson(
+            lookupRequest,
+            hostInfo.HostId,
+            hostInfo.InterfaceId);
+        var updateRequest = requestReader.Read(lookupRequest.EntityId, updateRequestJson, lookupRequest.Host);
+        var updateValidation = await requestValidator.ValidateAsync(updateRequest, cancellationToken);
+        if (!updateValidation.IsValid)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                updateRequest,
+                updateValidation.PrimaryErrorCode(),
+                updateValidation.PrimaryErrorMessage(),
+                updateValidation.MissingHostGroups.ToArray(),
+                updateValidation.MissingTemplates.ToArray(),
+                updateValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var updateResult = await zabbixClient.ExecuteAsync(updateRequest, cancellationToken);
+        return ZabbixProcessingResult.FromApiResult(updateRequest, updateResult);
+    }
+
+    private static bool IsDeleteFallbackRequest(ZabbixRequestDocument request)
+    {
+        return string.Equals(request.Method, "host.get", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(request.FallbackForMethod, "host.delete", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUpdateFallbackRequest(ZabbixRequestDocument request)
+    {
+        return string.Equals(request.Method, "host.get", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(request.FallbackForMethod, "host.update", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ReadFirstHostId(string? responseJson)
+    {
+        return ReadFirstHostLookupInfo(responseJson)?.HostId;
+    }
+
+    private static ZabbixHostLookupInfo? ReadFirstHostLookupInfo(string? responseJson)
+    {
+        if (string.IsNullOrWhiteSpace(responseJson))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(responseJson);
+        if (!document.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var host in result.EnumerateArray())
+        {
+            if (host.ValueKind == JsonValueKind.Object
+                && host.TryGetProperty("hostid", out var hostId))
+            {
+                var parsedHostId = ReadScalar(hostId);
+                if (string.IsNullOrWhiteSpace(parsedHostId))
+                {
+                    continue;
+                }
+
+                return new ZabbixHostLookupInfo(parsedHostId, ReadFirstInterfaceId(host));
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadFirstInterfaceId(JsonElement host)
+    {
+        if (!host.TryGetProperty("interfaces", out var interfaces)
+            || interfaces.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var zabbixInterface in interfaces.EnumerateArray())
+        {
+            if (zabbixInterface.ValueKind == JsonValueKind.Object
+                && zabbixInterface.TryGetProperty("interfaceid", out var interfaceId))
+            {
+                return ReadScalar(interfaceId);
+            }
+        }
+
+        return null;
+    }
+
+    private static string BuildHostUpdateRequestJson(
+        ZabbixRequestDocument lookupRequest,
+        string hostId,
+        string? interfaceId)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("jsonrpc", "2.0");
+            writer.WriteString("method", "host.update");
+            writer.WritePropertyName("params");
+            writer.WriteStartObject();
+            writer.WriteString("hostid", hostId);
+            foreach (var property in lookupRequest.FallbackUpdateParams.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "hostid", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.Equals(property.Name, "interfaces", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    WriteInterfacesWithExistingId(writer, property.Value, interfaceId);
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+            writer.WritePropertyName("id");
+            lookupRequest.Id.WriteTo(writer);
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void WriteInterfacesWithExistingId(
+        Utf8JsonWriter writer,
+        JsonElement interfaces,
+        string? interfaceId)
+    {
+        writer.WritePropertyName("interfaces");
+        writer.WriteStartArray();
+
+        var index = 0;
+        foreach (var zabbixInterface in interfaces.EnumerateArray())
+        {
+            if (zabbixInterface.ValueKind != JsonValueKind.Object)
+            {
+                zabbixInterface.WriteTo(writer);
+                index++;
+                continue;
+            }
+
+            writer.WriteStartObject();
+            if (index == 0 && !string.IsNullOrWhiteSpace(interfaceId))
+            {
+                writer.WriteString("interfaceid", interfaceId);
+            }
+
+            foreach (var property in zabbixInterface.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "interfaceid", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+            index++;
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static object ResolveJsonRpcId(ZabbixRequestDocument request)
+    {
+        return request.Id.ValueKind switch
+        {
+            JsonValueKind.Number when request.Id.TryGetInt64(out var value) => value,
+            JsonValueKind.String => request.Id.GetString() ?? request.RequestId ?? "1",
+            _ => request.RequestId ?? "1"
+        };
+    }
+
+    private static string? ReadScalar(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            _ => null
+        };
+    }
+
+    private sealed record ZabbixHostLookupInfo(string HostId, string? InterfaceId);
 
     private async Task PublishStateAndCommitAsync(
         ConsumeResult<string, string> consumed,

@@ -1,0 +1,82 @@
+openapi: 3.0.3
+info:
+  title: cmdbwebhooks2kafka HTTP API
+  version: 0.1.0
+servers:
+  - url: http://localhost:5080
+    description: Dev server
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /webhooks/cmdbuild:
+    post:
+      summary: Receive CMDBuild webhook
+      operationId: receiveCmdbuildWebhook
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CmdbWebhookPayload'
+      responses:
+        '202':
+          description: Event accepted and published to Kafka
+        '400':
+          description: Invalid JSON payload
+        '401':
+          description: Invalid or missing Bearer token
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    HealthResponse:
+      type: object
+      required: [service, status]
+      properties:
+        service:
+          type: string
+        status:
+          type: string
+          example: ok
+    CmdbWebhookPayload:
+      type: object
+      required: [source, eventType, cmdbuildEvent, className, id, code]
+      additionalProperties: true
+      properties:
+        source:
+          type: string
+          example: cmdbuild
+        eventType:
+          type: string
+          enum: [create, update, delete]
+        cmdbuildEvent:
+          type: string
+          enum: [card_create_after, card_update_after, card_delete_after]
+        className:
+          type: string
+          enum: [Notebook, PC, Server, tk]
+        id:
+          type: string
+        code:
+          type: string
+        ip_address:
+          type: string
+        description:
+          type: string
+        os:
+          type: string
+        zabbixTag:
+          type: string

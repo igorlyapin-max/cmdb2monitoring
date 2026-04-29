@@ -17,7 +17,7 @@ public sealed class ZabbixClient(
         ZabbixRequestDocument request,
         CancellationToken cancellationToken)
     {
-        return await SendJsonRpcAsync(request.RawJson, authenticated: true, cancellationToken);
+        return await SendJsonRpcAsync(request.ZabbixJson, authenticated: true, cancellationToken);
     }
 
     public async Task<HashSet<string>> GetExistingHostGroupIdsAsync(

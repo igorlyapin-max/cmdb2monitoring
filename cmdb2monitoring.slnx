@@ -4,4 +4,7 @@
     <Project Path="src/cmdbwebhooks2kafka/cmdbwebhooks2kafka.csproj" />
     <Project Path="src/zabbixrequests2api/zabbixrequests2api.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/configvalidation/configvalidation.csproj" />
+  </Folder>
 </Solution>

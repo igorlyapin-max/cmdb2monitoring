@@ -591,6 +591,25 @@ cmdbkafka2zabbix.logs
 Для update/delete Zabbix API требует zabbix hostid.
 Если во входном событии есть поле zabbix_hostid, микросервис формирует прямой host.update или host.delete.
 Если zabbix_hostid отсутствует, микросервис формирует fallback host.get по вычисленному имени host, чтобы следующий обработчик мог получить hostid и затем выполнить update/delete.
+Для fallback update/delete в JSON-RPC request добавляется служебный объект cmdb2monitoring.
+Этот объект не отправляется в Zabbix API и удаляется третьим сервисом перед фактическим вызовом Zabbix.
+
+Для delete fallback metadata содержит:
+- eventType;
+- entityId;
+- host;
+- fallbackForMethod=host.delete.
+
+Для update fallback metadata содержит:
+- eventType;
+- entityId;
+- host;
+- fallbackForMethod=host.update;
+- fallbackUpdateParams с целевыми параметрами host.update без hostid.
+
+zabbixrequests2api после host.get:
+- для fallbackForMethod=host.delete берет найденный hostid и выполняет host.delete;
+- для fallbackForMethod=host.update берет найденный hostid и interfaceid, дополняет fallbackUpdateParams и выполняет host.update.
 
 Rules-файл содержит отдельные виды правил:
 - eventRoutingRules;
@@ -604,9 +623,8 @@ Rules-файл содержит отдельные виды правил:
 
 Будущие задачи:
 - определить, где хранить связь CMDBuild id/code -> Zabbix hostid;
-- добавить обработчик второго шага для fallback host.get -> host.update/host.delete;
 - определить стратегию dead-letter topic для ошибок конвертации;
-- расширить zabbixrequests2api или отдельный сервис для второго шага host.get -> host.update/host.delete.
+- добавить отдельный аудит повторных fallback-событий и политику дедупликации.
 
 14. Микросервис zabbixrequests2api
 
@@ -847,3 +865,89 @@ CMDBuild -> cmdbwebhooks2kafka -> cmdbuild.webhooks.dev -> cmdbkafka2zabbix -> z
 По результатам проверки исправлено поведение zabbixrequests2api с HttpClient:
 - RequestTimeoutMs задается при создании typed HttpClient;
 - сервис не меняет HttpClient.Timeout во время выполнения JSON-RPC запросов.
+
+14.12. Проверка create/update/delete после fallback-доработок
+
+Проверен объект Server s1:
+- CMDBuild id: 109921;
+- Zabbix host: cmdb-server-s1;
+- Zabbix hostid: 10684.
+
+Create:
+- CMDBuild create опубликован в cmdbuild.webhooks.dev offset 31;
+- cmdbkafka2zabbix сформировал host.create в zabbix.host.requests.dev offset 25;
+- zabbixrequests2api успешно выполнил host.create;
+- response опубликован в zabbix.host.responses.dev offset 4;
+- в Zabbix создан host cmdb-server-s1 с IP 1.1.1.1.
+
+Update:
+- CMDBuild update опубликован в cmdbuild.webhooks.dev offset 32;
+- старая логика выполнила только host.get без изменения Zabbix;
+- после доработки update fallback событие переотправлено в offset 33;
+- cmdbkafka2zabbix сформировал host.get с metadata fallbackForMethod=host.update и fallbackUpdateParams в zabbix.host.requests.dev offset 27;
+- zabbixrequests2api выполнил host.get, затем host.update;
+- response опубликован в zabbix.host.responses.dev offset 6;
+- IP host cmdb-server-s1 в Zabbix изменен на 1.1.1.2.
+
+Delete:
+- CMDBuild delete для Server codesrv1 опубликован в cmdbuild.webhooks.dev offset 29;
+- после доработки delete fallback событие переотправлено в offset 30;
+- cmdbkafka2zabbix сформировал host.get с metadata fallbackForMethod=host.delete в zabbix.host.requests.dev offset 24;
+- zabbixrequests2api выполнил host.get, затем host.delete;
+- response опубликован в zabbix.host.responses.dev offset 3;
+- host cmdb-server-codesrv1 удален из Zabbix.
+
+15. Архитектурные артефакты
+
+В репозитории заведена папка aa с артефактами по требованиям:
+- описание бизнес-процесса и Mermaid-схема;
+- информационная модель и Mermaid-схема;
+- схема развертывания для dev/test представления;
+- AsyncAPI для Kafka topics;
+- OpenAPI для webhook HTTP API и health endpoints;
+- карта HealthCheck;
+- карта доступов Kafka;
+- карта метрик;
+- карта секретов;
+- карта регистрации событий;
+- документация по конфигурационным файлам.
+
+Диаграммы хранятся в формате diagram-as-code для версионирования в git.
+При необходимости они могут быть экспортированы во внешний формат изображения или VSDX.
+
+16. Конфигурационная документация
+
+Файл:
+
+aa/configuration-files.md
+
+Документация описывает:
+- какие appsettings-файлы есть у каждого микросервиса;
+- какие параметры менять при смене Kafka/Zabbix/ELK/окружения;
+- какие параметры должны задаваться только через env/secret storage;
+- как включать SASL/TLS Kafka через конфиг;
+- какие topics должны совпадать между микросервисами;
+- как настраивать rules-файл, state-файл и gentle processing.
+
+17. Автотесты конфигурации
+
+Добавлен проект:
+
+tests/configvalidation
+
+Добавлен скрипт:
+
+scripts/test-configs.sh
+
+Скрипт проверяет:
+- синтаксис JSON appsettings и rules-файла;
+- наличие обязательных секций Service, Kafka, ElkLogging, Zabbix, Processing, ProcessingState;
+- связность topic chain между микросервисами;
+- корректность dev/base topic suffix;
+- отсутствие production-секретов в base config;
+- наличие обязательных architecture artifacts в aa;
+- наличие fallback metadata в rules-файле для update/delete.
+
+Запуск:
+
+./scripts/test-configs.sh

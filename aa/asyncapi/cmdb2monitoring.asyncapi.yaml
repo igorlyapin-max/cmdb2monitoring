@@ -1,0 +1,235 @@
+asyncapi: '2.6.0'
+info:
+  title: cmdb2monitoring Kafka API
+  version: '0.1.0'
+  description: AsyncAPI для Kafka-потоков проекта cmdb2monitoring.
+defaultContentType: application/json
+servers:
+  devKafka:
+    url: localhost:9092
+    protocol: kafka
+    description: Локальная Kafka dev-контура
+channels:
+  cmdbuild.webhooks.dev:
+    description: Нормализованные события CMDBuild.
+    publish:
+      operationId: publishCmdbWebhookEvent
+      summary: cmdbwebhooks2kafka публикует CMDB event envelope
+      message:
+        $ref: '#/components/messages/CmdbWebhookEnvelope'
+    subscribe:
+      operationId: consumeCmdbWebhookEvent
+      summary: cmdbkafka2zabbix читает CMDB event envelope
+      message:
+        $ref: '#/components/messages/CmdbWebhookEnvelope'
+  zabbix.host.requests.dev:
+    description: JSON-RPC запросы к Zabbix API.
+    publish:
+      operationId: publishZabbixRequest
+      summary: cmdbkafka2zabbix публикует Zabbix JSON-RPC
+      message:
+        $ref: '#/components/messages/ZabbixJsonRpcRequest'
+    subscribe:
+      operationId: consumeZabbixRequest
+      summary: zabbixrequests2api читает Zabbix JSON-RPC
+      message:
+        $ref: '#/components/messages/ZabbixJsonRpcRequest'
+  zabbix.host.responses.dev:
+    description: Результаты вызовов Zabbix API.
+    publish:
+      operationId: publishZabbixResponse
+      summary: zabbixrequests2api публикует результат обработки
+      message:
+        $ref: '#/components/messages/ZabbixProcessingResponse'
+  cmdbwebhooks2kafka.logs.dev:
+    description: Structured JSON logs первого сервиса.
+    publish:
+      message:
+        $ref: '#/components/messages/StructuredLog'
+  cmdbkafka2zabbix.logs.dev:
+    description: Structured JSON logs второго сервиса.
+    publish:
+      message:
+        $ref: '#/components/messages/StructuredLog'
+  zabbixrequests2api.logs.dev:
+    description: Structured JSON logs третьего сервиса.
+    publish:
+      message:
+        $ref: '#/components/messages/StructuredLog'
+components:
+  messages:
+    CmdbWebhookEnvelope:
+      name: CmdbWebhookEnvelope
+      title: CMDB webhook envelope
+      contentType: application/json
+      headers:
+        type: object
+        properties:
+          source:
+            type: string
+          eventType:
+            type: string
+            enum: [create, update, delete]
+      payload:
+        $ref: '#/components/schemas/CmdbWebhookEnvelope'
+    ZabbixJsonRpcRequest:
+      name: ZabbixJsonRpcRequest
+      title: Zabbix JSON-RPC request
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ZabbixJsonRpcRequest'
+    ZabbixProcessingResponse:
+      name: ZabbixProcessingResponse
+      title: Zabbix processing response
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ZabbixProcessingResponse'
+    StructuredLog:
+      name: StructuredLog
+      title: Structured service log
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/StructuredLog'
+  schemas:
+    CmdbWebhookEnvelope:
+      type: object
+      required: [source, eventType, entityType, entityId, receivedAt, payload]
+      properties:
+        source:
+          type: string
+          example: cmdbuild
+        eventType:
+          type: string
+          enum: [create, update, delete]
+          description: Тип события жизненного цикла карточки.
+        entityType:
+          type: string
+          enum: [Notebook, PC, Server, tk]
+        entityId:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          required: [source, eventType, cmdbuildEvent, className, id, code]
+          additionalProperties: true
+          properties:
+            source:
+              type: string
+            eventType:
+              type: string
+              enum: [create, update, delete]
+            cmdbuildEvent:
+              type: string
+              enum: [card_create_after, card_update_after, card_delete_after]
+            className:
+              type: string
+            id:
+              type: string
+            code:
+              type: string
+            ip_address:
+              type: string
+            description:
+              type: string
+            os:
+              type: string
+              description: CMDBuild lookup id или человекочитаемое значение OS.
+            zabbixTag:
+              type: string
+              description: CMDBuild lookup id или tag1/tag2/tag3.
+    ZabbixJsonRpcRequest:
+      type: object
+      required: [jsonrpc, method, params, id]
+      properties:
+        cmdb2monitoring:
+          type: object
+          description: Внутренняя metadata для fallback update/delete, перед вызовом Zabbix API удаляется.
+          properties:
+            eventType:
+              type: string
+            entityId:
+              type: string
+            host:
+              type: string
+            fallbackForMethod:
+              type: string
+              enum: [host.update, host.delete]
+            fallbackUpdateParams:
+              type: object
+        jsonrpc:
+          type: string
+          const: '2.0'
+        method:
+          type: string
+          enum: [host.create, host.get, host.update, host.delete]
+        params:
+          oneOf:
+            - type: object
+            - type: array
+        id:
+          oneOf:
+            - type: integer
+            - type: string
+    ZabbixProcessingResponse:
+      type: object
+      required: [source, success, method, processedAt, input, missing]
+      properties:
+        source:
+          type: string
+          const: zabbixrequests2api
+        success:
+          type: boolean
+        method:
+          type: string
+        entityId:
+          type: string
+        requestId:
+          type: string
+        host:
+          type: string
+        errorCode:
+          type: string
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        zabbixRequestSent:
+          type: boolean
+        processedAt:
+          type: string
+          format: date-time
+        input:
+          type: object
+          required: [topic, partition, offset, key]
+        missing:
+          type: object
+          required: [hostGroups, templates, templateGroups]
+        zabbixResponse:
+          type: object
+    StructuredLog:
+      type: object
+      required: [timestamp, level, category, message, service, environment]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+        category:
+          type: string
+        eventId:
+          type: integer
+        eventName:
+          type: string
+          nullable: true
+        message:
+          type: string
+        exception:
+          type: string
+          nullable: true
+        service:
+          type: string
+        environment:
+          type: string

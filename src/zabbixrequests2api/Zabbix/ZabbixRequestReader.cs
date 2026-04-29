@@ -4,7 +4,9 @@ namespace ZabbixRequests2Api.Zabbix;
 
 public sealed class ZabbixRequestReader
 {
-    public ZabbixRequestDocument Read(string? key, string messageValue)
+    private const string MetadataPropertyName = "cmdb2monitoring";
+
+    public ZabbixRequestDocument Read(string? key, string messageValue, string? hostOverride = null)
     {
         using var document = JsonDocument.Parse(messageValue);
         var root = document.RootElement;
@@ -14,24 +16,63 @@ public sealed class ZabbixRequestReader
         }
 
         var method = ReadString(root, "method") ?? string.Empty;
+        var metadata = root.TryGetProperty(MetadataPropertyName, out var metadataElement)
+            && metadataElement.ValueKind == JsonValueKind.Object
+                ? metadataElement
+                : default;
         var parameters = root.TryGetProperty("params", out var paramsElement)
             ? paramsElement.Clone()
             : default;
         var id = root.TryGetProperty("id", out var idElement)
             ? idElement.Clone()
             : default;
+        var fallbackUpdateParams = metadata.ValueKind == JsonValueKind.Object
+            && metadata.TryGetProperty("fallbackUpdateParams", out var updateParams)
+            && updateParams.ValueKind == JsonValueKind.Object
+                ? updateParams.Clone()
+                : default;
 
         return new ZabbixRequestDocument
         {
             RawJson = messageValue,
+            ZabbixJson = BuildZabbixJson(messageValue, root),
             Root = root.Clone(),
             Params = parameters,
             Id = id,
             Method = method,
             RequestId = ReadScalar(id),
             EntityId = key,
-            Host = ReadHost(method, parameters)
+            Host = hostOverride ?? ReadHost(method, parameters) ?? ReadString(metadata, "host"),
+            FallbackForMethod = ReadString(metadata, "fallbackForMethod"),
+            FallbackUpdateParams = fallbackUpdateParams
         };
+    }
+
+    private static string BuildZabbixJson(string rawJson, JsonElement root)
+    {
+        if (!root.TryGetProperty(MetadataPropertyName, out _))
+        {
+            return rawJson;
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in root.EnumerateObject())
+            {
+                if (string.Equals(property.Name, MetadataPropertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
     private static string? ReadHost(string method, JsonElement parameters)
