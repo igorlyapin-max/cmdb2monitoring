@@ -37,9 +37,6 @@ builder.Services.AddOptions<KafkaOptions>()
     .Validate(options => options.MessageTimeoutMs > 0, "Kafka message timeout must be greater than zero.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.SourceHeaderName), "Kafka source header name is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.EventTypeHeaderName), "Kafka event type header name is required.")
-    .Validate(options => !options.TopicProvisioning.Enabled || options.TopicProvisioning.Partitions > 0, "Kafka topic partitions must be greater than zero.")
-    .Validate(options => !options.TopicProvisioning.Enabled || options.TopicProvisioning.ReplicationFactor > 0, "Kafka topic replication factor must be greater than zero.")
-    .Validate(options => !options.TopicProvisioning.Enabled || options.TopicProvisioning.RequestTimeoutMs > 0, "Kafka topic request timeout must be greater than zero.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ElkLoggingOptions>()
@@ -57,9 +54,6 @@ builder.Services.AddOptions<ElkLoggingOptions>()
     .Validate(options => !options.Enabled || !options.Kafka.Enabled || !string.IsNullOrWhiteSpace(options.Kafka.ServiceName), "ELK Kafka service name is required.")
     .Validate(options => !options.Enabled || !options.Kafka.Enabled || !string.IsNullOrWhiteSpace(options.Kafka.Environment), "ELK Kafka environment is required.")
     .Validate(options => !options.Enabled || !options.Kafka.Enabled || options.Kafka.FlushTimeoutMs > 0, "ELK Kafka flush timeout must be greater than zero.")
-    .Validate(options => !options.Enabled || !options.Kafka.Enabled || !options.Kafka.TopicProvisioning.Enabled || options.Kafka.TopicProvisioning.Partitions > 0, "ELK Kafka topic partitions must be greater than zero.")
-    .Validate(options => !options.Enabled || !options.Kafka.Enabled || !options.Kafka.TopicProvisioning.Enabled || options.Kafka.TopicProvisioning.ReplicationFactor > 0, "ELK Kafka topic replication factor must be greater than zero.")
-    .Validate(options => !options.Enabled || !options.Kafka.Enabled || !options.Kafka.TopicProvisioning.Enabled || options.Kafka.TopicProvisioning.RequestTimeoutMs > 0, "ELK Kafka topic request timeout must be greater than zero.")
     .ValidateOnStart();
 
 builder.Services.AddSingleton<IProducer<string, string>>(services =>
@@ -72,7 +66,6 @@ builder.Services.AddSingleton<IProducer<string, string>>(services =>
 builder.Logging.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerProvider, KafkaElkLoggerProvider>());
 
 builder.Services.AddSingleton<IKafkaEventPublisher, KafkaEventPublisher>();
-builder.Services.AddHostedService<KafkaTopicProvisioner>();
 
 var app = builder.Build();
 var serviceOptions = app.Services.GetRequiredService<IOptions<ServiceOptions>>().Value;

@@ -47,8 +47,6 @@ public sealed class ElkKafkaOptions : KafkaClientOptions
 
     public int FlushTimeoutMs { get; init; } = 5000;
 
-    public KafkaTopicProvisioningOptions TopicProvisioning { get; init; } = new();
-
     public bool HasValidMinimumLevel()
     {
         return Enum.TryParse<LogLevel>(MinimumLevel, ignoreCase: true, out _);

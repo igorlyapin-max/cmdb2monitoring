@@ -9,11 +9,12 @@ POST {{cmdbwebhooks2kafka_HostAddress}}/webhooks/cmdbuild
 Content-Type: application/json
 
 {
-  "eventType": "card.updated",
-  "className": "Host",
-  "cardId": "12345",
-  "data": {
-    "name": "srv-app-01",
-    "ip": "10.0.0.15"
-  }
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "Notebook",
+  "id": "97805",
+  "code": "2222",
+  "ip_address": "192.168.10.10",
+  "description": "qq1"
 }
