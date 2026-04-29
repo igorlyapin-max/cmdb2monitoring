@@ -11,6 +11,7 @@
 Первый микросервис: cmdbwebhooks2kafka.
 Второй микросервис: cmdbkafka2zabbix.
 Третий микросервис: zabbixrequests2api.
+Frontend/BFF: monitoring-ui-api.
 
 Назначение cmdbwebhooks2kafka:
 - принимать webhook-события из CMDBuild;
@@ -38,6 +39,18 @@
 - сохранять идентификатор последнего обработанного объекта в локальный state-файл;
 - вести структурированные логи в Kafka-топик для будущей интеграции с ELK.
 
+Назначение monitoring-ui-api:
+- предоставлять Node.js frontend и backend-for-frontend для оператора интеграции;
+- отображать health/status микросервисов;
+- принимать login/password для CMDBuild и Zabbix, если IdP отключен;
+- хранить credentials только в server-side session;
+- предоставлять console настройки IdP/SAML2 после авторизации;
+- загружать и валидировать JSON rules-файл;
+- выполнять dry-run правил конвертации;
+- синхронизировать catalog из Zabbix: templates, host groups, template groups, known tags;
+- синхронизировать catalog из CMDBuild: классы, атрибуты, lookup-значения;
+- хранить catalog cache локально без секретов.
+
 2. Технологический стек
 
 - Язык: C#.
@@ -47,6 +60,7 @@
 - CMDB: CMDBuild.
 - Логи: structured JSON logs, временно через Kafka-топик, в будущем через ELK.
 - Репозиторий: monorepo.
+- Frontend/BFF: Node.js без прямого доступа браузера к Kafka/CMDBuild/Zabbix.
 
 3. Структура репозитория
 
@@ -56,6 +70,7 @@
 - микросервис: src/cmdbwebhooks2kafka;
 - микросервис: src/cmdbkafka2zabbix;
 - микросервис: src/zabbixrequests2api;
+- frontend/BFF: src/monitoring-ui-api;
 - правила конвертации: rules/cmdbuild-to-zabbix-host-create.json;
 - общие настройки сборки: Directory.Build.props;
 - документация проекта: README.md;
@@ -904,7 +919,7 @@ Delete:
 - информационная модель и Mermaid-схема;
 - схема развертывания для dev/test представления;
 - AsyncAPI для Kafka topics;
-- OpenAPI для webhook HTTP API и health endpoints;
+- OpenAPI для webhook HTTP API, health endpoints и monitoring-ui-api;
 - карта HealthCheck;
 - карта доступов Kafka;
 - карта метрик;
@@ -951,3 +966,126 @@ scripts/test-configs.sh
 Запуск:
 
 ./scripts/test-configs.sh
+
+18. Frontend/BFF monitoring-ui-api
+
+18.1. Назначение
+
+monitoring-ui-api является Node.js компонентом для frontend и backend-for-frontend.
+
+Frontend не должен обращаться напрямую к Kafka, CMDBuild, Zabbix или IdP-интеграционным endpoint.
+Все обращения выполняются через monitoring-ui-api.
+
+Первый реализованный срез:
+- статический frontend dashboard;
+- Node.js HTTP API без внешних npm-зависимостей;
+- server-side session;
+- login form для режима без IdP;
+- read-only health dashboard по health endpoints микросервисов;
+- rules view с загрузкой JSON, validate, dry-run и upload;
+- Zabbix catalog sync;
+- CMDBuild catalog sync;
+- console для SAML2/IdP настроек.
+
+18.2. Авторизация
+
+Поддерживаются два режима требований:
+
+IdP enabled:
+- целевая модель через единый IdP;
+- основной протокол SAML2;
+- предполагается, что CMDBuild и Zabbix обслуживаются тем же IdP;
+- настройки IdP вносятся через console после авторизации.
+
+IdP disabled:
+- пользователь вводит CMDBuild login/password;
+- пользователь вводит Zabbix login/password или Zabbix API token;
+- credentials не хранятся в браузере;
+- credentials хранятся только в памяти server-side session;
+- production secrets не попадают в git.
+
+Первый срез не реализует полноценный SAML2 login flow.
+Он фиксирует настройки IdP/SAML2 и подготавливает структуру API/UI для следующей итерации.
+
+18.3. Rules upload
+
+Frontend должен уметь загружать JSON rules-файл.
+
+Поток:
+- пользователь выбирает локальный JSON;
+- frontend отправляет JSON в monitoring-ui-api;
+- API валидирует JSON;
+- API может выполнить dry-run на тестовом CMDB payload;
+- после успешной валидации API сохраняет файл в configured rules path;
+- git commit из UI отключен по умолчанию через Rules.AutoCommit=false.
+
+Upload доступен только роли admin.
+Dry-run и validate могут быть доступны оператору в будущей RBAC-модели.
+
+18.4. Zabbix catalog sync
+
+monitoring-ui-api должен загружать из Zabbix:
+- templates;
+- host groups;
+- template groups;
+- known tags.
+
+Catalog cache:
+
+src/monitoring-ui-api/data/zabbix-catalog-cache.json
+
+Cache не должен содержать секреты и не должен попадать в git.
+
+Catalog используется для:
+- UI-подсказок rules;
+- validation rules upload;
+- dry-run;
+- отображения ID и человекочитаемых имен.
+
+Runtime-проверки zabbixrequests2api остаются обязательными и не заменяются UI validation.
+
+18.5. CMDBuild catalog sync
+
+monitoring-ui-api должен загружать из CMDBuild:
+- все классы объектов;
+- active/inactive признак, если доступен;
+- parent/prototype/superclass признаки, если доступны;
+- attributes классов;
+- lookup values, если доступны.
+
+Catalog cache:
+
+src/monitoring-ui-api/data/cmdbuild-catalog-cache.json
+
+Cache не должен содержать секреты и не должен попадать в git.
+
+18.6. Конфигурация monitoring-ui-api
+
+Файлы:
+- src/monitoring-ui-api/config/appsettings.json;
+- src/monitoring-ui-api/config/appsettings.Development.json.
+
+Основные секции:
+- Service;
+- Auth;
+- Idp;
+- Cmdbuild;
+- Zabbix;
+- Rules;
+- Services.
+
+18.7. Проверки
+
+Добавлена Node.js проверка:
+
+src/monitoring-ui-api/scripts/validate-config.mjs
+
+Она запускается из общего скрипта:
+
+./scripts/test-configs.sh
+
+Проверяются:
+- JSON-конфиги monitoring-ui-api;
+- наличие server/static frontend files;
+- наличие rules-файла;
+- обязательные параметры Service/Auth/Cmdbuild/Zabbix/Rules.

@@ -355,6 +355,7 @@ static void ValidateArchitectureArtifacts(string repositoryRoot, List<string> er
         "aa/asyncapi/cmdb2monitoring.asyncapi.yaml",
         "aa/openapi/cmdbwebhooks2kafka.openapi.yaml",
         "aa/openapi/health.openapi.yaml",
+        "aa/openapi/monitoring-ui-api.openapi.yaml",
         "aa/maps/healthcheck-map.md",
         "aa/maps/kafka-access-map.md",
         "aa/maps/metrics-map.md",

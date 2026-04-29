@@ -5,3 +5,4 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 ./scripts/dotnet run --project tests/configvalidation/configvalidation.csproj -- "$ROOT_DIR"
+node src/monitoring-ui-api/scripts/validate-config.mjs

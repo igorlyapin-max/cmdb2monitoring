@@ -1,0 +1,418 @@
+openapi: 3.0.3
+info:
+  title: cmdb2monitoring monitoring UI API
+  version: 0.1.0
+  description: >
+    Backend-for-frontend API for dashboard, server-side sessions, rules
+    validation, dry-run, upload, IdP settings, and CMDBuild/Zabbix catalog
+    synchronization.
+servers:
+  - url: http://localhost:5090
+security:
+  - sessionCookie: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/auth/status:
+    get:
+      summary: Read current authentication status and IdP public settings
+      security: []
+      responses:
+        "200":
+          description: Authentication status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+  /api/auth/login:
+    post:
+      summary: Create local server-side session when IdP mode is disabled
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Session created.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/auth/logout:
+    post:
+      summary: Destroy current server-side session
+      responses:
+        "200":
+          description: Session destroyed.
+  /api/services/health:
+    get:
+      summary: Read configured microservice health endpoints
+      responses:
+        "200":
+          description: Health probe results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceHealthList"
+  /api/events:
+    get:
+      summary: Read recent integration events
+      description: Placeholder until Kafka adapter is added to monitoring-ui-api.
+      responses:
+        "200":
+          description: Event list or not configured marker.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/rules/current:
+    get:
+      summary: Read current conversion rules
+      responses:
+        "200":
+          description: Current rules and validation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesDocument"
+  /api/rules/validate:
+    post:
+      summary: Validate uploaded rules or current rules when body is empty
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesPayload"
+      responses:
+        "200":
+          description: Validation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResult"
+  /api/rules/dry-run:
+    post:
+      summary: Apply rules to a sample CMDBuild payload without saving
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesDryRunRequest"
+      responses:
+        "200":
+          description: Dry-run result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/rules/upload:
+    post:
+      summary: Validate and optionally save conversion rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesPayload"
+      responses:
+        "200":
+          description: Upload result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/rules/history:
+    get:
+      summary: Read configured rules file git history
+      responses:
+        "200":
+          description: Commit list.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/zabbix/catalog:
+    get:
+      summary: Read Zabbix catalog cache status
+      responses:
+        "200":
+          description: Catalog cache status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/zabbix/catalog/sync:
+    post:
+      summary: Synchronize Zabbix templates, host groups, template groups, and known tags
+      responses:
+        "200":
+          description: Synced catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/zabbix/catalog/{collection}:
+    get:
+      summary: Read Zabbix catalog collection from cache
+      parameters:
+        - $ref: "#/components/parameters/CatalogCollection"
+      responses:
+        "200":
+          description: Catalog collection.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/cmdbuild/catalog:
+    get:
+      summary: Read CMDBuild catalog cache status
+      responses:
+        "200":
+          description: Catalog cache status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/cmdbuild/catalog/sync:
+    post:
+      summary: Synchronize CMDBuild classes, class attributes, and lookup types
+      responses:
+        "200":
+          description: Synced catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/cmdbuild/catalog/{collection}:
+    get:
+      summary: Read CMDBuild catalog collection from cache
+      parameters:
+        - $ref: "#/components/parameters/CatalogCollection"
+      responses:
+        "200":
+          description: Catalog collection.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/settings/idp:
+    get:
+      summary: Read IdP/SAML2 settings with secrets redacted
+      responses:
+        "200":
+          description: IdP settings.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    put:
+      summary: Save IdP/SAML2 settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Saved settings with secrets redacted.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: cmdb2m_session
+  parameters:
+    CatalogCollection:
+      name: collection
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - templates
+          - host-groups
+          - template-groups
+          - tags
+          - classes
+          - attributes
+          - lookups
+  responses:
+    Error:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - service
+        - status
+      properties:
+        service:
+          type: string
+        status:
+          type: string
+          example: ok
+    AuthStatus:
+      type: object
+      required:
+        - authenticated
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          type: object
+          nullable: true
+          additionalProperties: true
+        idp:
+          type: object
+          additionalProperties: true
+        auth:
+          type: object
+          additionalProperties: true
+    LoginRequest:
+      type: object
+      properties:
+        cmdbuild:
+          type: object
+          required:
+            - username
+            - password
+          properties:
+            baseUrl:
+              type: string
+            username:
+              type: string
+            password:
+              type: string
+              format: password
+        zabbix:
+          type: object
+          properties:
+            apiEndpoint:
+              type: string
+            username:
+              type: string
+            password:
+              type: string
+              format: password
+            apiToken:
+              type: string
+              format: password
+    ServiceHealthList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    RulesDocument:
+      type: object
+      properties:
+        path:
+          type: string
+        fileName:
+          type: string
+        schemaVersion:
+          type: string
+        name:
+          type: string
+        validation:
+          $ref: "#/components/schemas/ValidationResult"
+        content:
+          type: object
+          additionalProperties: true
+    RulesPayload:
+      type: object
+      properties:
+        content:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+        rules:
+          type: object
+          additionalProperties: true
+        save:
+          type: boolean
+    RulesDryRunRequest:
+      type: object
+      required:
+        - payload
+      properties:
+        rules:
+          type: object
+          additionalProperties: true
+        payload:
+          type: object
+          additionalProperties: true
+    ValidationResult:
+      type: object
+      required:
+        - valid
+        - errors
+        - warnings
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string

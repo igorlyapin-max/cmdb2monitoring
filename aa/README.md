@@ -12,6 +12,7 @@
 - `asyncapi/cmdb2monitoring.asyncapi.yaml` - описание Kafka-потоков.
 - `openapi/cmdbwebhooks2kafka.openapi.yaml` - HTTP API webhook-сервиса.
 - `openapi/health.openapi.yaml` - health endpoints микросервисов.
+- `openapi/monitoring-ui-api.openapi.yaml` - HTTP API frontend/BFF.
 - `maps/healthcheck-map.md` - карта healthcheck.
 - `maps/kafka-access-map.md` - карта доступов Kafka.
 - `maps/metrics-map.md` - карта метрик.

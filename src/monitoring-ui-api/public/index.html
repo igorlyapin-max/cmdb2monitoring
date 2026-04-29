@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>cmdb2monitoring</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">C2M</span>
+        <span>cmdb2monitoring</span>
+      </div>
+      <div class="session" id="sessionSummary"></div>
+    </header>
+
+    <main>
+      <section id="loginView" class="login-shell hidden">
+        <form id="loginForm" class="login-panel">
+          <h1>Вход</h1>
+          <div class="form-grid">
+            <label>
+              <span>CMDBuild URL</span>
+              <input name="cmdbuildBaseUrl" autocomplete="url">
+            </label>
+            <label>
+              <span>CMDBuild login</span>
+              <input name="cmdbuildUsername" autocomplete="username" required>
+            </label>
+            <label>
+              <span>CMDBuild password</span>
+              <input name="cmdbuildPassword" type="password" autocomplete="current-password" required>
+            </label>
+            <label>
+              <span>Zabbix API</span>
+              <input name="zabbixApiEndpoint" autocomplete="url">
+            </label>
+            <label>
+              <span>Zabbix login</span>
+              <input name="zabbixUsername" autocomplete="username">
+            </label>
+            <label>
+              <span>Zabbix password</span>
+              <input name="zabbixPassword" type="password" autocomplete="current-password">
+            </label>
+            <label>
+              <span>Zabbix API token</span>
+              <input name="zabbixApiToken" type="password" autocomplete="off">
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit">Войти</button>
+          </div>
+          <p id="loginError" class="error-line"></p>
+        </form>
+      </section>
+
+      <section id="appView" class="app-shell hidden">
+        <nav class="side-nav" aria-label="Разделы">
+          <button class="nav-item active" data-view="dashboard">Dashboard</button>
+          <button class="nav-item" data-view="events">Events</button>
+          <button class="nav-item" data-view="rules">Rules</button>
+          <button class="nav-item" data-view="zabbix">Zabbix Catalog</button>
+          <button class="nav-item" data-view="cmdbuild">CMDBuild Catalog</button>
+          <button class="nav-item" data-view="settings">Settings</button>
+          <button class="nav-item danger" id="logoutButton" type="button">Logout</button>
+        </nav>
+
+        <div class="workspace">
+          <section class="view active" id="dashboard">
+            <div class="view-header">
+              <h1>Dashboard</h1>
+              <button id="refreshDashboard" type="button">Refresh</button>
+            </div>
+            <div class="metrics-grid" id="healthGrid"></div>
+          </section>
+
+          <section class="view" id="events">
+            <div class="view-header">
+              <h1>Events</h1>
+              <button id="refreshEvents" type="button">Refresh</button>
+            </div>
+            <div class="surface">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody id="eventsTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="view" id="rules">
+            <div class="view-header">
+              <h1>Rules</h1>
+              <div class="actions">
+                <button id="loadRules" type="button">Load</button>
+                <button id="validateRules" type="button">Validate</button>
+              </div>
+            </div>
+            <div class="split-layout">
+              <div class="surface">
+                <h2>Current</h2>
+                <dl class="kv" id="rulesSummary"></dl>
+                <pre id="rulesPreview" class="code-block"></pre>
+              </div>
+              <div class="surface">
+                <h2>Upload / Dry-run</h2>
+                <label class="file-picker">
+                  <span>Rules JSON</span>
+                  <input id="rulesFile" type="file" accept="application/json,.json">
+                </label>
+                <textarea id="dryRunPayload" spellcheck="false"></textarea>
+                <div class="actions">
+                  <button id="dryRunRules" type="button">Dry-run</button>
+                  <button id="uploadRules" type="button">Upload</button>
+                </div>
+                <pre id="rulesResult" class="code-block"></pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="zabbix">
+            <div class="view-header">
+              <h1>Zabbix Catalog</h1>
+              <div class="actions">
+                <button id="syncZabbix" type="button">Sync</button>
+                <button id="loadZabbix" type="button">Load</button>
+              </div>
+            </div>
+            <div class="catalog-grid">
+              <div class="surface">
+                <h2>Templates</h2>
+                <table>
+                  <thead><tr><th>ID</th><th>Name</th><th>Host</th></tr></thead>
+                  <tbody id="zabbixTemplates"></tbody>
+                </table>
+              </div>
+              <div class="surface">
+                <h2>Host groups</h2>
+                <table>
+                  <thead><tr><th>ID</th><th>Name</th></tr></thead>
+                  <tbody id="zabbixHostGroups"></tbody>
+                </table>
+              </div>
+              <div class="surface">
+                <h2>Template groups</h2>
+                <table>
+                  <thead><tr><th>ID</th><th>Name</th></tr></thead>
+                  <tbody id="zabbixTemplateGroups"></tbody>
+                </table>
+              </div>
+              <div class="surface">
+                <h2>Tags</h2>
+                <table>
+                  <thead><tr><th>Tag</th><th>Value</th></tr></thead>
+                  <tbody id="zabbixTags"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="cmdbuild">
+            <div class="view-header">
+              <h1>CMDBuild Catalog</h1>
+              <div class="actions">
+                <button id="syncCmdbuild" type="button">Sync</button>
+                <button id="loadCmdbuild" type="button">Load</button>
+              </div>
+            </div>
+            <div class="split-layout">
+              <div class="surface">
+                <h2>Classes</h2>
+                <table>
+                  <thead><tr><th>Name</th><th>Active</th><th>Description</th></tr></thead>
+                  <tbody id="cmdbClasses"></tbody>
+                </table>
+              </div>
+              <div class="surface">
+                <h2>Attributes</h2>
+                <table>
+                  <thead><tr><th>Class</th><th>Count</th><th>Status</th></tr></thead>
+                  <tbody id="cmdbAttributes"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="settings">
+            <div class="view-header">
+              <h1>Settings</h1>
+              <button id="saveIdp" type="button">Save</button>
+            </div>
+            <form id="idpForm" class="surface settings-grid">
+              <label class="check-row">
+                <input name="enabled" type="checkbox">
+                <span>Use IdP</span>
+              </label>
+              <label><span>Metadata URL</span><input name="metadataUrl"></label>
+              <label><span>Entity ID</span><input name="entityId"></label>
+              <label><span>SSO URL</span><input name="ssoUrl"></label>
+              <label><span>SLO URL</span><input name="sloUrl"></label>
+              <label><span>SP Entity ID</span><input name="spEntityId"></label>
+              <label><span>ACS URL</span><input name="acsUrl"></label>
+              <label><span>NameID format</span><input name="nameIdFormat"></label>
+              <label><span>IdP X509 certificate</span><textarea name="idpX509Certificate"></textarea></label>
+              <label><span>SP certificate</span><textarea name="spCertificate"></textarea></label>
+              <label><span>SP private key</span><textarea name="spPrivateKey"></textarea></label>
+            </form>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

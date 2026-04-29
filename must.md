@@ -6,12 +6,14 @@
 
 - Проект ведется в одном monorepo.
 - Каждый микросервис живет в отдельной папке `src/<service-name>`.
-- Основной язык разработки: C# / .NET.
+- Основной язык backend-микросервисов: C# / .NET.
+- Frontend/BFF допускается на Node.js, если он не обращается из браузера напрямую к Kafka/CMDBuild/Zabbix.
 - Все настройки выносятся в конфигурационные файлы и env overrides. Не хардкодить адреса, topics, credentials, токены, пути state-файлов, endpoints.
 - Kafka topics создаются внешней инфраструктурой. Код микросервисов не должен создавать topics при старте.
 - Логи проектируются под ELK. Пока ELK отсутствует, structured JSON logs пишутся в Kafka log topics.
 - Runtime state хранится в `state/*.json` и не попадает в git.
 - Production secrets не хранятся в git. Использовать переменные окружения, secret storage или local config, исключенный из git.
+- Frontend credentials не хранить в браузере; использовать server-side session.
 
 ## Микросервисные соглашения
 
@@ -94,6 +96,7 @@
 ```bash
 ./scripts/test-configs.sh
 ./scripts/dotnet build cmdb2monitoring.slnx --no-restore -m:1 -v minimal
+node src/monitoring-ui-api/scripts/validate-config.mjs
 git diff --check
 ```
 

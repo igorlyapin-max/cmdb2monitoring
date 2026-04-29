@@ -108,6 +108,61 @@ Kafka__Input__Username=<secret>
 Kafka__Input__Password=<secret>
 ```
 
+## monitoring-ui-api
+
+Файлы:
+- `src/monitoring-ui-api/config/appsettings.json`;
+- `src/monitoring-ui-api/config/appsettings.Development.json`.
+
+Компонент написан на Node.js и совмещает backend-for-frontend API со статическим frontend.
+Браузер не должен обращаться напрямую к Kafka, CMDBuild или Zabbix.
+
+Основные секции:
+
+| Параметр | Назначение | Когда менять |
+| --- | --- | --- |
+| `Service:Host` | IP/interface для bind Node.js сервера | При запуске в контейнере/на сервере |
+| `Service:Port` | HTTP port UI/API | При конфликте портов |
+| `Service:PublicDir` | Папка статического frontend | При смене сборки UI |
+| `Auth:UseIdp` | Включение IdP режима | После настройки SAML2 |
+| `Auth:SessionCookieName` | Имя session cookie | При конфликте cookie |
+| `Auth:SessionTimeoutMinutes` | Время жизни server-side session | По требованиям ИБ |
+| `Idp:*` | SAML2 настройки | После настройки единого IdP |
+| `Cmdbuild:BaseUrl` | CMDBuild REST base URL | Для каждого окружения |
+| `Cmdbuild:Catalog:*` | Cache и validation настроек CMDBuild catalog | При смене cache policy |
+| `Zabbix:ApiEndpoint` | Zabbix JSON-RPC URL | Для каждого окружения |
+| `Zabbix:Catalog:*` | Cache и validation настроек Zabbix catalog | При смене cache policy |
+| `Rules:RulesFilePath` | Путь к JSON rules-файлу | Если rules вынесены |
+| `Rules:AllowUpload` | Разрешить upload rules через UI | Для admin UI |
+| `Rules:AllowSave` | Разрешить запись rules-файла | Для read-only окружений отключать |
+| `Rules:AutoCommit` | Делать git commit из UI | По умолчанию false |
+| `Services:HealthEndpoints` | Health endpoints микросервисов | При добавлении сервисов |
+
+Runtime cache:
+- `src/monitoring-ui-api/data/zabbix-catalog-cache.json`;
+- `src/monitoring-ui-api/data/cmdbuild-catalog-cache.json`.
+
+Runtime state:
+- `src/monitoring-ui-api/state/ui-settings.json`.
+
+Эти файлы не должны попадать в git.
+
+Пример запуска:
+
+```bash
+cd src/monitoring-ui-api
+npm start
+```
+
+Пример env override:
+
+```bash
+PORT=5090
+CMDBUILD_BASE_URL=http://cmdbuild:8080/cmdbuild/services/rest/v3
+ZABBIX_API_ENDPOINT=http://zabbix/api_jsonrpc.php
+RULES_FILE_PATH=rules/cmdbuild-to-zabbix-host-create.json
+```
+
 ## Проверка конфигов
 
 Запуск:
