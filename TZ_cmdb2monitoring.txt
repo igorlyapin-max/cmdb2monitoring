@@ -10,6 +10,7 @@
 
 Первый микросервис: cmdbwebhooks2kafka.
 Второй микросервис: cmdbkafka2zabbix.
+Третий микросервис: zabbixrequests2api.
 
 Назначение cmdbwebhooks2kafka:
 - принимать webhook-события из CMDBuild;
@@ -24,6 +25,16 @@
 - применять регулярные выражения для валидации и выбора групп, шаблонов и интерфейсов Zabbix;
 - формировать JSON-RPC payload, принимаемый Zabbix API;
 - публиковать сформированный Zabbix JSON-RPC payload в отдельный Kafka topic;
+- сохранять идентификатор последнего обработанного объекта в локальный state-файл;
+- вести структурированные логи в Kafka-топик для будущей интеграции с ELK.
+
+Назначение zabbixrequests2api:
+- читать JSON-RPC запросы к Zabbix из Kafka;
+- валидировать обязательные поля Zabbix payload;
+- проверять наличие host groups, templates и template groups в Zabbix;
+- выполнять вызовы Zabbix API;
+- публиковать результат или ошибку в отдельный Kafka response topic;
+- обрабатывать объекты "gentle" режимом с настраиваемой задержкой между объектами;
 - сохранять идентификатор последнего обработанного объекта в локальный state-файл;
 - вести структурированные логи в Kafka-топик для будущей интеграции с ELK.
 
@@ -44,6 +55,7 @@
 - wrapper для локального .NET SDK: scripts/dotnet;
 - микросервис: src/cmdbwebhooks2kafka;
 - микросервис: src/cmdbkafka2zabbix;
+- микросервис: src/zabbixrequests2api;
 - правила конвертации: rules/cmdbuild-to-zabbix-host-create.json;
 - общие настройки сборки: Directory.Build.props;
 - документация проекта: README.md;
@@ -594,4 +606,244 @@ Rules-файл содержит отдельные виды правил:
 - определить, где хранить связь CMDBuild id/code -> Zabbix hostid;
 - добавить обработчик второго шага для fallback host.get -> host.update/host.delete;
 - определить стратегию dead-letter topic для ошибок конвертации;
-- определить сервис, который будет читать zabbix.host.requests.* и вызывать Zabbix API.
+- расширить zabbixrequests2api или отдельный сервис для второго шага host.get -> host.update/host.delete.
+
+14. Микросервис zabbixrequests2api
+
+14.1. Назначение
+
+Микросервис zabbixrequests2api является третьим этапом пайплайна:
+
+CMDBuild -> cmdbwebhooks2kafka -> cmdbuild.webhooks.* -> cmdbkafka2zabbix -> zabbix.host.requests.* -> zabbixrequests2api -> Zabbix API.
+
+Сервис читает JSON-RPC payload из Kafka, валидирует его, проверяет связанные справочники в Zabbix, вызывает Zabbix API и публикует результат выполнения в Kafka response topic.
+
+14.2. Kafka input/output
+
+Development input topic:
+
+zabbix.host.requests.dev
+
+Production/base input topic:
+
+zabbix.host.requests
+
+Development output topic:
+
+zabbix.host.responses.dev
+
+Production/base output topic:
+
+zabbix.host.responses
+
+Микросервис не создает Kafka topics при старте.
+Input/output/log topics должны быть созданы заранее средствами инфраструктуры.
+
+Kafka offsets должны коммититься только после:
+- публикации response/error сообщения в output topic;
+- записи state-файла.
+
+14.3. Zabbix API
+
+Zabbix API endpoint задается через конфиг:
+
+Zabbix.ApiEndpoint
+
+Текущий dev endpoint:
+
+http://localhost:8081/api_jsonrpc.php
+
+Поддерживаемые режимы авторизации:
+- None;
+- Token;
+- Login;
+- LoginOrToken.
+
+Dev login:
+- user: Admin;
+- password: zabbix.
+
+Production token/password не должны храниться в git. Для реального окружения использовать переменные окружения, секрет-хранилище или local config, исключенный из git.
+
+14.4. Обязательные поля JSON-RPC
+
+Каждый входной объект должен содержать:
+- jsonrpc=2.0;
+- method;
+- params;
+- id.
+
+Для host.create обязательны:
+- params.host;
+- params.interfaces с минимум одним интерфейсом;
+- params.groups с минимум одной host group;
+- params.templates с минимум одним template.
+
+Для host.update обязательны:
+- params.hostid.
+
+Для host.delete обязательны:
+- params массив с минимум одним hostid.
+
+Для host.get в текущем pipeline обязателен:
+- params.filter.host с минимум одним host name.
+
+Tags не создаются отдельным справочником Zabbix. Они передаются напрямую в host.create/host.update в поле params.tags.
+Для tags проверяется наличие непустого поля tag.
+
+14.5. Проверка справочников Zabbix
+
+Перед host.create и host.update сервис должен проверять:
+- наличие всех params.groups[].groupid через hostgroup.get;
+- наличие всех params.templates[].templateid через template.get;
+- наличие template group у найденных templates через template.get с selectGroups.
+
+Если справочник отсутствует, сервис не вызывает host.create/host.update, а публикует error response.
+
+Коды ошибок:
+- missing_host_group;
+- missing_template;
+- missing_template_group;
+- invalid_zabbix_request;
+- invalid_json;
+- zabbix_api_error;
+- zabbix_http_error.
+
+14.6. Gentle processing
+
+Сервис не должен отправлять объекты в Zabbix непрерывным потоком.
+
+Между обработкой объектов должна быть настраиваемая задержка:
+
+Processing.DelayBetweenObjectsMs
+
+Значение по умолчанию:
+
+2000 ms
+
+Retry-настройки также задаются через конфиг:
+- Processing.MaxRetryAttempts;
+- Processing.RetryDelayMs.
+
+14.7. Response topic contract
+
+В output topic zabbix.host.responses.* сервис публикует JSON:
+
+{
+  "source": "zabbixrequests2api",
+  "success": true|false,
+  "method": "host.create|host.update|host.delete|host.get",
+  "entityId": "<Kafka key>",
+  "requestId": "<JSON-RPC id>",
+  "host": "<host name>",
+  "errorCode": "<код ошибки или null>",
+  "errorMessage": "<текст ошибки или null>",
+  "zabbixRequestSent": true|false,
+  "processedAt": "<UTC timestamp>",
+  "input": {
+    "topic": "<input topic>",
+    "partition": 0,
+    "offset": 0,
+    "key": "<input key>"
+  },
+  "missing": {
+    "hostGroups": [],
+    "templates": [],
+    "templateGroups": []
+  },
+  "zabbixResponse": { "...": "raw Zabbix response если был вызов API" }
+}
+
+14.8. State-файл обработки
+
+Development state file:
+
+state/zabbixrequests2api-state.dev.json
+
+Production/base state file:
+
+state/zabbixrequests2api-state.json
+
+State должен содержать:
+- last entityId;
+- last method;
+- input topic;
+- input partition;
+- input offset;
+- output topic;
+- outputPublished;
+- zabbixRequestSent;
+- success;
+- errorCode;
+- processedAt.
+
+14.9. Логирование zabbixrequests2api
+
+ELK-сервера пока нет.
+
+Текущий временный режим:
+- structured JSON logs через Kafka;
+- отдельный Kafka topic для логов.
+
+Development log topic:
+
+zabbixrequests2api.logs.dev
+
+Production/base config log topic:
+
+zabbixrequests2api.logs
+
+Конфиг должен содержать секцию ElkLogging по тому же принципу, что и предыдущие микросервисы.
+
+14.10. Шаблоны Zabbix
+
+Шаблоны мониторинга не являются JSON-файлами проекта.
+Шаблоны мониторинга являются объектами внутри Zabbix.
+
+JSON используется:
+- как формат rules-файла конвертации;
+- как формат JSON-RPC запроса к Zabbix API.
+
+В JSON-RPC host.create сервис передает только ссылки на уже существующие шаблоны Zabbix:
+
+{
+  "templates": [
+    { "templateid": "10564" },
+    { "templateid": "10001" }
+  ]
+}
+
+На текущем dev-стенде подтверждены шаблоны:
+- templateid=10001: Linux by Zabbix agent;
+- templateid=10564: ICMP Ping.
+
+Если нужный templateid отсутствует в Zabbix, zabbixrequests2api должен остановить обработку объекта до вызова host.create/host.update и опубликовать ошибку missing_template в response topic.
+
+14.11. Итоговая проверка полной цепочки
+
+В dev-окружении проверена полная цепочка:
+
+CMDBuild -> cmdbwebhooks2kafka -> cmdbuild.webhooks.dev -> cmdbkafka2zabbix -> zabbix.host.requests.dev -> zabbixrequests2api -> Zabbix API -> zabbix.host.responses.dev.
+
+Контрольный объект:
+- CMDBuild class: Server;
+- CMDBuild id: 108952;
+- code: codesrv1;
+- ip_address: 10.66.66.1;
+- OS lookup id: 105146, преобразовано в Linux;
+- zabbixTag lookup id: 106857, преобразовано в tag1.
+
+Результат обработки:
+- webhook дошел до cmdbuild.webhooks.dev;
+- cmdbkafka2zabbix сформировал host.create;
+- zabbixrequests2api успешно вызвал Zabbix API;
+- в Zabbix создан host cmdb-server-codesrv1;
+- Zabbix hostid: 10683;
+- назначена host group Linux servers;
+- назначены templates Linux by Zabbix agent и ICMP Ping;
+- назначены tags source=cmdbuild, cmdb.class=Server, cmdb.id=108952, cmdb.event=create, cmdb.os=Linux, cmdb.zabbixTag=tag1;
+- успешный результат опубликован в zabbix.host.responses.dev.
+
+По результатам проверки исправлено поведение zabbixrequests2api с HttpClient:
+- RequestTimeoutMs задается при создании typed HttpClient;
+- сервис не меняет HttpClient.Timeout во время выполнения JSON-RPC запросов.
