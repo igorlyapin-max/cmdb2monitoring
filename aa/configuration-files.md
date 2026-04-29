@@ -127,10 +127,22 @@ Kafka__Input__Password=<secret>
 | `Auth:UseIdp` | Включение IdP режима | После настройки SAML2 |
 | `Auth:SessionCookieName` | Имя session cookie | При конфликте cookie |
 | `Auth:SessionTimeoutMinutes` | Время жизни server-side session | По требованиям ИБ |
-| `Idp:*` | SAML2 настройки | После настройки единого IdP |
+| `Auth:MaxSamlPostBytes` | Максимальный размер ACS POST | При больших SAML assertions |
+| `Idp:MetadataUrl` | URL IdP metadata XML | Если IdP публикует metadata |
+| `Idp:EntityId` | IdP issuer/entityID | Для проверки issuer |
+| `Idp:SsoUrl` | IdP SSO endpoint | Если metadata не используется |
+| `Idp:SloUrl` | IdP SLO endpoint | При включении logout через IdP |
+| `Idp:IdpX509Certificate` / `Idp:IdpX509CertificatePath` | IdP signing certificate | Обязательно для валидации SAMLResponse |
+| `Idp:SpEntityId` | SP issuer/entityID | При регистрации SP в IdP |
+| `Idp:AcsUrl` | ACS endpoint `/auth/saml2/acs` | При смене внешнего URL UI |
+| `Idp:SloCallbackUrl` | SP logout callback | При смене внешнего URL UI |
+| `Idp:SpCertificate` / `Idp:SpPrivateKey` | SP cert/key | Если нужно подписывать requests или расшифровывать assertions |
+| `Idp:RoleMapping` | Маппинг SAML groups в роли UI | При смене групп IdP |
 | `Cmdbuild:BaseUrl` | CMDBuild REST base URL | Для каждого окружения |
+| `Cmdbuild:ServiceAccount:*` | Учетная запись BFF для CMDBuild API в IdP режиме | Через secret/env в prod |
 | `Cmdbuild:Catalog:*` | Cache и validation настроек CMDBuild catalog | При смене cache policy |
 | `Zabbix:ApiEndpoint` | Zabbix JSON-RPC URL | Для каждого окружения |
+| `Zabbix:ServiceAccount:*` | Учетная запись/API token BFF для Zabbix API в IdP режиме | Через secret/env в prod |
 | `Zabbix:Catalog:*` | Cache и validation настроек Zabbix catalog | При смене cache policy |
 | `Rules:RulesFilePath` | Путь к JSON rules-файлу | Если rules вынесены |
 | `Rules:AllowUpload` | Разрешить upload rules через UI | Для admin UI |
@@ -161,6 +173,12 @@ PORT=5090
 CMDBUILD_BASE_URL=http://cmdbuild:8080/cmdbuild/services/rest/v3
 ZABBIX_API_ENDPOINT=http://zabbix/api_jsonrpc.php
 RULES_FILE_PATH=rules/cmdbuild-to-zabbix-host-create.json
+MONITORING_UI_USE_IDP=true
+SAML2_METADATA_URL=https://idp.example/metadata
+SAML2_IDP_CERT_PATH=/run/secrets/idp-signing.crt
+CMDBUILD_SERVICE_USERNAME=<secret>
+CMDBUILD_SERVICE_PASSWORD=<secret>
+ZABBIX_SERVICE_API_TOKEN=<secret>
 ```
 
 ## Проверка конфигов

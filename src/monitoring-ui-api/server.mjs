@@ -5,12 +5,15 @@ import { existsSync, createReadStream } from 'node:fs';
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { basename, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from '@node-saml/node-saml';
+import { parseStringPromise } from 'xml2js';
 
 const serviceRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const repositoryRoot = resolve(serviceRoot, '../..');
 const environment = process.env.NODE_ENV || 'Development';
 const config = await loadConfig();
 const sessions = new Map();
+let samlMetadataCache = null;
 
 await ensureRuntimeDirectories();
 
@@ -59,6 +62,11 @@ async function route(request, response) {
     return;
   }
 
+  if (path.startsWith('/auth/saml2')) {
+    await routeSaml(request, response, url, path);
+    return;
+  }
+
   await serveStatic(response, path);
 }
 
@@ -70,7 +78,7 @@ async function routeApi(request, response, url, path) {
       user: session ? publicUser(session) : null,
       idp: publicIdpSettings(),
       auth: {
-        useIdp: Boolean(config.Auth.UseIdp),
+        useIdp: isIdpEnabled(),
         requireCmdbuildCredentialsWhenIdpDisabled: Boolean(config.Auth.RequireCmdbuildCredentialsWhenIdpDisabled),
         requireZabbixCredentialsWhenIdpDisabled: Boolean(config.Auth.RequireZabbixCredentialsWhenIdpDisabled)
       }
@@ -229,6 +237,73 @@ async function routeApi(request, response, url, path) {
   });
 }
 
+async function routeSaml(request, response, url, path) {
+  if (request.method === 'GET' && path === '/auth/saml2/metadata') {
+    const metadata = await buildSamlMetadata();
+    response.writeHead(200, {
+      'content-type': 'application/samlmetadata+xml; charset=utf-8',
+      'cache-control': 'no-store'
+    });
+    response.end(metadata);
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/auth/saml2/login') {
+    assertSamlEnabled();
+    const saml = await createSamlClient();
+    const relayState = safeRelayState(url.searchParams.get('returnUrl') ?? '/');
+    const redirectUrl = await saml.getAuthorizeUrlAsync(relayState, request.headers.host, {});
+    sendRedirect(response, redirectUrl);
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/auth/saml2/acs') {
+    assertSamlEnabled();
+    const form = await readFormBody(request, config.Auth.MaxSamlPostBytes ?? 1048576);
+    const saml = await createSamlClient();
+    const validation = await saml.validatePostResponseAsync(form);
+    if (validation.loggedOut) {
+      sendRedirect(response, '/');
+      return;
+    }
+
+    if (!validation.profile) {
+      throw httpError(401, 'saml_profile_missing', 'SAML response did not contain a user profile.');
+    }
+
+    const session = createSamlSession(validation.profile);
+    sessions.set(session.id, session);
+    sendRedirect(response, safeRelayState(form.RelayState ?? '/'), {
+      'Set-Cookie': buildSessionCookie(session.id)
+    });
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/auth/saml2/logout') {
+    const sessionId = readCookie(request, config.Auth.SessionCookieName);
+    const session = sessionId ? sessions.get(sessionId) : null;
+    if (sessionId) {
+      sessions.delete(sessionId);
+    }
+
+    const expiredCookie = `${config.Auth.SessionCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+    if (session?.saml?.profile && !isBlank(config.Idp.SloUrl || config.Idp.sloUrl)) {
+      const saml = await createSamlClient();
+      const redirectUrl = await saml.getLogoutUrlAsync(session.saml.profile, '/', {});
+      sendRedirect(response, redirectUrl, { 'Set-Cookie': expiredCookie });
+      return;
+    }
+
+    sendRedirect(response, '/', { 'Set-Cookie': expiredCookie });
+    return;
+  }
+
+  sendJson(response, 404, {
+    error: 'not_found',
+    path
+  });
+}
+
 async function loadConfig() {
   const base = JSON.parse(await readFile(join(serviceRoot, 'config/appsettings.json'), 'utf8'));
   const environmentConfigPath = join(serviceRoot, `config/appsettings.${environment}.json`);
@@ -236,8 +311,22 @@ async function loadConfig() {
     ? mergeObjects(base, JSON.parse(await readFile(environmentConfigPath, 'utf8')))
     : base;
 
+  await applyPersistedUiSettings(merged);
   applyEnvOverrides(merged);
   return merged;
+}
+
+async function applyPersistedUiSettings(target) {
+  const settingsPath = join(serviceRoot, 'state/ui-settings.json');
+  if (!existsSync(settingsPath)) {
+    return;
+  }
+
+  const persisted = JSON.parse(await readFile(settingsPath, 'utf8'));
+  if (persisted.idp) {
+    Object.assign(target.Idp, persisted.idp, { Enabled: Boolean(persisted.idp.enabled) });
+    target.Auth.UseIdp = Boolean(persisted.idp.enabled);
+  }
 }
 
 function mergeObjects(base, override) {
@@ -258,8 +347,23 @@ function applyEnvOverrides(target) {
     PORT: ['Service', 'Port'],
     MONITORING_UI_HOST: ['Service', 'Host'],
     MONITORING_UI_USE_IDP: ['Auth', 'UseIdp'],
+    SAML2_METADATA_URL: ['Idp', 'MetadataUrl'],
+    SAML2_ENTITY_ID: ['Idp', 'EntityId'],
+    SAML2_SSO_URL: ['Idp', 'SsoUrl'],
+    SAML2_SLO_URL: ['Idp', 'SloUrl'],
+    SAML2_IDP_CERT: ['Idp', 'IdpX509Certificate'],
+    SAML2_IDP_CERT_PATH: ['Idp', 'IdpX509CertificatePath'],
+    SAML2_SP_ENTITY_ID: ['Idp', 'SpEntityId'],
+    SAML2_ACS_URL: ['Idp', 'AcsUrl'],
+    SAML2_SP_CERT_PATH: ['Idp', 'SpCertificatePath'],
+    SAML2_SP_PRIVATE_KEY_PATH: ['Idp', 'SpPrivateKeyPath'],
     CMDBUILD_BASE_URL: ['Cmdbuild', 'BaseUrl'],
+    CMDBUILD_SERVICE_USERNAME: ['Cmdbuild', 'ServiceAccount', 'Username'],
+    CMDBUILD_SERVICE_PASSWORD: ['Cmdbuild', 'ServiceAccount', 'Password'],
     ZABBIX_API_ENDPOINT: ['Zabbix', 'ApiEndpoint'],
+    ZABBIX_SERVICE_USER: ['Zabbix', 'ServiceAccount', 'User'],
+    ZABBIX_SERVICE_PASSWORD: ['Zabbix', 'ServiceAccount', 'Password'],
+    ZABBIX_SERVICE_API_TOKEN: ['Zabbix', 'ServiceAccount', 'ApiToken'],
     RULES_FILE_PATH: ['Rules', 'RulesFilePath']
   };
 
@@ -283,8 +387,8 @@ async function ensureRuntimeDirectories() {
 }
 
 async function login(payload) {
-  if (config.Auth.UseIdp || config.Idp.Enabled) {
-    throw httpError(501, 'idp_not_implemented', 'SAML2 login flow is not implemented in this first UI slice.');
+  if (isIdpEnabled()) {
+    throw httpError(409, 'idp_enabled', 'Use /auth/saml2/login when IdP mode is enabled.');
   }
 
   const cmdbuild = payload?.cmdbuild ?? {};
@@ -711,15 +815,18 @@ async function saveIdpSettings(payload) {
       entityId: payload?.entityId ?? '',
       ssoUrl: payload?.ssoUrl ?? '',
       sloUrl: payload?.sloUrl ?? '',
-      idpX509Certificate: payload?.idpX509Certificate ?? '',
-      spEntityId: payload?.spEntityId ?? config.Idp.SpEntityId,
-      acsUrl: payload?.acsUrl ?? config.Idp.AcsUrl,
-      spCertificate: payload?.spCertificate ?? '',
-      spPrivateKey: payload?.spPrivateKey ?? '',
-      nameIdFormat: payload?.nameIdFormat ?? config.Idp.NameIdFormat,
+      sloCallbackUrl: payload?.sloCallbackUrl ?? configValue(config.Idp, 'SloCallbackUrl'),
+      idpX509Certificate: secretSetting(payload?.idpX509Certificate, 'IdpX509Certificate'),
+      spEntityId: payload?.spEntityId ?? configValue(config.Idp, 'SpEntityId'),
+      acsUrl: payload?.acsUrl ?? configValue(config.Idp, 'AcsUrl'),
+      spCertificate: secretSetting(payload?.spCertificate, 'SpCertificate'),
+      spPrivateKey: secretSetting(payload?.spPrivateKey, 'SpPrivateKey'),
+      nameIdFormat: payload?.nameIdFormat ?? configValue(config.Idp, 'NameIdFormat'),
+      authnRequestBinding: payload?.authnRequestBinding ?? configValue(config.Idp, 'AuthnRequestBinding'),
       requireSignedAssertions: payload?.requireSignedAssertions ?? true,
+      requireSignedResponses: payload?.requireSignedResponses ?? false,
       requireEncryptedAssertions: payload?.requireEncryptedAssertions ?? false,
-      clockSkewSeconds: Number(payload?.clockSkewSeconds ?? config.Idp.ClockSkewSeconds ?? 120),
+      clockSkewSeconds: Number(payload?.clockSkewSeconds ?? configValue(config.Idp, 'ClockSkewSeconds') ?? 120),
       attributeMapping: payload?.attributeMapping ?? config.Idp.AttributeMapping,
       roleMapping: payload?.roleMapping ?? config.Idp.RoleMapping,
       savedAt: new Date().toISOString()
@@ -734,26 +841,291 @@ async function saveIdpSettings(payload) {
   return publicIdpSettings();
 }
 
+function createSamlSession(profile) {
+  const identity = samlIdentityFromProfile(profile);
+  const roles = rolesFromSamlGroups(identity.groups);
+  const cmdbuildServiceAccount = config.Cmdbuild.ServiceAccount ?? {};
+  const zabbixServiceAccount = config.Zabbix.ServiceAccount ?? {};
+  const session = {
+    id: randomUUID(),
+    authMethod: 'saml2',
+    createdAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
+    roles,
+    identity,
+    saml: {
+      issuer: profile.issuer,
+      nameID: profile.nameID,
+      nameIDFormat: profile.nameIDFormat,
+      sessionIndex: profile.sessionIndex,
+      profile
+    },
+    cmdbuild: {
+      baseUrl: config.Cmdbuild.BaseUrl,
+      username: cmdbuildServiceAccount.Username ?? cmdbuildServiceAccount.username ?? '',
+      password: cmdbuildServiceAccount.Password ?? cmdbuildServiceAccount.password ?? ''
+    },
+    zabbix: {
+      apiEndpoint: config.Zabbix.ApiEndpoint,
+      username: zabbixServiceAccount.User ?? zabbixServiceAccount.user ?? '',
+      password: zabbixServiceAccount.Password ?? zabbixServiceAccount.password ?? '',
+      apiToken: zabbixServiceAccount.ApiToken ?? zabbixServiceAccount.apiToken ?? ''
+    }
+  };
+
+  return session;
+}
+
+function samlIdentityFromProfile(profile) {
+  const mapping = config.Idp.AttributeMapping ?? config.Idp.attributeMapping ?? {};
+  const login = firstProfileValue(profile, [
+    mapping.Login,
+    mapping.login,
+    'uid',
+    'username',
+    'nameID'
+  ]) ?? profile.nameID;
+  const email = firstProfileValue(profile, [
+    mapping.Email,
+    mapping.email,
+    'email',
+    'mail',
+    'urn:oid:0.9.2342.19200300.100.1.3'
+  ]);
+  const displayName = firstProfileValue(profile, [
+    mapping.DisplayName,
+    mapping.displayName,
+    'displayName',
+    'cn',
+    'name'
+  ]) ?? login;
+  const groups = normalizeStringArray(firstProfileValue(profile, [
+    mapping.Groups,
+    mapping.groups,
+    'groups',
+    'memberOf',
+    'roles'
+  ]));
+
+  return {
+    login,
+    email: email ?? '',
+    displayName,
+    groups
+  };
+}
+
+function rolesFromSamlGroups(groups) {
+  const normalizedGroups = new Set(groups.map(group => group.toLowerCase()));
+  const roleMapping = config.Idp.RoleMapping ?? config.Idp.roleMapping ?? {};
+  const roles = new Set();
+  for (const [role, expectedGroups] of Object.entries(roleMapping)) {
+    for (const expectedGroup of normalizeStringArray(expectedGroups)) {
+      if (normalizedGroups.has(expectedGroup.toLowerCase())) {
+        roles.add(role.toLowerCase());
+      }
+    }
+  }
+
+  if (roles.size === 0) {
+    roles.add('readonly');
+  }
+
+  return [...roles].sort();
+}
+
+async function createSamlClient() {
+  const settings = await resolveSamlSettings();
+  const options = {
+    callbackUrl: settings.acsUrl,
+    entryPoint: settings.ssoUrl,
+    issuer: settings.spEntityId,
+    audience: settings.spEntityId,
+    idpCert: settings.idpCerts,
+    idpIssuer: settings.entityId || undefined,
+    identifierFormat: settings.nameIdFormat || null,
+    acceptedClockSkewMs: settings.clockSkewSeconds * 1000,
+    validateInResponseTo: ValidateInResponseTo.always,
+    requestIdExpirationPeriodMs: (config.Idp.RequestIdExpirationMinutes ?? 30) * 60 * 1000,
+    wantAssertionsSigned: Boolean(settings.requireSignedAssertions),
+    wantAuthnResponseSigned: Boolean(config.Idp.RequireSignedResponses ?? config.Idp.requireSignedResponses ?? false),
+    signatureAlgorithm: config.Idp.SignatureAlgorithm ?? config.Idp.signatureAlgorithm ?? 'sha256',
+    digestAlgorithm: config.Idp.DigestAlgorithm ?? config.Idp.digestAlgorithm ?? 'sha256',
+    logoutUrl: settings.sloUrl || settings.ssoUrl,
+    logoutCallbackUrl: settings.sloCallbackUrl || undefined,
+    disableRequestedAuthnContext: Boolean(config.Idp.DisableRequestedAuthnContext ?? config.Idp.disableRequestedAuthnContext ?? false)
+  };
+
+  if (!isBlank(settings.authnRequestBinding)) {
+    options.authnRequestBinding = settings.authnRequestBinding;
+  }
+
+  if (!isBlank(settings.spPrivateKey)) {
+    options.privateKey = settings.spPrivateKey;
+  }
+
+  if (!isBlank(settings.spCertificate)) {
+    options.publicCert = settings.spCertificate;
+  }
+
+  if (settings.requireEncryptedAssertions && !isBlank(settings.spPrivateKey)) {
+    options.decryptionPvk = settings.spPrivateKey;
+  }
+
+  return new SAML(options);
+}
+
+async function buildSamlMetadata() {
+  const settings = await resolveSamlSettings({ metadataOnly: true });
+  return generateServiceProviderMetadata({
+    issuer: settings.spEntityId,
+    callbackUrl: settings.acsUrl,
+    logoutCallbackUrl: settings.sloCallbackUrl || undefined,
+    identifierFormat: settings.nameIdFormat || null,
+    wantAssertionsSigned: Boolean(settings.requireSignedAssertions),
+    privateKey: settings.spPrivateKey || undefined,
+    publicCerts: settings.spCertificate || undefined,
+    signatureAlgorithm: config.Idp.SignatureAlgorithm ?? config.Idp.signatureAlgorithm ?? 'sha256',
+    digestAlgorithm: config.Idp.DigestAlgorithm ?? config.Idp.digestAlgorithm ?? 'sha256',
+    signMetadata: Boolean(config.Idp.SignMetadata ?? config.Idp.signMetadata ?? false)
+  });
+}
+
+async function resolveSamlSettings(options = {}) {
+  const metadataUrl = configValue(config.Idp, 'MetadataUrl');
+  const metadata = !isBlank(metadataUrl) ? await readIdpMetadata(metadataUrl) : {};
+  const idpCertText = await readConfiguredPem(
+    configValue(config.Idp, 'IdpX509Certificate'),
+    configValue(config.Idp, 'IdpX509CertificatePath')
+  );
+  const spCertificate = await readConfiguredPem(
+    configValue(config.Idp, 'SpCertificate'),
+    configValue(config.Idp, 'SpCertificatePath')
+  );
+  const spPrivateKey = await readConfiguredPem(
+    configValue(config.Idp, 'SpPrivateKey'),
+    configValue(config.Idp, 'SpPrivateKeyPath')
+  );
+  const settings = {
+    entityId: configValue(config.Idp, 'EntityId') || metadata.entityId || '',
+    ssoUrl: configValue(config.Idp, 'SsoUrl') || metadata.ssoUrl || '',
+    sloUrl: configValue(config.Idp, 'SloUrl') || metadata.sloUrl || '',
+    spEntityId: configValue(config.Idp, 'SpEntityId') || 'cmdb2monitoring-monitoring-ui',
+    acsUrl: configValue(config.Idp, 'AcsUrl') || 'http://localhost:5090/auth/saml2/acs',
+    sloCallbackUrl: configValue(config.Idp, 'SloCallbackUrl') || 'http://localhost:5090/auth/saml2/logout',
+    nameIdFormat: configValue(config.Idp, 'NameIdFormat') || 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+    requireSignedAssertions: Boolean(config.Idp.RequireSignedAssertions ?? config.Idp.requireSignedAssertions ?? true),
+    requireEncryptedAssertions: Boolean(config.Idp.RequireEncryptedAssertions ?? config.Idp.requireEncryptedAssertions ?? false),
+    clockSkewSeconds: Number(config.Idp.ClockSkewSeconds ?? config.Idp.clockSkewSeconds ?? 120),
+    authnRequestBinding: configValue(config.Idp, 'AuthnRequestBinding'),
+    idpCerts: normalizePemList(idpCertText || metadata.signingCertificates || []),
+    spCertificate: normalizePem(spCertificate, 'CERTIFICATE'),
+    spPrivateKey: normalizePem(spPrivateKey, 'PRIVATE KEY')
+  };
+
+  if (isBlank(settings.spEntityId)) {
+    throw httpError(500, 'saml_config_invalid', 'SAML SP entity id is not configured.');
+  }
+
+  if (isBlank(settings.acsUrl)) {
+    throw httpError(500, 'saml_config_invalid', 'SAML ACS URL is not configured.');
+  }
+
+  if (!options.metadataOnly) {
+    if (isBlank(settings.ssoUrl)) {
+      throw httpError(500, 'saml_config_invalid', 'SAML IdP SSO URL is not configured.');
+    }
+
+    if (settings.idpCerts.length === 0) {
+      throw httpError(500, 'saml_config_invalid', 'SAML IdP signing certificate is not configured.');
+    }
+  }
+
+  return settings;
+}
+
+async function readIdpMetadata(metadataUrl) {
+  const now = Date.now();
+  const ttlMs = Number(config.Idp.MetadataCacheTtlSeconds ?? config.Idp.metadataCacheTtlSeconds ?? 300) * 1000;
+  if (samlMetadataCache?.url === metadataUrl && now - samlMetadataCache.loadedAt < ttlMs) {
+    return samlMetadataCache.value;
+  }
+
+  const response = await fetch(metadataUrl, {
+    headers: { accept: 'application/samlmetadata+xml, application/xml, text/xml' },
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) {
+    throw httpError(502, 'saml_metadata_error', `IdP metadata returned HTTP ${response.status}.`);
+  }
+
+  const value = await extractIdpMetadata(await response.text());
+  samlMetadataCache = {
+    url: metadataUrl,
+    loadedAt: now,
+    value
+  };
+  return value;
+}
+
+async function extractIdpMetadata(xml) {
+  const parsed = await parseStringPromise(xml, {
+    explicitArray: false,
+    trim: true
+  });
+  const entityDescriptor = findXmlNode(parsed, 'EntityDescriptor');
+  const idpDescriptor = findXmlNode(entityDescriptor, 'IDPSSODescriptor');
+  const ssoServices = xmlChildren(idpDescriptor, 'SingleSignOnService');
+  const sloServices = xmlChildren(idpDescriptor, 'SingleLogoutService');
+  const keyDescriptors = xmlChildren(idpDescriptor, 'KeyDescriptor');
+  const signingCertificates = [];
+
+  for (const keyDescriptor of keyDescriptors) {
+    const use = xmlAttributes(keyDescriptor).use ?? 'signing';
+    if (use !== 'signing') {
+      continue;
+    }
+
+    const certificate = xmlText(findXmlNode(keyDescriptor, 'X509Certificate'));
+    if (!isBlank(certificate)) {
+      signingCertificates.push(certificate);
+    }
+  }
+
+  return {
+    entityId: xmlAttributes(entityDescriptor).entityID ?? '',
+    ssoUrl: preferredSamlBindingLocation(ssoServices),
+    sloUrl: preferredSamlBindingLocation(sloServices),
+    signingCertificates
+  };
+}
+
 function publicIdpSettings() {
   return {
     provider: 'SAML2',
-    enabled: Boolean(config.Idp.Enabled || config.Auth.UseIdp),
-    metadataUrl: config.Idp.MetadataUrl || config.Idp.metadataUrl || '',
-    entityId: config.Idp.EntityId || config.Idp.entityId || '',
-    ssoUrl: config.Idp.SsoUrl || config.Idp.ssoUrl || '',
-    sloUrl: config.Idp.SloUrl || config.Idp.sloUrl || '',
-    spEntityId: config.Idp.SpEntityId || config.Idp.spEntityId || '',
-    acsUrl: config.Idp.AcsUrl || config.Idp.acsUrl || '',
-    nameIdFormat: config.Idp.NameIdFormat || config.Idp.nameIdFormat || '',
+    enabled: isIdpEnabled(),
+    metadataUrl: configValue(config.Idp, 'MetadataUrl'),
+    entityId: configValue(config.Idp, 'EntityId'),
+    ssoUrl: configValue(config.Idp, 'SsoUrl'),
+    sloUrl: configValue(config.Idp, 'SloUrl'),
+    spEntityId: configValue(config.Idp, 'SpEntityId'),
+    acsUrl: configValue(config.Idp, 'AcsUrl'),
+    sloCallbackUrl: configValue(config.Idp, 'SloCallbackUrl'),
+    metadataRoute: '/auth/saml2/metadata',
+    loginRoute: '/auth/saml2/login',
+    logoutRoute: '/auth/saml2/logout',
+    nameIdFormat: configValue(config.Idp, 'NameIdFormat'),
+    authnRequestBinding: configValue(config.Idp, 'AuthnRequestBinding'),
     requireSignedAssertions: Boolean(config.Idp.RequireSignedAssertions ?? config.Idp.requireSignedAssertions),
+    requireSignedResponses: Boolean(config.Idp.RequireSignedResponses ?? config.Idp.requireSignedResponses ?? false),
     requireEncryptedAssertions: Boolean(config.Idp.RequireEncryptedAssertions ?? config.Idp.requireEncryptedAssertions),
     clockSkewSeconds: Number(config.Idp.ClockSkewSeconds ?? config.Idp.clockSkewSeconds ?? 120),
     attributeMapping: config.Idp.AttributeMapping || config.Idp.attributeMapping || {},
     roleMapping: config.Idp.RoleMapping || config.Idp.roleMapping || {},
     secretsConfigured: {
-      idpX509Certificate: !isBlank(config.Idp.IdpX509Certificate || config.Idp.idpX509Certificate),
-      spCertificate: !isBlank(config.Idp.SpCertificate || config.Idp.spCertificate),
-      spPrivateKey: !isBlank(config.Idp.SpPrivateKey || config.Idp.spPrivateKey)
+      idpX509Certificate: !isBlank(configValue(config.Idp, 'IdpX509Certificate') || configValue(config.Idp, 'IdpX509CertificatePath')),
+      spCertificate: !isBlank(configValue(config.Idp, 'SpCertificate') || configValue(config.Idp, 'SpCertificatePath')),
+      spPrivateKey: !isBlank(configValue(config.Idp, 'SpPrivateKey') || configValue(config.Idp, 'SpPrivateKeyPath'))
     }
   };
 }
@@ -955,6 +1327,25 @@ async function serveStatic(response, path) {
 }
 
 async function readJsonBody(request, maxBytes) {
+  const text = await readBodyText(request, maxBytes);
+  if (text.length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw httpError(400, 'invalid_json', error instanceof Error ? error.message : 'Invalid JSON');
+  }
+}
+
+async function readFormBody(request, maxBytes) {
+  const text = await readBodyText(request, maxBytes);
+  const params = new URLSearchParams(text);
+  return Object.fromEntries(params.entries());
+}
+
+async function readBodyText(request, maxBytes) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -967,14 +1358,10 @@ async function readJsonBody(request, maxBytes) {
   }
 
   if (chunks.length === 0) {
-    return {};
+    return '';
   }
 
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch (error) {
-    throw httpError(400, 'invalid_json', error instanceof Error ? error.message : 'Invalid JSON');
-  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 function requireSession(request, response) {
@@ -1020,8 +1407,15 @@ function requireRole(session, response, allowedRoles) {
 
 function publicUser(session) {
   return {
+    authMethod: session.authMethod ?? 'local',
     roles: session.roles,
     createdAt: session.createdAt,
+    identity: session.identity ? {
+      login: session.identity.login,
+      email: session.identity.email,
+      displayName: session.identity.displayName,
+      groups: session.identity.groups
+    } : null,
     cmdbuild: {
       baseUrl: session.cmdbuild.baseUrl,
       username: session.cmdbuild.username
@@ -1200,6 +1594,15 @@ function sendJson(response, statusCode, payload, headers = {}) {
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
+function sendRedirect(response, location, headers = {}) {
+  response.writeHead(302, {
+    location,
+    'cache-control': 'no-store',
+    ...headers
+  });
+  response.end();
+}
+
 async function safeJson(response) {
   try {
     return await response.json();
@@ -1230,6 +1633,26 @@ function readCookie(request, name) {
 function buildSessionCookie(sessionId) {
   const maxAge = Math.max(60, Number(config.Auth.SessionTimeoutMinutes) * 60);
   return `${config.Auth.SessionCookieName}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+}
+
+function safeRelayState(value) {
+  const fallback = '/';
+  if (isBlank(value)) {
+    return fallback;
+  }
+
+  const text = String(value);
+  if (text.startsWith('/') && !text.startsWith('//')) {
+    return text;
+  }
+
+  return fallback;
+}
+
+function assertSamlEnabled() {
+  if (!isIdpEnabled()) {
+    throw httpError(409, 'idp_disabled', 'SAML2 IdP mode is disabled.');
+  }
 }
 
 function contentTypeFor(path) {
@@ -1274,6 +1697,162 @@ function isPlainObject(value) {
 
 function isBlank(value) {
   return value === undefined || value === null || String(value).trim() === '';
+}
+
+function isIdpEnabled() {
+  return Boolean(config.Auth.UseIdp || config.Idp.Enabled || config.Idp.enabled);
+}
+
+function configValue(section, pascalName) {
+  const camelName = `${pascalName[0].toLowerCase()}${pascalName.slice(1)}`;
+  return !isBlank(section?.[pascalName]) ? section[pascalName] : (section?.[camelName] ?? '');
+}
+
+function secretSetting(payloadValue, existingPascalName) {
+  return isBlank(payloadValue) ? configValue(config.Idp, existingPascalName) : payloadValue;
+}
+
+async function readConfiguredPem(value, path) {
+  if (!isBlank(value)) {
+    return String(value).replaceAll('\\n', '\n');
+  }
+
+  if (isBlank(path)) {
+    return '';
+  }
+
+  const fullPath = resolveServiceFile(path);
+  return (await readFile(fullPath, 'utf8')).replaceAll('\\n', '\n');
+}
+
+function normalizePemList(value) {
+  const items = Array.isArray(value) ? value : [value];
+  return items
+    .flatMap(item => normalizeStringArray(item))
+    .map(item => normalizePem(item, 'CERTIFICATE'))
+    .filter(item => !isBlank(item));
+}
+
+function normalizePem(value, label) {
+  if (isBlank(value)) {
+    return '';
+  }
+
+  const text = String(value).replaceAll('\\n', '\n').trim();
+  if (text.includes('-----BEGIN ')) {
+    return text;
+  }
+
+  const compact = text.replace(/\s+/g, '');
+  const lines = compact.match(/.{1,64}/g) ?? [compact];
+  return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----`;
+}
+
+function firstProfileValue(profile, names) {
+  for (const name of names.filter(item => !isBlank(item))) {
+    if (name === 'nameID') {
+      return profile.nameID;
+    }
+
+    const value = profile[name];
+    if (Array.isArray(value) && value.length > 0) {
+      return value;
+    }
+
+    if (!isBlank(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeStringArray(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap(item => normalizeStringArray(item));
+  }
+
+  if (isBlank(value)) {
+    return [];
+  }
+
+  return String(value)
+    .split(/[;,]/)
+    .map(item => item.trim())
+    .filter(item => item.length > 0);
+}
+
+function findXmlNode(node, wantedName) {
+  if (!node || typeof node !== 'object') {
+    return null;
+  }
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findXmlNode(item, wantedName);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    if (localXmlName(key) === wantedName) {
+      return value;
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    const found = findXmlNode(value, wantedName);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function xmlChildren(node, wantedName) {
+  if (!node || typeof node !== 'object') {
+    return [];
+  }
+
+  const items = [];
+  for (const [key, value] of Object.entries(node)) {
+    if (localXmlName(key) === wantedName) {
+      items.push(...(Array.isArray(value) ? value : [value]));
+    }
+  }
+
+  return items;
+}
+
+function xmlAttributes(node) {
+  return node?.$ ?? {};
+}
+
+function xmlText(node) {
+  if (typeof node === 'string') {
+    return node;
+  }
+
+  if (Array.isArray(node)) {
+    return xmlText(node[0]);
+  }
+
+  return node?._ ?? '';
+}
+
+function localXmlName(name) {
+  return String(name).includes(':') ? String(name).split(':').pop() : String(name);
+}
+
+function preferredSamlBindingLocation(services) {
+  const preferred = services.find(service => String(xmlAttributes(service).Binding ?? '').includes('HTTP-Redirect'))
+    ?? services.find(service => String(xmlAttributes(service).Binding ?? '').includes('HTTP-POST'))
+    ?? services[0];
+  return xmlAttributes(preferred).Location ?? '';
 }
 
 function equalsIgnoreCase(left, right) {

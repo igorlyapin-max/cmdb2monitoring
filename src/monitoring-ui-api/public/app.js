@@ -45,6 +45,11 @@ function bindNavigation() {
 function bindForms() {
   $('#loginForm').addEventListener('submit', async event => {
     event.preventDefault();
+    if (state.auth?.useIdp) {
+      location.href = '/auth/saml2/login';
+      return;
+    }
+
     $('#loginError').textContent = '';
     const form = new FormData(event.currentTarget);
     try {
@@ -72,6 +77,10 @@ function bindForms() {
     }
   });
 
+  $('#idpLoginButton').addEventListener('click', () => {
+    location.href = '/auth/saml2/login';
+  });
+
   $('#logoutButton').addEventListener('click', async () => {
     await api('/api/auth/logout', { method: 'POST', body: {} });
     location.reload();
@@ -96,10 +105,14 @@ function bindForms() {
 }
 
 function renderAuth(status) {
+  state.auth = status.auth ?? {};
   $('#loginView').classList.toggle('hidden', status.authenticated);
   $('#appView').classList.toggle('hidden', !status.authenticated);
+  $('#idpLoginBlock').classList.toggle('hidden', !state.auth.useIdp || status.authenticated);
+  $('#localCredentials').classList.toggle('hidden', state.auth.useIdp);
+  $('#localLoginActions').classList.toggle('hidden', state.auth.useIdp);
   $('#sessionSummary').textContent = status.authenticated
-    ? `${status.user?.cmdbuild?.username ?? 'user'} | ${status.user?.zabbix?.apiEndpoint ?? ''}`
+    ? `${status.user?.identity?.displayName ?? status.user?.cmdbuild?.username ?? 'user'} | ${status.user?.authMethod ?? 'local'}`
     : 'not authenticated';
   if (status.authenticated && status.idp) {
     fillIdpForm(status.idp);
@@ -230,7 +243,11 @@ async function saveIdp() {
       sloUrl: form.get('sloUrl'),
       spEntityId: form.get('spEntityId'),
       acsUrl: form.get('acsUrl'),
+      sloCallbackUrl: form.get('sloCallbackUrl'),
       nameIdFormat: form.get('nameIdFormat'),
+      authnRequestBinding: form.get('authnRequestBinding'),
+      requireSignedResponses: form.get('requireSignedResponses') === 'on',
+      requireSignedAssertions: form.get('requireSignedAssertions') === 'on',
       idpX509Certificate: form.get('idpX509Certificate'),
       spCertificate: form.get('spCertificate'),
       spPrivateKey: form.get('spPrivateKey')
@@ -243,9 +260,11 @@ async function saveIdp() {
 function fillIdpForm(idp) {
   const form = $('#idpForm');
   form.elements.enabled.checked = Boolean(idp.enabled);
-  for (const field of ['metadataUrl', 'entityId', 'ssoUrl', 'sloUrl', 'spEntityId', 'acsUrl', 'nameIdFormat']) {
+  for (const field of ['metadataUrl', 'entityId', 'ssoUrl', 'sloUrl', 'spEntityId', 'acsUrl', 'sloCallbackUrl', 'nameIdFormat', 'authnRequestBinding']) {
     form.elements[field].value = idp[field] ?? '';
   }
+  form.elements.requireSignedResponses.checked = Boolean(idp.requireSignedResponses);
+  form.elements.requireSignedAssertions.checked = Boolean(idp.requireSignedAssertions);
 }
 
 async function api(path, options = {}) {

@@ -10,5 +10,9 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@node-saml/node-saml": "^5.1.0",
+    "xml2js": "^0.6.2"
   }
 }

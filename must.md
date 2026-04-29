@@ -14,6 +14,7 @@
 - Runtime state хранится в `state/*.json` и не попадает в git.
 - Production secrets не хранятся в git. Использовать переменные окружения, secret storage или local config, исключенный из git.
 - Frontend credentials не хранить в браузере; использовать server-side session.
+- SAML2 реализуется через проверенную библиотеку, с обязательной проверкой IdP signing certificate и InResponseTo; XML-подписи не проверять самописным кодом.
 
 ## Микросервисные соглашения
 

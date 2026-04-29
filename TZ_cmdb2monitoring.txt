@@ -43,6 +43,7 @@ Frontend/BFF: monitoring-ui-api.
 - предоставлять Node.js frontend и backend-for-frontend для оператора интеграции;
 - отображать health/status микросервисов;
 - принимать login/password для CMDBuild и Zabbix, если IdP отключен;
+- выполнять SAML2 SP login flow, если IdP включен;
 - хранить credentials только в server-side session;
 - предоставлять console настройки IdP/SAML2 после авторизации;
 - загружать и валидировать JSON rules-файл;
@@ -976,11 +977,12 @@ monitoring-ui-api является Node.js компонентом для fronten
 Frontend не должен обращаться напрямую к Kafka, CMDBuild, Zabbix или IdP-интеграционным endpoint.
 Все обращения выполняются через monitoring-ui-api.
 
-Первый реализованный срез:
+Реализованный срез:
 - статический frontend dashboard;
-- Node.js HTTP API без внешних npm-зависимостей;
+- Node.js HTTP API;
 - server-side session;
 - login form для режима без IdP;
+- SAML2 SP endpoints login, ACS, metadata и logout;
 - read-only health dashboard по health endpoints микросервисов;
 - rules view с загрузкой JSON, validate, dry-run и upload;
 - Zabbix catalog sync;
@@ -992,10 +994,17 @@ Frontend не должен обращаться напрямую к Kafka, CMDBu
 Поддерживаются два режима требований:
 
 IdP enabled:
-- целевая модель через единый IdP;
 - основной протокол SAML2;
 - предполагается, что CMDBuild и Zabbix обслуживаются тем же IdP;
-- настройки IdP вносятся через console после авторизации.
+- настройки IdP вносятся через console после авторизации;
+- SP metadata публикуется по /auth/saml2/metadata;
+- login стартует через /auth/saml2/login;
+- ACS принимает HTTP-POST binding по /auth/saml2/acs;
+- SAML response валидируется библиотекой @node-saml/node-saml;
+- InResponseTo проверяется обязательно;
+- IdP signing certificate обязателен через Idp:IdpX509Certificate, Idp:IdpX509CertificatePath или MetadataUrl;
+- пользовательские роли мапятся из SAML groups через Idp:RoleMapping;
+- CMDBuild/Zabbix integration credentials в IdP-режиме берутся из ServiceAccount-секций конфигурации.
 
 IdP disabled:
 - пользователь вводит CMDBuild login/password;
@@ -1003,9 +1012,6 @@ IdP disabled:
 - credentials не хранятся в браузере;
 - credentials хранятся только в памяти server-side session;
 - production secrets не попадают в git.
-
-Первый срез не реализует полноценный SAML2 login flow.
-Он фиксирует настройки IdP/SAML2 и подготавливает структуру API/UI для следующей итерации.
 
 18.3. Rules upload
 
@@ -1088,4 +1094,5 @@ src/monitoring-ui-api/scripts/validate-config.mjs
 - JSON-конфиги monitoring-ui-api;
 - наличие server/static frontend files;
 - наличие rules-файла;
-- обязательные параметры Service/Auth/Cmdbuild/Zabbix/Rules.
+- обязательные параметры Service/Auth/Idp/Cmdbuild/Zabbix/Rules;
+- наличие package.json и package-lock.json для Node.js зависимостей.

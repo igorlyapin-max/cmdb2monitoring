@@ -17,7 +17,7 @@ Run .NET commands through the repository wrapper:
 - `cmdbwebhooks2kafka`: receives CMDBuild webhook payloads on `POST /webhooks/cmdbuild` and publishes normalized events to Kafka.
 - `cmdbkafka2zabbix`: reads CMDB events from Kafka, applies JSON/T4 conversion rules, and publishes Zabbix JSON-RPC requests.
 - `zabbixrequests2api`: reads Zabbix JSON-RPC requests from Kafka, validates them, calls Zabbix API, and publishes responses.
-- `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, rules upload/dry-run, IdP settings, and CMDBuild/Zabbix catalog sync.
+- `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, rules upload/dry-run, SAML2 IdP login/settings, and CMDBuild/Zabbix catalog sync.
 
 Service settings live in `src/cmdbwebhooks2kafka/appsettings.json`.
 For a container running in Docker network `cmdbuild_default`, override Kafka with:
@@ -50,5 +50,6 @@ Run the frontend slice:
 
 ```bash
 cd src/monitoring-ui-api
+npm install
 npm start
 ```

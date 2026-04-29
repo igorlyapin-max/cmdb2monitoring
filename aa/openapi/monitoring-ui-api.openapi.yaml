@@ -62,6 +62,78 @@ paths:
       responses:
         "200":
           description: Session destroyed.
+  /auth/saml2/metadata:
+    get:
+      summary: Read SAML2 service provider metadata
+      security: []
+      responses:
+        "200":
+          description: SP metadata XML for IdP registration.
+          content:
+            application/samlmetadata+xml:
+              schema:
+                type: string
+  /auth/saml2/login:
+    get:
+      summary: Start SAML2 SP-initiated login
+      security: []
+      parameters:
+        - name: returnUrl
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to IdP SSO endpoint with SAMLRequest.
+          headers:
+            Location:
+              schema:
+                type: string
+        "409":
+          $ref: "#/components/responses/Error"
+  /auth/saml2/acs:
+    post:
+      summary: Consume SAML2 HTTP-POST response and create server-side session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - SAMLResponse
+              properties:
+                SAMLResponse:
+                  type: string
+                RelayState:
+                  type: string
+      responses:
+        "302":
+          description: Session created, browser redirected to RelayState or root.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Error"
+  /auth/saml2/logout:
+    get:
+      summary: Destroy local session and optionally start IdP SLO
+      responses:
+        "302":
+          description: Redirect to root or IdP SLO endpoint.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
   /api/services/health:
     get:
       summary: Read configured microservice health endpoints

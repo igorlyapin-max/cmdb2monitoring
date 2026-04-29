@@ -19,7 +19,10 @@
       <section id="loginView" class="login-shell hidden">
         <form id="loginForm" class="login-panel">
           <h1>Вход</h1>
-          <div class="form-grid">
+          <div id="idpLoginBlock" class="idp-login hidden">
+            <button id="idpLoginButton" type="button">Войти через IdP</button>
+          </div>
+          <div id="localCredentials" class="form-grid">
             <label>
               <span>CMDBuild URL</span>
               <input name="cmdbuildBaseUrl" autocomplete="url">
@@ -49,7 +52,7 @@
               <input name="zabbixApiToken" type="password" autocomplete="off">
             </label>
           </div>
-          <div class="actions">
+          <div id="localLoginActions" class="actions">
             <button type="submit">Войти</button>
           </div>
           <p id="loginError" class="error-line"></p>
@@ -207,7 +210,17 @@
               <label><span>SLO URL</span><input name="sloUrl"></label>
               <label><span>SP Entity ID</span><input name="spEntityId"></label>
               <label><span>ACS URL</span><input name="acsUrl"></label>
+              <label><span>SLO callback URL</span><input name="sloCallbackUrl"></label>
               <label><span>NameID format</span><input name="nameIdFormat"></label>
+              <label><span>Authn binding</span><input name="authnRequestBinding"></label>
+              <label class="check-row">
+                <input name="requireSignedResponses" type="checkbox">
+                <span>Require signed responses</span>
+              </label>
+              <label class="check-row">
+                <input name="requireSignedAssertions" type="checkbox">
+                <span>Require signed assertions</span>
+              </label>
               <label><span>IdP X509 certificate</span><textarea name="idpX509Certificate"></textarea></label>
               <label><span>SP certificate</span><textarea name="spCertificate"></textarea></label>
               <label><span>SP private key</span><textarea name="spPrivateKey"></textarea></label>
