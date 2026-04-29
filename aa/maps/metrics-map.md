@@ -12,3 +12,7 @@
 | M-006 | zabbixrequests2api | zabbix api error count | Ошибки API/валидации | Кандидат |
 | M-007 | zabbixrequests2api | processing latency | Время обработки объекта | Кандидат |
 | M-008 | Kafka | consumer lag | Отставание consumer groups | Внешний мониторинг |
+| M-009 | monitoring-ui-api | active session count | Количество активных server-side sessions | Кандидат |
+| M-010 | monitoring-ui-api | saml login success/error count | Контроль SAML2 авторизации | Кандидат |
+| M-011 | monitoring-ui-api | catalog sync duration/error count | Контроль синхронизации CMDBuild/Zabbix catalog | Кандидат |
+| M-012 | monitoring-ui-api | rules validate/upload count | Контроль изменений rules через UI | Кандидат |

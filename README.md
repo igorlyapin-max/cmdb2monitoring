@@ -35,6 +35,7 @@ dotnet --info
 
 ## Documentation
 
+- `PROJECT_DOCUMENTATION.md`: full project operations and configuration guide.
 - `TZ_cmdb2monitoring.txt`: project technical specification.
 - `aa/`: architecture artifacts, AsyncAPI/OpenAPI, maps, diagrams, and configuration documentation.
 - `aa/configuration-files.md`: what to configure in each microservice and when.

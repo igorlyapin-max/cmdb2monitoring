@@ -13,5 +13,11 @@
 | EV-009 | zabbixrequests2api | Zabbix API call | Information/Error | method, requestId, status |
 | EV-010 | zabbixrequests2api | Response опубликован | Information | topic, partition, offset, success |
 | EV-011 | Все сервисы | State загружен/записан | Information | entityId, offset, processedAt |
+| EV-012 | monitoring-ui-api | Local login/logout | Information/Warning | authMethod, user, result |
+| EV-013 | monitoring-ui-api | SAML2 login/ACS | Information/Warning/Error | issuer, nameID, roleMapping, result |
+| EV-014 | monitoring-ui-api | IdP settings updated | Information | enabled, metadataUrl set, cert flags |
+| EV-015 | monitoring-ui-api | Rules validate/upload/dry-run | Information/Warning | rules path, valid, user |
+| EV-016 | monitoring-ui-api | Zabbix catalog sync | Information/Error | endpoint, counts, error |
+| EV-017 | monitoring-ui-api | CMDBuild catalog sync | Information/Error | endpoint, counts, error |
 
 Логи пишутся в JSON и временно публикуются в Kafka log topics для будущей доставки в ELK.

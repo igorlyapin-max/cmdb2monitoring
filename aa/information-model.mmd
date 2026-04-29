@@ -1,4 +1,10 @@
 flowchart LR
+    browser[Browser / Operator] -->|IF-009 UI/API| ui[monitoring-ui-api]
+    ui -->|IF-010 SAML2| idp[IdP SAML2]
+    ui -->|IF-011 catalog| cmdb
+    ui -->|IF-012 catalog| zbx
+    ui -->|IF-013 rules upload/validate| rules
+    ui -->|IF-014 cache/settings| fs
     cmdb[CMDBuild] -->|IF-001 HTTP webhook| wh[cmdbwebhooks2kafka]
     wh -->|IF-002 cmdbuild.webhooks.*| kafka[(Kafka)]
     kafka -->|cmdbuild.webhooks.*| conv[cmdbkafka2zabbix]

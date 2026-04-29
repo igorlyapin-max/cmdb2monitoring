@@ -7,7 +7,7 @@
 ## Состав
 
 - `business-process.md` и `business-process.mmd` - бизнес-процесс, позитивные/негативные сценарии, точки логирования.
-- `information-model.md` и `information-model.mmd` - информационные потоки между CMDBuild, микросервисами, Kafka, Zabbix и будущим ELK.
+- `information-model.md` и `information-model.mmd` - информационные потоки между CMDBuild, микросервисами, Kafka, Zabbix, monitoring UI, IdP и будущим ELK.
 - `deployment.md` и `deployment-test.mmd` - схема развертывания для тестового/целевого контура.
 - `asyncapi/cmdb2monitoring.asyncapi.yaml` - описание Kafka-потоков.
 - `openapi/cmdbwebhooks2kafka.openapi.yaml` - HTTP API webhook-сервиса.
@@ -19,6 +19,8 @@
 - `maps/secrets-map.md` - карта секретов.
 - `maps/event-registration-map.md` - карта регистрации событий.
 - `configuration-files.md` - описание конфигурационных файлов и параметров.
+
+Полная эксплуатационная документация по всему проекту находится в `PROJECT_DOCUMENTATION.md` в корне репозитория.
 
 ## Границы текущей версии
 

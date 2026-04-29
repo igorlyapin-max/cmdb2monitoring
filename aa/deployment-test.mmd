@@ -1,5 +1,6 @@
 flowchart TB
     subgraph devhost[Dev/Test host]
+        monui[monitoring-ui-api :5090]
         wh[cmdbwebhooks2kafka :5080]
         conv[cmdbkafka2zabbix :5081]
         api[zabbixrequests2api :5082]
@@ -13,6 +14,18 @@ flowchart TB
         zbx[Zabbix :8081]
     end
 
+    subgraph external[External/Future]
+        idp[IdP SAML2]
+        elk[ELK]
+    end
+
+    browser[Browser] --> monui
+    monui --> idp
+    monui --> cmdb
+    monui --> zbx
+    monui --> wh
+    monui --> conv
+    monui --> api
     cmdb -->|HTTP webhook| wh
     wh --> kafka
     kafka --> conv
@@ -23,3 +36,4 @@ flowchart TB
     wh --> state
     conv --> state
     api --> state
+    kafka -. log shipping .-> elk

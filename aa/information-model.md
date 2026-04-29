@@ -12,6 +12,12 @@
 | IF-006 | Микросервисы | Kafka | `*.logs.*` topics | Structured JSON logs для будущего ELK |
 | IF-007 | cmdbkafka2zabbix | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
 | IF-008 | Микросервисы | Local FS | `state/*.json` | Последний обработанный объект |
+| IF-009 | Browser | monitoring-ui-api | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
+| IF-010 | monitoring-ui-api | IdP SAML2 | Redirect/POST SAML2 | AuthnRequest, SAMLResponse, metadata |
+| IF-011 | monitoring-ui-api | CMDBuild REST API | HTTP | Classes, attributes, lookup types, optional service account |
+| IF-012 | monitoring-ui-api | Zabbix API | HTTP JSON-RPC | Templates, host groups, template groups, known tags |
+| IF-013 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
+| IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json` | Catalog cache и persisted UI settings без runtime secrets в git |
 
 ## Срез бизнес-описания
 
@@ -19,10 +25,12 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-008:
+Срез поддержки включает IF-006..IF-014:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
+- frontend/BFF catalog cache;
+- SAML2 session и IdP settings;
 - секреты и credentials через конфиги/переменные окружения.
 
 ## Основные объекты данных
@@ -68,3 +76,30 @@
 - `input`;
 - `missing`;
 - `zabbixResponse`.
+
+### Monitoring UI session
+
+Хранится в памяти процесса `monitoring-ui-api`.
+
+Поля:
+- `authMethod`: `local` или `saml2`;
+- `roles`: `admin`, `operator`, `readonly`;
+- `identity`: login/email/displayName/groups для SAML2;
+- `cmdbuild`: base URL и server-side credentials;
+- `zabbix`: API endpoint и server-side credentials/token;
+- `createdAt`, `lastSeenAt`.
+
+### Catalog cache
+
+Хранится в `src/monitoring-ui-api/data/*.json` и не попадает в git.
+
+Zabbix cache:
+- templates;
+- hostGroups;
+- templateGroups;
+- tags.
+
+CMDBuild cache:
+- classes;
+- attributes;
+- lookups.

@@ -345,6 +345,7 @@ static void ValidateArchitectureArtifacts(string repositoryRoot, List<string> er
     var requiredFiles = new[]
     {
         "aa/README.md",
+        "PROJECT_DOCUMENTATION.md",
         "aa/business-process.md",
         "aa/business-process.mmd",
         "aa/information-model.md",

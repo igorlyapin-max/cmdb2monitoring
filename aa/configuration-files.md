@@ -1,6 +1,9 @@
 # Конфигурационные файлы
 
-Все настройки задаются через `appsettings.json`, `appsettings.Development.json` и переменные окружения ASP.NET Core с разделителем `__`.
+Все настройки задаются через `appsettings.json`, `appsettings.Development.json` и переменные окружения.
+
+.NET-сервисы используют стандартный синтаксис ASP.NET Core env overrides с разделителем `__`.
+`monitoring-ui-api` использует `config/appsettings*.json` и явно поддержанные env overrides, перечисленные в этом документе и в `PROJECT_DOCUMENTATION.md`.
 
 Production/base конфиги не должны содержать реальные секреты. Development конфиги могут содержать локальные dev-значения, если они не используются в продуктивном контуре.
 
@@ -149,6 +152,40 @@ Kafka__Input__Password=<secret>
 | `Rules:AllowSave` | Разрешить запись rules-файла | Для read-only окружений отключать |
 | `Rules:AutoCommit` | Делать git commit из UI | По умолчанию false |
 | `Services:HealthEndpoints` | Health endpoints микросервисов | При добавлении сервисов |
+
+Поддержанные env overrides `monitoring-ui-api`:
+
+| Env | Конфиг |
+| --- | --- |
+| `PORT` | `Service:Port` |
+| `MONITORING_UI_HOST` | `Service:Host` |
+| `MONITORING_UI_USE_IDP` | `Auth:UseIdp` |
+| `SAML2_METADATA_URL` | `Idp:MetadataUrl` |
+| `SAML2_ENTITY_ID` | `Idp:EntityId` |
+| `SAML2_SSO_URL` | `Idp:SsoUrl` |
+| `SAML2_SLO_URL` | `Idp:SloUrl` |
+| `SAML2_IDP_CERT` | `Idp:IdpX509Certificate` |
+| `SAML2_IDP_CERT_PATH` | `Idp:IdpX509CertificatePath` |
+| `SAML2_SP_ENTITY_ID` | `Idp:SpEntityId` |
+| `SAML2_ACS_URL` | `Idp:AcsUrl` |
+| `SAML2_SP_CERT_PATH` | `Idp:SpCertificatePath` |
+| `SAML2_SP_PRIVATE_KEY_PATH` | `Idp:SpPrivateKeyPath` |
+| `CMDBUILD_BASE_URL` | `Cmdbuild:BaseUrl` |
+| `CMDBUILD_SERVICE_USERNAME` | `Cmdbuild:ServiceAccount:Username` |
+| `CMDBUILD_SERVICE_PASSWORD` | `Cmdbuild:ServiceAccount:Password` |
+| `ZABBIX_API_ENDPOINT` | `Zabbix:ApiEndpoint` |
+| `ZABBIX_SERVICE_USER` | `Zabbix:ServiceAccount:User` |
+| `ZABBIX_SERVICE_PASSWORD` | `Zabbix:ServiceAccount:Password` |
+| `ZABBIX_SERVICE_API_TOKEN` | `Zabbix:ServiceAccount:ApiToken` |
+| `RULES_FILE_PATH` | `Rules:RulesFilePath` |
+
+SAML2 endpoints:
+- SP metadata: `GET /auth/saml2/metadata`;
+- SP initiated login: `GET /auth/saml2/login`;
+- ACS: `POST /auth/saml2/acs`;
+- logout: `GET /auth/saml2/logout`.
+
+В IdP-режиме `Cmdbuild:ServiceAccount` и `Zabbix:ServiceAccount` используются BFF для server-side API calls. В режиме без IdP пользователь вводит credentials при входе, они хранятся только в памяти server-side session.
 
 Runtime cache:
 - `src/monitoring-ui-api/data/zabbix-catalog-cache.json`;

@@ -16,6 +16,8 @@
 | cmdbwebhooks2kafka | Прием и нормализация webhook |
 | cmdbkafka2zabbix | Конвертация CMDB-события в Zabbix JSON-RPC |
 | zabbixrequests2api | Вызов Zabbix API и публикация результата |
+| monitoring-ui-api | Frontend/BFF для оператора, rules, catalog sync и SAML2 login |
+| IdP SAML2 | Единая аутентификация для frontend, CMDBuild и Zabbix в целевой модели |
 | Kafka | Асинхронная шина обмена и временный транспорт логов |
 | Zabbix | Целевая система мониторинга |
 | ELK | Целевая система логирования, пока отсутствует |
@@ -48,6 +50,14 @@
 4. `zabbixrequests2api` выполняет `host.get`, получает `hostid`, затем выполняет `host.delete`.
 5. Результат публикуется в response topic.
 
+### Operator UI
+
+1. Оператор открывает `monitoring-ui-api`.
+2. Если IdP отключен, оператор вводит CMDBuild и Zabbix credentials; они хранятся только в server-side session.
+3. Если IdP включен, оператор проходит SAML2 login через `/auth/saml2/login`, IdP возвращает SAMLResponse на `/auth/saml2/acs`, BFF создает server-side session.
+4. Оператор проверяет health микросервисов, синхронизирует Zabbix catalog и CMDBuild catalog, валидирует или загружает rules JSON.
+5. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.
+
 ## Негативные сценарии
 
 | Сценарий | Поведение |
@@ -60,10 +70,17 @@
 | Zabbix host не найден для update/delete | `zabbixrequests2api` публикует `host_not_found` |
 | Zabbix API недоступен | retry по конфигу, затем error response |
 | Kafka publish error | ошибка логируется, offset не коммитится до успешной обработки |
+| SAML2 IdP не настроен | `/auth/saml2/login` возвращает конфигурационную ошибку, local login остается доступен только при `Auth:UseIdp=false` |
+| SAMLResponse не подписан доверенным IdP cert | `monitoring-ui-api` отклоняет ACS POST и не создает session |
+| SAML groups не попали в `RoleMapping` | Пользователь получает роль `readonly` |
+| Catalog sync недоступен | UI показывает ошибку BFF, runtime cache не обновляется |
 
 ## Вспомогательные процессы
 
 - Загрузка rules-файла из Git-managed JSON.
+- Загрузка rules-файла через frontend с серверной валидацией и dry-run.
+- Синхронизация Zabbix catalog: templates, host groups, template groups, known tags.
+- Синхронизация CMDBuild catalog: classes, attributes, lookup values.
 - Ведение state-файлов последнего обработанного объекта.
 - Структурное логирование в Kafka topics для будущей интеграции с ELK.
 - Проверка конфигураций скриптом `scripts/test-configs.sh`.
@@ -75,3 +92,4 @@
 | cmdbwebhooks2kafka | Получен webhook, ошибка авторизации, ошибка JSON, публикация в Kafka |
 | cmdbkafka2zabbix | Загружены rules, событие сконвертировано, событие пропущено, Kafka publish |
 | zabbixrequests2api | JSON-RPC принят, validation error, Zabbix API request/response, response опубликован |
+| monitoring-ui-api | Login/logout, SAML2 ACS, settings update, rules validate/upload, catalog sync |

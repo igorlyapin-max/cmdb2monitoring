@@ -1,9 +1,18 @@
 flowchart TD
     user[Пользователь CMDBuild] --> ui[CMDBuild Web UI]
+    operator[Оператор интеграции] --> monui[monitoring-ui-api :5090]
+    monui -->|SAML2 login/ACS| idp[IdP SAML2]
+    monui -->|catalog sync| cmdb
+    monui -->|catalog sync| zabbix
+    monui -->|rules validate/upload| rules[(Git rules JSON)]
+    monui -->|health dashboard| wh
+    monui -->|health dashboard| conv
+    monui -->|health dashboard| api
     ui --> cmdb[CMDBuild]
     cmdb -->|POST /webhooks/cmdbuild| wh[cmdbwebhooks2kafka]
     wh -->|cmdbuild.webhooks.*| kafka[(Kafka)]
     kafka --> conv[cmdbkafka2zabbix]
+    rules --> conv
     conv -->|zabbix.host.requests.*| kafka
     kafka --> api[zabbixrequests2api]
     api -->|JSON-RPC| zabbix[Zabbix API]

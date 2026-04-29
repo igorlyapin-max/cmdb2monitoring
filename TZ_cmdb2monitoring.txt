@@ -75,7 +75,9 @@ Frontend/BFF: monitoring-ui-api.
 - правила конвертации: rules/cmdbuild-to-zabbix-host-create.json;
 - общие настройки сборки: Directory.Build.props;
 - документация проекта: README.md;
-- данное ТЗ: TZ_cmdb2monitoring.txt.
+- эксплуатационная документация и конфигурации: PROJECT_DOCUMENTATION.md;
+- данное ТЗ: TZ_cmdb2monitoring.txt;
+- архитектурные артефакты: aa/.
 
 Локальные артефакты .NET SDK, NuGet cache, bin/obj и локальные секреты не должны попадать в git.
 Runtime state-файлы микросервисов не должны попадать в git.
@@ -1096,3 +1098,43 @@ src/monitoring-ui-api/scripts/validate-config.mjs
 - наличие rules-файла;
 - обязательные параметры Service/Auth/Idp/Cmdbuild/Zabbix/Rules;
 - наличие package.json и package-lock.json для Node.js зависимостей.
+
+19. Документация и архитектурные артефакты
+
+19.1. Основные документы
+
+Актуальные документы проекта:
+- README.md - краткий вход в проект, команды запуска и ссылки на документацию;
+- PROJECT_DOCUMENTATION.md - полная эксплуатационная документация проекта и конфигураций;
+- TZ_cmdb2monitoring.txt - техническое задание и функциональные требования;
+- must.md - обязательные соглашения разработки и Definition of Done;
+- aa/README.md - состав архитектурных артефактов.
+
+19.2. Архитектурные артефакты
+
+Папка aa должна отражать фактическую архитектуру:
+- business-process.md и business-process.mmd - бизнес-процессы CMDBuild->Zabbix и operator UI;
+- information-model.md и information-model.mmd - Kafka, rules, state, SAML2, catalog sync и UI flows;
+- deployment.md и deployment-test.mmd - dev/test/prod развертывание, включая monitoring-ui-api и IdP;
+- asyncapi/cmdb2monitoring.asyncapi.yaml - Kafka-контракты;
+- openapi/*.yaml - HTTP API webhook, health и monitoring-ui-api;
+- maps/*.md - healthcheck, Kafka access, metrics, secrets, event registration;
+- configuration-files.md - конфигурационные файлы и параметры.
+
+19.3. Правило обновления документации
+
+При любом изменении:
+- конфигурационных параметров;
+- Kafka topic или Kafka contract;
+- HTTP endpoint;
+- SAML2/IdP поведения;
+- rules JSON схемы;
+- state/cache файлов;
+- логирования или секретов
+
+необходимо обновить:
+- TZ_cmdb2monitoring.txt;
+- PROJECT_DOCUMENTATION.md;
+- релевантные файлы в aa/;
+- must.md, если меняется обязательное соглашение разработки;
+- tests/configvalidation, если меняется обязательный артефакт или проверяемое правило.
