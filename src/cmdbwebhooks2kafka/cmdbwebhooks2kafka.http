@@ -1,0 +1,19 @@
+@cmdbwebhooks2kafka_HostAddress = http://localhost:5080
+
+GET {{cmdbwebhooks2kafka_HostAddress}}/health
+Accept: application/json
+
+###
+
+POST {{cmdbwebhooks2kafka_HostAddress}}/webhooks/cmdbuild
+Content-Type: application/json
+
+{
+  "eventType": "card.updated",
+  "className": "Host",
+  "cardId": "12345",
+  "data": {
+    "name": "srv-app-01",
+    "ip": "10.0.0.15"
+  }
+}

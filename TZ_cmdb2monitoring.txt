@@ -1,0 +1,326 @@
+Техническое задание
+Проект: cmdb2monitoring
+Версия: 0.1
+Дата: 2026-04-29
+
+1. Назначение проекта
+
+Проект cmdb2monitoring предназначен для интеграции CMDBuild с внешними системами мониторинга и обработки событий.
+Разработка ведется в одном репозитории с разделением по микросервисам.
+
+Первый микросервис: cmdbwebhooks2kafka.
+
+Назначение cmdbwebhooks2kafka:
+- принимать webhook-события из CMDBuild;
+- нормализовать входные данные;
+- различать события create, update, delete;
+- публиковать события в Kafka;
+- вести структурированные логи в Kafka-топик для будущей интеграции с ELK.
+
+2. Технологический стек
+
+- Язык: C#.
+- Платформа: .NET.
+- Тип сервиса: ASP.NET Core Web API / Minimal API.
+- Брокер сообщений: Apache Kafka.
+- CMDB: CMDBuild.
+- Логи: structured JSON logs, временно через Kafka-топик, в будущем через ELK.
+- Репозиторий: monorepo.
+
+3. Структура репозитория
+
+Репозиторий содержит:
+- solution: cmdb2monitoring.slnx;
+- wrapper для локального .NET SDK: scripts/dotnet;
+- микросервис: src/cmdbwebhooks2kafka;
+- общие настройки сборки: Directory.Build.props;
+- документация проекта: README.md;
+- данное ТЗ: TZ_cmdb2monitoring.txt.
+
+Локальные артефакты .NET SDK, NuGet cache, bin/obj и локальные секреты не должны попадать в git.
+
+4. Микросервис cmdbwebhooks2kafka
+
+4.1. HTTP endpoint
+
+Микросервис должен принимать POST-запросы от CMDBuild:
+
+POST /webhooks/cmdbuild
+
+Health endpoint:
+
+GET /health
+
+4.2. Входной формат webhook
+
+CMDBuild должен отправлять JSON body с плоской структурой:
+
+{
+  "source": "cmdbuild",
+  "eventType": "create|update|delete",
+  "cmdbuildEvent": "card_create_after|card_update_after|card_delete_after",
+  "className": "Notebook|PC|Server|tk",
+  "id": "{server:Id}",
+  "code": "{server:Code}",
+  "ip_address": "{server:IPAddress}",
+  "description": "{server:Description}"
+}
+
+Поля могут быть расширены в будущем без изменения базового контракта.
+
+В старом формате поля _id и cardId не использовать. По результатам проверки CMDBuild корректно подставляет:
+- {server:Id} в поле id;
+- {server:Code} в поле code.
+
+4.3. Поддерживаемые события CMDBuild
+
+CMDBuild webhook events:
+- card_create_after -> eventType=create;
+- card_update_after -> eventType=update;
+- card_delete_after -> eventType=delete.
+
+4.4. Поддерживаемые классы CMDBuild
+
+Базовый класс в CMDBuild: Computer.
+
+Так как Computer является prototype-классом, webhook настраивается на конкретные наследники:
+- Notebook;
+- PC;
+- Server;
+- tk.
+
+Для каждого класса должны быть заведены webhook-записи на create, update, delete.
+
+4.5. Заголовки webhook из CMDBuild
+
+CMDBuild webhook должен передавать только:
+
+Authorization: Bearer <token>
+
+Content-Type вручную в CMDBuild webhook headers не указывать.
+Причина: CMDBuild сам добавляет Content-Type. Если прописать его вручную, запрос приходит как application/json,application/json.
+
+Микросервис должен быть устойчив к некорректному/дублированному Content-Type и читать JSON body вручную.
+
+5. Авторизация webhook
+
+Требуется Bearer token авторизация входящих webhook-запросов.
+
+Режимы токена:
+- static: токен хранится в конфиге микросервиса;
+- dynamic: заглушка под будущую реализацию, источник динамического токена пока не определен.
+
+На стороне CMDBuild токен прописывается вручную в webhook header Authorization.
+
+Важно: секретное значение токена не должно храниться в git в production-конфиге. Для реального окружения использовать переменные окружения, секрет-хранилище или local config, исключенный из git.
+
+6. Kafka
+
+6.1. Топик бизнес-событий
+
+Микросервис публикует нормализованные CMDBuild webhook-события в Kafka.
+
+Development topic:
+
+cmdbuild.webhooks.dev
+
+Production/base config topic:
+
+cmdbuild.webhooks
+
+6.2. Текущий режим подключения Kafka
+
+Текущая локальная Kafka работает без авторизации:
+- SecurityProtocol: Plaintext;
+- SASL отключен;
+- TLS отключен;
+- username/password не используются.
+
+Адреса Kafka:
+- с хоста: localhost:9092 или 127.0.0.1:9092;
+- из Docker-сети: kafka:29092.
+
+6.3. Kafka security config
+
+Все параметры подключения должны задаваться через конфиг:
+- BootstrapServers;
+- Topic;
+- ClientId;
+- SecurityProtocol;
+- SaslMechanism;
+- Username;
+- Password;
+- Acks;
+- EnableIdempotence;
+- MessageTimeoutMs.
+
+Сейчас используется Plaintext. В будущем должна быть возможность включить SASL/TLS через конфиг без изменения кода.
+
+6.4. Kafka message contract
+
+Микросервис публикует envelope:
+
+{
+  "source": "cmdbuild",
+  "eventType": "create|update|delete",
+  "entityType": "Notebook|PC|Server|tk",
+  "entityId": "<id или code>",
+  "receivedAt": "<UTC timestamp>",
+  "payload": { ... исходный webhook payload ... }
+}
+
+Правило entityId:
+- сначала читать поле id;
+- затем code;
+- затем entityId.
+
+Kafka key:
+- entityId, если найден;
+- иначе eventType.
+
+6.5. Kafka topic provisioning
+
+Микросервис должен при старте проверять/создавать нужные Kafka topics.
+
+Настройки provisioning:
+- Enabled;
+- Partitions;
+- ReplicationFactor;
+- RequestTimeoutMs;
+- FailOnError.
+
+7. Логирование и ELK
+
+ELK-сервера пока нет.
+
+Требуется заложить настройки и код так, чтобы позже подключить ELK без изменения бизнес-логики.
+
+Текущий временный режим:
+- структурированные логи пишутся в Kafka;
+- формат логов: JSON;
+- отдельный Kafka-топик для логов.
+
+Development log topic:
+
+cmdbwebhooks2kafka.logs.dev
+
+Production/base config log topic:
+
+cmdbwebhooks2kafka.logs
+
+Конфиг должен содержать секцию ElkLogging:
+- Enabled;
+- Mode;
+- Elk.Endpoint;
+- Elk.Index;
+- Elk.ApiKey;
+- Kafka настройки для лог-топика;
+- MinimumLevel;
+- ServiceName;
+- Environment;
+- FlushTimeoutMs.
+
+8. Конфигурация
+
+Все настройки микросервиса должны храниться в конфиге:
+- Service;
+- CmdbWebhook;
+- Kafka;
+- ElkLogging;
+- Logging.
+
+Не допускается хардкодить:
+- Kafka bootstrap servers;
+- Kafka topics;
+- auth/security settings;
+- webhook route;
+- имена полей для определения eventType/entityType/entityId;
+- ELK/Kafka logging settings.
+
+9. Текущие локальные настройки CMDBuild
+
+CMDBuild доступен локально:
+
+http://localhost:8090/cmdbuild
+
+Учетная запись для настройки в dev:
+
+admin/admin
+
+REST base URL:
+
+http://localhost:8090/cmdbuild/services/rest/v3
+
+Webhook URL для текущего локального сервиса:
+
+http://192.168.202.100:5080/webhooks/cmdbuild
+
+Если сервис запускается в другом окружении, URL необходимо заменить в CMDBuild webhook settings.
+
+10. Проверки приемки
+
+10.1. HTTP
+
+- GET /health возвращает статус ok.
+- POST /webhooks/cmdbuild принимает корректный JSON.
+- Некорректный JSON возвращает 400.
+- Дублированный Content-Type не должен ломать обработку, если тело запроса является JSON.
+
+10.2. CMDBuild -> Kafka
+
+Для Notebook, PC, Server, tk:
+- create в CMDBuild приводит к сообщению в Kafka;
+- update в CMDBuild приводит к сообщению в Kafka;
+- delete в CMDBuild приводит к сообщению в Kafka.
+
+В Kafka payload должен содержать:
+- id;
+- code;
+- ip_address;
+- description;
+- className;
+- eventType;
+- cmdbuildEvent.
+
+В Kafka payload не должно быть старых полей:
+- _id;
+- cardId.
+
+10.3. Kafka
+
+- Сообщения публикуются в cmdbuild.webhooks.dev в dev-окружении.
+- Логи публикуются в cmdbwebhooks2kafka.logs.dev в dev-окружении.
+- Topics создаются или подтверждаются при старте сервиса.
+
+10.4. Логи
+
+Лог-события должны фиксировать:
+- получение webhook;
+- eventType;
+- entityType;
+- entityId;
+- успешную публикацию в Kafka с topic/partition/offset;
+- ошибки разбора JSON;
+- ошибки Kafka publishing/provisioning.
+
+11. Известные ограничения и следующие задачи
+
+1. Реализовать полноценную Bearer token validation в микросервисе.
+2. Добавить конфиг static/dynamic token mode.
+3. Добавить тесты на разбор payload и выбор entityId.
+4. Добавить тесты на Kafka publisher через mock/abstraction.
+5. Добавить Dockerfile и compose-профиль для запуска микросервиса рядом с CMDBuild/Kafka.
+6. Добавить production-подключение к ELK, когда будет известен endpoint.
+7. Уточнить политику retry/dead-letter для ошибок публикации в Kafka.
+8. Уточнить схему версионирования Kafka message contract.
+
+12. Итог текущих проверок
+
+Подтверждено:
+- CMDBuild webhook доходит до микросервиса;
+- микросервис публикует события в Kafka topic cmdbuild.webhooks.dev;
+- CMDBuild корректно подставляет id через {server:Id};
+- CMDBuild корректно подставляет code через {server:Code};
+- старый формат _id/cardId признан нерабочим и исключен;
+- логирование в Kafka topic cmdbwebhooks2kafka.logs.dev работает;
+- topic cmdbuild.webhooks.dev очищен от старых тестовых сообщений старого формата.
