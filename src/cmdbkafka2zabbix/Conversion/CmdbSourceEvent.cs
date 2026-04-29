@@ -1,0 +1,18 @@
+using System.Text.Json;
+
+namespace CmdbKafka2Zabbix.Conversion;
+
+public sealed record CmdbSourceEvent(
+    string Source,
+    string EventType,
+    string? EntityType,
+    string? EntityId,
+    string? Code,
+    string? ClassName,
+    string? IpAddress,
+    string? ZabbixHostId,
+    string? Description,
+    string? OperatingSystem,
+    string? ZabbixTag,
+    DateTimeOffset? ReceivedAt,
+    JsonElement Payload);

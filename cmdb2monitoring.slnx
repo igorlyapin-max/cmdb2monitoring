@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj" />
     <Project Path="src/cmdbwebhooks2kafka/cmdbwebhooks2kafka.csproj" />
   </Folder>
 </Solution>

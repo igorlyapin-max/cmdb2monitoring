@@ -25,6 +25,7 @@ Thumbs.db
 *.log
 *.tmp
 *.temp
+state/
 
 # Local runtime secrets and Codex workspace metadata
 .env

@@ -1,0 +1,1031 @@
+{
+  "schemaVersion": "0.1",
+  "name": "cmdbuild-computer-to-zabbix-host-lifecycle",
+  "description": "Conversion rules for CMDBuild Computer-derived webhook events into Zabbix JSON-RPC payloads.",
+  "source": {
+    "topic": "cmdbuild.webhooks.dev",
+    "supportedEvents": [
+      "create",
+      "update",
+      "delete"
+    ],
+    "hostCreateEvents": [
+      "create"
+    ],
+    "entityClasses": [
+      "Computer",
+      "Notebook",
+      "PC",
+      "Server",
+      "tk"
+    ],
+    "fields": {
+      "entityId": {
+        "source": "id",
+        "required": true
+      },
+      "code": {
+        "source": "code",
+        "required": false
+      },
+      "className": {
+        "source": "className",
+        "required": true
+      },
+      "ipAddress": {
+        "source": "ip_address",
+        "required": true,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "zabbixHostId": {
+        "source": "zabbix_hostid",
+        "required": false
+      },
+      "description": {
+        "source": "description",
+        "required": false
+      },
+      "os": {
+        "source": "os",
+        "required": false,
+        "validationRegex": "(?i)^(Windows|Linux|Windows server|vmware|105130|105146|105152|105161)$"
+      },
+      "zabbixTag": {
+        "source": "zabbixTag",
+        "required": false,
+        "validationRegex": "(?i)^(tag[1-3]|106857|106852|106850)$"
+      }
+    }
+  },
+  "zabbix": {
+    "apiEndpoint": "http://localhost:8081/api_jsonrpc.php",
+    "apiVersionDetected": "7.0.25",
+    "method": "host.create",
+    "auth": {
+      "mode": "configuredTokenOrLogin",
+      "tokenConfigKey": "Zabbix:ApiToken",
+      "loginConfigKeys": {
+        "user": "Zabbix:User",
+        "password": "Zabbix:Password"
+      }
+    },
+    "requiredHostCreateFields": [
+      "host",
+      "interfaces",
+      "groups"
+    ],
+    "expectedMonitoringFields": [
+      "host",
+      "name",
+      "interfaces[].ip",
+      "templates[].templateid",
+      "tags[].tag",
+      "tags[].value",
+      "groups[].groupid"
+    ]
+  },
+  "lookups": {
+    "hostGroups": [
+      {
+        "name": "Applications",
+        "groupid": "19"
+      },
+      {
+        "name": "Databases",
+        "groupid": "20"
+      },
+      {
+        "name": "Discovered hosts",
+        "groupid": "5"
+      },
+      {
+        "name": "Hypervisors",
+        "groupid": "7"
+      },
+      {
+        "name": "Linux servers",
+        "groupid": "2"
+      },
+      {
+        "name": "Virtual machines",
+        "groupid": "6"
+      },
+      {
+        "name": "Zabbix servers",
+        "groupid": "4"
+      }
+    ],
+    "templates": [
+      {
+        "name": "Linux by Zabbix agent",
+        "templateid": "10001"
+      },
+      {
+        "name": "Windows by Zabbix agent",
+        "templateid": "10081"
+      },
+      {
+        "name": "ICMP Ping",
+        "templateid": "10564"
+      },
+      {
+        "name": "Zabbix agent",
+        "templateid": "10561"
+      },
+      {
+        "name": "Zabbix agent active",
+        "templateid": "10562"
+      },
+      {
+        "name": "Generic by SNMP",
+        "templateid": "10563"
+      },
+      {
+        "name": "Linux by SNMP",
+        "templateid": "10248"
+      },
+      {
+        "name": "Windows by SNMP",
+        "templateid": "10249"
+      },
+      {
+        "name": "Network Generic Device by SNMP",
+        "templateid": "10226"
+      },
+      {
+        "name": "Zabbix server health",
+        "templateid": "10047"
+      }
+    ]
+  },
+  "defaults": {
+    "host": {
+      "status": 0,
+      "inventory_mode": -1
+    },
+    "hostGroups": [
+      {
+        "name": "Linux servers",
+        "groupid": "2"
+      }
+    ],
+    "templates": [
+      {
+        "name": "ICMP Ping",
+        "templateid": "10564"
+      },
+      {
+        "name": "Linux by Zabbix agent",
+        "templateid": "10001"
+      }
+    ],
+    "agentInterface": {
+      "type": 1,
+      "main": 1,
+      "useip": 1,
+      "dns": "",
+      "port": "10050"
+    },
+    "snmpInterface": {
+      "type": 2,
+      "main": 1,
+      "useip": 1,
+      "dns": "",
+      "port": "161"
+    },
+    "tags": [
+      {
+        "tag": "source",
+        "value": "cmdbuild"
+      },
+      {
+        "tag": "cmdb.class",
+        "valueTemplate": "<#= Model.ClassName #>"
+      },
+      {
+        "tag": "cmdb.id",
+        "valueTemplate": "<#= Model.EntityId #>"
+      }
+    ]
+  },
+  "normalization": {
+    "hostName": {
+      "inputPriority": [
+        "code",
+        "id"
+      ],
+      "prefixTemplate": "cmdb-<#= Model.ClassName #>-",
+      "regexReplacements": [
+        {
+          "pattern": "[^A-Za-z0-9_.-]+",
+          "replacement": "-"
+        },
+        {
+          "pattern": "^-+|-+$",
+          "replacement": ""
+        }
+      ],
+      "lowercase": true,
+      "fallbackTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.EntityId #>"
+    },
+    "visibleName": {
+      "template": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>"
+    }
+  },
+  "eventRoutingRules": [
+    {
+      "eventType": "create",
+      "method": "host.create",
+      "templateName": "hostCreateJsonRpcRequestLines",
+      "requiresZabbixHostId": false,
+      "requiredFields": [
+        "entityId",
+        "className",
+        "ipAddress"
+      ],
+      "publish": true
+    },
+    {
+      "eventType": "update",
+      "method": "host.update",
+      "templateName": "hostUpdateJsonRpcRequestLines",
+      "requiresZabbixHostId": true,
+      "fallbackMethod": "host.get",
+      "fallbackTemplateName": "hostGetByHostJsonRpcRequestLines",
+      "requiredFields": [
+        "entityId",
+        "className"
+      ],
+      "publish": true
+    },
+    {
+      "eventType": "delete",
+      "method": "host.delete",
+      "templateName": "hostDeleteJsonRpcRequestLines",
+      "requiresZabbixHostId": true,
+      "fallbackMethod": "host.get",
+      "fallbackTemplateName": "hostGetByHostJsonRpcRequestLines",
+      "requiredFields": [
+        "entityId",
+        "className"
+      ],
+      "publish": true
+    }
+  ],
+  "selectionPolicy": {
+    "ruleOrder": "ascendingPriority",
+    "groupSelection": "mergeAllMatchesOrFallback",
+    "templateSelection": "mergeAllMatchesOrFallback",
+    "interfaceSelection": "firstMatchOrFallback",
+    "tagSelection": "mergeDefaultsAndMatches",
+    "deduplicateBy": {
+      "hostGroups": "groupid",
+      "templates": "templateid",
+      "tags": "tag"
+    }
+  },
+  "groupSelectionRules": [
+    {
+      "name": "databases",
+      "priority": 10,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)(database|db)"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\b(db|database|postgres|postgresql|mysql|mssql|oracle)\\b"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Databases",
+          "groupid": "20"
+        }
+      ]
+    },
+    {
+      "name": "applications",
+      "priority": 20,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)(application|app)"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\b(app|application|service)\\b"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Applications",
+          "groupid": "19"
+        }
+      ]
+    },
+    {
+      "name": "hypervisors",
+      "priority": 30,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)(hypervisor|esxi|vmware|kvm)"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\b(hypervisor|esxi|vmware|kvm)\\b"
+          },
+          {
+            "field": "os",
+            "pattern": "(?i)^(vmware|105161)$"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Hypervisors",
+          "groupid": "7"
+        }
+      ]
+    },
+    {
+      "name": "virtual-machines",
+      "priority": 40,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)(virtual|vm)"
+          },
+          {
+            "field": "code",
+            "pattern": "(?i)^vm[-_.]"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\b(vm|virtual machine|virtual)\\b"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Virtual machines",
+          "groupid": "6"
+        }
+      ]
+    },
+    {
+      "name": "network-devices",
+      "priority": 50,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)(network|switch|router)"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\b(snmp|switch|router|network)\\b"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Discovered hosts",
+          "groupid": "5"
+        }
+      ]
+    },
+    {
+      "name": "linux-os",
+      "priority": 55,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(linux|105146)$"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Linux servers",
+          "groupid": "2"
+        }
+      ]
+    },
+    {
+      "name": "windows-os",
+      "priority": 56,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(windows|windows server|105130|105152)$"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Discovered hosts",
+          "groupid": "5"
+        }
+      ]
+    },
+    {
+      "name": "workstations",
+      "priority": 60,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^(notebook|pc)$"
+          },
+          {
+            "field": "code",
+            "pattern": "(?i)^(nb|pc)[-_.]"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Discovered hosts",
+          "groupid": "5"
+        }
+      ]
+    },
+    {
+      "name": "linux-servers",
+      "priority": 70,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(linux|105146)$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\blinux\\b"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Linux servers",
+          "groupid": "2"
+        }
+      ]
+    },
+    {
+      "name": "default-linux",
+      "priority": 1000,
+      "fallback": true,
+      "when": {
+        "always": true
+      },
+      "hostGroupsRef": "defaults.hostGroups"
+    }
+  ],
+  "templateSelectionRules": [
+    {
+      "name": "network-snmp",
+      "priority": 10,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)(network|switch|router)"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\b(snmp|switch|router|network)\\b"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Network Generic Device by SNMP",
+          "templateid": "10226"
+        }
+      ]
+    },
+    {
+      "name": "generic-snmp",
+      "priority": 20,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "description",
+            "pattern": "(?i)\\bsnmp\\b"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Generic by SNMP",
+          "templateid": "10563"
+        }
+      ]
+    },
+    {
+      "name": "linux-agent",
+      "priority": 25,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(linux|105146)$"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Linux by Zabbix agent",
+          "templateid": "10001"
+        }
+      ]
+    },
+    {
+      "name": "vmware-agent",
+      "priority": 26,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(vmware|105161)$"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Zabbix agent",
+          "templateid": "10561"
+        }
+      ]
+    },
+    {
+      "name": "windows-agent",
+      "priority": 30,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)windows"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\b(win|windows)\\b"
+          },
+          {
+            "field": "os",
+            "pattern": "(?i)^(windows|windows server|105130|105152)$"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Windows by Zabbix agent",
+          "templateid": "10081"
+        }
+      ]
+    },
+    {
+      "name": "default-linux-agent",
+      "priority": 1000,
+      "fallback": true,
+      "when": {
+        "always": true
+      },
+      "templatesRef": "defaults.templates"
+    }
+  ],
+  "interfaceSelectionRules": [
+    {
+      "name": "snmp-interface",
+      "priority": 10,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)(network|switch|router)"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i)\\bsnmp\\b"
+          }
+        ]
+      },
+      "interfaceRef": "snmpInterface"
+    },
+    {
+      "name": "default-agent-interface",
+      "priority": 1000,
+      "fallback": true,
+      "when": {
+        "always": true
+      },
+      "interfaceRef": "agentInterface"
+    }
+  ],
+  "tagSelectionRules": [
+    {
+      "name": "event-create",
+      "priority": 10,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "eventType",
+            "pattern": "(?i)^create$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-update",
+      "priority": 20,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "eventType",
+            "pattern": "(?i)^update$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-delete",
+      "priority": 30,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "eventType",
+            "pattern": "(?i)^delete$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "workstation-kind",
+      "priority": 40,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^(notebook|pc)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "asset.kind",
+          "value": "workstation"
+        }
+      ]
+    },
+    {
+      "name": "os-windows",
+      "priority": 50,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(windows|105130)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.os",
+          "value": "Windows"
+        }
+      ]
+    },
+    {
+      "name": "os-linux",
+      "priority": 51,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(linux|105146)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.os",
+          "value": "Linux"
+        }
+      ]
+    },
+    {
+      "name": "os-vmware",
+      "priority": 52,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(vmware|105161)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.os",
+          "value": "vmware"
+        }
+      ]
+    },
+    {
+      "name": "os-windows-server",
+      "priority": 53,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "os",
+            "pattern": "(?i)^(windows server|105152)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.os",
+          "value": "Windows server"
+        }
+      ]
+    },
+    {
+      "name": "zabbix-tag-1",
+      "priority": 60,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "zabbixTag",
+            "pattern": "(?i)^(tag1|106857)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.zabbixTag",
+          "value": "tag1"
+        }
+      ]
+    },
+    {
+      "name": "zabbix-tag-2",
+      "priority": 61,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "zabbixTag",
+            "pattern": "(?i)^(tag2|106852)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.zabbixTag",
+          "value": "tag2"
+        }
+      ]
+    },
+    {
+      "name": "zabbix-tag-3",
+      "priority": 62,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "zabbixTag",
+            "pattern": "(?i)^(tag3|106850)$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.zabbixTag",
+          "value": "tag3"
+        }
+      ]
+    },
+    {
+      "name": "default-tags",
+      "priority": 1000,
+      "fallback": true,
+      "when": {
+        "always": true
+      },
+      "tagsRef": "defaults.tags"
+    }
+  ],
+  "t4Templates": {
+    "engine": "Mono.TextTemplating",
+    "modelParameter": "Model",
+    "hostCreateJsonRpcRequestLines": [
+      "{",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.create\",",
+      "  \"params\": {",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"name\": \"<#= Model.VisibleName #>\",",
+      "    \"status\": <#= Model.Status #>,",
+      "    \"inventory_mode\": <#= Model.InventoryMode #>,",
+      "    \"interfaces\": [",
+      "      {",
+      "        \"type\": <#= Model.Interface.Type #>,",
+      "        \"main\": <#= Model.Interface.Main #>,",
+      "        \"useip\": <#= Model.Interface.UseIp #>,",
+      "        \"ip\": \"<#= Model.IpAddress #>\",",
+      "        \"dns\": \"<#= Model.Interface.Dns #>\",",
+      "        \"port\": \"<#= Model.Interface.Port #>\"",
+      "      }",
+      "    ],",
+      "    \"groups\": [",
+      "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
+      "      { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"templates\": [",
+      "      <# for (var i = 0; i < Model.Templates.Count; i++) { #>",
+      "      { \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"tags\": [",
+      "      <# for (var i = 0; i < Model.Tags.Count; i++) { #>",
+      "      { \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ]",
+      "  },",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ],
+    "hostUpdateJsonRpcRequestLines": [
+      "{",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.update\",",
+      "  \"params\": {",
+      "    \"hostid\": \"<#= Model.ZabbixHostId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"name\": \"<#= Model.VisibleName #>\",",
+      "    \"status\": <#= Model.Status #>,",
+      "    \"interfaces\": [",
+      "      {",
+      "        \"type\": <#= Model.Interface.Type #>,",
+      "        \"main\": <#= Model.Interface.Main #>,",
+      "        \"useip\": <#= Model.Interface.UseIp #>,",
+      "        \"ip\": \"<#= Model.IpAddress #>\",",
+      "        \"dns\": \"<#= Model.Interface.Dns #>\",",
+      "        \"port\": \"<#= Model.Interface.Port #>\"",
+      "      }",
+      "    ],",
+      "    \"groups\": [",
+      "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
+      "      { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"templates\": [",
+      "      <# for (var i = 0; i < Model.Templates.Count; i++) { #>",
+      "      { \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"tags\": [",
+      "      <# for (var i = 0; i < Model.Tags.Count; i++) { #>",
+      "      { \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ]",
+      "  },",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ],
+    "hostDeleteJsonRpcRequestLines": [
+      "{",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.delete\",",
+      "  \"params\": [",
+      "    \"<#= Model.ZabbixHostId #>\"",
+      "  ],",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ],
+    "hostGetByHostJsonRpcRequestLines": [
+      "{",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.get\",",
+      "  \"params\": {",
+      "    \"output\": [\"hostid\", \"host\", \"name\"],",
+      "    \"filter\": {",
+      "      \"host\": [\"<#= Model.Host #>\"]",
+      "    }",
+      "  },",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ]
+  },
+  "exampleInput": {
+    "source": "cmdbuild",
+    "eventType": "create",
+    "className": "Notebook",
+    "id": "97805",
+    "code": "NB-97805",
+    "ip_address": "192.168.1.1",
+    "description": "Office notebook",
+    "os": "Linux",
+    "zabbixTag": "tag2"
+  },
+  "exampleHostCreateParams": {
+    "host": "cmdb-notebook-nb-97805",
+    "name": "Notebook NB-97805",
+    "status": 0,
+    "inventory_mode": -1,
+    "interfaces": [
+      {
+        "type": 1,
+        "main": 1,
+        "useip": 1,
+        "ip": "192.168.1.1",
+        "dns": "",
+        "port": "10050"
+      }
+    ],
+    "groups": [
+      {
+        "groupid": "2"
+      }
+    ],
+    "templates": [
+      {
+        "templateid": "10564"
+      },
+      {
+        "templateid": "10001"
+      }
+    ],
+    "tags": [
+      {
+        "tag": "source",
+        "value": "cmdbuild"
+      },
+      {
+        "tag": "cmdb.class",
+        "value": "Notebook"
+      },
+      {
+        "tag": "cmdb.id",
+        "value": "97805"
+      },
+      {
+        "tag": "cmdb.os",
+        "value": "Linux"
+      },
+      {
+        "tag": "cmdb.zabbixTag",
+        "value": "tag2"
+      }
+    ]
+  }
+}
