@@ -117,6 +117,24 @@ function renderAuth(status) {
   if (status.authenticated && status.idp) {
     fillIdpForm(status.idp);
   }
+  if (!status.authenticated && !state.auth.useIdp) {
+    fillLocalLoginDefaults(state.auth.localLoginDefaults);
+  }
+}
+
+function fillLocalLoginDefaults(defaults) {
+  if (!defaults?.enabled) {
+    return;
+  }
+
+  const form = $('#loginForm');
+  form.elements.cmdbuildBaseUrl.value = defaults.cmdbuild?.baseUrl ?? '';
+  form.elements.cmdbuildUsername.value = defaults.cmdbuild?.username ?? '';
+  form.elements.cmdbuildPassword.value = defaults.cmdbuild?.password ?? '';
+  form.elements.zabbixApiEndpoint.value = defaults.zabbix?.apiEndpoint ?? '';
+  form.elements.zabbixUsername.value = defaults.zabbix?.username ?? '';
+  form.elements.zabbixPassword.value = defaults.zabbix?.password ?? '';
+  form.elements.zabbixApiToken.value = defaults.zabbix?.apiToken ?? '';
 }
 
 async function loadDashboard() {

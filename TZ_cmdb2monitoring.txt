@@ -1011,6 +1011,7 @@ IdP enabled:
 IdP disabled:
 - пользователь вводит CMDBuild login/password;
 - пользователь вводит Zabbix login/password или Zabbix API token;
+- в dev-режиме стартовая форма может заполняться из `Auth:LocalLoginDefaults`;
 - credentials не хранятся в браузере;
 - credentials хранятся только в памяти server-side session;
 - production secrets не попадают в git.

@@ -19,6 +19,7 @@ required(config, 'Service.Name');
 required(config, 'Service.HealthRoute');
 required(config, 'Auth.SessionCookieName');
 required(config, 'Auth.MaxSamlPostBytes');
+required(config, 'Auth.LocalLoginDefaults');
 required(config, 'Idp.Provider');
 required(config, 'Idp.SpEntityId');
 required(config, 'Idp.AcsUrl');

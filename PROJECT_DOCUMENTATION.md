@@ -148,6 +148,7 @@ Rules-файл отвечает за:
 | --- | --- |
 | `Service` | Host, port, health route, public frontend dir |
 | `Auth` | IdP mode, session cookie, session timeout, SAML POST limit |
+| `Auth:LocalLoginDefaults` | Prefill local login form; только dev/временный режим, в prod должен быть выключен |
 | `Idp` | SAML2 SP/IdP настройки |
 | `Cmdbuild` | CMDBuild REST base URL, service account для IdP режима, catalog cache |
 | `Zabbix` | Zabbix API endpoint, service account/API token для IdP режима, catalog cache |
@@ -167,6 +168,11 @@ IdP режим:
 - внешние URL `Idp:AcsUrl` и `Idp:SloCallbackUrl` должны совпадать с URL, зарегистрированными в IdP;
 - задать `Idp:RoleMapping`, чтобы SAML groups превращались в `admin`, `operator`, `readonly`;
 - задать `Cmdbuild:ServiceAccount` и `Zabbix:ServiceAccount`, потому что browser credentials в IdP режиме не вводятся.
+
+Local login defaults:
+- base config держит `Auth:LocalLoginDefaults:Enabled=false`;
+- `appsettings.Development.json` временно заполняет форму текущими dev-значениями;
+- при переносе в prod или после перехода на IdP выключить `Enabled` и очистить значения.
 
 Поддержанные env vars:
 

@@ -131,6 +131,7 @@ Kafka__Input__Password=<secret>
 | `Auth:SessionCookieName` | Имя session cookie | При конфликте cookie |
 | `Auth:SessionTimeoutMinutes` | Время жизни server-side session | По требованиям ИБ |
 | `Auth:MaxSamlPostBytes` | Максимальный размер ACS POST | При больших SAML assertions |
+| `Auth:LocalLoginDefaults` | Prefill стартовой формы local login | Только для dev/временной диагностики, в prod держать disabled |
 | `Idp:MetadataUrl` | URL IdP metadata XML | Если IdP публикует metadata |
 | `Idp:EntityId` | IdP issuer/entityID | Для проверки issuer |
 | `Idp:SsoUrl` | IdP SSO endpoint | Если metadata не используется |

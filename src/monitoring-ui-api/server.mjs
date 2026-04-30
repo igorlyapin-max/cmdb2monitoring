@@ -80,7 +80,8 @@ async function routeApi(request, response, url, path) {
       auth: {
         useIdp: isIdpEnabled(),
         requireCmdbuildCredentialsWhenIdpDisabled: Boolean(config.Auth.RequireCmdbuildCredentialsWhenIdpDisabled),
-        requireZabbixCredentialsWhenIdpDisabled: Boolean(config.Auth.RequireZabbixCredentialsWhenIdpDisabled)
+        requireZabbixCredentialsWhenIdpDisabled: Boolean(config.Auth.RequireZabbixCredentialsWhenIdpDisabled),
+        localLoginDefaults: publicLocalLoginDefaults()
       }
     });
     return;
@@ -1126,6 +1127,30 @@ function publicIdpSettings() {
       idpX509Certificate: !isBlank(configValue(config.Idp, 'IdpX509Certificate') || configValue(config.Idp, 'IdpX509CertificatePath')),
       spCertificate: !isBlank(configValue(config.Idp, 'SpCertificate') || configValue(config.Idp, 'SpCertificatePath')),
       spPrivateKey: !isBlank(configValue(config.Idp, 'SpPrivateKey') || configValue(config.Idp, 'SpPrivateKeyPath'))
+    }
+  };
+}
+
+function publicLocalLoginDefaults() {
+  const defaults = config.Auth.LocalLoginDefaults ?? {};
+  if (!defaults.Enabled) {
+    return {
+      enabled: false
+    };
+  }
+
+  return {
+    enabled: true,
+    cmdbuild: {
+      baseUrl: defaults.CmdbuildBaseUrl ?? '',
+      username: defaults.CmdbuildUsername ?? '',
+      password: defaults.CmdbuildPassword ?? ''
+    },
+    zabbix: {
+      apiEndpoint: defaults.ZabbixApiEndpoint ?? '',
+      username: defaults.ZabbixUsername ?? '',
+      password: defaults.ZabbixPassword ?? '',
+      apiToken: defaults.ZabbixApiToken ?? ''
     }
   };
 }
