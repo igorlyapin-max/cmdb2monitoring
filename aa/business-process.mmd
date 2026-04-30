@@ -1,29 +1,39 @@
 flowchart TD
     user[Пользователь CMDBuild] --> ui[CMDBuild Web UI]
-    operator[Оператор интеграции] --> monui[monitoring-ui-api :5090]
-    monui -->|SAML2 login/ACS| idp[IdP SAML2]
-    monui -->|catalog sync| cmdb
-    monui -->|catalog sync| zabbix
-    monui -->|rules validate/upload| rules[(Git rules JSON)]
-    monui -->|health dashboard| wh
-    monui -->|health dashboard| conv
-    monui -->|health dashboard| api
-    monui -->|events read-only| kafka
-    ui --> cmdb[CMDBuild]
+    operator[Оператор интеграции] -->|HTTP :5090| monui[monitoring-ui-api :5090]
+    monui -->|SAML2 login/ACS :443 или :80| idp[IdP SAML2]
+    monui -->|CMDB REST catalog :8090| cmdb
+    monui -->|Zabbix JSON-RPC catalog :8081| zabbix
+    monui -->|local FS rules validate/upload| rules[(Git rules JSON)]
+    monui -->|GET /health :5080| wh
+    monui -->|GET /health :5081| conv
+    monui -->|GET /health :5082| api
+    monui -->|Kafka events read-only :9092| kafka
+    ui -->|HTTP :8090| cmdb[CMDBuild :8090]
     cmdb -->|POST :5080 /webhooks/cmdbuild| wh[cmdbwebhooks2kafka :5080]
     wh -->|cmdbuild.webhooks.* :9092| kafka[(Kafka :9092)]
-    kafka --> conv[cmdbkafka2zabbix]
+    kafka -->|consume cmdbuild.webhooks.* :9092| conv[cmdbkafka2zabbix :5081]
     rules --> conv
-    conv -->|zabbix.host.requests.*| kafka
-    kafka --> api[zabbixrequests2api]
+    conv -->|produce zabbix.host.requests.* :9092| kafka
+    kafka -->|consume zabbix.host.requests.* :9092| api[zabbixrequests2api :5082]
     api -->|JSON-RPC :8081| zabbix[Zabbix API :8081]
     api -->|zabbix.host.responses.* :9092| kafka
-    wh -->|logs| logs[Kafka log topics]
-    conv -->|logs| logs
-    api -->|logs| logs
-    logs -. future .-> elk[ELK]
+    wh -->|logs :9092| logs[Kafka log topics]
+    conv -->|logs :9092| logs
+    api -->|logs :9092| logs
+    logs -. future ship :9200 .-> elk[ELK]
+
+    subgraph subprocesses[Повторно используемые подпроцессы]
+        sp1[SP-001 webhook auth + normalize]
+        sp2[SP-002 rules + regex + T4 conversion]
+        sp3[SP-003 Zabbix payload validation]
+        sp4[SP-004 host.get fallback]
+        sp5[SP-005 JSON-RPC + response + state]
+        sp6[SP-006 catalog sync]
+        sp7[SP-007 rules validate + backup + save]
+    end
 
     subgraph fallback[Fallback для update/delete без zabbix_hostid]
-        api -->|host.get| zabbix
-        api -->|host.update или host.delete| zabbix
+        api -->|host.get JSON-RPC :8081| zabbix
+        api -->|host.update или host.delete JSON-RPC :8081| zabbix
     end

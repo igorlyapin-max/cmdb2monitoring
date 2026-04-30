@@ -8,17 +8,18 @@
 | IF-002 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | topic `cmdbuild.webhooks.*` | Нормализованный CMDB event envelope |
 | IF-003 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
 | IF-004 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |
-| IF-005 | zabbixrequests2api | Kafka | topic `zabbix.host.responses.*` | Результат вызова Zabbix API |
-| IF-006 | Микросервисы | Kafka | `*.logs.*` topics | Structured JSON logs для будущего ELK |
-| IF-007 | cmdbkafka2zabbix | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
-| IF-008 | Микросервисы | Local FS | `state/*.json` | Последний обработанный объект |
-| IF-009 | Browser | monitoring-ui-api | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
-| IF-010 | monitoring-ui-api | IdP SAML2 | Redirect/POST SAML2 | AuthnRequest, SAMLResponse, metadata |
-| IF-011 | monitoring-ui-api | CMDBuild REST API | HTTP | Classes, attributes, lookup types, optional service account |
-| IF-012 | monitoring-ui-api | Zabbix API | HTTP JSON-RPC | Templates, host groups, template groups, known tags |
+| IF-005 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.responses.*` | Результат вызова Zabbix API |
+| IF-006 | Микросервисы `:5080/:5081/:5082` | Kafka `:9092` | `*.logs.*` topics | Structured JSON logs для будущего ELK |
+| IF-007 | cmdbkafka2zabbix `:5081` | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
+| IF-008 | Микросервисы `:5080/:5081/:5082` | Local FS | `state/*.json` | Последний обработанный объект |
+| IF-009 | Browser | monitoring-ui-api `:5090` | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
+| IF-010 | monitoring-ui-api `:5090` | IdP SAML2 `:443/:80` | Redirect/POST SAML2 | AuthnRequest, SAMLResponse, metadata |
+| IF-011 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP | Classes, attributes, lookup types, optional service account |
+| IF-012 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC | Templates, host groups, template groups, known tags |
 | IF-013 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
 | IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json` | Catalog cache и persisted UI settings; runtime-файл не попадает в git |
-| IF-015 | monitoring-ui-api | Kafka | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
+| IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
+| IF-016 | monitoring-ui-api `:5090` | .NET services `:5080/:5081/:5082` | HTTP GET `/health` | Проверка готовности микросервисов на dashboard |
 
 ## Срез бизнес-описания
 
@@ -26,12 +27,13 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-015:
+Срез поддержки включает IF-006..IF-016:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
 - frontend/BFF catalog cache;
 - read-only просмотр Kafka topics через monitoring-ui-api;
+- health dashboard микросервисов через HTTP endpoints;
 - SAML2 session и IdP settings;
 - секреты и credentials через конфиги/переменные окружения.
 

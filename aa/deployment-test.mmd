@@ -19,22 +19,22 @@ flowchart TB
         elk[ELK]
     end
 
-    browser[Browser] --> monui
-    monui --> idp
-    monui --> cmdb
-    monui --> zbx
-    monui --> kafka
-    monui --> wh
-    monui --> conv
-    monui --> api
+    browser[Browser] -->|HTTP :5090| monui
+    monui -->|SAML2 :443 или :80| idp
+    monui -->|CMDB REST :8090| cmdb
+    monui -->|Zabbix JSON-RPC :8081| zbx
+    monui -->|Kafka read-only :9092| kafka
+    monui -->|GET /health :5080| wh
+    monui -->|GET /health :5081| conv
+    monui -->|GET /health :5082| api
     cmdb -->|HTTP webhook :5080 via 192.168.202.100| wh
-    wh --> kafka
-    kafka --> conv
-    rules --> conv
-    conv --> kafka
-    kafka --> api
-    api --> zbx
+    wh -->|produce :9092| kafka
+    kafka -->|consume :9092| conv
+    rules -->|local FS| conv
+    conv -->|produce :9092| kafka
+    kafka -->|consume :9092| api
+    api -->|JSON-RPC :8081| zbx
     wh --> state
     conv --> state
     api --> state
-    kafka -. log shipping .-> elk
+    kafka -. log shipping :9200 .-> elk

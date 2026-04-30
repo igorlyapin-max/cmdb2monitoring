@@ -22,6 +22,18 @@
 | Zabbix | Целевая система мониторинга |
 | ELK | Целевая система логирования, пока отсутствует |
 
+## Повторно используемые подпроцессы
+
+| ID | Подпроцесс | Где используется |
+| --- | --- | --- |
+| SP-001 | Проверка Bearer token, нормализация CMDBuild webhook и публикация в Kafka | Create, Update, Delete |
+| SP-002 | Чтение Kafka-события, применение rules JSON, regex-выборов и T4-шаблонов | Create, Update, Delete |
+| SP-003 | Валидация Zabbix payload по catalog cache: host groups, templates, template groups, tags и расширенные host-поля | Create, Update |
+| SP-004 | Fallback-поиск Zabbix host через `host.get`, если `zabbix_hostid` отсутствует | Update, Delete |
+| SP-005 | Вызов Zabbix JSON-RPC, публикация response topic, запись state-файла и offset | Create, Update, Delete |
+| SP-006 | Синхронизация catalog cache CMDBuild/Zabbix через `monitoring-ui-api` | Operator UI, Validate rules mapping, Mapping |
+| SP-007 | Валидация, dry-run, backup и сохранение rules JSON через `monitoring-ui-api` | Operator UI, Validate rules mapping |
+
 ## Позитивные сценарии
 
 ### Create

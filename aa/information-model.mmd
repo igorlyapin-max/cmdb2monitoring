@@ -1,23 +1,26 @@
 flowchart LR
-    browser[Browser / Operator] -->|IF-009 UI/API| ui[monitoring-ui-api]
-    ui -->|IF-010 SAML2| idp[IdP SAML2]
+    browser[Browser / Operator] -->|IF-009 HTTP UI/API :5090| ui[monitoring-ui-api :5090]
+    ui -->|IF-010 SAML2 Redirect/POST :443 или :80| idp[IdP SAML2]
     ui -->|IF-011 catalog :8090| cmdb
     ui -->|IF-012 catalog :8081| zbx
-    ui -->|IF-013 rules upload/validate| rules
-    ui -->|IF-014 cache/settings| fs
-    ui -->|IF-015 events read-only| kafka
+    ui -->|IF-013 local rules upload/validate| rules
+    ui -->|IF-014 local cache/settings| fs
+    ui -->|IF-015 Kafka events read-only :9092| kafka
+    ui -->|IF-016 GET /health :5080| wh
+    ui -->|IF-016 GET /health :5081| conv
+    ui -->|IF-016 GET /health :5082| api
     cmdb[CMDBuild :8090] -->|IF-001 HTTP webhook :5080| wh[cmdbwebhooks2kafka :5080]
     wh -->|IF-002 cmdbuild.webhooks.* :9092| kafka[(Kafka :9092)]
-    kafka -->|cmdbuild.webhooks.*| conv[cmdbkafka2zabbix]
+    kafka -->|cmdbuild.webhooks.* :9092| conv[cmdbkafka2zabbix :5081]
     rules[(Git rules JSON)] -->|IF-007| conv
     conv -->|IF-003 zabbix.host.requests.* :9092| kafka
-    kafka -->|zabbix.host.requests.*| api[zabbixrequests2api]
+    kafka -->|zabbix.host.requests.* :9092| api[zabbixrequests2api :5082]
     api -->|IF-004 JSON-RPC :8081| zbx[Zabbix API :8081]
     api -->|IF-005 zabbix.host.responses.* :9092| kafka
-    wh -->|IF-006 logs| kafka
-    conv -->|IF-006 logs| kafka
-    api -->|IF-006 logs| kafka
+    wh -->|IF-006 logs :9092| kafka
+    conv -->|IF-006 logs :9092| kafka
+    api -->|IF-006 logs :9092| kafka
     wh -->|IF-008 state| fs[(Local FS)]
     conv -->|IF-008 state| fs
     api -->|IF-008 state| fs
-    kafka -. future ship .-> elk[ELK]
+    kafka -. future ship :9200 .-> elk[ELK]
