@@ -43,6 +43,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 button.secondary {
   background: #fff;
   color: var(--accent-strong);
@@ -279,11 +284,282 @@ h2 {
   gap: 14px;
 }
 
+.zabbix-catalog-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.zabbix-catalog-menu {
+  position: sticky;
+  top: 72px;
+}
+
+.zabbix-catalog-menu h2 {
+  margin-top: 0;
+}
+
+.catalog-submenu {
+  display: grid;
+  gap: 6px;
+}
+
+.zabbix-catalog-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border-color: var(--line);
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+}
+
+.zabbix-catalog-menu-item.is-open {
+  border-color: var(--accent);
+  background: #e6f4f1;
+  color: var(--accent-strong);
+}
+
+.zabbix-catalog-menu-title {
+  overflow-wrap: anywhere;
+}
+
+.zabbix-catalog-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 22px;
+  border-radius: 999px;
+  background: #eef3f4;
+  color: var(--muted);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.zabbix-catalog-content {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.zabbix-catalog-section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.zabbix-catalog-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.zabbix-catalog-section-header h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.zabbix-catalog-section-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  border-color: var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 0;
+}
+
+.zabbix-catalog-section-body {
+  border-top: 1px solid var(--line);
+  padding: 12px 14px 14px;
+  overflow: auto;
+}
+
+.zabbix-catalog-section.is-collapsed .zabbix-catalog-section-body {
+  display: none;
+}
+
+.zabbix-catalog-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .mapping-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+}
+
+.mapping-mode-controls {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.mapping-mode-field {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.mapping-mode-field span {
+  margin: 0 0 7px;
+}
+
+.mapping-mode-field select {
+  width: 220px;
+}
+
+.mapping-editor {
+  margin-bottom: 14px;
+}
+
+.mapping-editor-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mapping-editor-panel {
+  margin-top: 8px;
+}
+
+.mapping-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.mapping-editor-grid .wide-field {
+  margin-top: 0;
+  grid-column: span 2;
+}
+
+.mapping-editor-status {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mapping-editor-status.is-warning {
+  color: #9a3412;
+  font-weight: 700;
+}
+
+.mapping-delete-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mapping-delete-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mapping-delete-group {
+  display: grid;
+  gap: 0;
+  border: 1px solid #d7dee2;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.mapping-delete-group-header {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+
+.mapping-delete-group-toggle {
+  min-width: 28px;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.mapping-delete-group h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.mapping-delete-group-count {
+  min-width: 28px;
+  border-radius: 999px;
+  background: #eef3f2;
+  color: var(--muted);
+  padding: 3px 7px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.mapping-delete-group-body {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #e2e8ea;
+  padding: 8px;
+}
+
+.mapping-delete-group.is-collapsed .mapping-delete-group-body {
+  display: none;
+}
+
+.mapping-delete-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  border: 1px solid #d7dee2;
+  border-radius: 6px;
+  background: #fbfdfd;
+  padding: 8px 9px;
+}
+
+.mapping-delete-item input[type="checkbox"] {
+  width: auto;
+  min-height: auto;
+  margin-top: 3px;
+}
+
+.mapping-delete-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mapping-delete-rule-name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.mapping-delete-rule-meta,
+.mapping-delete-empty {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .surface,
@@ -432,6 +708,12 @@ h2 {
   opacity: 0.72;
 }
 
+.mapping-node.is-selection-filtered-out,
+.mapping-section.is-edit-filtered-out,
+.mapping-node.is-edit-filtered-out {
+  display: none;
+}
+
 .mapping-node {
   display: grid;
   width: 100%;
@@ -462,8 +744,20 @@ h2 {
   border-left-width: 3px;
 }
 
+.mapping-level-5 {
+  margin-left: 64px;
+  width: calc(100% - 64px);
+  border-left-width: 3px;
+}
+
 .mapping-kind-cmdb {
   border-left-color: #2563eb;
+}
+
+.mapping-kind-cmdb-super {
+  border-left-color: #0f766e;
+  background: #eef9f6;
+  font-weight: 600;
 }
 
 .mapping-kind-lookup {
@@ -545,7 +839,13 @@ h2 {
 }
 
 .validation-summary {
-  margin-bottom: 14px;
+  margin-bottom: 8px;
+}
+
+.validation-post-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 14px;
 }
 
 .validation-summary-line {
@@ -723,11 +1023,20 @@ th {
   .app-shell,
   .split-layout,
   .catalog-grid,
+  .zabbix-catalog-layout,
   .mapping-grid,
   .metrics-grid,
   .form-grid,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .mapping-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mapping-editor-grid .wide-field {
+    grid-column: auto;
   }
 
   .app-shell {
@@ -753,5 +1062,9 @@ th {
   .actions select,
   .actions input[type="number"] {
     width: 100%;
+  }
+
+  .zabbix-catalog-menu {
+    position: static;
   }
 }

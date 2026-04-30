@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: cmdb2monitoring monitoring UI API
-  version: 0.1.0
+  version: 0.2.0
   description: >
     Backend-for-frontend API for dashboard, server-side sessions, Kafka event
     browsing, rules validation, dry-run, upload, runtime settings, IdP settings,
@@ -250,6 +250,18 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/zabbix/catalog/mapping:
+    get:
+      summary: Read lightweight Zabbix catalog for Mapping
+      description: Returns counts and lightweight sections; large sections are loaded lazily through `/api/zabbix/catalog/{collection}`.
+      responses:
+        "200":
+          description: Lightweight Mapping catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /api/zabbix/catalog/sync:
     post:
       summary: Synchronize Zabbix templates, host groups, template groups, and known tags
@@ -380,6 +392,16 @@ components:
           - host-groups
           - template-groups
           - tags
+          - proxies
+          - proxy-groups
+          - global-macros
+          - host-macros
+          - inventory-fields
+          - interface-profiles
+          - host-statuses
+          - maintenances
+          - tls-psk-modes
+          - value-maps
           - classes
           - attributes
           - lookups

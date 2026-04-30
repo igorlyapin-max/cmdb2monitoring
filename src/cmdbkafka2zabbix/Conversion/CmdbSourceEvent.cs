@@ -10,6 +10,7 @@ public sealed record CmdbSourceEvent(
     string? Code,
     string? ClassName,
     string? IpAddress,
+    string? DnsName,
     string? ZabbixHostId,
     string? Description,
     string? OperatingSystem,

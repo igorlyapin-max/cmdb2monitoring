@@ -1,5 +1,8 @@
 # Документация проекта cmdb2monitoring
 
+Версия документации: `0.2.0`.
+Дата актуализации: 2026-04-30.
+
 ## Назначение
 
 `cmdb2monitoring` - monorepo интеграции CMDBuild, Kafka и Zabbix.
@@ -9,6 +12,7 @@
 - health dashboard микросервисов;
 - загрузка, валидация и dry-run rules JSON;
 - визуальный Mapping и Validate rules mapping с подсветкой связей CMDBuild -> rules -> Zabbix;
+- режим редактирования Mapping: добавление и удаление rules в draft JSON, undo/redo, save-as без записи на backend;
 - безопасное удаление отсутствующих элементов из rules с локальным backup в `rules/.backup/`;
 - просмотр последних сообщений Kafka topics на вкладке Events;
 - синхронизация справочников Zabbix и CMDBuild;
@@ -220,18 +224,27 @@ Events:
 - раскрытие topic показывает timestamp, сводку service/partition/offset/key и value.
 
 Mapping:
-- правая колонка показывает CMDBuild classes/attributes/lookups;
+- левая колонка показывает CMDBuild classes/attributes/lookups;
 - центральная колонка показывает conversion fields, regex, selection rules и T4 blocks;
-- левая колонка показывает Zabbix catalog entities;
+- правая колонка показывает Zabbix catalog entities;
 - повторное нажатие на элемент снимает выделение;
 - для lookup выделяется только конкретная связка class + lookup + value;
 - блоки списков скрываются, если не участвуют в выделении, и могут быть раскрыты пользователем.
+- Zabbix catalog sections в Mapping закрыты по умолчанию и лениво загружаются по `+` или при попадании в выделенную цепочку;
+- edit mode имеет действия `Добавление правила` и `Удаление правила`;
+- добавление правила выбирает CMDBuild class, class attribute field, conversion structure, Zabbix object/payload, priority и regex;
+- удаление правила группирует rules по типам, держит группы закрытыми через `+`, удаляет только выбранные rules из draft JSON и оставляет classes/source fields без автоматической чистки;
+- undo/redo работают только с draft текущей browser-сессии;
+- `Save file as` сохраняет draft JSON и второй текстовый файл с CMDBuild webhook Body/DELETE-инструкциями только по добавленным и удаленным в текущей сессии rules/classes/source fields;
+- перед сохранением проверяется, что каждый мониторинговый класс из `source.entityClasses` или `className` regex имеет IP или DNS class attribute field, связанный с `interfaceAddressRules`;
+- имена классов CMDBuild нормализуются для UI: например, `NetworkDevice` и `Network device` считаются одним классом, а отображение предпочитает имя/описание из CMDBuild catalog.
 
 Validate rules mapping:
 - интерактивно не строит цепочки, а подсвечивает только отсутствующие элементы в CMDBuild/Zabbix источниках;
 - для отсутствующих элементов выводятся checkbox;
 - кнопка удаления спрашивает подтверждение, создает backup предыдущей версии в `rules/.backup/`, затем удаляет выбранные элементы из rules;
 - backup-файлы не коммитятся в Git.
+- этот раздел не предназначен для интерактивной подсветки связей, а только для поиска отсутствующих классов, атрибутов и Zabbix-ссылок.
 
 Поддержанные env vars:
 
@@ -278,6 +291,18 @@ Runtime cache/state:
 - dynamic source fields: `Model.Field("fieldName")` читает поле из `source.fields` rules;
 - Zabbix host links: `Groups`, `Templates`, `Tags`;
 - расширенные host параметры: `Status`, `ProxyId`, `ProxyGroupId`, `TlsPsk`, `Macros`, `InventoryFields`, `Maintenances`, `ValueMaps`.
+
+Расширение rules для новых CMDBuild атрибутов возможно без изменения кода, если:
+- атрибут уже приходит в webhook body;
+- атрибут добавлен в `source.fields`;
+- rules/T4 используют существующие механизмы `Model.Field(...)` или `Model.Source(...)`;
+- для создания/обновления Zabbix host остается настроен IP или DNS через `interfaceAddressRules`.
+
+Для нового CMDBuild класса дополнительно нужны:
+- класс в CMDBuild catalog и webhook-записи на нужные события;
+- добавление класса в `source.entityClasses` или rule condition по `className`;
+- обязательная связь IP/DNS class attribute field с Zabbix interface structure;
+- актуализированный CMDBuild catalog cache в UI через `CMDBuild Catalog -> Sync`.
 
 Без переписывания микросервисов можно менять JSON rules:
 - `source.fields` для уже приходящих CMDBuild атрибутов;

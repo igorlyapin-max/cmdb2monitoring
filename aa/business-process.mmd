@@ -5,6 +5,7 @@ flowchart TD
     monui -->|CMDB REST catalog :8090| cmdb
     monui -->|Zabbix JSON-RPC catalog :8081| zabbix
     monui -->|local FS rules validate/upload| rules[(Git rules JSON)]
+    monui -->|Mapping save-as draft/webhook files| downloads[(Local downloads)]
     monui -->|GET /health :5080| wh
     monui -->|GET /health :5081| conv
     monui -->|GET /health :5082| api
@@ -31,6 +32,7 @@ flowchart TD
         sp5[SP-005 JSON-RPC + response + state]
         sp6[SP-006 catalog sync]
         sp7[SP-007 rules validate + backup + save]
+        sp8[SP-008 Mapping add/delete rules + save-as]
     end
 
     subgraph fallback[Fallback для update/delete без zabbix_hostid]

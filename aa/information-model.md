@@ -20,6 +20,7 @@
 | IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json` | Catalog cache и persisted UI settings; runtime-файл не попадает в git |
 | IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
 | IF-016 | monitoring-ui-api `:5090` | .NET services `:5080/:5081/:5082` | HTTP GET `/health` | Проверка готовности микросервисов на dashboard |
+| IF-017 | Browser | Local downloads | rules JSON и `*-webhook-bodies.txt` | Mapping `Save file as`: draft rules и webhook Body/DELETE-инструкции только по изменениям текущей UI-сессии |
 
 ## Срез бизнес-описания
 
@@ -27,13 +28,14 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-016:
+Срез поддержки включает IF-006..IF-017:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
 - frontend/BFF catalog cache;
 - read-only просмотр Kafka topics через monitoring-ui-api;
 - health dashboard микросервисов через HTTP endpoints;
+- локальный save-as draft rules и webhook-инструкций для оператора;
 - SAML2 session и IdP settings;
 - секреты и credentials через конфиги/переменные окружения.
 
@@ -126,3 +128,17 @@ CMDBuild cache:
 - classes;
 - attributes;
 - lookups.
+
+### Mapping draft session
+
+Хранится в памяти браузера текущей вкладки `monitoring-ui-api`.
+
+Содержит:
+- draft rules JSON;
+- undo/redo history текущей UI-сессии;
+- выбранное действие edit mode: добавление или удаление rule;
+- diff между начальным rules JSON и draft для генерации `*-webhook-bodies.txt`.
+
+`Save file as` не пишет draft на backend. Пользователь сохраняет два локальных файла:
+- draft rules JSON;
+- текстовый файл с CMDBuild webhook Body snippets для добавлений и DELETE-инструкциями для удалений.

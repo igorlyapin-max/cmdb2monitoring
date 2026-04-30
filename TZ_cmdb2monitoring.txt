@@ -1,7 +1,7 @@
 Техническое задание
 Проект: cmdb2monitoring
-Версия: 0.1
-Дата: 2026-04-29
+Версия: 0.2.0
+Дата: 2026-04-30
 
 1. Назначение проекта
 
@@ -48,6 +48,8 @@ Frontend/BFF: monitoring-ui-api.
 - предоставлять console настройки IdP/SAML2 после авторизации;
 - загружать и валидировать JSON rules-файл;
 - выполнять dry-run правил конвертации;
+- визуализировать Mapping CMDBuild -> rules -> Zabbix;
+- поддерживать session draft редактирование Mapping: добавление/удаление rules, undo/redo и save-as;
 - синхронизировать catalog из Zabbix: templates, host groups, template groups, known tags;
 - синхронизировать catalog из CMDBuild: классы, атрибуты, lookup-значения;
 - хранить catalog cache локально без секретов.
@@ -146,6 +148,12 @@ CMDBuild webhook events:
 Для подклассов Computer используются дополнительные атрибуты:
 - OS: lookup со значениями Windows, Linux, Windows server, vmware;
 - zabbixTag: lookup со значениями tag1, tag2, tag3.
+
+Дополнительно допускается подключение новых конкретных классов CMDBuild, например `Network device`, если:
+- класс существует в CMDBuild catalog;
+- для класса заведены webhook-записи на нужные события;
+- webhook body передает обязательные поля `id`, `code`, `className` и либо IP, либо DNS-атрибут для создания/обновления Zabbix host;
+- новые атрибуты добавлены в rules `source.fields` и участвуют в правилах/T4 без изменения базового контракта.
 
 4.5. Заголовки webhook из CMDBuild
 
@@ -1038,7 +1046,17 @@ monitoring-ui-api должен загружать из Zabbix:
 - templates;
 - host groups;
 - template groups;
-- known tags.
+- known tags;
+- proxies;
+- proxy groups;
+- global macros;
+- host macros;
+- inventory fields;
+- interface profiles;
+- host statuses;
+- maintenances;
+- TLS/PSK modes;
+- value maps.
 
 Catalog cache:
 
@@ -1098,7 +1116,9 @@ Events Kafka browser:
 - список topics берется из `EventBrowser:Topics`;
 - текущие topics: `cmdbuild.webhooks.dev`, `zabbix.host.requests.dev`, `zabbix.host.responses.dev`, `cmdbwebhooks2kafka.logs.dev`, `cmdbkafka2zabbix.logs.dev`, `zabbixrequests2api.logs.dev`;
 - поддерживаются настройки `BootstrapServers`, `ClientId`, `SecurityProtocol`, `SaslMechanism`, `Username`, `Password`, `MaxMessages`, `ReadTimeoutMs`;
-- просмотр read-only, topics не создаются.
+- просмотр read-only, topics не создаются;
+- по умолчанию выводятся последние сообщения, сортировка от более новых к более старым;
+- раскрытый topic показывает timestamp, сводку service/partition/offset/key и value.
 
 18.7. Проверки
 
@@ -1225,6 +1245,15 @@ Model.Field("fieldName")
 - Mapping: три колонки CMDBuild -> rules -> Zabbix с подсветкой участвующих элементов;
 - lookup mapping по конкретной связке class + lookup + value;
 - повторное нажатие на элемент снимает выделение;
+- Zabbix catalog sections в Mapping закрыты по умолчанию и загружаются по `+` или при попадании в выделенную цепочку;
+- edit mode Mapping с действиями `Добавление правила` и `Удаление правила`;
+- добавление rule выбирает CMDBuild class, class attribute field, conversion structure, Zabbix object/payload, priority и regex;
+- удаление rule показывает rules по группам, держит группы закрытыми через `+`, удаляет только выбранные rules из draft JSON и не чистит classes/source fields автоматически;
+- undo/redo хранит историю текущей UI-сессии;
+- `Save file as` сохраняет draft rules JSON и второй текстовый файл для CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
+- второй webhook-файл должен явно помечать удаления и не смешивать неизмененные правила с изменениями текущей сессии;
+- перед сохранением Mapping выполняет проверку: каждый мониторинговый класс из `source.entityClasses` или `className` regex rules должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules`;
+- имена классов нормализуются: `NetworkDevice` и `Network device` считаются одним классом, UI предпочитает отображаемое имя из CMDBuild catalog;
 - Validate rules mapping: без интерактивной подсветки цепочек, только выявление отсутствующих элементов источников;
 - checkbox над отсутствующими элементами;
 - выбор всех/снятие выбора на заголовках;

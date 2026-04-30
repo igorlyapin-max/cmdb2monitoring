@@ -69,7 +69,9 @@
 3. Если IdP включен, оператор проходит SAML2 login через `/auth/saml2/login`, IdP возвращает SAMLResponse на `/auth/saml2/acs`, BFF создает server-side session.
 4. Оператор проверяет health микросервисов, синхронизирует Zabbix catalog и CMDBuild catalog, валидирует или загружает rules JSON.
 5. Оператор просматривает настроенные Kafka topics на вкладке Events; чтение выполняет BFF, браузер не подключается к Kafka напрямую.
-6. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.
+6. Оператор использует Mapping edit mode для добавления или удаления rules в draft JSON, проверяет IP/DNS consistency и сохраняет draft через `Save file as`.
+7. `Save file as` формирует два локальных файла: draft rules JSON и `*-webhook-bodies.txt` только по добавленным/удаленным в текущей сессии rules/classes/source fields.
+8. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.
 
 ## Негативные сценарии
 
@@ -89,6 +91,8 @@
 | SAMLResponse не подписан доверенным IdP cert | `monitoring-ui-api` отклоняет ACS POST и не создает session |
 | SAML groups не попали в `RoleMapping` | Пользователь получает роль `readonly` |
 | Catalog sync недоступен | UI показывает ошибку BFF, runtime cache не обновляется |
+| Mapping rule добавляет класс без IP/DNS binding | UI показывает предупреждение save validation; `Save file as` требует подтверждения перед сохранением |
+| CMDBuild class name записан как `NetworkDevice`, а catalog содержит `Network device` | UI нормализует имя класса и предпочитает отображение из CMDBuild catalog |
 
 ## Вспомогательные процессы
 
@@ -98,6 +102,7 @@
 - Синхронизация Zabbix catalog: templates, host groups, template groups, known tags.
 - Синхронизация расширенного Zabbix catalog: proxies, proxy groups, macros, inventory fields, interface profiles, host statuses, maintenances, TLS/PSK modes, value maps.
 - Синхронизация CMDBuild catalog: classes, attributes, lookup values.
+- Mapping edit mode: добавление rules, удаление rules по группам, undo/redo, локальный save-as draft JSON и webhook-инструкций.
 - Ведение state-файлов последнего обработанного объекта и восстановление Kafka consumer с `lastInputOffset + 1`.
 - Структурное логирование в Kafka topics для будущей интеграции с ELK.
 - Проверка конфигураций скриптом `scripts/test-configs.sh`.

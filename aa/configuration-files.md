@@ -224,6 +224,9 @@ Events:
 
 Rules UI:
 - Mapping показывает CMDBuild, rules и Zabbix в трех колонках;
+- Mapping edit mode позволяет добавлять rules в draft JSON, удалять rules по группам, выполнять undo/redo и сохранять draft через `Save file as`;
+- `Save file as` дополнительно формирует текстовый файл CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
+- перед сохранением Mapping проверяет IP/DNS binding: каждый мониторинговый класс из `source.entityClasses` или `className` regex должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules`;
 - Validate rules mapping подсвечивает только отсутствующие элементы и позволяет удалить выбранные элементы после подтверждения;
 - перед удалением rules-файл копируется в `rules/.backup/*.bak`;
 - `rules/.backup/` является локальным backup и не коммитится.

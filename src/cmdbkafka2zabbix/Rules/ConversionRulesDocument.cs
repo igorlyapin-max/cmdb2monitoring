@@ -24,6 +24,8 @@ public sealed class ConversionRulesDocument
 
     public SelectionRule[] InterfaceSelectionRules { get; init; } = [];
 
+    public InterfaceAddressRule[] InterfaceAddressRules { get; init; } = [];
+
     public SelectionRule[] TagSelectionRules { get; init; } = [];
 
     public SelectionRule[] ProxySelectionRules { get; init; } = [];
@@ -78,6 +80,8 @@ public sealed class SourceRules
 public sealed class SourceFieldRule
 {
     public string Source { get; init; } = string.Empty;
+
+    public string[] Sources { get; init; } = [];
 
     public bool Required { get; init; }
 
@@ -150,6 +154,21 @@ public sealed class InterfaceSettings
     public string Dns { get; init; } = string.Empty;
 
     public string Port { get; init; } = string.Empty;
+}
+
+public sealed class InterfaceAddressRule
+{
+    public string Name { get; init; } = string.Empty;
+
+    public int Priority { get; init; } = 1000;
+
+    public bool Fallback { get; init; }
+
+    public RuleCondition When { get; init; } = new();
+
+    public string Mode { get; init; } = string.Empty;
+
+    public string ValueField { get; init; } = string.Empty;
 }
 
 public sealed class TagDefinition
@@ -361,7 +380,13 @@ public sealed class RuleCondition
 {
     public bool Always { get; init; }
 
+    public string FieldExists { get; init; } = string.Empty;
+
+    public string[] FieldsExist { get; init; } = [];
+
     public RegexCondition[] AnyRegex { get; init; } = [];
+
+    public RegexCondition[] AllRegex { get; init; } = [];
 }
 
 public sealed class RegexCondition

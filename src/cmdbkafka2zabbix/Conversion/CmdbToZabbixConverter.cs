@@ -80,6 +80,7 @@ public sealed class CmdbToZabbixConverter(
             EntityId = source.EntityId,
             Code = source.Code,
             IpAddress = source.IpAddress ?? string.Empty,
+            DnsName = source.DnsName ?? string.Empty,
             ZabbixHostId = source.ZabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
@@ -105,6 +106,7 @@ public sealed class CmdbToZabbixConverter(
             EntityId = source.EntityId,
             Code = source.Code,
             IpAddress = source.IpAddress ?? string.Empty,
+            DnsName = source.DnsName ?? string.Empty,
             ZabbixHostId = source.ZabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
@@ -127,6 +129,7 @@ public sealed class CmdbToZabbixConverter(
             EntityId = source.EntityId,
             Code = source.Code,
             IpAddress = source.IpAddress ?? string.Empty,
+            DnsName = source.DnsName ?? string.Empty,
             ZabbixHostId = source.ZabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
@@ -139,7 +142,7 @@ public sealed class CmdbToZabbixConverter(
             TlsPsk = MapTlsPsk(tlsPsk),
             Status = status,
             InventoryMode = rules.Defaults.Host.InventoryMode,
-            Interface = MapInterface(SelectInterface(source, rules)),
+            Interface = MapInterface(SelectInterface(source, rules), SelectInterfaceAddress(source, rules), source),
             Groups = SelectGroups(source, rules),
             Templates = SelectTemplates(source, rules),
             Tags = BuildTags(source, rules, renderModel),
@@ -155,6 +158,11 @@ public sealed class CmdbToZabbixConverter(
     {
         foreach (var requiredField in requiredFields)
         {
+            if (string.Equals(requiredField, "interfaceAddress", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             if (string.IsNullOrWhiteSpace(ReadField(source, requiredField)))
             {
                 return $"missing_{requiredField.ToLowerInvariant()}";
@@ -180,7 +188,22 @@ public sealed class CmdbToZabbixConverter(
             }
         }
 
+        if (RequiresInterfaceAddress(requiredFields)
+            && SelectInterfaceAddress(source, rules) is null
+            && string.IsNullOrWhiteSpace(source.IpAddress)
+            && string.IsNullOrWhiteSpace(source.DnsName))
+        {
+            return "missing_interface_address";
+        }
+
         return string.Empty;
+    }
+
+    private static bool RequiresInterfaceAddress(string[] requiredFields)
+    {
+        return requiredFields.Contains("interfaceAddress", StringComparer.OrdinalIgnoreCase)
+            || requiredFields.Contains("ipAddress", StringComparer.OrdinalIgnoreCase)
+            || requiredFields.Contains("dnsName", StringComparer.OrdinalIgnoreCase);
     }
 
     private EventRoutingRule? ResolveRoute(CmdbSourceEvent source, ConversionRulesDocument rules)
@@ -200,7 +223,7 @@ public sealed class CmdbToZabbixConverter(
                 EventType = source.EventType,
                 Method = string.IsNullOrWhiteSpace(rules.Zabbix.Method) ? "host.create" : rules.Zabbix.Method,
                 TemplateName = options.Value.TemplateName,
-                RequiredFields = ["entityId", "className", "ipAddress"]
+                RequiredFields = ["entityId", "className", "interfaceAddress"]
             };
         }
 
@@ -338,6 +361,57 @@ public sealed class CmdbToZabbixConverter(
             .FirstOrDefault(rule => Matches(source, rule.When));
 
         return ResolveInterface(matchedRule?.InterfaceRef, rules);
+    }
+
+    private static InterfaceAddressSelection? SelectInterfaceAddress(CmdbSourceEvent source, ConversionRulesDocument rules)
+    {
+        if (rules.InterfaceAddressRules.Length == 0)
+        {
+            if (!string.IsNullOrWhiteSpace(source.IpAddress))
+            {
+                return new InterfaceAddressSelection("ip", source.IpAddress);
+            }
+
+            return !string.IsNullOrWhiteSpace(source.DnsName)
+                ? new InterfaceAddressSelection("dns", source.DnsName)
+                : null;
+        }
+
+        var matchedRule = rules.InterfaceAddressRules
+            .Where(rule => !rule.Fallback)
+            .OrderBy(rule => rule.Priority)
+            .FirstOrDefault(rule => Matches(source, rule.When));
+
+        matchedRule ??= rules.InterfaceAddressRules
+            .Where(rule => rule.Fallback)
+            .OrderBy(rule => rule.Priority)
+            .FirstOrDefault(rule => Matches(source, rule.When));
+
+        if (matchedRule is null)
+        {
+            return null;
+        }
+
+        var valueField = string.IsNullOrWhiteSpace(matchedRule.ValueField)
+            ? matchedRule.Mode
+            : matchedRule.ValueField;
+        var value = ReadField(source, valueField);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var mode = string.IsNullOrWhiteSpace(matchedRule.Mode)
+            ? InferAddressMode(valueField)
+            : matchedRule.Mode;
+        return new InterfaceAddressSelection(mode, value);
+    }
+
+    private static string InferAddressMode(string valueField)
+    {
+        return CanonicalFieldName(valueField).Equals("dnsName", StringComparison.OrdinalIgnoreCase)
+            ? "dns"
+            : "ip";
     }
 
     private List<ZabbixTagModel> BuildTags(
@@ -514,18 +588,52 @@ public sealed class CmdbToZabbixConverter(
             return true;
         }
 
-        foreach (var regex in condition.AnyRegex)
+        var hasConditions = false;
+        if (!string.IsNullOrWhiteSpace(condition.FieldExists))
         {
-            var value = ReadField(source, regex.Field);
-            if (!string.IsNullOrWhiteSpace(value)
-                && !string.IsNullOrWhiteSpace(regex.Pattern)
-                && Regex.IsMatch(value, regex.Pattern, RegexOptions.CultureInvariant, RegexTimeout))
+            hasConditions = true;
+            if (string.IsNullOrWhiteSpace(ReadField(source, condition.FieldExists)))
             {
-                return true;
+                return false;
             }
         }
 
-        return false;
+        if (condition.FieldsExist.Length > 0)
+        {
+            hasConditions = true;
+            if (!condition.FieldsExist.All(field => !string.IsNullOrWhiteSpace(ReadField(source, field))))
+            {
+                return false;
+            }
+        }
+
+        if (condition.AllRegex.Length > 0)
+        {
+            hasConditions = true;
+            if (!condition.AllRegex.All(regex => MatchesRegex(source, regex)))
+            {
+                return false;
+            }
+        }
+
+        if (condition.AnyRegex.Length > 0)
+        {
+            hasConditions = true;
+            if (!condition.AnyRegex.Any(regex => MatchesRegex(source, regex)))
+            {
+                return false;
+            }
+        }
+
+        return hasConditions;
+    }
+
+    private static bool MatchesRegex(CmdbSourceEvent source, RegexCondition regex)
+    {
+        var value = ReadField(source, regex.Field);
+        return !string.IsNullOrWhiteSpace(value)
+            && !string.IsNullOrWhiteSpace(regex.Pattern)
+            && Regex.IsMatch(value, regex.Pattern, RegexOptions.CultureInvariant, RegexTimeout);
     }
 
     private static string? ReadField(CmdbSourceEvent source, string field)
@@ -550,6 +658,7 @@ public sealed class CmdbToZabbixConverter(
             "code" => source.Code,
             "classname" or "class" => source.ClassName,
             "ipaddress" or "ip_address" => source.IpAddress,
+            "dnsname" or "dns_name" or "fqdn" or "hostname" or "host_dns" => source.DnsName,
             "zabbixhostid" or "zabbix_hostid" => source.ZabbixHostId,
             "description" => source.Description,
             "os" or "operatingsystem" or "operating_system" => source.OperatingSystem,
@@ -565,6 +674,7 @@ public sealed class CmdbToZabbixConverter(
             "entityid" or "id" => "entityId",
             "classname" or "class" => "className",
             "ipaddress" => "ipAddress",
+            "dnsname" or "fqdn" or "hostname" or "hostdns" => "dnsName",
             "zabbixhostid" => "zabbixHostId",
             "os" or "operatingsystem" => "os",
             "zabbixtag" => "zabbixTag",
@@ -829,14 +939,25 @@ public sealed class CmdbToZabbixConverter(
         return !string.IsNullOrWhiteSpace(item.ValueMapId) || !string.IsNullOrWhiteSpace(item.Name);
     }
 
-    private static ZabbixInterfaceModel MapInterface(InterfaceSettings settings)
+    private static ZabbixInterfaceModel MapInterface(
+        InterfaceSettings settings,
+        InterfaceAddressSelection? address,
+        CmdbSourceEvent source)
     {
+        var useDns = string.Equals(address?.Mode, "dns", StringComparison.OrdinalIgnoreCase);
+        var ip = useDns
+            ? string.Empty
+            : address?.Value ?? source.IpAddress ?? string.Empty;
+        var dns = useDns
+            ? address?.Value ?? source.DnsName ?? settings.Dns
+            : settings.Dns;
         return new ZabbixInterfaceModel
         {
             Type = settings.Type,
             Main = settings.Main,
-            UseIp = settings.UseIp,
-            Dns = settings.Dns,
+            UseIp = address is null ? settings.UseIp : useDns ? 0 : 1,
+            Ip = ip,
+            Dns = dns,
             Port = settings.Port
         };
     }
@@ -896,3 +1017,5 @@ public sealed class CmdbToZabbixConverter(
         throw new InvalidOperationException($"Unsupported T4 template name '{templateName}'.");
     }
 }
+
+internal sealed record InterfaceAddressSelection(string Mode, string Value);

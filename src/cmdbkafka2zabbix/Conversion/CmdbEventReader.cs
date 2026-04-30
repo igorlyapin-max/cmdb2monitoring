@@ -24,6 +24,7 @@ public sealed class CmdbEventReader
         var configuredCode = ReadConfiguredField(sourceFields, "code");
         var configuredClassName = ReadConfiguredField(sourceFields, "className");
         var configuredIpAddress = ReadConfiguredField(sourceFields, "ipAddress");
+        var configuredDnsName = ReadConfiguredField(sourceFields, "dnsName");
         var configuredZabbixHostId = ReadConfiguredField(sourceFields, "zabbixHostId");
         var configuredDescription = ReadConfiguredField(sourceFields, "description");
         var configuredOperatingSystem = ReadConfiguredField(sourceFields, "os");
@@ -37,6 +38,7 @@ public sealed class CmdbEventReader
             Code: configuredCode,
             ClassName: configuredClassName ?? entityType,
             IpAddress: configuredIpAddress,
+            DnsName: configuredDnsName,
             ZabbixHostId: configuredZabbixHostId,
             Description: configuredDescription,
             OperatingSystem: configuredOperatingSystem,
@@ -51,12 +53,15 @@ public sealed class CmdbEventReader
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (fieldName, fieldRule) in rules.Source.Fields)
         {
-            if (string.IsNullOrWhiteSpace(fieldRule.Source))
+            var sourceNames = SourceNames(fieldRule).ToArray();
+            if (sourceNames.Length == 0)
             {
                 continue;
             }
 
-            var value = ReadString(payload, fieldRule.Source);
+            var value = sourceNames
+                .Select(sourceName => ReadString(payload, sourceName))
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
             if (!string.IsNullOrWhiteSpace(value))
             {
                 values[fieldName] = value;
@@ -64,6 +69,22 @@ public sealed class CmdbEventReader
         }
 
         return values;
+    }
+
+    private static IEnumerable<string> SourceNames(SourceFieldRule rule)
+    {
+        if (!string.IsNullOrWhiteSpace(rule.Source))
+        {
+            yield return rule.Source;
+        }
+
+        foreach (var source in rule.Sources)
+        {
+            if (!string.IsNullOrWhiteSpace(source))
+            {
+                yield return source;
+            }
+        }
     }
 
     private static string? ReadConfiguredField(IReadOnlyDictionary<string, string> sourceFields, string fieldName)

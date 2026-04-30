@@ -9,6 +9,7 @@ flowchart LR
     ui -->|IF-016 GET /health :5080| wh
     ui -->|IF-016 GET /health :5081| conv
     ui -->|IF-016 GET /health :5082| api
+    ui -->|IF-017 save-as rules/webhook files| downloads[(Local downloads)]
     cmdb[CMDBuild :8090] -->|IF-001 HTTP webhook :5080| wh[cmdbwebhooks2kafka :5080]
     wh -->|IF-002 cmdbuild.webhooks.* :9092| kafka[(Kafka :9092)]
     kafka -->|cmdbuild.webhooks.* :9092| conv[cmdbkafka2zabbix :5081]

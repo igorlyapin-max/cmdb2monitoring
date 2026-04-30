@@ -36,6 +36,8 @@ public sealed class ZabbixHostCreateModel
 
     public string IpAddress { get; init; } = string.Empty;
 
+    public string DnsName { get; init; } = string.Empty;
+
     public string ClassName { get; init; } = string.Empty;
 
     public string? EntityId { get; init; }
@@ -94,6 +96,8 @@ public sealed class ZabbixInterfaceModel
     public int Main { get; init; }
 
     public int UseIp { get; init; }
+
+    public string Ip { get; init; } = string.Empty;
 
     public string Dns { get; init; } = string.Empty;
 

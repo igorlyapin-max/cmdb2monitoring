@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { existsSync, createReadStream } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -179,6 +179,12 @@ async function routeApi(request, response, url, path) {
 
   if (request.method === 'GET' && path === '/api/zabbix/catalog') {
     sendJson(response, 200, await readCatalogCache(config.Zabbix.Catalog.CacheFilePath));
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/api/zabbix/catalog/mapping') {
+    const catalog = await readCatalogCache(config.Zabbix.Catalog.CacheFilePath);
+    sendJson(response, 200, readZabbixMappingCatalog(catalog));
     return;
   }
 
@@ -764,6 +770,7 @@ async function validateRulesObject(rules) {
   requireArray(rules, 'eventRoutingRules', errors);
   requireArray(rules, 'groupSelectionRules', errors);
   requireArray(rules, 'templateSelectionRules', errors);
+  requireArray(rules, 'interfaceAddressRules', errors);
   requireArray(rules, 'interfaceSelectionRules', errors);
   requireArray(rules, 'tagSelectionRules', errors);
 
@@ -839,7 +846,7 @@ async function dryRunRules(payload) {
   const rules = payload?.rules ? normalizeRulesPayload({ content: payload.rules }) : (await readCurrentRules()).content;
   const source = payload?.payload ?? payload?.source ?? {};
   const validation = await validateRulesObject(rules);
-  const normalized = normalizeSourcePayload(source);
+  const normalized = normalizeSourcePayload(source, rules);
   const route = (rules.eventRoutingRules ?? []).find(item => equalsIgnoreCase(item.eventType, normalized.eventType));
   const model = buildDryRunModel(rules, normalized, route);
 
@@ -1883,7 +1890,8 @@ function buildDryRunModel(rules, source, route) {
     ClassName: className,
     EntityId: source.entityId || source.id,
     Code: source.code,
-    IpAddress: source.ip_address,
+    IpAddress: source.ipAddress || source.ip_address,
+    DnsName: source.dnsName || source.dns_name,
     OperatingSystem: source.os,
     ZabbixTag: source.zabbixTag,
     EventType: source.eventType,
@@ -2011,7 +2019,10 @@ function selectInterface(rules, source) {
     .find(item => matchesCondition(item.when, source))
     ?? (rules.interfaceProfileSelectionRules ?? []).find(item => item.fallback && matchesCondition(item.when, source));
   if (profileRule?.interfaceProfileRef && rules.defaults?.interfaceProfiles?.[profileRule.interfaceProfileRef]) {
-    return rules.defaults.interfaceProfiles[profileRule.interfaceProfileRef];
+    return applyInterfaceAddress(
+      rules.defaults.interfaceProfiles[profileRule.interfaceProfileRef],
+      selectInterfaceAddress(rules, source),
+      source);
   }
 
   const rule = (rules.interfaceSelectionRules ?? [])
@@ -2019,9 +2030,58 @@ function selectInterface(rules, source) {
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
     .find(item => matchesCondition(item.when, source))
     ?? (rules.interfaceSelectionRules ?? []).find(item => item.fallback && matchesCondition(item.when, source));
-  return rule?.interfaceRef === 'snmpInterface'
+  const profile = rule?.interfaceRef === 'snmpInterface'
     ? rules.defaults?.snmpInterface
     : rules.defaults?.agentInterface;
+  return applyInterfaceAddress(profile, selectInterfaceAddress(rules, source), source);
+}
+
+function selectInterfaceAddress(rules, source) {
+  const rulesList = rules.interfaceAddressRules ?? [];
+  if (rulesList.length === 0) {
+    if (!isBlank(readSourceField(source, 'ipAddress'))) {
+      return { mode: 'ip', value: readSourceField(source, 'ipAddress') };
+    }
+
+    if (!isBlank(readSourceField(source, 'dnsName'))) {
+      return { mode: 'dns', value: readSourceField(source, 'dnsName') };
+    }
+
+    return null;
+  }
+
+  const rule = rulesList
+    .filter(item => !item.fallback)
+    .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+    .find(item => matchesCondition(item.when, source))
+    ?? rulesList
+      .filter(item => item.fallback)
+      .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+      .find(item => matchesCondition(item.when, source));
+  if (!rule) {
+    return null;
+  }
+
+  const valueField = rule.valueField || rule.mode;
+  const value = readSourceField(source, valueField);
+  if (isBlank(value)) {
+    return null;
+  }
+
+  return {
+    mode: rule.mode || (canonicalSourceField(valueField) === 'dnsName' ? 'dns' : 'ip'),
+    value
+  };
+}
+
+function applyInterfaceAddress(profile = {}, address, source) {
+  const useDns = equalsIgnoreCase(address?.mode, 'dns');
+  return {
+    ...profile,
+    useip: address ? (useDns ? 0 : 1) : profile.useip,
+    ip: useDns ? '' : address?.value ?? readSourceField(source, 'ipAddress') ?? '',
+    dns: useDns ? address?.value ?? readSourceField(source, 'dnsName') ?? profile.dns ?? '' : profile.dns ?? ''
+  };
 }
 
 function selectTags(rules, source) {
@@ -2055,19 +2115,47 @@ function matchesCondition(condition = {}, source) {
     return true;
   }
 
-  for (const matcher of condition.anyRegex ?? []) {
-    const value = readSourceField(source, matcher.field);
-    if (!isBlank(value) && compileRuleRegex(matcher.pattern).test(value)) {
-      return true;
+  let hasConditions = false;
+  if (condition.fieldExists) {
+    hasConditions = true;
+    if (isBlank(readSourceField(source, condition.fieldExists))) {
+      return false;
     }
   }
 
-  return false;
+  if (Array.isArray(condition.fieldsExist)
+      && condition.fieldsExist.length > 0) {
+    hasConditions = true;
+    if (!condition.fieldsExist.every(field => !isBlank(readSourceField(source, field)))) {
+      return false;
+    }
+  }
+
+  if (Array.isArray(condition.allRegex) && condition.allRegex.length > 0) {
+    hasConditions = true;
+    if (!condition.allRegex.every(matcher => matchesRuleRegex(source, matcher))) {
+      return false;
+    }
+  }
+
+  if (Array.isArray(condition.anyRegex) && condition.anyRegex.length > 0) {
+    hasConditions = true;
+    if (!condition.anyRegex.some(matcher => matchesRuleRegex(source, matcher))) {
+      return false;
+    }
+  }
+
+  return hasConditions;
 }
 
-function normalizeSourcePayload(payload) {
+function matchesRuleRegex(source, matcher) {
+  const value = readSourceField(source, matcher.field);
+  return !isBlank(value) && compileRuleRegex(matcher.pattern).test(value);
+}
+
+function normalizeSourcePayload(payload, rules = null) {
   const data = payload.payload ?? payload;
-  return {
+  const normalized = {
     ...data,
     source: data.source ?? payload.source ?? 'cmdbuild',
     eventType: data.eventType ?? payload.eventType ?? 'create',
@@ -2077,14 +2165,39 @@ function normalizeSourcePayload(payload) {
     code: data.code ?? payload.code,
     className: data.className ?? payload.className ?? payload.entityType,
     ip_address: data.ip_address ?? data.ipAddress ?? payload.ip_address ?? payload.ipAddress,
+    ipAddress: data.ipAddress ?? data.ip_address ?? payload.ipAddress ?? payload.ip_address,
+    dns_name: data.dns_name ?? data.dnsName ?? data.fqdn ?? data.host_dns ?? data.hostname
+      ?? payload.dns_name ?? payload.dnsName ?? payload.fqdn ?? payload.host_dns ?? payload.hostname,
+    dnsName: data.dnsName ?? data.dns_name ?? data.fqdn ?? data.host_dns ?? data.hostname
+      ?? payload.dnsName ?? payload.dns_name ?? payload.fqdn ?? payload.host_dns ?? payload.hostname,
     description: data.description ?? payload.description,
     os: data.os ?? data.OS ?? payload.os ?? payload.OS,
     zabbixTag: data.zabbixTag ?? payload.zabbixTag,
     zabbixHostId: data.zabbix_hostid ?? data.zabbixHostId ?? payload.zabbix_hostid ?? payload.zabbixHostId
   };
+
+  for (const [fieldName, fieldRule] of Object.entries(rules?.source?.fields ?? {})) {
+    const value = sourceFieldSources(fieldRule)
+      .map(sourceName => readPayloadProperty(data, sourceName) ?? readPayloadProperty(payload, sourceName))
+      .find(value => !isBlank(value));
+    if (!isBlank(value)) {
+      normalized[fieldName] = value;
+    }
+  }
+
+  normalized.ip_address = normalized.ipAddress ?? normalized.ip_address;
+  normalized.ipAddress = normalized.ipAddress ?? normalized.ip_address;
+  normalized.dns_name = normalized.dnsName ?? normalized.dns_name;
+  normalized.dnsName = normalized.dnsName ?? normalized.dns_name;
+  return normalized;
 }
 
 function readSourceField(source, field) {
+  const canonical = canonicalSourceField(field);
+  if (source[canonical] !== undefined) {
+    return source[canonical];
+  }
+
   const normalized = field?.toLowerCase();
   return {
     source: source.source,
@@ -2095,8 +2208,13 @@ function readSourceField(source, field) {
     code: source.code,
     classname: source.className,
     class: source.className,
-    ipaddress: source.ip_address,
-    ip_address: source.ip_address,
+    ipaddress: source.ipAddress ?? source.ip_address,
+    ip_address: source.ipAddress ?? source.ip_address,
+    dnsname: source.dnsName ?? source.dns_name,
+    dns_name: source.dnsName ?? source.dns_name,
+    fqdn: source.dnsName ?? source.dns_name,
+    hostname: source.dnsName ?? source.dns_name,
+    host_dns: source.dnsName ?? source.dns_name,
     os: source.os,
     operatingsystem: source.os,
     zabbixtag: source.zabbixTag,
@@ -2104,6 +2222,47 @@ function readSourceField(source, field) {
     zabbixhostid: source.zabbixHostId,
     zabbix_hostid: source.zabbixHostId
   }[normalized] ?? source[field] ?? source[normalized];
+}
+
+function readPayloadProperty(payload, propertyName) {
+  if (!payload || isBlank(propertyName)) {
+    return null;
+  }
+
+  if (payload[propertyName] !== undefined) {
+    return payload[propertyName];
+  }
+
+  const wanted = String(propertyName).toLowerCase();
+  const key = Object.keys(payload).find(item => item.toLowerCase() === wanted);
+  return key ? payload[key] : null;
+}
+
+function sourceFieldSources(fieldRule = {}) {
+  return [
+    fieldRule.source,
+    ...(Array.isArray(fieldRule.sources) ? fieldRule.sources : [])
+  ].filter(value => !isBlank(value));
+}
+
+function canonicalSourceField(field) {
+  const normalized = String(field ?? '').replaceAll('_', '').toLowerCase();
+  return {
+    entityid: 'entityId',
+    id: 'entityId',
+    classname: 'className',
+    class: 'className',
+    ipaddress: 'ipAddress',
+    dnsname: 'dnsName',
+    fqdn: 'dnsName',
+    hostname: 'dnsName',
+    hostdns: 'dnsName',
+    zabbixhostid: 'zabbixHostId',
+    os: 'os',
+    operatingsystem: 'os',
+    zabbixtag: 'zabbixTag',
+    eventtype: 'eventType'
+  }[normalized] ?? field;
 }
 
 function normalizeRulesPayload(payload) {
@@ -2146,7 +2305,7 @@ async function serveStatic(response, path) {
     'content-type': contentTypeFor(fullPath),
     'cache-control': 'no-store'
   });
-  createReadStream(fullPath).pipe(response);
+  response.end(await readFile(fullPath));
 }
 
 async function readJsonBody(request, maxBytes) {
@@ -2336,6 +2495,51 @@ function readCatalogCollection(catalog, name) {
   };
 }
 
+function readZabbixMappingCatalog(catalog) {
+  const collection = name => Array.isArray(catalog?.[name]) ? catalog[name] : [];
+  const compactTemplates = collection('templates').map(template => ({
+    templateid: template.templateid,
+    host: template.host,
+    name: template.name,
+    groups: template.groups
+  }));
+
+  return {
+    syncedAt: catalog?.syncedAt ?? null,
+    zabbixEndpoint: catalog?.zabbixEndpoint ?? null,
+    hostGroups: collection('hostGroups'),
+    templateGroups: collection('templateGroups'),
+    templates: compactTemplates,
+    tags: collection('tags'),
+    proxies: [],
+    proxyGroups: [],
+    globalMacros: [],
+    inventoryFields: [],
+    interfaceProfiles: [],
+    hostStatuses: [],
+    maintenances: [],
+    tlsPskModes: [],
+    hostMacros: [],
+    valueMaps: [],
+    counts: {
+      hostGroups: collection('hostGroups').length,
+      templateGroups: collection('templateGroups').length,
+      templates: collection('templates').length,
+      tags: collection('tags').length,
+      proxies: collection('proxies').length,
+      proxyGroups: collection('proxyGroups').length,
+      globalMacros: collection('globalMacros').length,
+      hostMacros: collection('hostMacros').length,
+      inventoryFields: collection('inventoryFields').length,
+      interfaceProfiles: collection('interfaceProfiles').length,
+      hostStatuses: collection('hostStatuses').length,
+      maintenances: collection('maintenances').length,
+      tlsPskModes: collection('tlsPskModes').length,
+      valueMaps: collection('valueMaps').length
+    }
+  };
+}
+
 function collectZabbixTags(hosts) {
   const tags = new Map();
   for (const host of hosts ?? []) {
@@ -2502,6 +2706,9 @@ function renderSimple(template = '', model) {
     .replaceAll('<#= Model.Host #>', model.Host ?? '')
     .replaceAll('<#= Model.VisibleName #>', model.VisibleName ?? '')
     .replaceAll('<#= Model.IpAddress #>', model.IpAddress ?? '')
+    .replaceAll('<#= Model.DnsName #>', model.DnsName ?? '')
+    .replaceAll('<#= Model.Interface.Ip #>', model.Interface?.ip ?? model.Interface?.Ip ?? '')
+    .replaceAll('<#= Model.Interface.Dns #>', model.Interface?.dns ?? model.Interface?.Dns ?? '')
     .replaceAll('<#= Model.OperatingSystem #>', model.OperatingSystem ?? '')
     .replaceAll('<#= Model.ZabbixTag #>', model.ZabbixTag ?? '')
     .replaceAll('<#= Model.EventType #>', model.EventType ?? '')

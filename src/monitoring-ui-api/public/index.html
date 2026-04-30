@@ -69,6 +69,7 @@
           <button class="nav-item" data-view="zabbix">Zabbix Catalog</button>
           <button class="nav-item" data-view="cmdbuild">CMDBuild Catalog</button>
           <button class="nav-item" data-view="settings">Settings</button>
+          <button class="nav-item" data-view="help">Help</button>
           <button class="nav-item danger" id="logoutButton" type="button">Logout</button>
         </nav>
 
@@ -150,8 +151,57 @@
 
           <section class="view" id="mapping">
             <div class="view-header">
-              <h1>Mapping</h1>
-              <button id="loadMapping" type="button">Load</button>
+              <div class="view-title-block">
+                <h1>Mapping</h1>
+                <div class="mapping-mode-controls">
+                  <label class="mapping-mode-field" for="mappingMode">
+                    <span>Режим</span>
+                    <select id="mappingMode">
+                      <option value="view">Режим просмотра</option>
+                      <option value="edit">Режим редактирования</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div class="actions">
+                <button id="mappingClearSelection" class="secondary" type="button" disabled>Снять выделение</button>
+                <button id="mappingUndo" class="secondary" type="button" disabled>Undo</button>
+                <button id="mappingRedo" class="secondary" type="button" disabled>Redo</button>
+                <button id="mappingSaveAs" class="secondary" type="button" disabled>Save file as</button>
+                <button id="loadMapping" type="button">Load</button>
+              </div>
+            </div>
+            <div id="mappingEditor" class="mapping-editor surface hidden">
+              <div class="mapping-editor-toolbar">
+                <label>
+                  <span>Действие</span>
+                  <select id="mappingEditAction">
+                    <option value="add">Добавление правила</option>
+                    <option value="delete">Удаление правила</option>
+                  </select>
+                </label>
+              </div>
+              <div id="mappingAddPanel" class="mapping-editor-panel">
+                <div class="mapping-editor-grid">
+                  <label><span>CMDBuild class</span><select id="mappingEditClass"></select></label>
+                  <label><span>Class attribute field</span><select id="mappingEditField"></select></label>
+                  <label><span>Conversion structure</span><select id="mappingEditTargetType"></select></label>
+                  <label><span>Zabbix object / payload</span><select id="mappingEditZabbixObject"></select></label>
+                  <label><span>Priority</span><input id="mappingEditPriority" type="number" min="1" step="1" value="100"></label>
+                  <label><span>Regex</span><input id="mappingEditRegex" type="text" value="(?i).*"></label>
+                  <label class="wide-field"><span>Rule name</span><input id="mappingEditRuleName" type="text" placeholder="auto-generated"></label>
+                  <button id="mappingAddRule" type="button">Add conversion rule</button>
+                </div>
+              </div>
+              <div id="mappingDeletePanel" class="mapping-editor-panel mapping-delete-panel hidden">
+                <div class="mapping-delete-actions">
+                  <button id="mappingDeleteSelectAll" class="secondary" type="button">Select all</button>
+                  <button id="mappingDeleteClear" class="secondary" type="button">Clear</button>
+                  <button id="mappingDeleteSelected" class="danger" type="button" disabled>Delete selected rules</button>
+                </div>
+                <div id="mappingDeleteRules" class="mapping-delete-list"></div>
+              </div>
+              <p id="mappingEditorStatus" class="mapping-editor-status"></p>
             </div>
             <div class="mapping-grid">
               <div class="mapping-column surface">
@@ -174,10 +224,12 @@
               <h1>Validate rules mapping</h1>
               <div class="actions">
                 <button id="loadValidateMapping" type="button">Load</button>
-                <button id="deleteValidateMappingSelected" class="danger" type="button" disabled>Delete</button>
               </div>
             </div>
             <div id="validateMappingSummary" class="surface validation-summary"></div>
+            <div class="validation-post-actions">
+              <button id="deleteValidateMappingSelected" class="danger" type="button" disabled>Delete</button>
+            </div>
             <div class="mapping-grid validation-grid">
               <div class="mapping-column surface" data-validation-column="cmdbuild">
                 <div class="validation-column-header">
@@ -214,105 +266,12 @@
                 <button id="loadZabbix" type="button">Load</button>
               </div>
             </div>
-            <div class="catalog-grid">
-              <div class="surface">
-                <h2>Templates</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Name</th><th>Host</th></tr></thead>
-                  <tbody id="zabbixTemplates"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Host groups</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Name</th></tr></thead>
-                  <tbody id="zabbixHostGroups"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Template groups</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Name</th></tr></thead>
-                  <tbody id="zabbixTemplateGroups"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Tags</h2>
-                <table>
-                  <thead><tr><th>Tag</th><th>Value</th></tr></thead>
-                  <tbody id="zabbixTags"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Proxies</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Name</th><th>Mode</th></tr></thead>
-                  <tbody id="zabbixProxies"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Proxy groups</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Name</th><th>Failover</th></tr></thead>
-                  <tbody id="zabbixProxyGroups"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Global macros</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Macro</th><th>Description</th></tr></thead>
-                  <tbody id="zabbixGlobalMacros"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Host macros</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Macro</th><th>Host</th></tr></thead>
-                  <tbody id="zabbixHostMacros"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Inventory fields</h2>
-                <table>
-                  <thead><tr><th>Name</th></tr></thead>
-                  <tbody id="zabbixInventoryFields"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Interface profiles</h2>
-                <table>
-                  <thead><tr><th>Name</th><th>Type</th><th>Port</th></tr></thead>
-                  <tbody id="zabbixInterfaceProfiles"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Host status</h2>
-                <table>
-                  <thead><tr><th>Status</th><th>Name</th></tr></thead>
-                  <tbody id="zabbixHostStatuses"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Maintenances</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Name</th><th>Type</th></tr></thead>
-                  <tbody id="zabbixMaintenances"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>TLS/PSK modes</h2>
-                <table>
-                  <thead><tr><th>Name</th><th>Connect</th><th>Accept</th></tr></thead>
-                  <tbody id="zabbixTlsPskModes"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2>Value maps</h2>
-                <table>
-                  <thead><tr><th>ID</th><th>Name</th><th>Mappings</th></tr></thead>
-                  <tbody id="zabbixValueMaps"></tbody>
-                </table>
-              </div>
+            <div class="zabbix-catalog-layout">
+              <aside class="surface zabbix-catalog-menu">
+                <h2>Catalog groups</h2>
+                <div id="zabbixCatalogMenu" class="catalog-submenu"></div>
+              </aside>
+              <div id="zabbixCatalogContent" class="zabbix-catalog-content"></div>
             </div>
           </section>
 
@@ -438,6 +397,73 @@
               <label><span>SP certificate</span><textarea name="spCertificate"></textarea></label>
               <label><span>SP private key</span><textarea name="spPrivateKey"></textarea></label>
             </form>
+          </section>
+
+          <section class="view" id="help">
+            <div class="view-header">
+              <h1>Help</h1>
+            </div>
+            <div class="catalog-grid">
+              <div class="surface">
+                <h2>Общий принцип</h2>
+                <ul>
+                  <li>Браузер работает только с <code>monitoring-ui-api</code>; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.</li>
+                  <li>Все адреса, учетные данные, Kafka topics, IdP/SAML2 и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Settings.</li>
+                  <li>Всплывающие подсказки показываются при наведении или фокусе на элементе интерфейса.</li>
+                </ul>
+              </div>
+              <div class="surface">
+                <h2>Dashboard и Events</h2>
+                <ul>
+                  <li>Dashboard показывает доступность <code>cmdbwebhooks2kafka</code>, <code>cmdbkafka2zabbix</code>, <code>zabbixrequests2api</code> и самого BFF.</li>
+                  <li>Events читает последние сообщения из настроенных Kafka topics через backend-адаптер.</li>
+                  <li>Количество в Events означает "последние N сообщений"; по умолчанию выводятся 5 последних.</li>
+                </ul>
+              </div>
+              <div class="surface">
+                <h2>Rules</h2>
+                <ul>
+                  <li>Load загружает текущий JSON правил конвертации.</li>
+                  <li>Validate проверяет структуру правил на backend.</li>
+                  <li>Dry-run применяет правила к тестовому CMDBuild payload без сохранения.</li>
+                  <li>Upload сохраняет новый JSON правил на backend после проверки.</li>
+                </ul>
+              </div>
+              <div class="surface">
+                <h2>Mapping</h2>
+                <ul>
+                  <li>Страница показывает цепочку <code>CMDBuild -> Conversion Rules -> Zabbix</code>.</li>
+                  <li>Режим просмотра показывает выбранную цепочку и скрывает лишние атрибуты классов, другие rule-подблоки и несвязанные элементы списков Zabbix.</li>
+                  <li>Снять выделение доступно в режиме просмотра и возвращает Mapping к обычному обзору без подсветки цепочки.</li>
+                  <li>Режим редактирования меняет draft JSON текущей сессии: можно выбрать CMDBuild class/class attribute field, структуру конвертации, Zabbix object/payload, priority и regex.</li>
+                  <li>Действие "Удаление правила" показывает rules текущего draft JSON, удаляет отмеченные правила после подтверждения и оставляет классы/class attribute fields на месте.</li>
+                  <li>Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
+                  <li>Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules.</li>
+                  <li>Повторное нажатие на выбранный элемент снимает выделение.</li>
+                  <li>Interface address rules выбирают, чем заполнить Zabbix interface: <code>ipAddress</code> дает <code>useip=1</code>, <code>dnsName</code> дает <code>useip=0</code>.</li>
+                  <li>Для lookup выделяется только конкретная связка класса, lookup и значения, например <code>Notebook.zabbixTag.tag1</code>.</li>
+                  <li>Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
+                </ul>
+              </div>
+              <div class="surface">
+                <h2>Validate rules mapping</h2>
+                <ul>
+                  <li>Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.</li>
+                  <li>Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.</li>
+                  <li>Checkbox над отсутствующим элементом включает его в удаление из rules JSON.</li>
+                  <li>Delete спрашивает подтверждение, сохраняет предыдущую версию и исправляет выбранные ссылки в правилах.</li>
+                </ul>
+              </div>
+              <div class="surface">
+                <h2>Каталоги и Settings</h2>
+                <ul>
+                  <li>Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.</li>
+                  <li>CMDBuild Catalog загружает классы, атрибуты и lookup-значения.</li>
+                  <li>Settings сохраняет runtime-настройки подключений, Events Kafka browser и IdP/SAML2.</li>
+                  <li>Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.</li>
+                </ul>
+              </div>
+            </div>
           </section>
 
         </div>
