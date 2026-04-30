@@ -32,7 +32,22 @@ public sealed class KafkaConversionWorker(
         }
 
         var inputOptions = kafkaOptions.Value.Input;
-        using var consumer = new ConsumerBuilder<string, string>(inputOptions.BuildConsumerConfig()).Build();
+        using var consumer = new ConsumerBuilder<string, string>(inputOptions.BuildConsumerConfig())
+            .SetPartitionsAssignedHandler((_, partitions) =>
+            {
+                var assignments = BuildPartitionAssignments(partitions, previousState);
+                foreach (var assignment in assignments.Where(item => item.Offset != Offset.Unset))
+                {
+                    logger.LogInformation(
+                        "Resuming Kafka consumer from state at {Topic}[{Partition}]@{Offset}",
+                        assignment.Topic,
+                        assignment.Partition.Value,
+                        assignment.Offset.Value);
+                }
+
+                return assignments;
+            })
+            .Build();
         consumer.Subscribe(inputOptions.Topic);
 
         logger.LogInformation(
@@ -76,6 +91,33 @@ public sealed class KafkaConversionWorker(
         }
 
         consumer.Close();
+    }
+
+    private static List<TopicPartitionOffset> BuildPartitionAssignments(
+        IReadOnlyCollection<TopicPartition> partitions,
+        ProcessingStateDocument? previousState)
+    {
+        return partitions
+            .Select(partition => new TopicPartitionOffset(
+                partition,
+                ResolveStartOffset(partition, previousState)))
+            .ToList();
+    }
+
+    private static Offset ResolveStartOffset(
+        TopicPartition partition,
+        ProcessingStateDocument? previousState)
+    {
+        if (previousState?.LastInputTopic is null
+            || previousState.LastInputPartition is null
+            || previousState.LastInputOffset is null
+            || !string.Equals(previousState.LastInputTopic, partition.Topic, StringComparison.Ordinal)
+            || previousState.LastInputPartition.Value != partition.Partition.Value)
+        {
+            return Offset.Unset;
+        }
+
+        return new Offset(previousState.LastInputOffset.Value + 1);
     }
 
     private async Task ProcessMessageAsync(

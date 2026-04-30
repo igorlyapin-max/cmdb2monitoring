@@ -70,6 +70,24 @@ public sealed class ZabbixRequestValidator(
             case "host.get":
                 ValidateHostGet(request, result);
                 break;
+            case "maintenance.get":
+            case "maintenance.create":
+            case "maintenance.update":
+            case "maintenance.delete":
+            case "usermacro.get":
+            case "usermacro.create":
+            case "usermacro.update":
+            case "usermacro.delete":
+            case "proxy.get":
+            case "proxy.create":
+            case "proxy.update":
+            case "proxy.delete":
+            case "valuemap.get":
+            case "valuemap.create":
+            case "valuemap.update":
+            case "valuemap.delete":
+                ValidateGenericParams(request, result);
+                break;
             default:
                 result.AddError("unsupported_method", $"Unsupported Zabbix method '{request.Method}'.");
                 break;
@@ -107,6 +125,7 @@ public sealed class ZabbixRequestValidator(
         }
 
         ValidateTags(request.Params, result);
+        ValidateHostExtendedFields(request.Params, result);
     }
 
     private static void ValidateHostUpdate(ZabbixRequestDocument request, ZabbixValidationResult result)
@@ -123,6 +142,7 @@ public sealed class ZabbixRequestValidator(
         }
 
         ValidateTags(request.Params, result);
+        ValidateHostExtendedFields(request.Params, result);
     }
 
     private static void ValidateHostDelete(ZabbixRequestDocument request, ZabbixValidationResult result)
@@ -157,6 +177,16 @@ public sealed class ZabbixRequestValidator(
         }
     }
 
+    private static void ValidateGenericParams(ZabbixRequestDocument request, ZabbixValidationResult result)
+    {
+        if (request.Params.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+        {
+            return;
+        }
+
+        result.AddError("missing_params", $"{request.Method} params object or array is required.");
+    }
+
     private static void ValidateTags(JsonElement parameters, ZabbixValidationResult result)
     {
         if (!parameters.TryGetProperty("tags", out var tags) || tags.ValueKind == JsonValueKind.Undefined)
@@ -177,6 +207,88 @@ public sealed class ZabbixRequestValidator(
                 result.AddError("invalid_tag", "Each Zabbix tag must contain a non-empty tag field.");
                 return;
             }
+        }
+    }
+
+    private static void ValidateHostExtendedFields(JsonElement parameters, ZabbixValidationResult result)
+    {
+        ValidateStatus(parameters, result);
+        ValidateMacros(parameters, result);
+        ValidateInventory(parameters, result);
+        ValidateTlsPsk(parameters, result);
+    }
+
+    private static void ValidateStatus(JsonElement parameters, ZabbixValidationResult result)
+    {
+        if (!parameters.TryGetProperty("status", out var status) || status.ValueKind == JsonValueKind.Undefined)
+        {
+            return;
+        }
+
+        if (!TryReadInt(status, out var value) || value is < 0 or > 1)
+        {
+            result.AddError("invalid_host_status", "params.status must be 0 (monitored) or 1 (unmonitored).");
+        }
+    }
+
+    private static void ValidateMacros(JsonElement parameters, ZabbixValidationResult result)
+    {
+        if (!parameters.TryGetProperty("macros", out var macros) || macros.ValueKind == JsonValueKind.Undefined)
+        {
+            return;
+        }
+
+        if (macros.ValueKind != JsonValueKind.Array)
+        {
+            result.AddError("invalid_macros", "params.macros must be an array.");
+            return;
+        }
+
+        foreach (var macro in macros.EnumerateArray())
+        {
+            if (macro.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(ReadString(macro, "macro")))
+            {
+                result.AddError("invalid_macro", "Each host macro must contain a non-empty macro field.");
+                return;
+            }
+        }
+    }
+
+    private static void ValidateInventory(JsonElement parameters, ZabbixValidationResult result)
+    {
+        if (!parameters.TryGetProperty("inventory", out var inventory) || inventory.ValueKind == JsonValueKind.Undefined)
+        {
+            return;
+        }
+
+        if (inventory.ValueKind != JsonValueKind.Object)
+        {
+            result.AddError("invalid_inventory", "params.inventory must be an object.");
+        }
+    }
+
+    private static void ValidateTlsPsk(JsonElement parameters, ZabbixValidationResult result)
+    {
+        var hasTlsConnect = parameters.TryGetProperty("tls_connect", out var tlsConnect)
+            && tlsConnect.ValueKind != JsonValueKind.Undefined;
+        var hasTlsAccept = parameters.TryGetProperty("tls_accept", out var tlsAccept)
+            && tlsAccept.ValueKind != JsonValueKind.Undefined;
+
+        if (hasTlsConnect && !TryReadInt(tlsConnect, out _))
+        {
+            result.AddError("invalid_tls_connect", "params.tls_connect must be numeric.");
+        }
+
+        if (hasTlsAccept && !TryReadInt(tlsAccept, out _))
+        {
+            result.AddError("invalid_tls_accept", "params.tls_accept must be numeric.");
+        }
+
+        if (parameters.TryGetProperty("tls_psk", out var psk)
+            && psk.ValueKind != JsonValueKind.Undefined
+            && string.IsNullOrWhiteSpace(ReadScalar(psk)))
+        {
+            result.AddError("invalid_tls_psk", "params.tls_psk must be non-empty when provided.");
         }
     }
 
@@ -295,5 +407,21 @@ public sealed class ZabbixRequestValidator(
             JsonValueKind.False => bool.FalseString,
             _ => null
         };
+    }
+
+    private static bool TryReadInt(JsonElement value, out int result)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out result))
+        {
+            return true;
+        }
+
+        if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out result))
+        {
+            return true;
+        }
+
+        result = 0;
+        return false;
     }
 }

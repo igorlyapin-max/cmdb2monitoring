@@ -10,14 +10,14 @@ flowchart TD
     monui -->|health dashboard| api
     monui -->|events read-only| kafka
     ui --> cmdb[CMDBuild]
-    cmdb -->|POST /webhooks/cmdbuild| wh[cmdbwebhooks2kafka]
-    wh -->|cmdbuild.webhooks.*| kafka[(Kafka)]
+    cmdb -->|POST :5080 /webhooks/cmdbuild| wh[cmdbwebhooks2kafka :5080]
+    wh -->|cmdbuild.webhooks.* :9092| kafka[(Kafka :9092)]
     kafka --> conv[cmdbkafka2zabbix]
     rules --> conv
     conv -->|zabbix.host.requests.*| kafka
     kafka --> api[zabbixrequests2api]
-    api -->|JSON-RPC| zabbix[Zabbix API]
-    api -->|zabbix.host.responses.*| kafka
+    api -->|JSON-RPC :8081| zabbix[Zabbix API :8081]
+    api -->|zabbix.host.responses.* :9092| kafka
     wh -->|logs| logs[Kafka log topics]
     conv -->|logs| logs
     api -->|logs| logs

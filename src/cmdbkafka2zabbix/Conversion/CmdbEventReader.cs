@@ -18,15 +18,16 @@ public sealed class CmdbEventReader
         var entityId = ReadString(root, "entityId");
         var source = ReadString(root, "source") ?? "cmdbuild";
         var receivedAt = ReadDateTimeOffset(root, "receivedAt");
+        var sourceFields = ReadConfiguredFields(payload, rules);
 
-        var configuredEntityId = ReadConfiguredField(payload, rules, "entityId");
-        var configuredCode = ReadConfiguredField(payload, rules, "code");
-        var configuredClassName = ReadConfiguredField(payload, rules, "className");
-        var configuredIpAddress = ReadConfiguredField(payload, rules, "ipAddress");
-        var configuredZabbixHostId = ReadConfiguredField(payload, rules, "zabbixHostId");
-        var configuredDescription = ReadConfiguredField(payload, rules, "description");
-        var configuredOperatingSystem = ReadConfiguredField(payload, rules, "os");
-        var configuredZabbixTag = ReadConfiguredField(payload, rules, "zabbixTag");
+        var configuredEntityId = ReadConfiguredField(sourceFields, "entityId");
+        var configuredCode = ReadConfiguredField(sourceFields, "code");
+        var configuredClassName = ReadConfiguredField(sourceFields, "className");
+        var configuredIpAddress = ReadConfiguredField(sourceFields, "ipAddress");
+        var configuredZabbixHostId = ReadConfiguredField(sourceFields, "zabbixHostId");
+        var configuredDescription = ReadConfiguredField(sourceFields, "description");
+        var configuredOperatingSystem = ReadConfiguredField(sourceFields, "os");
+        var configuredZabbixTag = ReadConfiguredField(sourceFields, "zabbixTag");
 
         return new CmdbSourceEvent(
             Source: source,
@@ -40,18 +41,34 @@ public sealed class CmdbEventReader
             Description: configuredDescription,
             OperatingSystem: configuredOperatingSystem,
             ZabbixTag: configuredZabbixTag,
+            SourceFields: sourceFields,
             ReceivedAt: receivedAt,
             Payload: payload.Clone());
     }
 
-    private static string? ReadConfiguredField(JsonElement payload, ConversionRulesDocument rules, string fieldName)
+    private static Dictionary<string, string> ReadConfiguredFields(JsonElement payload, ConversionRulesDocument rules)
     {
-        if (!rules.Source.Fields.TryGetValue(fieldName, out var fieldRule) || string.IsNullOrWhiteSpace(fieldRule.Source))
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (fieldName, fieldRule) in rules.Source.Fields)
         {
-            return null;
+            if (string.IsNullOrWhiteSpace(fieldRule.Source))
+            {
+                continue;
+            }
+
+            var value = ReadString(payload, fieldRule.Source);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                values[fieldName] = value;
+            }
         }
 
-        return ReadString(payload, fieldRule.Source);
+        return values;
+    }
+
+    private static string? ReadConfiguredField(IReadOnlyDictionary<string, string> sourceFields, string fieldName)
+    {
+        return sourceFields.TryGetValue(fieldName, out var value) ? value : null;
     }
 
     private static string? ReadString(JsonElement element, string propertyName)

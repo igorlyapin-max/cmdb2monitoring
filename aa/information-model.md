@@ -4,10 +4,10 @@
 
 | ID | Источник | Приемник | Канал | Данные |
 | --- | --- | --- | --- | --- |
-| IF-001 | CMDBuild | cmdbwebhooks2kafka | HTTP POST `/webhooks/cmdbuild` | CMDBuild webhook payload |
-| IF-002 | cmdbwebhooks2kafka | Kafka | topic `cmdbuild.webhooks.*` | Нормализованный CMDB event envelope |
-| IF-003 | cmdbkafka2zabbix | Kafka | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
-| IF-004 | zabbixrequests2api | Zabbix API | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |
+| IF-001 | CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild`, dev URL `http://192.168.202.100:5080/webhooks/cmdbuild` | CMDBuild webhook payload |
+| IF-002 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | topic `cmdbuild.webhooks.*` | Нормализованный CMDB event envelope |
+| IF-003 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
+| IF-004 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |
 | IF-005 | zabbixrequests2api | Kafka | topic `zabbix.host.responses.*` | Результат вызова Zabbix API |
 | IF-006 | Микросервисы | Kafka | `*.logs.*` topics | Structured JSON logs для будущего ELK |
 | IF-007 | cmdbkafka2zabbix | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
@@ -60,6 +60,16 @@
 - `id`;
 - optional metadata `cmdb2monitoring` для fallback-сценариев update/delete.
 
+`params` для `host.create/update` может включать:
+- `host`, `name`, `status`;
+- `inventory_mode`, `inventory`;
+- `interfaces`, `groups`, `templates`, `tags`;
+- `macros`;
+- `proxyid`, `proxy_groupid`;
+- TLS/PSK поля `tls_connect`, `tls_accept`, `tls_psk_identity`, `tls_psk`.
+
+Если передается `inventory`, `inventory_mode` не должен быть `-1`.
+
 ### Zabbix response
 
 Передается в `zabbix.host.responses.*`.
@@ -99,7 +109,16 @@ Zabbix cache:
 - templates;
 - hostGroups;
 - templateGroups;
-- tags.
+- tags;
+- proxies;
+- proxyGroups;
+- macros;
+- inventoryFields;
+- interfaceProfiles;
+- hostStatuses;
+- maintenances;
+- tlsPskModes;
+- valueMaps.
 
 CMDBuild cache:
 - classes;

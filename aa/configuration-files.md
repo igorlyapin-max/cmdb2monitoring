@@ -20,6 +20,7 @@ Production/base конфиги не должны содержать реальн
 | Меняется задержка обработки объектов | `Processing:DelayBetweenObjectsMs` |
 | Меняется rules-файл | `ConversionRules:RepositoryPath`, `ConversionRules:RulesFilePath` |
 | Подключается ELK | `ElkLogging:Mode`, `ElkLogging:Elk:*`, при необходимости отключить Kafka log sink |
+| CMDBuild работает в Docker и вызывает локальный webhook | `src/cmdbwebhooks2kafka/Properties/launchSettings.json`, `ASPNETCORE_URLS=http://0.0.0.0:5080` |
 
 ## cmdbwebhooks2kafka
 
@@ -41,9 +42,15 @@ Production/base конфиги не должны содержать реальн
 | `Kafka:SecurityProtocol` | Plaintext/SASL/TLS режим | При включении авторизации Kafka |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK или смене log topic |
 
+Dev запуск:
+- `launchSettings.json` должен использовать `http://0.0.0.0:5080`;
+- CMDBuild-контейнер вызывает webhook по `http://192.168.202.100:5080/webhooks/cmdbuild`;
+- `http://localhost:5080` доступен только с dev host и не подходит как URL внутри CMDBuild-контейнера.
+
 Пример env override:
 
 ```bash
+ASPNETCORE_URLS=http://0.0.0.0:5080
 Kafka__BootstrapServers=kafka:29092
 Kafka__Topic=cmdbuild.webhooks
 ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
@@ -72,8 +79,13 @@ Rules-файл `rules/cmdbuild-to-zabbix-host-create.json` управляет:
 - event routing create/update/delete;
 - regex validation;
 - выбором groups/templates/interfaces/tags;
+- расширенными Zabbix host параметрами: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances, value maps;
 - T4 templates для Zabbix JSON-RPC;
 - fallback metadata для update/delete без `zabbix_hostid`.
+
+При наличии `inventory` в rules/T4 payload необходимо использовать `inventory_mode=0` или другой разрешенный режим inventory. `inventory_mode=-1` отключает inventory, и Zabbix отклоняет такие запросы.
+
+State-файл хранит последний успешно обработанный input offset. При старте consumer назначает позицию чтения `lastInputOffset + 1` для сохраненного topic/partition.
 
 ## zabbixrequests2api
 
@@ -110,6 +122,8 @@ Kafka__Input__SaslMechanism=ScramSha512
 Kafka__Input__Username=<secret>
 Kafka__Input__Password=<secret>
 ```
+
+State-файл `zabbixrequests2api` также используется для восстановления позиции Kafka consumer после рестарта: чтение начинается с `lastInputOffset + 1`.
 
 ## monitoring-ui-api
 
@@ -205,7 +219,14 @@ Events:
 - `EventBrowser:BootstrapServers` в dev равен `localhost:9092`;
 - `EventBrowser:SecurityProtocol=Plaintext` для текущей локальной Kafka без авторизации;
 - `EventBrowser:Topics` должен содержать используемые сервисами topics, включая request/response/log topics;
+- `EventBrowser:MaxMessages` задает количество последних сообщений к выводу, например `5` означает 5 последних;
 - UI Settings сохраняет runtime overrides в `UiSettings:FilePath`, по умолчанию `src/monitoring-ui-api/state/ui-settings.json`.
+
+Rules UI:
+- Mapping показывает CMDBuild, rules и Zabbix в трех колонках;
+- Validate rules mapping подсвечивает только отсутствующие элементы и позволяет удалить выбранные элементы после подтверждения;
+- перед удалением rules-файл копируется в `rules/.backup/*.bak`;
+- `rules/.backup/` является локальным backup и не коммитится.
 
 Runtime cache:
 - `src/monitoring-ui-api/data/zabbix-catalog-cache.json`;
@@ -213,6 +234,7 @@ Runtime cache:
 
 Runtime state:
 - `src/monitoring-ui-api/state/ui-settings.json`.
+- `rules/.backup/*.bak`.
 
 Эти файлы не должны попадать в git.
 

@@ -54,6 +54,15 @@ public sealed class ZabbixHostCreateModel
 
     public string? FallbackForMethod { get; init; }
 
+    public IReadOnlyDictionary<string, string> SourceFields { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    public string? ProxyId { get; init; }
+
+    public string? ProxyGroupId { get; init; }
+
+    public ZabbixTlsPskModel TlsPsk { get; init; } = new();
+
     public ZabbixInterfaceModel Interface { get; init; } = new();
 
     public List<ZabbixGroupModel> Groups { get; init; } = [];
@@ -62,7 +71,20 @@ public sealed class ZabbixHostCreateModel
 
     public List<ZabbixTagModel> Tags { get; init; } = [];
 
+    public List<ZabbixMacroModel> Macros { get; init; } = [];
+
+    public List<ZabbixInventoryFieldModel> InventoryFields { get; init; } = [];
+
+    public List<ZabbixMaintenanceModel> Maintenances { get; init; } = [];
+
+    public List<ZabbixValueMapModel> ValueMaps { get; init; } = [];
+
     public int RequestId { get; init; }
+
+    public string Field(string name)
+    {
+        return SourceFields.TryGetValue(name, out var value) ? value : string.Empty;
+    }
 }
 
 public sealed class ZabbixInterfaceModel
@@ -83,3 +105,28 @@ public sealed record ZabbixGroupModel(string Name, string GroupId);
 public sealed record ZabbixTemplateModel(string Name, string TemplateId);
 
 public sealed record ZabbixTagModel(string Tag, string Value);
+
+public sealed record ZabbixMacroModel(string Macro, string Value, string Description, int Type);
+
+public sealed record ZabbixInventoryFieldModel(string Field, string Value);
+
+public sealed record ZabbixMaintenanceModel(string Name, string MaintenanceId);
+
+public sealed record ZabbixValueMapModel(string Name, string ValueMapId);
+
+public sealed class ZabbixTlsPskModel
+{
+    public int? TlsConnect { get; init; }
+
+    public int? TlsAccept { get; init; }
+
+    public string TlsPskIdentity { get; init; } = string.Empty;
+
+    public string TlsPsk { get; init; } = string.Empty;
+
+    public bool Enabled => TlsConnect.HasValue || TlsAccept.HasValue;
+
+    public bool HasIdentity => !string.IsNullOrWhiteSpace(TlsPskIdentity);
+
+    public bool HasPsk => !string.IsNullOrWhiteSpace(TlsPsk);
+}

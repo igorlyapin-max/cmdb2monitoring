@@ -6,7 +6,9 @@
 
 | Узел | Артефакты | Сетевые адреса |
 | --- | --- | --- |
-| Workstation/Dev host | .NET микросервисы | `localhost:5080`, `localhost:5081`, `localhost:5082` |
+| Workstation/Dev host | `cmdbwebhooks2kafka` | bind `0.0.0.0:5080`, local `http://localhost:5080`, Docker-visible `http://192.168.202.100:5080` |
+| Workstation/Dev host | `cmdbkafka2zabbix` | `http://localhost:5081` |
+| Workstation/Dev host | `zabbixrequests2api` | `http://localhost:5082` |
 | Workstation/Dev host | Node.js frontend/BFF `monitoring-ui-api` | `http://localhost:5090` |
 | Docker host | Kafka | host `localhost:9092`, docker network `kafka:29092` |
 | Docker host | CMDBuild | `http://localhost:8090/cmdbuild` |
@@ -30,16 +32,16 @@
 
 | Откуда | Куда | Протокол |
 | --- | --- | --- |
-| CMDBuild | cmdbwebhooks2kafka | HTTP POST |
-| Browser | monitoring-ui-api | HTTP |
-| monitoring-ui-api | IdP SAML2 | HTTP Redirect/POST |
-| monitoring-ui-api | CMDBuild REST API | HTTP |
-| monitoring-ui-api | Zabbix API | HTTP JSON-RPC |
-| monitoring-ui-api | .NET services health endpoints | HTTP |
+| CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild` через `http://192.168.202.100:5080` в dev |
+| Browser | monitoring-ui-api `:5090` | HTTP |
+| monitoring-ui-api `:5090` | IdP SAML2 | HTTP Redirect/POST |
+| monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP |
+| monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC |
+| monitoring-ui-api `:5090` | .NET services health endpoints `:5080/:5081/:5082` | HTTP |
 | monitoring-ui-api | Kafka `localhost:9092` / `kafka:29092` | Kafka protocol, read-only Events |
-| cmdbwebhooks2kafka | Kafka | Kafka protocol |
-| cmdbkafka2zabbix | Kafka | Kafka protocol |
+| cmdbwebhooks2kafka `:5080` | Kafka `:9092` | Kafka protocol |
+| cmdbkafka2zabbix `:5081` | Kafka `:9092` | Kafka protocol |
 | cmdbkafka2zabbix | Git repository/working copy | local FS или git |
-| zabbixrequests2api | Kafka | Kafka protocol |
-| zabbixrequests2api | Zabbix API | HTTP JSON-RPC |
+| zabbixrequests2api `:5082` | Kafka `:9092` | Kafka protocol |
+| zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP JSON-RPC |
 | Микросервисы | ELK или Kafka log topics | HTTP/Kafka |

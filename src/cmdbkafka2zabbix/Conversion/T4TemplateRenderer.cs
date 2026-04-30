@@ -1,5 +1,6 @@
 using System.CodeDom.Compiler;
 using System.Text;
+using System.Text.RegularExpressions;
 using CmdbKafka2Zabbix.Rules;
 using Microsoft.VisualStudio.TextTemplating;
 using Microsoft.Extensions.Options;
@@ -52,14 +53,25 @@ public sealed class T4TemplateRenderer(IOptions<ConversionRulesOptions> options)
 
     public string RenderSimple(string template, ZabbixHostCreateModel model)
     {
-        return template
+        var rendered = template
             .Replace("<#= Model.Host #>", model.Host, StringComparison.Ordinal)
             .Replace("<#= Model.VisibleName #>", model.VisibleName, StringComparison.Ordinal)
             .Replace("<#= Model.ClassName #>", model.ClassName, StringComparison.Ordinal)
             .Replace("<#= Model.EntityId #>", model.EntityId ?? string.Empty, StringComparison.Ordinal)
             .Replace("<#= Model.Code #>", model.Code ?? string.Empty, StringComparison.Ordinal)
+            .Replace("<#= Model.IpAddress #>", model.IpAddress, StringComparison.Ordinal)
+            .Replace("<#= Model.OperatingSystem #>", model.OperatingSystem ?? string.Empty, StringComparison.Ordinal)
+            .Replace("<#= Model.ZabbixTag #>", model.ZabbixTag ?? string.Empty, StringComparison.Ordinal)
+            .Replace("<#= Model.EventType #>", model.EventType, StringComparison.Ordinal)
             .Replace("<#= Model.ZabbixHostId #>", model.ZabbixHostId ?? string.Empty, StringComparison.Ordinal)
             .Replace("<#= Model.Code ?? Model.EntityId #>", model.Code ?? model.EntityId ?? string.Empty, StringComparison.Ordinal);
+
+        return Regex.Replace(
+            rendered,
+            "<#=\\s*Model\\.Field\\([\"'](?<name>[^\"']+)[\"']\\)\\s*#>",
+            match => model.Field(match.Groups["name"].Value),
+            RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(500));
     }
 
     private string BuildTemplateContent(string[] templateLines)

@@ -133,9 +133,12 @@ components:
               type: string
             description:
               type: string
+            OS:
+              type: string
+              description: Фактическое имя lookup-поля CMDBuild для OS; может быть numeric id.
             os:
               type: string
-              description: CMDBuild lookup id или человекочитаемое значение OS.
+              description: Допустимый alias OS, если payload уже нормализован.
             zabbixTag:
               type: string
               description: CMDBuild lookup id или tag1/tag2/tag3.
@@ -166,12 +169,80 @@ components:
           enum: [host.create, host.get, host.update, host.delete]
         params:
           oneOf:
-            - type: object
+            - $ref: '#/components/schemas/ZabbixHostParams'
             - type: array
         id:
           oneOf:
             - type: integer
             - type: string
+    ZabbixHostParams:
+      type: object
+      additionalProperties: true
+      properties:
+        host:
+          type: string
+        name:
+          type: string
+        status:
+          type: integer
+          enum: [0, 1]
+        inventory_mode:
+          type: integer
+          description: Не использовать -1, если передается объект inventory.
+        interfaces:
+          type: array
+          items:
+            type: object
+        groups:
+          type: array
+          items:
+            type: object
+            properties:
+              groupid:
+                type: string
+        templates:
+          type: array
+          items:
+            type: object
+            properties:
+              templateid:
+                type: string
+        tags:
+          type: array
+          items:
+            type: object
+            properties:
+              tag:
+                type: string
+              value:
+                type: string
+        macros:
+          type: array
+          items:
+            type: object
+            properties:
+              macro:
+                type: string
+              value:
+                type: string
+              description:
+                type: string
+        inventory:
+          type: object
+          additionalProperties:
+            type: string
+        proxyid:
+          type: string
+        proxy_groupid:
+          type: string
+        tls_connect:
+          type: integer
+        tls_accept:
+          type: integer
+        tls_psk_identity:
+          type: string
+        tls_psk:
+          type: string
     ZabbixProcessingResponse:
       type: object
       required: [source, success, method, processedAt, input, missing]

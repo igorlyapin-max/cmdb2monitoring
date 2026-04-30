@@ -14,5 +14,6 @@ public sealed record CmdbSourceEvent(
     string? Description,
     string? OperatingSystem,
     string? ZabbixTag,
+    IReadOnlyDictionary<string, string> SourceFields,
     DateTimeOffset? ReceivedAt,
     JsonElement Payload);

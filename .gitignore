@@ -27,6 +27,7 @@ Thumbs.db
 *.temp
 state/
 src/monitoring-ui-api/data/
+rules/.backup/
 node_modules/
 
 # Local runtime secrets and Codex workspace metadata

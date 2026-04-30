@@ -1156,3 +1156,98 @@ src/monitoring-ui-api/scripts/validate-config.mjs
 - релевантные файлы в aa/;
 - must.md, если меняется обязательное соглашение разработки;
 - tests/configvalidation, если меняется обязательный артефакт или проверяемое правило.
+
+20. Уточнения по текущей реализации от 2026-04-30
+
+20.1. Сетевой запуск webhook-сервиса
+
+CMDBuild работает в Docker-контейнере и не может обращаться к `localhost` dev host.
+
+Текущий dev endpoint webhook:
+
+http://192.168.202.100:5080/webhooks/cmdbuild
+
+`cmdbwebhooks2kafka` должен слушать `0.0.0.0:5080`.
+Запуск только на `localhost:5080` считается ошибочной конфигурацией для текущего dev-контура, потому что webhook из CMDBuild не дойдет до сервиса.
+
+Healthcheck:
+
+http://localhost:5080/health
+http://192.168.202.100:5080/health
+
+20.2. Kafka state и восстановление после рестарта
+
+Для `cmdbkafka2zabbix` и `zabbixrequests2api` state-файл должен использоваться не только для диагностики.
+
+Обязательное поведение:
+- при успешной обработке записывать последний input topic, partition, offset и идентификатор объекта;
+- при старте читать state-файл;
+- после назначения Kafka partition начинать чтение с `lastInputOffset + 1` для сохраненного topic/partition;
+- Kafka offset коммитить только после успешной публикации результата или осознанного skip/error response.
+
+Это предотвращает повторную обработку старых сообщений после рестарта при рассинхронизации committed offset consumer group и локального state-файла.
+
+20.3. Zabbix inventory
+
+Если rules/T4 формируют объект `inventory`, то `inventory_mode` не должен быть `-1`.
+
+Причина:
+- `inventory_mode=-1` отключает inventory в Zabbix;
+- Zabbix отклоняет запрос с ошибкой `Cannot set inventory fields for disabled inventory`, если одновременно переданы `inventory_mode=-1` и `inventory`.
+
+Текущее dev-значение:
+
+inventory_mode = 0
+
+20.4. Расширенная модель rules
+
+Rules JSON должен поддерживать следующие расширения Zabbix host payload:
+- proxy;
+- proxy group;
+- interface profile;
+- host status;
+- TLS/PSK;
+- host macros;
+- inventory fields;
+- maintenances;
+- value maps.
+
+T4-шаблоны используют промежуточную модель `Model.*`.
+`Model.*` не является прямой схемой CMDBuild или Zabbix. Это объект конвертера `cmdbkafka2zabbix`, который собирается из CMDB payload, rules и catalog references.
+
+Для динамических полей используется:
+
+Model.Field("fieldName")
+
+20.5. UI Mapping и Validate rules mapping
+
+В `monitoring-ui-api` должны быть доступны:
+- Mapping: три колонки CMDBuild -> rules -> Zabbix с подсветкой участвующих элементов;
+- lookup mapping по конкретной связке class + lookup + value;
+- повторное нажатие на элемент снимает выделение;
+- Validate rules mapping: без интерактивной подсветки цепочек, только выявление отсутствующих элементов источников;
+- checkbox над отсутствующими элементами;
+- выбор всех/снятие выбора на заголовках;
+- удаление выбранных отсутствующих элементов только после подтверждения пользователя;
+- перед удалением сохранять backup rules-файла в `rules/.backup/*.bak`;
+- `rules/.backup/` не коммитить в Git.
+
+20.6. Последняя smoke-проверка create
+
+Карточка CMDBuild:
+- class: Server;
+- id: 139231;
+- code: srv15;
+- ip: 192.168.202.2;
+- OS: Windows server;
+- zabbixTag: tag3.
+
+Цепочка:
+- webhook опубликован в `cmdbuild.webhooks.dev`;
+- `cmdbkafka2zabbix` сформировал `host.create`;
+- `zabbixrequests2api` вызвал Zabbix API;
+- Zabbix создал host `cmdb-server-srv15`;
+- hostid: 10691;
+- interface IP: 192.168.202.2;
+- templates: `Windows by Zabbix agent`, `ICMP Ping`;
+- response опубликован в `zabbix.host.responses.dev` с `success=true`.

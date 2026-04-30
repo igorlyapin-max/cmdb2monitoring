@@ -1,19 +1,19 @@
 flowchart LR
     browser[Browser / Operator] -->|IF-009 UI/API| ui[monitoring-ui-api]
     ui -->|IF-010 SAML2| idp[IdP SAML2]
-    ui -->|IF-011 catalog| cmdb
-    ui -->|IF-012 catalog| zbx
+    ui -->|IF-011 catalog :8090| cmdb
+    ui -->|IF-012 catalog :8081| zbx
     ui -->|IF-013 rules upload/validate| rules
     ui -->|IF-014 cache/settings| fs
     ui -->|IF-015 events read-only| kafka
-    cmdb[CMDBuild] -->|IF-001 HTTP webhook| wh[cmdbwebhooks2kafka]
-    wh -->|IF-002 cmdbuild.webhooks.*| kafka[(Kafka)]
+    cmdb[CMDBuild :8090] -->|IF-001 HTTP webhook :5080| wh[cmdbwebhooks2kafka :5080]
+    wh -->|IF-002 cmdbuild.webhooks.* :9092| kafka[(Kafka :9092)]
     kafka -->|cmdbuild.webhooks.*| conv[cmdbkafka2zabbix]
     rules[(Git rules JSON)] -->|IF-007| conv
-    conv -->|IF-003 zabbix.host.requests.*| kafka
+    conv -->|IF-003 zabbix.host.requests.* :9092| kafka
     kafka -->|zabbix.host.requests.*| api[zabbixrequests2api]
-    api -->|IF-004 JSON-RPC| zbx[Zabbix API]
-    api -->|IF-005 zabbix.host.responses.*| kafka
+    api -->|IF-004 JSON-RPC :8081| zbx[Zabbix API :8081]
+    api -->|IF-005 zabbix.host.responses.* :9092| kafka
     wh -->|IF-006 logs| kafka
     conv -->|IF-006 logs| kafka
     api -->|IF-006 logs| kafka

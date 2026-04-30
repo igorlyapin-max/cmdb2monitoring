@@ -2,8 +2,8 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, createReadStream } from 'node:fs';
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { basename, dirname, extname, join, normalize, resolve } from 'node:path';
+import { copyFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { basename, dirname, extname, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Kafka, logLevel } from 'kafkajs';
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from '@node-saml/node-saml';
@@ -153,6 +153,17 @@ async function routeApi(request, response, url, path) {
 
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
     sendJson(response, 200, await uploadRules(payload, session));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/rules/fix-mapping') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await fixRulesMapping(payload, session));
     return;
   }
 
@@ -884,6 +895,205 @@ async function uploadRules(payload, session) {
   };
 }
 
+async function fixRulesMapping(payload, session) {
+  if (!config.Rules.AllowUpload || !config.Rules.AllowSave) {
+    throw httpError(403, 'rules_save_disabled', 'Rules save is disabled by configuration.');
+  }
+
+  const operations = normalizeRulesFixOperations(payload?.operations);
+  if (operations.length === 0) {
+    throw httpError(400, 'empty_rules_fix', 'No mapping fix operations were selected.');
+  }
+
+  const current = await readCurrentRules();
+  const rules = structuredClone(current.content);
+  const changes = applyRulesFixOperations(rules, operations);
+  const validation = await validateRulesObject(rules);
+
+  if (!validation.valid) {
+    return {
+      saved: false,
+      path: config.Rules.RulesFilePath,
+      validation,
+      changes
+    };
+  }
+
+  if (changes.length === 0) {
+    return {
+      saved: false,
+      path: config.Rules.RulesFilePath,
+      validation,
+      changes
+    };
+  }
+
+  const rulesPath = resolveRepoPath(config.Rules.RulesFilePath);
+  const backupPath = await backupRulesFile(rulesPath);
+  await writeFile(rulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
+
+  let git = null;
+  if (config.Rules.AutoCommit) {
+    git = await commitRules(session);
+  }
+
+  return {
+    saved: true,
+    path: config.Rules.RulesFilePath,
+    backupPath: relative(repositoryRoot, backupPath),
+    validation,
+    changes,
+    git
+  };
+}
+
+function normalizeRulesFixOperations(value) {
+  if (!Array.isArray(value)) {
+    throw httpError(400, 'invalid_rules_fix', 'operations must be an array.');
+  }
+
+  return value.slice(0, 250).map(operation => ({
+    scope: String(operation?.scope ?? ''),
+    kind: String(operation?.kind ?? ''),
+    id: String(operation?.id ?? ''),
+    name: String(operation?.name ?? ''),
+    className: String(operation?.className ?? ''),
+    fieldKey: String(operation?.fieldKey ?? ''),
+    source: String(operation?.source ?? '')
+  })).filter(operation => operation.scope && operation.kind);
+}
+
+function applyRulesFixOperations(rules, operations) {
+  const changes = [];
+  for (const operation of operations) {
+    if (operation.scope === 'zabbix' && operation.kind === 'hostGroup') {
+      removeRuleItemReferences(rules, operation, {
+        lookupPath: ['lookups', 'hostGroups'],
+        defaultsPath: ['defaults', 'hostGroups'],
+        rulesList: 'groupSelectionRules',
+        itemProperty: 'hostGroups',
+        idField: 'groupid'
+      }, changes);
+    } else if (operation.scope === 'zabbix' && operation.kind === 'template') {
+      removeRuleItemReferences(rules, operation, {
+        lookupPath: ['lookups', 'templates'],
+        defaultsPath: ['defaults', 'templates'],
+        rulesList: 'templateSelectionRules',
+        itemProperty: 'templates',
+        idField: 'templateid'
+      }, changes);
+    } else if (operation.scope === 'zabbix' && operation.kind === 'templateGroup') {
+      removeRuleItemReferences(rules, operation, {
+        lookupPath: ['lookups', 'templateGroups'],
+        defaultsPath: ['defaults', 'templateGroups'],
+        rulesList: 'templateGroupSelectionRules',
+        itemProperty: 'templateGroups',
+        idField: 'groupid'
+      }, changes);
+    } else if (operation.scope === 'cmdbuild' && operation.kind === 'class') {
+      removeSourceClassReference(rules, operation, changes);
+    } else if (operation.scope === 'cmdbuild' && operation.kind === 'attribute') {
+      removeSourceFieldReference(rules, operation, changes);
+    }
+  }
+
+  return changes;
+}
+
+function removeRuleItemReferences(rules, operation, spec, changes) {
+  const matcher = item => sameRulesFixItem(item, spec.idField, operation.id, operation.name);
+  let removed = 0;
+  removed += removeItemsAtPath(rules, spec.lookupPath, matcher);
+  removed += removeItemsAtPath(rules, spec.defaultsPath, matcher);
+  for (const rule of rules[spec.rulesList] ?? []) {
+    removed += removeItemsFromArray(rule[spec.itemProperty], matcher);
+  }
+
+  if (removed > 0) {
+    changes.push({
+      scope: operation.scope,
+      kind: operation.kind,
+      id: operation.id,
+      name: operation.name,
+      removed
+    });
+  }
+}
+
+function removeSourceClassReference(rules, operation, changes) {
+  const removed = removeItemsFromArray(rules.source?.entityClasses, item => sameNormalized(item, operation.className));
+  if (removed > 0) {
+    changes.push({
+      scope: operation.scope,
+      kind: operation.kind,
+      className: operation.className,
+      removed
+    });
+  }
+}
+
+function removeSourceFieldReference(rules, operation, changes) {
+  const fields = rules.source?.fields;
+  if (!fields || !fields[operation.fieldKey]) {
+    return;
+  }
+
+  const source = fields[operation.fieldKey]?.source;
+  if (operation.source && !sameNormalized(source, operation.source)) {
+    return;
+  }
+
+  delete fields[operation.fieldKey];
+  changes.push({
+    scope: operation.scope,
+    kind: operation.kind,
+    className: operation.className,
+    fieldKey: operation.fieldKey,
+    source: operation.source,
+    removed: 1
+  });
+}
+
+function removeItemsAtPath(root, path, matcher) {
+  const items = path.reduce((current, part) => current?.[part], root);
+  return removeItemsFromArray(items, matcher);
+}
+
+function removeItemsFromArray(items, matcher) {
+  if (!Array.isArray(items)) {
+    return 0;
+  }
+
+  const originalLength = items.length;
+  const kept = items.filter(item => !matcher(item));
+  items.splice(0, items.length, ...kept);
+  return originalLength - kept.length;
+}
+
+function sameRulesFixItem(item, idField, id, name) {
+  const wanted = [id, name].map(normalizeToken).filter(Boolean);
+  if (wanted.length === 0) {
+    return false;
+  }
+
+  return [item?.[idField], item?.name, item?.host]
+    .map(normalizeToken)
+    .some(candidate => wanted.includes(candidate));
+}
+
+function sameNormalized(left, right) {
+  return normalizeToken(left) === normalizeToken(right);
+}
+
+async function backupRulesFile(rulesPath) {
+  const backupDir = join(dirname(rulesPath), '.backup');
+  await mkdir(backupDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = join(backupDir, `${basename(rulesPath)}.${timestamp}.bak`);
+  await copyFile(rulesPath, backupPath);
+  return backupPath;
+}
+
 async function readRulesHistory() {
   const result = await runGit(['log', '--oneline', '--', config.Rules.RulesFilePath]);
   return {
@@ -931,6 +1141,26 @@ async function syncZabbixCatalog(session) {
     selectTags: ['tag', 'value']
   });
   const tags = collectZabbixTags(hosts);
+  const proxies = await zabbixCallOptional(apiEndpoint, token, 'proxy.get', {
+    output: ['proxyid', 'name']
+  });
+  const proxyGroups = await zabbixCallOptional(apiEndpoint, token, 'proxygroup.get', {
+    output: ['proxy_groupid', 'name']
+  });
+  const globalMacros = await zabbixCallOptional(apiEndpoint, token, 'globalmacro.get', {
+    output: ['globalmacroid', 'macro', 'value', 'description', 'type']
+  });
+  const hostMacros = await zabbixCallOptional(apiEndpoint, token, 'usermacro.get', {
+    output: ['hostmacroid', 'hostid', 'macro', 'value', 'description', 'type'],
+    selectHosts: ['hostid', 'host', 'name']
+  });
+  const maintenances = await zabbixCallOptional(apiEndpoint, token, 'maintenance.get', {
+    output: ['maintenanceid', 'name', 'maintenance_type']
+  });
+  const valueMaps = await zabbixCallOptional(apiEndpoint, token, 'valuemap.get', {
+    output: ['valuemapid', 'name'],
+    selectMappings: ['type', 'value', 'newvalue']
+  });
 
   const catalog = {
     syncedAt: new Date().toISOString(),
@@ -938,7 +1168,17 @@ async function syncZabbixCatalog(session) {
     hostGroups,
     templateGroups,
     templates,
-    tags
+    tags,
+    proxies,
+    proxyGroups,
+    globalMacros,
+    hostMacros,
+    inventoryFields: zabbixInventoryFields(),
+    interfaceProfiles: zabbixInterfaceProfiles(),
+    hostStatuses: zabbixHostStatuses(),
+    maintenances,
+    tlsPskModes: zabbixTlsPskModes(),
+    valueMaps
   };
   await writeCatalogCache(config.Zabbix.Catalog.CacheFilePath, catalog);
 
@@ -1639,16 +1879,43 @@ function buildDryRunModel(rules, source, route) {
   const hostInput = source.code || source.id || source.entityId || 'unknown';
   const host = normalizeHostName(rules, className, hostInput, source);
   const fallbackForMethod = route?.requiresZabbixHostId && !source.zabbixHostId ? route.method : null;
+  const model = {
+    ClassName: className,
+    EntityId: source.entityId || source.id,
+    Code: source.code,
+    IpAddress: source.ip_address,
+    OperatingSystem: source.os,
+    ZabbixTag: source.zabbixTag,
+    EventType: source.eventType,
+    Host: host,
+    VisibleName: `${className} ${source.code || source.id || source.entityId || ''}`.trim(),
+    Fields: source
+  };
+  const hostStatus = selectSingleRuleItem(rules.hostStatusSelectionRules, rules, source, 'hostStatus', 'hostStatusRef')
+    ?? rules.defaults?.hostStatus;
+  const proxy = selectSingleRuleItem(rules.proxySelectionRules, rules, source, 'proxy', 'proxyRef');
+  const proxyGroup = selectSingleRuleItem(rules.proxyGroupSelectionRules, rules, source, 'proxyGroup', 'proxyGroupRef');
+  const tlsPsk = selectSingleRuleItem(rules.tlsPskSelectionRules, rules, source, 'tlsPsk', 'tlsPskRef')
+    ?? selectSingleRuleItem(rules.tlsPskSelectionRules, rules, source, 'tlsPskMode', 'tlsPskModeRef')
+    ?? rules.defaults?.tlsPsk;
 
   return {
     host,
-    visibleName: `${className} ${source.code || source.id || source.entityId || ''}`.trim(),
+    visibleName: model.VisibleName,
     method: fallbackForMethod ? route.fallbackMethod : route?.method,
     fallbackForMethod,
+    status: hostStatus?.status ?? rules.defaults?.host?.status ?? 0,
+    proxy,
+    proxyGroup,
+    tlsPsk,
     groups: selectLookupItems(rules.groupSelectionRules, rules, source, 'hostGroups', 'hostGroupsRef'),
     templates: selectLookupItems(rules.templateSelectionRules, rules, source, 'templates', 'templatesRef'),
     interface: selectInterface(rules, source),
     tags: selectTags(rules, source),
+    macros: selectRenderedItems(rules.hostMacroSelectionRules, rules, source, 'hostMacros', 'hostMacrosRef', rules.defaults?.hostMacros ?? [], model, 'macro'),
+    inventory: selectRenderedItems(rules.inventorySelectionRules, rules, source, 'inventoryFields', 'inventoryFieldsRef', rules.defaults?.inventoryFields ?? [], model, 'field'),
+    maintenances: selectLookupItems(rules.maintenanceSelectionRules, rules, source, 'maintenances', 'maintenancesRef'),
+    valueMaps: selectLookupItems(rules.valueMapSelectionRules, rules, source, 'valueMaps', 'valueMapsRef'),
     requestId: buildRequestId(source.entityId || source.id || host)
   };
 }
@@ -1680,8 +1947,17 @@ function selectLookupItems(rulesList = [], rules, source, propertyName, refName)
       return rule[propertyName];
     }
 
+    if (rule[propertyName] && typeof rule[propertyName] === 'object') {
+      return [rule[propertyName]];
+    }
+
     if (rule[refName] === `defaults.${propertyName}`) {
-      return rules.defaults?.[propertyName] ?? [];
+      const value = rules.defaults?.[propertyName];
+      if (Array.isArray(value)) {
+        return value;
+      }
+
+      return value && typeof value === 'object' ? [value] : [];
     }
 
     return [];
@@ -1689,13 +1965,55 @@ function selectLookupItems(rulesList = [], rules, source, propertyName, refName)
 
   const unique = new Map();
   for (const item of items) {
-    unique.set(item.groupid || item.templateid || item.name, item);
+    unique.set(
+      item.groupid
+        || item.templateid
+        || item.proxyid
+        || item.proxy_groupid
+        || item.maintenanceid
+        || item.valuemapid
+        || item.macro
+        || item.field
+        || item.name,
+      item);
+  }
+
+  return [...unique.values()];
+}
+
+function selectSingleRuleItem(rulesList = [], rules, source, propertyName, refName) {
+  return selectLookupItems(rulesList, rules, source, `${propertyName}s`, `${propertyName}sRef`)[0]
+    ?? selectLookupItems(rulesList, rules, source, propertyName, refName)[0]
+    ?? null;
+}
+
+function selectRenderedItems(rulesList = [], rules, source, propertyName, refName, defaults, model, keyName) {
+  const selected = selectLookupItems(rulesList, rules, source, propertyName, refName);
+  const items = [...defaults, ...selected].map(item => ({
+    ...item,
+    value: item.value || renderSimple(item.valueTemplate, model)
+  }));
+  const unique = new Map();
+  for (const item of items) {
+    const key = item[keyName] || item.name || item.macro;
+    if (key) {
+      unique.set(key, item);
+    }
   }
 
   return [...unique.values()];
 }
 
 function selectInterface(rules, source) {
+  const profileRule = (rules.interfaceProfileSelectionRules ?? [])
+    .filter(item => !item.fallback)
+    .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+    .find(item => matchesCondition(item.when, source))
+    ?? (rules.interfaceProfileSelectionRules ?? []).find(item => item.fallback && matchesCondition(item.when, source));
+  if (profileRule?.interfaceProfileRef && rules.defaults?.interfaceProfiles?.[profileRule.interfaceProfileRef]) {
+    return rules.defaults.interfaceProfiles[profileRule.interfaceProfileRef];
+  }
+
   const rule = (rules.interfaceSelectionRules ?? [])
     .filter(item => !item.fallback)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
@@ -1750,6 +2068,7 @@ function matchesCondition(condition = {}, source) {
 function normalizeSourcePayload(payload) {
   const data = payload.payload ?? payload;
   return {
+    ...data,
     source: data.source ?? payload.source ?? 'cmdbuild',
     eventType: data.eventType ?? payload.eventType ?? 'create',
     entityType: data.entityType ?? payload.entityType ?? data.className,
@@ -1759,7 +2078,7 @@ function normalizeSourcePayload(payload) {
     className: data.className ?? payload.className ?? payload.entityType,
     ip_address: data.ip_address ?? data.ipAddress ?? payload.ip_address ?? payload.ipAddress,
     description: data.description ?? payload.description,
-    os: data.os ?? payload.os,
+    os: data.os ?? data.OS ?? payload.os ?? payload.OS,
     zabbixTag: data.zabbixTag ?? payload.zabbixTag,
     zabbixHostId: data.zabbix_hostid ?? data.zabbixHostId ?? payload.zabbix_hostid ?? payload.zabbixHostId
   };
@@ -1784,7 +2103,7 @@ function readSourceField(source, field) {
     zabbix_tag: source.zabbixTag,
     zabbixhostid: source.zabbixHostId,
     zabbix_hostid: source.zabbixHostId
-  }[normalized];
+  }[normalized] ?? source[field] ?? source[normalized];
 }
 
 function normalizeRulesPayload(payload) {
@@ -1961,7 +2280,7 @@ async function readCatalogCache(cachePath) {
     };
   }
 
-  return JSON.parse(await readFile(fullPath, 'utf8'));
+  return withCatalogDefaults(JSON.parse(await readFile(fullPath, 'utf8')));
 }
 
 async function tryReadCatalogCache(cachePath) {
@@ -1978,12 +2297,36 @@ async function writeCatalogCache(cachePath, catalog) {
   await writeFile(fullPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
 }
 
+function withCatalogDefaults(catalog) {
+  if (!catalog || (!catalog.zabbixEndpoint && !catalog.hostGroups && !catalog.templates)) {
+    return catalog;
+  }
+
+  return {
+    ...catalog,
+    inventoryFields: catalog.inventoryFields ?? zabbixInventoryFields(),
+    interfaceProfiles: catalog.interfaceProfiles ?? zabbixInterfaceProfiles(),
+    hostStatuses: catalog.hostStatuses ?? zabbixHostStatuses(),
+    tlsPskModes: catalog.tlsPskModes ?? zabbixTlsPskModes()
+  };
+}
+
 function readCatalogCollection(catalog, name) {
   const mapping = {
     templates: 'templates',
     'host-groups': 'hostGroups',
     'template-groups': 'templateGroups',
     tags: 'tags',
+    proxies: 'proxies',
+    'proxy-groups': 'proxyGroups',
+    'global-macros': 'globalMacros',
+    'host-macros': 'hostMacros',
+    'inventory-fields': 'inventoryFields',
+    'interface-profiles': 'interfaceProfiles',
+    'host-statuses': 'hostStatuses',
+    maintenances: 'maintenances',
+    'tls-psk-modes': 'tlsPskModes',
+    'value-maps': 'valueMaps',
     classes: 'classes',
     lookups: 'lookups',
     attributes: 'attributes'
@@ -2006,6 +2349,105 @@ function collectZabbixTags(hosts) {
   }
 
   return [...tags.values()].sort((left, right) => `${left.tag}:${left.value}`.localeCompare(`${right.tag}:${right.value}`));
+}
+
+function zabbixInventoryFields() {
+  return [
+    'type',
+    'type_full',
+    'name',
+    'alias',
+    'os',
+    'os_full',
+    'os_short',
+    'serialno_a',
+    'serialno_b',
+    'tag',
+    'asset_tag',
+    'macaddress_a',
+    'macaddress_b',
+    'hardware',
+    'hardware_full',
+    'software',
+    'software_full',
+    'software_app_a',
+    'software_app_b',
+    'software_app_c',
+    'software_app_d',
+    'software_app_e',
+    'contact',
+    'location',
+    'location_lat',
+    'location_lon',
+    'notes',
+    'chassis',
+    'model',
+    'hw_arch',
+    'vendor',
+    'contract_number',
+    'installer_name',
+    'deployment_status',
+    'url_a',
+    'url_b',
+    'url_c',
+    'host_networks',
+    'host_netmask',
+    'host_router',
+    'oob_ip',
+    'oob_netmask',
+    'oob_router',
+    'date_hw_purchase',
+    'date_hw_install',
+    'date_hw_expiry',
+    'date_hw_decomm',
+    'site_address_a',
+    'site_address_b',
+    'site_address_c',
+    'site_city',
+    'site_state',
+    'site_country',
+    'site_zip',
+    'site_rack',
+    'site_notes',
+    'poc_1_name',
+    'poc_1_email',
+    'poc_1_phone_a',
+    'poc_1_phone_b',
+    'poc_1_cell',
+    'poc_1_screen',
+    'poc_1_notes',
+    'poc_2_name',
+    'poc_2_email',
+    'poc_2_phone_a',
+    'poc_2_phone_b',
+    'poc_2_cell',
+    'poc_2_screen',
+    'poc_2_notes'
+  ].map(name => ({ name }));
+}
+
+function zabbixInterfaceProfiles() {
+  return [
+    { name: 'agent', type: 1, defaultPort: '10050', payload: 'interfaces[]' },
+    { name: 'snmp', type: 2, defaultPort: '161', payload: 'interfaces[]' },
+    { name: 'ipmi', type: 3, defaultPort: '623', payload: 'interfaces[]' },
+    { name: 'jmx', type: 4, defaultPort: '12345', payload: 'interfaces[]' }
+  ];
+}
+
+function zabbixHostStatuses() {
+  return [
+    { status: 0, name: 'monitored' },
+    { status: 1, name: 'unmonitored' }
+  ];
+}
+
+function zabbixTlsPskModes() {
+  return [
+    { name: 'none', tls_connect: 1, tls_accept: 1 },
+    { name: 'psk', tls_connect: 2, tls_accept: 2 },
+    { name: 'certificate', tls_connect: 4, tls_accept: 4 }
+  ];
 }
 
 function normalizeCmdbuildList(result) {
@@ -2056,7 +2498,14 @@ function renderSimple(template = '', model) {
     .replaceAll('<#= Model.ClassName #>', model.ClassName ?? '')
     .replaceAll('<#= Model.EntityId #>', model.EntityId ?? '')
     .replaceAll('<#= Model.Code ?? Model.EntityId #>', model.Code ?? model.EntityId ?? '')
-    .replaceAll('<#= Model.Code #>', model.Code ?? '');
+    .replaceAll('<#= Model.Code #>', model.Code ?? '')
+    .replaceAll('<#= Model.Host #>', model.Host ?? '')
+    .replaceAll('<#= Model.VisibleName #>', model.VisibleName ?? '')
+    .replaceAll('<#= Model.IpAddress #>', model.IpAddress ?? '')
+    .replaceAll('<#= Model.OperatingSystem #>', model.OperatingSystem ?? '')
+    .replaceAll('<#= Model.ZabbixTag #>', model.ZabbixTag ?? '')
+    .replaceAll('<#= Model.EventType #>', model.EventType ?? '')
+    .replace(/<#=\s*Model\.Field\(["']([^"']+)["']\)\s*#>/g, (_, name) => readSourceField(model.Fields ?? {}, name) ?? '');
 }
 
 function compileRuleRegex(pattern) {
@@ -2365,6 +2814,10 @@ function preferredSamlBindingLocation(services) {
 
 function equalsIgnoreCase(left, right) {
   return String(left ?? '').toLowerCase() === String(right ?? '').toLowerCase();
+}
+
+function normalizeToken(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function clampInt(value, fallback, min, max) {

@@ -19,7 +19,14 @@ Run .NET commands through the repository wrapper:
 - `zabbixrequests2api`: reads Zabbix JSON-RPC requests from Kafka, validates them, calls Zabbix API, and publishes responses.
 - `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, rules upload/dry-run, SAML2 IdP login/settings, and CMDBuild/Zabbix catalog sync.
 
-Service settings live in `src/cmdbwebhooks2kafka/appsettings.json`.
+Dev HTTP ports:
+
+- `cmdbwebhooks2kafka`: `http://localhost:5080`, bind `0.0.0.0:5080` so CMDBuild in Docker can call `http://192.168.202.100:5080/webhooks/cmdbuild`.
+- `cmdbkafka2zabbix`: `http://localhost:5081`.
+- `zabbixrequests2api`: `http://localhost:5082`.
+- `monitoring-ui-api`: `http://localhost:5090`.
+
+Service settings live in each service `appsettings.json` / `appsettings.Development.json`.
 For a container running in Docker network `cmdbuild_default`, override Kafka with:
 
 ```bash
@@ -44,7 +51,9 @@ dotnet --info
 
 ```bash
 ./scripts/test-configs.sh
-./scripts/dotnet build cmdb2monitoring.slnx
+./scripts/dotnet build src/cmdbwebhooks2kafka/cmdbwebhooks2kafka.csproj
+./scripts/dotnet build src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj
+./scripts/dotnet build src/zabbixrequests2api/zabbixrequests2api.csproj
 ```
 
 Run the frontend slice:
