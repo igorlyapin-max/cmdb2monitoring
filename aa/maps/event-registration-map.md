@@ -7,8 +7,8 @@
 | EV-003 | IF-001 | cmdbwebhooks2kafka | Ошибка JSON | Warning/Error | route, exception |
 | EV-004 | IF-002 | cmdbwebhooks2kafka | Kafka publish success | Information | topic, partition, offset |
 | EV-005 | IF-007 | cmdbkafka2zabbix | Rules загружены | Information | rules path, schemaVersion, git commit |
-| EV-006 | IF-002, IF-003 | cmdbkafka2zabbix | Событие сконвертировано | Information | eventType, entityId, host |
-| EV-007 | IF-002 | cmdbkafka2zabbix | Событие пропущено | Information/Warning | entityId, skipReason |
+| EV-006 | IF-002, IF-003 | cmdbkafka2zabbix | Событие сконвертировано | Information | eventType, entityId, host, hostProfile, publishedCount |
+| EV-007 | IF-002 | cmdbkafka2zabbix | Событие пропущено | Information/Warning | entityId, hostProfile, skipReason |
 | EV-008 | IF-003, IF-004 | zabbixrequests2api | Validation error | Warning | method, entityId, errorCode |
 | EV-009 | IF-004 | zabbixrequests2api | Zabbix API call | Information/Error | method, requestId, status |
 | EV-010 | IF-005 | zabbixrequests2api | Response опубликован | Information | topic, partition, offset, success |

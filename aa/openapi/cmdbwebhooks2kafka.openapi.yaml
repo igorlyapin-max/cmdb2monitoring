@@ -76,6 +76,14 @@ components:
           type: string
         ip_address:
           type: string
+        management_ip:
+          type: string
+          description: Дополнительный management/OOB IP для hostProfiles или второго Zabbix interface.
+        dns_name:
+          type: string
+        management_dns:
+          type: string
+          description: Дополнительное management/OOB DNS-имя для hostProfiles или второго Zabbix interface.
         description:
           type: string
         OS:

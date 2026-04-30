@@ -43,6 +43,7 @@ public sealed class ZabbixRequestReader
             RequestId = ReadScalar(id),
             EntityId = key,
             Host = hostOverride ?? ReadHost(method, parameters) ?? ReadString(metadata, "host"),
+            HostProfileName = ReadString(metadata, "hostProfile"),
             FallbackForMethod = ReadString(metadata, "fallbackForMethod"),
             FallbackUpdateParams = fallbackUpdateParams
         };

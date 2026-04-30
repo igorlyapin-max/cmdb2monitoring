@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CmdbKafka2Zabbix.Conversion;
+using CmdbKafka2Zabbix.Rules;
+using Microsoft.Extensions.Options;
 
 var repositoryRoot = args.Length > 0
     ? Path.GetFullPath(args[0])
@@ -36,6 +39,7 @@ foreach (var service in services)
 ValidateTopicChain(configs, "base", errors);
 ValidateTopicChain(configs, "development", errors);
 ValidateRulesFile(repositoryRoot, errors);
+await ValidateRulesT4Rendering(repositoryRoot, errors);
 ValidateArchitectureArtifacts(repositoryRoot, errors);
 
 foreach (var warning in warnings)
@@ -330,12 +334,151 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
     RequireArray(rules, "t4Templates:hostCreateJsonRpcRequestLines", "rules", errors);
     RequireArray(rules, "t4Templates:hostUpdateJsonRpcRequestLines", "rules", errors);
     RequireArray(rules, "t4Templates:hostDeleteJsonRpcRequestLines", "rules", errors);
+    RequireArray(rules, "hostProfiles", "rules", errors);
+    RequireObject(rules, "source:fields:managementIpAddress", "rules", errors);
+    RequireObject(rules, "source:fields:managementDnsName", "rules", errors);
+
+    var hostProfiles = GetArray(rules, "hostProfiles");
+    if (hostProfiles.Count == 0)
+    {
+        errors.Add("Rules file must contain at least one hostProfiles entry.");
+    }
+
+    foreach (var profile in hostProfiles.OfType<JsonObject>())
+    {
+        if (string.IsNullOrWhiteSpace(GetString(profile, "name")))
+        {
+            errors.Add("Each hostProfiles entry must contain name.");
+        }
+
+        RequireArray(profile, "interfaces", $"hostProfile:{GetString(profile, "name") ?? "<unknown>"}", errors);
+    }
+
+    var createTemplate = string.Join('\n', GetArray(rules, "t4Templates:hostCreateJsonRpcRequestLines").Select(item => item?.GetValue<string>() ?? string.Empty));
+    var updateTemplate = string.Join('\n', GetArray(rules, "t4Templates:hostUpdateJsonRpcRequestLines").Select(item => item?.GetValue<string>() ?? string.Empty));
+    foreach (var template in new[] { createTemplate, updateTemplate })
+    {
+        if (!template.Contains("Model.Interfaces", StringComparison.Ordinal))
+        {
+            errors.Add("host.create and host.update T4 templates must render Model.Interfaces.");
+        }
+    }
+
     var hostGetTemplate = string.Join('\n', GetArray(rules, "t4Templates:hostGetByHostJsonRpcRequestLines").Select(item => item?.GetValue<string>() ?? string.Empty));
-    foreach (var marker in new[] { "cmdb2monitoring", "fallbackForMethod", "fallbackUpdateParams", "selectInterfaces" })
+    foreach (var marker in new[] { "cmdb2monitoring", "hostProfile", "fallbackForMethod", "fallbackUpdateParams", "selectInterfaces", "Model.Interfaces" })
     {
         if (!hostGetTemplate.Contains(marker, StringComparison.Ordinal))
         {
             errors.Add($"hostGetByHostJsonRpcRequestLines must include '{marker}' for update/delete fallback.");
+        }
+    }
+}
+
+static async Task ValidateRulesT4Rendering(string repositoryRoot, List<string> errors)
+{
+    var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
+    ConversionRulesDocument? rules;
+    try
+    {
+        rules = JsonSerializer.Deserialize<ConversionRulesDocument>(
+            File.ReadAllText(rulesPath),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            });
+    }
+    catch (Exception ex)
+    {
+        errors.Add($"Rules T4 validation cannot read rules document: {ex.Message}");
+        return;
+    }
+
+    if (rules is null)
+    {
+        errors.Add("Rules T4 validation cannot read rules document.");
+        return;
+    }
+
+    var renderer = new T4TemplateRenderer(Options.Create(new ConversionRulesOptions
+    {
+        AddDefaultDirectives = true
+    }));
+    var model = new ZabbixHostCreateModel
+    {
+        Host = "cmdb-server-s1",
+        VisibleName = "Server s1",
+        HostProfileName = "main",
+        ClassName = "Server",
+        EntityId = "1001",
+        Code = "s1",
+        IpAddress = "192.168.202.2",
+        DnsName = "s1.example.local",
+        ZabbixHostId = "12345",
+        OperatingSystem = "Windows server",
+        ZabbixTag = "tag1",
+        EventType = "update",
+        CurrentMethod = "host.update",
+        FallbackForMethod = "host.update",
+        SourceFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["entityId"] = "1001",
+            ["code"] = "s1",
+            ["className"] = "Server",
+            ["ipAddress"] = "192.168.202.2",
+            ["managementIpAddress"] = "192.168.202.102",
+            ["hostProfile"] = "main"
+        },
+        Status = 0,
+        InventoryMode = 0,
+        Interface = new ZabbixInterfaceModel
+        {
+            Type = 1,
+            Main = 1,
+            UseIp = 1,
+            Ip = "192.168.202.2",
+            Port = "10050"
+        },
+        Interfaces =
+        [
+            new ZabbixInterfaceModel
+            {
+                Type = 1,
+                Main = 1,
+                UseIp = 1,
+                Ip = "192.168.202.2",
+                Port = "10050"
+            },
+            new ZabbixInterfaceModel
+            {
+                Type = 2,
+                Main = 1,
+                UseIp = 1,
+                Ip = "192.168.202.102",
+                Port = "161"
+            }
+        ],
+        Groups = [new ZabbixGroupModel("Linux servers", "2")],
+        Templates = [new ZabbixTemplateModel("ICMP Ping", "10564")],
+        Tags = [new ZabbixTagModel("cmdb.hostProfile", "main")],
+        RequestId = 1001
+    };
+
+    foreach (var (name, lines) in new Dictionary<string, string[]>
+    {
+        ["hostCreateJsonRpcRequestLines"] = rules.T4Templates.HostCreateJsonRpcRequestLines,
+        ["hostUpdateJsonRpcRequestLines"] = rules.T4Templates.HostUpdateJsonRpcRequestLines,
+        ["hostDeleteJsonRpcRequestLines"] = rules.T4Templates.HostDeleteJsonRpcRequestLines,
+        ["hostGetByHostJsonRpcRequestLines"] = rules.T4Templates.HostGetByHostJsonRpcRequestLines
+    })
+    {
+        try
+        {
+            var rendered = await renderer.RenderAsync(lines, model, CancellationToken.None);
+            using var _ = JsonDocument.Parse(rendered);
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"Rules T4 template '{name}' failed to render valid JSON: {ex.Message}");
         }
     }
 }
@@ -451,6 +594,14 @@ static void RequireArray(JsonObject config, string path, string context, List<st
     if (GetArray(config, path).Count == 0)
     {
         errors.Add($"{context} {path} must be a non-empty array.");
+    }
+}
+
+static void RequireObject(JsonObject config, string path, string context, List<string> errors)
+{
+    if (GetNode(config, path) is not JsonObject)
+    {
+        errors.Add($"{context} {path} must be an object.");
     }
 }
 

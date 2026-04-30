@@ -6,6 +6,11 @@
     <AssemblyName>configvalidation</AssemblyName>
     <RootNamespace>ConfigValidation</RootNamespace>
     <Nullable>enable</Nullable>
+    <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj" />
+  </ItemGroup>
 
 </Project>

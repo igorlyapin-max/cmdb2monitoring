@@ -26,7 +26,7 @@ flowchart TD
 
     subgraph subprocesses[Повторно используемые подпроцессы]
         sp1[SP-001 webhook auth + normalize]
-        sp2[SP-002 rules + regex + T4 conversion]
+        sp2[SP-002 rules + hostProfiles + regex + T4 conversion]
         sp3[SP-003 Zabbix payload validation]
         sp4[SP-004 host.get fallback]
         sp5[SP-005 JSON-RPC + response + state]

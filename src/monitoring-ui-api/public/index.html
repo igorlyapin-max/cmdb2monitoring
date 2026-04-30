@@ -438,9 +438,11 @@
                   <li>Режим редактирования меняет draft JSON текущей сессии: можно выбрать CMDBuild class/class attribute field, структуру конвертации, Zabbix object/payload, priority и regex.</li>
                   <li>Действие "Удаление правила" показывает rules текущего draft JSON, удаляет отмеченные правила после подтверждения и оставляет классы/class attribute fields на месте.</li>
                   <li>Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
-                  <li>Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules.</li>
+                  <li>Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или <code>hostProfiles[].interfaces</code>.</li>
                   <li>Повторное нажатие на выбранный элемент снимает выделение.</li>
                   <li>Interface address rules выбирают, чем заполнить Zabbix interface: <code>ipAddress</code> дает <code>useip=1</code>, <code>dnsName</code> дает <code>useip=0</code>.</li>
+                  <li>Host profiles описывают два режима: несколько <code>interfaces[]</code> внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.</li>
+                  <li>Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а <code>valueField</code> указывает, какой CMDB атрибут станет IP или DNS.</li>
                   <li>Для lookup выделяется только конкретная связка класса, lookup и значения, например <code>Notebook.zabbixTag.tag1</code>.</li>
                   <li>Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
                 </ul>

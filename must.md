@@ -76,6 +76,8 @@
 - Текущий файл правил: `rules/cmdbuild-to-zabbix-host-create.json`.
 - Regex используется не только для валидации, но и для выбора groups/templates/interfaces/tags.
 - Rules должны поддерживать расширенные Zabbix host параметры без правки кода: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps.
+- Rules должны поддерживать `hostProfiles[]`: один CMDB object может формировать один Zabbix host с несколькими `interfaces[]` или несколько Zabbix hosts через fan-out.
+- Новые T4-шаблоны должны использовать `Model.Interfaces`; `Model.Interface` допускается только как обратная совместимость с первым интерфейсом.
 - Итоговый JSON-RPC payload формируется T4-шаблонами из rules-файла.
 - При изменении rules-файла нужно прогнать:
   - `./scripts/test-configs.sh`;

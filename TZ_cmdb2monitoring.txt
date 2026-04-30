@@ -516,6 +516,36 @@ Regex используется не только для валидации, но
 Для групп и шаблонов допускается объединение нескольких совпавших правил с дедупликацией по groupid/templateid.
 Для интерфейса выбирается первое совпавшее правило, иначе fallback.
 
+13.6.1. Host profiles и несколько интерфейсов
+
+Rules-файл должен поддерживать два режима обработки объектов с несколькими адресами:
+
+1. Один CMDB object -> один Zabbix host с несколькими interfaces[].
+   Применяется, если основной IP и management IP относятся к одному объекту мониторинга.
+   В этом случае несколько элементов описываются внутри одного hostProfiles[].interfaces.
+
+2. Один CMDB object -> несколько Zabbix hosts.
+   Применяется, если основной сервер и management-контроллер должны иметь разные host names, templates, groups, tags или lifecycle.
+   В этом случае rules содержит несколько hostProfiles[], например main и management.
+
+Host profile должен содержать:
+- name;
+- when condition;
+- hostNameTemplate;
+- visibleNameTemplate;
+- interfaces[] с interfaceProfileRef, mode и valueField.
+
+interfaceProfileRef выбирает тип мониторинга agent/SNMP/IPMI/JMX из defaults.interfaceProfiles.
+mode=ip заполняет interfaces[].ip и useip=1.
+mode=dns заполняет interfaces[].dns и useip=0.
+valueField ссылается на нормализованное поле из source.fields, например ipAddress, dnsName, managementIpAddress или managementDnsName.
+
+При нескольких hostProfiles микросервис cmdbkafka2zabbix публикует несколько сообщений в zabbix.host.requests.* для одного входного CMDB event.
+State входного offset должен записываться только после публикации всех сообщений по этому событию.
+
+Для update/delete без zabbix_hostid каждый host profile должен проходить через fallback host.get по своему вычисленному host name.
+В request metadata должно передаваться hostProfile, чтобы логи и responses позволяли понять, какой profile обрабатывался.
+
 Текущие правила выбора по OS:
 - Linux или lookup id 105146 -> группа Linux servers, шаблон Linux by Zabbix agent, tag cmdb.os=Linux;
 - Windows или lookup id 105130 -> группа Discovered hosts, шаблон Windows by Zabbix agent, tag cmdb.os=Windows;
@@ -557,11 +587,13 @@ t4Templates.hostCreateJsonRpcRequestLines
 - method=host.create;
 - params.host;
 - params.name;
-- params.interfaces;
+- params.interfaces из Model.Interfaces;
 - params.groups;
 - params.templates;
 - params.tags;
 - id.
+
+Для обратной совместимости Model.Interface остается первым элементом Model.Interfaces, но новые шаблоны должны использовать Model.Interfaces.
 
 13.8. State-файл обработки
 
@@ -1252,7 +1284,7 @@ Model.Field("fieldName")
 - undo/redo хранит историю текущей UI-сессии;
 - `Save file as` сохраняет draft rules JSON и второй текстовый файл для CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
 - второй webhook-файл должен явно помечать удаления и не смешивать неизмененные правила с изменениями текущей сессии;
-- перед сохранением Mapping выполняет проверку: каждый мониторинговый класс из `source.entityClasses` или `className` regex rules должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules`;
+- перед сохранением Mapping выполняет проверку: каждый мониторинговый класс из `source.entityClasses` или `className` regex rules должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
 - имена классов нормализуются: `NetworkDevice` и `Network device` считаются одним классом, UI предпочитает отображаемое имя из CMDBuild catalog;
 - Validate rules mapping: без интерактивной подсветки цепочек, только выявление отсутствующих элементов источников;
 - checkbox над отсутствующими элементами;

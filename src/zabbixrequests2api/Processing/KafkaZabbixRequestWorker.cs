@@ -159,9 +159,10 @@ public sealed class KafkaZabbixRequestWorker(
         await PublishStateAndCommitAsync(consumed, consumer, result, cancellationToken);
 
         logger.LogInformation(
-            "Processed Zabbix request {Method} for entity {EntityId}, success {Success}, error {ErrorCode}",
+            "Processed Zabbix request {Method} for entity {EntityId}, profile {HostProfileName}, success {Success}, error {ErrorCode}",
             result.Method,
             result.EntityId ?? "<unknown>",
+            result.HostProfileName ?? "<default>",
             result.Success,
             result.ErrorCode ?? "<none>");
     }
@@ -323,8 +324,7 @@ public sealed class KafkaZabbixRequestWorker(
 
         var updateRequestJson = BuildHostUpdateRequestJson(
             lookupRequest,
-            hostInfo.HostId,
-            hostInfo.InterfaceId);
+            hostInfo);
         var updateRequest = requestReader.Read(lookupRequest.EntityId, updateRequestJson, lookupRequest.Host);
         var updateValidation = await requestValidator.ValidateAsync(updateRequest, cancellationToken);
         if (!updateValidation.IsValid)
@@ -383,37 +383,45 @@ public sealed class KafkaZabbixRequestWorker(
                     continue;
                 }
 
-                return new ZabbixHostLookupInfo(parsedHostId, ReadFirstInterfaceId(host));
+                return new ZabbixHostLookupInfo(parsedHostId, ReadInterfaces(host));
             }
         }
 
         return null;
     }
 
-    private static string? ReadFirstInterfaceId(JsonElement host)
+    private static ZabbixInterfaceLookupInfo[] ReadInterfaces(JsonElement host)
     {
         if (!host.TryGetProperty("interfaces", out var interfaces)
             || interfaces.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return [];
         }
 
+        var result = new List<ZabbixInterfaceLookupInfo>();
         foreach (var zabbixInterface in interfaces.EnumerateArray())
         {
-            if (zabbixInterface.ValueKind == JsonValueKind.Object
-                && zabbixInterface.TryGetProperty("interfaceid", out var interfaceId))
+            if (zabbixInterface.ValueKind != JsonValueKind.Object)
             {
-                return ReadScalar(interfaceId);
+                continue;
             }
+
+            result.Add(new ZabbixInterfaceLookupInfo(
+                InterfaceId: ReadString(zabbixInterface, "interfaceid"),
+                Type: ReadString(zabbixInterface, "type"),
+                Main: ReadString(zabbixInterface, "main"),
+                UseIp: ReadString(zabbixInterface, "useip"),
+                Ip: ReadString(zabbixInterface, "ip"),
+                Dns: ReadString(zabbixInterface, "dns"),
+                Port: ReadString(zabbixInterface, "port")));
         }
 
-        return null;
+        return result.ToArray();
     }
 
     private static string BuildHostUpdateRequestJson(
         ZabbixRequestDocument lookupRequest,
-        string hostId,
-        string? interfaceId)
+        ZabbixHostLookupInfo hostInfo)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -423,7 +431,7 @@ public sealed class KafkaZabbixRequestWorker(
             writer.WriteString("method", "host.update");
             writer.WritePropertyName("params");
             writer.WriteStartObject();
-            writer.WriteString("hostid", hostId);
+            writer.WriteString("hostid", hostInfo.HostId);
             foreach (var property in lookupRequest.FallbackUpdateParams.EnumerateObject())
             {
                 if (string.Equals(property.Name, "hostid", StringComparison.OrdinalIgnoreCase))
@@ -434,7 +442,7 @@ public sealed class KafkaZabbixRequestWorker(
                 if (string.Equals(property.Name, "interfaces", StringComparison.OrdinalIgnoreCase)
                     && property.Value.ValueKind == JsonValueKind.Array)
                 {
-                    WriteInterfacesWithExistingId(writer, property.Value, interfaceId);
+                    WriteInterfacesWithExistingIds(writer, property.Value, hostInfo.Interfaces);
                     continue;
                 }
 
@@ -450,10 +458,10 @@ public sealed class KafkaZabbixRequestWorker(
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    private static void WriteInterfacesWithExistingId(
+    private static void WriteInterfacesWithExistingIds(
         Utf8JsonWriter writer,
         JsonElement interfaces,
-        string? interfaceId)
+        IReadOnlyList<ZabbixInterfaceLookupInfo> existingInterfaces)
     {
         writer.WritePropertyName("interfaces");
         writer.WriteStartArray();
@@ -469,7 +477,8 @@ public sealed class KafkaZabbixRequestWorker(
             }
 
             writer.WriteStartObject();
-            if (index == 0 && !string.IsNullOrWhiteSpace(interfaceId))
+            var interfaceId = FindMatchingInterfaceId(zabbixInterface, existingInterfaces, index);
+            if (!string.IsNullOrWhiteSpace(interfaceId))
             {
                 writer.WriteString("interfaceid", interfaceId);
             }
@@ -491,6 +500,46 @@ public sealed class KafkaZabbixRequestWorker(
         writer.WriteEndArray();
     }
 
+    private static string? FindMatchingInterfaceId(
+        JsonElement zabbixInterface,
+        IReadOnlyList<ZabbixInterfaceLookupInfo> existingInterfaces,
+        int index)
+    {
+        var type = ReadString(zabbixInterface, "type");
+        var useIp = ReadString(zabbixInterface, "useip");
+        var ip = ReadString(zabbixInterface, "ip");
+        var dns = ReadString(zabbixInterface, "dns");
+        var port = ReadString(zabbixInterface, "port");
+
+        var exact = existingInterfaces.FirstOrDefault(item =>
+            SameScalar(item.Type, type)
+            && SameScalar(item.UseIp, useIp)
+            && SameScalar(item.Ip, ip)
+            && SameScalar(item.Dns, dns)
+            && SameScalar(item.Port, port));
+        if (!string.IsNullOrWhiteSpace(exact?.InterfaceId))
+        {
+            return exact.InterfaceId;
+        }
+
+        var sameAddress = existingInterfaces.FirstOrDefault(item =>
+            SameScalar(item.Type, type)
+            && SameScalar(item.Port, port)
+            && (!string.IsNullOrWhiteSpace(ip) && SameScalar(item.Ip, ip)
+                || !string.IsNullOrWhiteSpace(dns) && SameScalar(item.Dns, dns)));
+        if (!string.IsNullOrWhiteSpace(sameAddress?.InterfaceId))
+        {
+            return sameAddress.InterfaceId;
+        }
+
+        return index == 0 ? existingInterfaces.FirstOrDefault()?.InterfaceId : null;
+    }
+
+    private static bool SameScalar(string? left, string? right)
+    {
+        return string.Equals(left ?? string.Empty, right ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static object ResolveJsonRpcId(ZabbixRequestDocument request)
     {
         return request.Id.ValueKind switch
@@ -499,6 +548,13 @@ public sealed class KafkaZabbixRequestWorker(
             JsonValueKind.String => request.Id.GetString() ?? request.RequestId ?? "1",
             _ => request.RequestId ?? "1"
         };
+    }
+
+    private static string? ReadString(JsonElement element, string propertyName)
+    {
+        return element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out var value)
+            ? ReadScalar(value)
+            : null;
     }
 
     private static string? ReadScalar(JsonElement value)
@@ -513,7 +569,16 @@ public sealed class KafkaZabbixRequestWorker(
         };
     }
 
-    private sealed record ZabbixHostLookupInfo(string HostId, string? InterfaceId);
+    private sealed record ZabbixHostLookupInfo(string HostId, ZabbixInterfaceLookupInfo[] Interfaces);
+
+    private sealed record ZabbixInterfaceLookupInfo(
+        string? InterfaceId,
+        string? Type,
+        string? Main,
+        string? UseIp,
+        string? Ip,
+        string? Dns,
+        string? Port);
 
     private async Task PublishStateAndCommitAsync(
         ConsumeResult<string, string> consumed,

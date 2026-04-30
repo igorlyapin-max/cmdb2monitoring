@@ -62,12 +62,12 @@
 - `method`;
 - `params`;
 - `id`;
-- optional metadata `cmdb2monitoring` для fallback-сценариев update/delete.
+- optional metadata `cmdb2monitoring` для внутренних сценариев и fallback update/delete; содержит `eventType`, `entityId`, `host`, `hostProfile`.
 
 `params` для `host.create/update` может включать:
 - `host`, `name`, `status`;
 - `inventory_mode`, `inventory`;
-- `interfaces`, `groups`, `templates`, `tags`;
+- `interfaces`, `groups`, `templates`, `tags`; `interfaces` может содержать несколько элементов для одного Zabbix host;
 - `macros`;
 - `proxyid`, `proxy_groupid`;
 - TLS/PSK поля `tls_connect`, `tls_accept`, `tls_psk_identity`, `tls_psk`.

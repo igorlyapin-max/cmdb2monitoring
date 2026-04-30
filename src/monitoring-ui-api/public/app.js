@@ -172,7 +172,7 @@ const zabbixExtensionDefinitions = [
     lazyCatalogPath: 'interface-profiles',
     label: item => item.name,
     meta: item => `type ${item.type ?? '-'} | port ${item.defaultPort ?? item.port ?? '-'}`,
-    help: 'Interface profile описывает тип интерфейса мониторинга: agent, SNMP, IPMI или JMX. Это не отдельный Zabbix object, а управляемый профиль для interfaces[].'
+    help: 'Interface profile описывает тип интерфейса мониторинга: agent, SNMP, IPMI или JMX. Это не отдельный Zabbix object, а управляемый профиль для interfaces[]. В hostProfiles один profile может использовать несколько interface profiles для одного host или разные interface profiles для fan-out hosts.'
   },
   {
     title: 'Host status',
@@ -223,7 +223,7 @@ const viewDescriptions = {
   dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
   events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
   rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и upload нового файла правил.',
-  mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Template rules выбирают templates, Tag rules формируют tags; одно и то же class attribute field, например zabbixTag, может использоваться как условие в обоих блоках, но результат у них разный.',
+  mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags.',
   validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
   zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
   cmdbuild: 'Показывает классы, атрибуты и lookup-справочники, загруженные из CMDBuild.',
@@ -238,7 +238,9 @@ const defaultPayload = {
   id: '109921',
   code: 's1',
   ip_address: '1.1.1.2',
+  management_ip: '1.1.1.102',
   dns_name: 's1.example.local',
+  management_dns: 's1-mgmt.example.local',
   description: 's1',
   os: '105146',
   zabbixTag: '106852'
@@ -1954,6 +1956,7 @@ function diffRuleCollections(leftRules, rightRules, action) {
 function mappingRuleCollections() {
   return [
     { key: 'eventRoutingRules', label: 'Event routing', type: 'eventRouting' },
+    { key: 'hostProfiles', label: 'Host profiles', type: 'hostProfiles' },
     { key: 'groupSelectionRules', label: 'Group rules', type: 'hostGroups' },
     { key: 'templateSelectionRules', label: 'Template rules', type: 'templates' },
     { key: 'templateGroupSelectionRules', label: 'Template group rules', type: 'templateGroups' },
@@ -2036,10 +2039,10 @@ function validateMappingDraftBeforeSave(rules, cmdbuildCatalog) {
   const hasInterfaceUseIp = expectedFields.includes('interfaces[].useip');
   const hasInterfaceIp = expectedFields.includes('interfaces[].ip');
   const hasInterfaceDns = expectedFields.includes('interfaces[].dns');
-  const addressRules = rules.interfaceAddressRules ?? [];
+  const addressRules = allInterfaceAddressRuleSources(rules);
 
   if (addressRules.length === 0) {
-    issues.push('Не настроен блок interfaceAddressRules: Zabbix host не получит обязательный interface address.');
+    issues.push('Не настроены interfaceAddressRules или hostProfiles[].interfaces: Zabbix host не получит обязательный interface address.');
   }
   if (!hasInterfaceUseIp) {
     issues.push('В zabbix.expectedMonitoringFields отсутствует interfaces[].useip.');
@@ -2090,7 +2093,7 @@ function validateMappingDraftBeforeSave(rules, cmdbuildCatalog) {
 }
 
 function addressCandidatesForClass(rules, attributes) {
-  return (rules.interfaceAddressRules ?? []).flatMap(rule => {
+  return allInterfaceAddressRuleSources(rules).flatMap(rule => {
     const fieldKey = rule.valueField || rule.mode;
     if (!fieldKey) {
       return [];
@@ -2105,6 +2108,27 @@ function addressCandidatesForClass(rules, attributes) {
     const attribute = findCatalogAttributeForField(attributes, fieldRule, fieldKey);
     return attribute ? [{ mode, fieldKey, attribute, rule }] : [];
   });
+}
+
+function allInterfaceAddressRuleSources(rules) {
+  return [
+    ...(rules.interfaceAddressRules ?? []),
+    ...(rules.hostProfiles ?? []).flatMap(profile => {
+      const profileLevel = profile.valueField || profile.mode
+        ? [{
+          name: `${profile.name || 'profile'} address`,
+          mode: profile.mode,
+          valueField: profile.valueField
+        }]
+        : [];
+      const interfaceLevel = (profile.interfaces ?? []).map(item => ({
+        name: `${profile.name || 'profile'} / ${item.name || 'interface'}`,
+        mode: item.mode || profile.mode,
+        valueField: item.valueField || profile.valueField
+      }));
+      return [...profileLevel, ...interfaceLevel];
+    })
+  ].filter(rule => rule.valueField || rule.mode);
 }
 
 function interfaceAddressMode(rule, fieldKey) {
@@ -2707,6 +2731,7 @@ function renderValidateMappingRules(container, rules, cmdbuildCatalog, validatio
     });
   }));
 
+  appendValidationSection(container, 'Host profiles', (rules.hostProfiles ?? []).flatMap(profile => hostProfileMappingNodes(profile)));
   appendValidationSection(container, 'Group rules', (rules.groupSelectionRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'hostGroups', null, null, rules)));
   appendValidationSection(container, 'Template rules', (rules.templateSelectionRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'templates', null, null, rules)));
   appendValidationSection(container, 'Interface address rules', (rules.interfaceAddressRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'interfaceAddress', rule.valueField ?? rule.mode, null, rules)));
@@ -3202,6 +3227,7 @@ function renderMappingRules(container, rules, cmdbuildCatalog = null) {
     help: eventRoutingHelp(rule)
   })));
 
+  appendHostProfilesSection(container, rules);
   appendConversionRuleSection(container, 'Group rules', rules.groupSelectionRules ?? [], 'hostGroups', null, rules);
   appendConversionRuleSection(container, 'Template rules', rules.templateSelectionRules ?? [], 'templates', null, rules);
   appendConversionRuleSection(container, 'Template group rules', rules.templateGroupSelectionRules ?? [], 'templateGroups', null, rules);
@@ -3607,6 +3633,7 @@ function mappingSectionHelp(title) {
     'Entity classes': 'Список классов CMDBuild, события которых правила считают допустимыми. Можно добавлять или удалять имя класса в JSON правил только если такой класс уже есть в CMDBuild и webhook передает его события.',
     'Class attribute fields': 'Conversion fields: поле слева является нормализованным Model-полем конвертера, source справа указывает атрибут или ключ webhook CMDBuild. Без правки микросервиса безопасно менять source, required и validationRegex для уже поддержанных Model-полей и реально существующих CMDBuild attributes.',
     'Event routing': 'Маршрутизация create/update/delete в JSON-RPC методы Zabbix и T4-шаблоны. Без правки микросервисов можно менять метод, templateName и fallbackTemplateName только в рамках уже поддержанных сценариев и существующих T4 templates.',
+    'Host profiles': 'Host profiles описывают fan-out: один CMDB object может дать один или несколько Zabbix hosts. Внутри profile задаются hostName/visibleName templates и interfaces. Если нужен один Zabbix host с несколькими IP, добавляйте несколько interfaces в один profile; если нужны отдельные hosts, добавляйте несколько profiles.',
     'Group rules': 'Правила выбора host groups по regex над class attribute fields. Обычно редактируются в JSON правил: priority, when.anyRegex/when.allRegex и ссылки на существующие Zabbix host groups. CMDBuild менять не нужно, если поля уже приходят в webhook.',
     'Template rules': 'Правила выбора Zabbix templates по regex над class attribute fields. В условии можно использовать lookup/class attribute field zabbixTag, если tag из CMDBuild должен влиять на выбор шаблона. Результатом Template rules должны оставаться только templates/templateRef; выбирать или назначать Zabbix tags в этом блоке нецелесообразно, для этого есть Tag rules.',
     'Interface address rules': 'Правила выбора адреса Zabbix interface. Можно выбирать IP или DNS через mode и valueField; valueField ссылается на нормализованное class attribute field, например ipAddress или dnsName.',
@@ -3654,7 +3681,21 @@ function eventRoutingHelp(rule) {
   return `Event routing для "${rule.eventType}" выбирает Zabbix method "${rule.method}" и T4 template "${rule.templateName}". Связанные поля берутся из requiredFields и из Model.* внутри T4 templates. Без правки микросервисов меняйте только существующие события, методы и шаблоны, которые уже поддержаны обработчиком.`;
 }
 
+function hostProfileHelp(profile) {
+  return `Host profile "${profile.name || 'default'}" задает один выходной Zabbix host для подходящего CMDB object. Несколько profiles создают несколько Kafka messages и несколько Zabbix hosts. Поля hostNameTemplate/visibleNameTemplate можно менять в rules; сами CMDB attributes должны уже приходить в webhook.`;
+}
+
+function hostProfileInterfaceHelp(profile, item) {
+  const valueField = item.valueField || profile.valueField || 'interfaceAddressRules';
+  const mode = item.mode || profile.mode || 'auto';
+  return `Interface "${item.name || valueField}" внутри host profile "${profile.name || 'default'}" добавляет элемент в Model.Interfaces и затем в Zabbix interfaces[]. mode=${mode}: ip заполняет interfaces[].ip/useip=1, dns заполняет interfaces[].dns/useip=0. Для одного Zabbix host с несколькими IP держите такие interfaces в одном profile; для отдельного management host используйте отдельный host profile.`;
+}
+
 function conversionRuleHelp(rule, type) {
+  if (type === 'hostProfiles') {
+    return hostProfileHelp(rule);
+  }
+
   if (type === 'templates') {
     return `Template rule "${rule.name}" выбирает Zabbix templates. Условия when.anyRegex/when.allRegex могут читать любой class attribute field, включая lookup zabbixTag, если значение tag должно влиять на выбор шаблона. Результатом должны быть templates/templateRef; назначать tags здесь не нужно и обычно вредно для читаемости правил.`;
   }
@@ -4380,6 +4421,9 @@ function ruleTokens(rule, type, rules = null) {
       ...sourceFieldTokens(rule.valueField)
     );
   }
+  if (type === 'hostProfiles') {
+    tokens.push(...hostProfileTokens(rule));
+  }
 
   if (rule.fallback) {
     tokens.push(`fallback:${type}`);
@@ -4388,11 +4432,35 @@ function ruleTokens(rule, type, rules = null) {
   return uniqueTokens(tokens);
 }
 
+function hostProfileTokens(profile) {
+  const profileName = profile.name || 'default';
+  const interfaceTokens = (profile.interfaces ?? []).flatMap(item => {
+    const interfaceProfile = item.interfaceProfileRef || item.interfaceRef || profile.interfaceProfileRef || profile.interfaceRef || '';
+    return [
+      `interface:${normalizeToken(interfaceProfile)}`,
+      `zbx-interfaceProfiles:${normalizeToken(interfaceProfile)}`,
+      ...sourceFieldTokens(item.valueField || profile.valueField),
+      ...conditionTokens(item.when),
+      ...conditionMatchTokens(item.when)
+    ];
+  });
+  return uniqueTokens([
+    `profile:${normalizeToken(profileName)}`,
+    'target:host',
+    'target:interfaces',
+    ...conditionTokens(profile.when),
+    ...conditionMatchTokens(profile.when),
+    ...templateStringTokens(profile.hostNameTemplate),
+    ...templateStringTokens(profile.visibleNameTemplate),
+    ...interfaceTokens
+  ]);
+}
+
 function targetTokensForRuleType(type) {
   if (type === 'hostGroups') {
     return ['target:groups'];
   }
-  if (type === 'interface' || type === 'interfaceAddress' || type === 'interfaceProfiles') {
+  if (type === 'interface' || type === 'interfaceAddress' || type === 'interfaceProfiles' || type === 'hostProfiles') {
     return ['target:interfaces'];
   }
   return [`target:${type}`];
@@ -4405,6 +4473,61 @@ function zabbixRuleItemTokens(type, item) {
   }
 
   return zabbixExtensionTokens(definition, item);
+}
+
+function appendHostProfilesSection(container, rules) {
+  const profiles = rules.hostProfiles ?? [];
+  const nodes = profiles.length > 0
+    ? profiles.flatMap(profile => hostProfileMappingNodes(profile))
+    : [emptyConversionBlockNode('Host profiles', 'hostProfiles')];
+  appendMappingSection(container, 'Host profiles', nodes, {
+    expanded: false,
+    status: profiles.length > 0 ? sectionStatusFromNodes(nodes) : 'warning',
+    help: mappingSectionHelp('Host profiles')
+  });
+}
+
+function hostProfileMappingNodes(profile) {
+  const profileName = profile.name || 'default';
+  return [
+    mappingNode({
+      label: profileName,
+      meta: `priority ${profile.priority ?? 1000}${profile.fallback ? ' | fallback' : ''}`,
+      tokens: hostProfileTokens(profile),
+      level: 1,
+      kind: 'rule',
+      help: hostProfileHelp(profile)
+    }),
+    ...conditionMappingNodes(profile, 'hostProfiles'),
+    ...((profile.interfaces ?? []).flatMap(item => hostProfileInterfaceMappingNodes(profile, item)))
+  ];
+}
+
+function hostProfileInterfaceMappingNodes(profile, item) {
+  const profileName = profile.name || 'default';
+  const interfaceProfile = item.interfaceProfileRef || item.interfaceRef || profile.interfaceProfileRef || profile.interfaceRef || 'selected interface';
+  const valueField = item.valueField || profile.valueField || '';
+  const tokens = uniqueTokens([
+    `profile:${normalizeToken(profileName)}`,
+    'target:interfaces',
+    `interface:${normalizeToken(interfaceProfile)}`,
+    `zbx-interfaceProfiles:${normalizeToken(interfaceProfile)}`,
+    ...sourceFieldTokens(valueField),
+    ...targetTokensForRuleType('hostProfiles'),
+    ...conditionTokens(item.when),
+    ...conditionMatchTokens(item.when)
+  ]);
+  return [
+    mappingNode({
+      label: item.name || interfaceProfile,
+      meta: `${item.mode || profile.mode || 'mode auto'} ${valueField ? `| ${valueField}` : ''}`,
+      tokens,
+      level: 2,
+      kind: 'rule',
+      help: hostProfileInterfaceHelp(profile, item)
+    }),
+    ...conditionMappingNodes(item, 'hostProfiles')
+  ];
 }
 
 function eventRoutingRuleTokens(rule, rules) {
@@ -4442,6 +4565,15 @@ function templateSourceFieldTokens(rules, templateNames) {
   }
 
   return [...fields].flatMap(field => sourceFieldTokens(field));
+}
+
+function templateStringTokens(template = '') {
+  return [
+    ...[...String(template).matchAll(/Model\.Field\(["']([^"']+)["']\)/g)].map(match => match[1]),
+    ...[...String(template).matchAll(/Model\.([A-Za-z0-9_]+)/g)]
+      .map(match => canonicalSourceField(match[1]))
+      .filter(field => field !== 'field')
+  ].flatMap(field => sourceFieldTokens(field));
 }
 
 function isKnownMappingSourceField(rules, field) {
@@ -4541,6 +4673,10 @@ function sourceFieldTargetTokens(fieldKey) {
     className: ['target:name', 'target:tags', 'target:groups', 'target:templates'],
     ipAddress: ['target:interfaces'],
     dnsName: ['target:interfaces'],
+    managementIpAddress: ['target:interfaces', 'target:host'],
+    managementDnsName: ['target:interfaces', 'target:host'],
+    hostProfile: ['target:host', 'target:interfaces', 'target:groups', 'target:templates', 'target:tags'],
+    outputProfile: ['target:host', 'target:interfaces', 'target:groups', 'target:templates', 'target:tags'],
     description: ['target:groups', 'target:templates', 'target:interfaces'],
     os: ['target:groups', 'target:templates', 'target:tags'],
     zabbixTag: ['target:tags'],
@@ -4732,8 +4868,20 @@ function canonicalSourceField(field) {
     class: 'className',
     ipaddress: 'ipAddress',
     ip_address: 'ipAddress',
+    managementipaddress: 'managementIpAddress',
+    management_ip: 'managementIpAddress',
+    mgmtip: 'managementIpAddress',
+    mgmt_ip: 'managementIpAddress',
+    oobip: 'managementIpAddress',
+    oob_ip: 'managementIpAddress',
     dnsname: 'dnsName',
     dns_name: 'dnsName',
+    managementdnsname: 'managementDnsName',
+    management_dns: 'managementDnsName',
+    mgmtdns: 'managementDnsName',
+    mgmt_dns: 'managementDnsName',
+    oobdns: 'managementDnsName',
+    oob_dns: 'managementDnsName',
     fqdn: 'dnsName',
     hostname: 'dnsName',
     hostdns: 'dnsName',
@@ -4744,7 +4892,9 @@ function canonicalSourceField(field) {
     zabbix_tag: 'zabbixTag',
     zabbixhostid: 'zabbixHostId',
     zabbix_hostid: 'zabbixHostId',
-    eventtype: 'eventType'
+    eventtype: 'eventType',
+    hostprofile: 'hostProfile',
+    outputprofile: 'outputProfile'
   }[normalized] ?? field;
 }
 

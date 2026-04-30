@@ -24,12 +24,7 @@ public sealed class ZabbixRequestPublisher(
         {
             Key = result.Key ?? result.EntityId ?? result.Host ?? result.EventType,
             Value = result.Value,
-            Headers = new Headers
-            {
-                { outputOptions.MethodHeaderName, Encoding.UTF8.GetBytes(result.Method) },
-                { outputOptions.EventTypeHeaderName, Encoding.UTF8.GetBytes(result.EventType) },
-                { outputOptions.EntityIdHeaderName, Encoding.UTF8.GetBytes(result.EntityId ?? string.Empty) }
-            }
+            Headers = BuildHeaders(result, outputOptions)
         }, cancellationToken);
 
         logger.LogInformation(
@@ -41,5 +36,22 @@ public sealed class ZabbixRequestPublisher(
             deliveryResult.Offset.Value);
 
         return deliveryResult;
+    }
+
+    private static Headers BuildHeaders(ZabbixConversionResult result, KafkaOutputOptions options)
+    {
+        var headers = new Headers
+        {
+            { options.MethodHeaderName, Encoding.UTF8.GetBytes(result.Method) },
+            { options.EventTypeHeaderName, Encoding.UTF8.GetBytes(result.EventType) },
+            { options.EntityIdHeaderName, Encoding.UTF8.GetBytes(result.EntityId ?? string.Empty) }
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.ProfileHeaderName))
+        {
+            headers.Add(options.ProfileHeaderName, Encoding.UTF8.GetBytes(result.ProfileName ?? string.Empty));
+        }
+
+        return headers;
     }
 }

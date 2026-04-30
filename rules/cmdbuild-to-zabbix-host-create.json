@@ -38,8 +38,20 @@
           "ip_address",
           "ip",
           "IPAddress",
-          "ipAddress",
-          "management_ip"
+          "ipAddress"
+        ],
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "managementIpAddress": {
+        "source": "management_ip",
+        "sources": [
+          "management_ip",
+          "mgmt_ip",
+          "oob_ip",
+          "ilo_ip",
+          "idrac_ip",
+          "managementIpAddress"
         ],
         "required": false,
         "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
@@ -52,6 +64,19 @@
           "host_dns",
           "hostname",
           "dnsName"
+        ],
+        "required": false,
+        "validationRegex": "^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
+      },
+      "managementDnsName": {
+        "source": "management_dns",
+        "sources": [
+          "management_dns",
+          "mgmt_dns",
+          "oob_dns",
+          "ilo_dns",
+          "idrac_dns",
+          "managementDnsName"
         ],
         "required": false,
         "validationRegex": "^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
@@ -353,10 +378,111 @@
       "publish": true
     }
   ],
+  "hostProfiles": [
+    {
+      "name": "main",
+      "priority": 10,
+      "when": {
+        "always": true
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "ipAddress",
+          "when": {
+            "fieldExists": "ipAddress"
+          }
+        },
+        {
+          "name": "main-agent-dns",
+          "priority": 20,
+          "fallback": true,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "dnsName",
+          "when": {
+            "fieldExists": "dnsName"
+          }
+        },
+        {
+          "name": "management-snmp-ip",
+          "priority": 30,
+          "interfaceProfileRef": "snmp",
+          "mode": "ip",
+          "valueField": "managementIpAddress",
+          "when": {
+            "fieldExists": "managementIpAddress"
+          }
+        },
+        {
+          "name": "management-snmp-dns",
+          "priority": 40,
+          "fallback": true,
+          "interfaceProfileRef": "snmp",
+          "mode": "dns",
+          "valueField": "managementDnsName",
+          "when": {
+            "fieldExists": "managementDnsName"
+          }
+        }
+      ]
+    },
+    {
+      "name": "management",
+      "priority": 20,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "managementIpAddress",
+            "pattern": ".+"
+          },
+          {
+            "field": "managementDnsName",
+            "pattern": ".+"
+          },
+          {
+            "field": "eventType",
+            "pattern": "(?i)^delete$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-mgmt",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> management",
+      "interfaces": [
+        {
+          "name": "management-host-snmp-ip",
+          "priority": 10,
+          "interfaceProfileRef": "snmp",
+          "mode": "ip",
+          "valueField": "managementIpAddress",
+          "when": {
+            "fieldExists": "managementIpAddress"
+          }
+        },
+        {
+          "name": "management-host-snmp-dns",
+          "priority": 20,
+          "fallback": true,
+          "interfaceProfileRef": "snmp",
+          "mode": "dns",
+          "valueField": "managementDnsName",
+          "when": {
+            "fieldExists": "managementDnsName"
+          }
+        }
+      ]
+    }
+  ],
   "selectionPolicy": {
     "ruleOrder": "ascendingPriority",
     "groupSelection": "mergeAllMatchesOrFallback",
     "templateSelection": "mergeAllMatchesOrFallback",
+    "hostProfileSelection": "allMatchedProfiles",
     "interfaceSelection": "firstMatchOrFallback",
     "tagSelection": "mergeDefaultsAndMatches",
     "deduplicateBy": {
@@ -366,6 +492,24 @@
     }
   },
   "groupSelectionRules": [
+    {
+      "name": "management-profile-hosts",
+      "priority": 5,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^management$"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Discovered hosts",
+          "groupid": "5"
+        }
+      ]
+    },
     {
       "name": "databases",
       "priority": 10,
@@ -698,6 +842,28 @@
       ]
     },
     {
+      "name": "management-profile-snmp",
+      "priority": 40,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^management$"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Generic by SNMP",
+          "templateid": "10563"
+        }
+      ]
+    },
+    {
       "name": "default-linux-agent",
       "priority": 1000,
       "fallback": true,
@@ -956,6 +1122,24 @@
       ]
     },
     {
+      "name": "host-profile-management",
+      "priority": 70,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^management$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.hostProfile",
+          "value": "management"
+        }
+      ]
+    },
+    {
       "name": "default-tags",
       "priority": 1000,
       "fallback": true,
@@ -970,6 +1154,12 @@
     "modelParameter": "Model",
     "hostCreateJsonRpcRequestLines": [
       "{",
+      "  \"cmdb2monitoring\": {",
+      "    \"eventType\": \"<#= Model.EventType #>\",",
+      "    \"entityId\": \"<#= Model.EntityId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\"",
+      "  },",
       "  \"jsonrpc\": \"2.0\",",
       "  \"method\": \"host.create\",",
       "  \"params\": {",
@@ -994,14 +1184,16 @@
       "    \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
       "<# } #>",
       "    \"interfaces\": [",
+      "      <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
       "      {",
-      "        \"type\": <#= Model.Interface.Type #>,",
-      "        \"main\": <#= Model.Interface.Main #>,",
-      "        \"useip\": <#= Model.Interface.UseIp #>,",
-      "        \"ip\": \"<#= Model.Interface.Ip #>\",",
-      "        \"dns\": \"<#= Model.Interface.Dns #>\",",
-      "        \"port\": \"<#= Model.Interface.Port #>\"",
-      "      }",
+      "        \"type\": <#= zif.Type #>,",
+      "        \"main\": <#= zif.Main #>,",
+      "        \"useip\": <#= zif.UseIp #>,",
+      "        \"ip\": \"<#= zif.Ip #>\",",
+      "        \"dns\": \"<#= zif.Dns #>\",",
+      "        \"port\": \"<#= zif.Port #>\"",
+      "      }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "      <# } #>",
       "    ],",
       "    \"groups\": [",
       "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
@@ -1034,6 +1226,12 @@
     ],
     "hostUpdateJsonRpcRequestLines": [
       "{",
+      "  \"cmdb2monitoring\": {",
+      "    \"eventType\": \"<#= Model.EventType #>\",",
+      "    \"entityId\": \"<#= Model.EntityId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\"",
+      "  },",
       "  \"jsonrpc\": \"2.0\",",
       "  \"method\": \"host.update\",",
       "  \"params\": {",
@@ -1058,14 +1256,16 @@
       "    \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
       "<# } #>",
       "    \"interfaces\": [",
+      "      <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
       "      {",
-      "        \"type\": <#= Model.Interface.Type #>,",
-      "        \"main\": <#= Model.Interface.Main #>,",
-      "        \"useip\": <#= Model.Interface.UseIp #>,",
-      "        \"ip\": \"<#= Model.Interface.Ip #>\",",
-      "        \"dns\": \"<#= Model.Interface.Dns #>\",",
-      "        \"port\": \"<#= Model.Interface.Port #>\"",
-      "      }",
+      "        \"type\": <#= zif.Type #>,",
+      "        \"main\": <#= zif.Main #>,",
+      "        \"useip\": <#= zif.UseIp #>,",
+      "        \"ip\": \"<#= zif.Ip #>\",",
+      "        \"dns\": \"<#= zif.Dns #>\",",
+      "        \"port\": \"<#= zif.Port #>\"",
+      "      }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "      <# } #>",
       "    ],",
       "    \"groups\": [",
       "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
@@ -1098,6 +1298,12 @@
     ],
     "hostDeleteJsonRpcRequestLines": [
       "{",
+      "  \"cmdb2monitoring\": {",
+      "    \"eventType\": \"<#= Model.EventType #>\",",
+      "    \"entityId\": \"<#= Model.EntityId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\"",
+      "  },",
       "  \"jsonrpc\": \"2.0\",",
       "  \"method\": \"host.delete\",",
       "  \"params\": [",
@@ -1112,6 +1318,7 @@
       "    \"eventType\": \"<#= Model.EventType #>\",",
       "    \"entityId\": \"<#= Model.EntityId #>\",",
       "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\",",
       "    \"fallbackForMethod\": \"<#= Model.FallbackForMethod #>\",",
       "    \"fallbackUpdateParams\": {",
       "      \"host\": \"<#= Model.Host #>\",",
@@ -1134,14 +1341,16 @@
       "      \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
       "<# } #>",
       "      \"interfaces\": [",
+      "        <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
       "        {",
-      "          \"type\": <#= Model.Interface.Type #>,",
-      "          \"main\": <#= Model.Interface.Main #>,",
-      "          \"useip\": <#= Model.Interface.UseIp #>,",
-      "          \"ip\": \"<#= Model.Interface.Ip #>\",",
-      "          \"dns\": \"<#= Model.Interface.Dns #>\",",
-      "          \"port\": \"<#= Model.Interface.Port #>\"",
-      "        }",
+      "          \"type\": <#= zif.Type #>,",
+      "          \"main\": <#= zif.Main #>,",
+      "          \"useip\": <#= zif.UseIp #>,",
+      "          \"ip\": \"<#= zif.Ip #>\",",
+      "          \"dns\": \"<#= zif.Dns #>\",",
+      "          \"port\": \"<#= zif.Port #>\"",
+      "        }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "        <# } #>",
       "      ],",
       "      \"groups\": [",
       "        <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
@@ -1190,7 +1399,9 @@
     "id": "97805",
     "code": "NB-97805",
     "ip_address": "192.168.1.1",
+    "management_ip": "192.168.1.101",
     "dns_name": "nb-97805.example.local",
+    "management_dns": "nb-97805-mgmt.example.local",
     "description": "Office notebook",
     "os": "Linux",
     "zabbixTag": "tag2"
@@ -1208,6 +1419,14 @@
         "ip": "192.168.1.1",
         "dns": "",
         "port": "10050"
+      },
+      {
+        "type": 2,
+        "main": 1,
+        "useip": 1,
+        "ip": "192.168.1.101",
+        "dns": "",
+        "port": "161"
       }
     ],
     "groups": [

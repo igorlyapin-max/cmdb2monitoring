@@ -18,6 +18,8 @@ public class KafkaOutputOptions : KafkaClientOptions
 
     public string EntityIdHeaderName { get; init; } = string.Empty;
 
+    public string ProfileHeaderName { get; init; } = "cmdb2monitoring-profile";
+
     public ProducerConfig BuildProducerConfig()
     {
         var config = new ProducerConfig

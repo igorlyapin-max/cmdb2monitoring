@@ -25,7 +25,7 @@
 | Путь | Назначение |
 | --- | --- |
 | `src/cmdbwebhooks2kafka` | Прием CMDBuild webhook и публикация normalized event в Kafka |
-| `src/cmdbkafka2zabbix` | Чтение CMDB events, применение JSON/T4 rules, публикация Zabbix JSON-RPC requests |
+| `src/cmdbkafka2zabbix` | Чтение CMDB events, применение JSON/T4 rules и `hostProfiles[]`, публикация одного или нескольких Zabbix JSON-RPC requests |
 | `src/zabbixrequests2api` | Чтение Zabbix requests, вызов Zabbix API, публикация responses |
 | `src/monitoring-ui-api` | Node.js frontend/BFF |
 | `rules/cmdbuild-to-zabbix-host-create.json` | Правила конвертации CMDBuild Computer-derived events в Zabbix JSON-RPC |
@@ -124,7 +124,7 @@ http://0.0.0.0:5080
 | Секция | Что задавать |
 | --- | --- |
 | `Kafka:Input` | Topic `cmdbuild.webhooks.*`, group id, consumer auth/security |
-| `Kafka:Output` | Topic `zabbix.host.requests.*`, producer auth/security |
+| `Kafka:Output` | Topic `zabbix.host.requests.*`, producer auth/security, `ProfileHeaderName` |
 | `ConversionRules` | Repository path, rules file path, git pull behavior, template engine |
 | `ProcessingState` | State-файл последнего обработанного объекта |
 | `ElkLogging` | Kafka log topic или будущий ELK |
@@ -132,7 +132,7 @@ http://0.0.0.0:5080
 Rules-файл отвечает за:
 - `create/update/delete` routing;
 - regex validation;
-- выбор host groups/templates/interfaces/tags;
+- выбор host profiles, host groups/templates/interfaces/tags;
 - выбор proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps;
 - T4 templates для JSON-RPC;
 - fallback `host.get -> host.update/delete` без `zabbix_hostid`.
@@ -226,6 +226,7 @@ Events:
 Mapping:
 - левая колонка показывает CMDBuild classes/attributes/lookups;
 - центральная колонка показывает conversion fields, regex, selection rules и T4 blocks;
+- Host profiles в центральной колонке показывают fan-out и конкретные interface profile/valueField связи;
 - правая колонка показывает Zabbix catalog entities;
 - повторное нажатие на элемент снимает выделение;
 - для lookup выделяется только конкретная связка class + lookup + value;
@@ -236,7 +237,7 @@ Mapping:
 - удаление правила группирует rules по типам, держит группы закрытыми через `+`, удаляет только выбранные rules из draft JSON и оставляет classes/source fields без автоматической чистки;
 - undo/redo работают только с draft текущей browser-сессии;
 - `Save file as` сохраняет draft JSON и второй текстовый файл с CMDBuild webhook Body/DELETE-инструкциями только по добавленным и удаленным в текущей сессии rules/classes/source fields;
-- перед сохранением проверяется, что каждый мониторинговый класс из `source.entityClasses` или `className` regex имеет IP или DNS class attribute field, связанный с `interfaceAddressRules`;
+- перед сохранением проверяется, что каждый мониторинговый класс из `source.entityClasses` или `className` regex имеет IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
 - имена классов CMDBuild нормализуются для UI: например, `NetworkDevice` и `Network device` считаются одним классом, а отображение предпочитает имя/описание из CMDBuild catalog.
 
 Validate rules mapping:
@@ -287,16 +288,23 @@ Runtime cache/state:
 `Model.*` в T4-шаблонах - это промежуточная модель `cmdbkafka2zabbix`, а не прямой объект CMDBuild или Zabbix.
 
 Поддержанные группы данных:
-- базовые поля: `EntityId`, `Code`, `ClassName`, `Host`, `VisibleName`, `IpAddress`, `Description`, `OperatingSystem`, `ZabbixTag`, `EventType`;
+- базовые поля: `EntityId`, `Code`, `ClassName`, `Host`, `VisibleName`, `HostProfileName`, `IpAddress`, `Description`, `OperatingSystem`, `ZabbixTag`, `EventType`;
 - dynamic source fields: `Model.Field("fieldName")` читает поле из `source.fields` rules;
+- Zabbix interfaces: `Interface` для обратной совместимости и `Interfaces` для нескольких `interfaces[]` в одном host;
 - Zabbix host links: `Groups`, `Templates`, `Tags`;
 - расширенные host параметры: `Status`, `ProxyId`, `ProxyGroupId`, `TlsPsk`, `Macros`, `InventoryFields`, `Maintenances`, `ValueMaps`.
+
+`hostProfiles[]` в rules управляет двумя сценариями:
+- один CMDB object -> один Zabbix host с несколькими `interfaces[]`, если несколько IP относятся к одному объекту мониторинга;
+- один CMDB object -> несколько Zabbix hosts, если основной сервер и management-контроллер должны иметь разные host names, templates, groups или lifecycle.
+
+При наличии нескольких host profiles `cmdbkafka2zabbix` публикует несколько сообщений в `zabbix.host.requests.*`. State входного Kafka offset записывается только после успешной публикации всех сообщений по одному CMDB event.
 
 Расширение rules для новых CMDBuild атрибутов возможно без изменения кода, если:
 - атрибут уже приходит в webhook body;
 - атрибут добавлен в `source.fields`;
 - rules/T4 используют существующие механизмы `Model.Field(...)` или `Model.Source(...)`;
-- для создания/обновления Zabbix host остается настроен IP или DNS через `interfaceAddressRules`.
+- для создания/обновления Zabbix host остается настроен IP или DNS через `interfaceAddressRules` или `hostProfiles[].interfaces`.
 
 Для нового CMDBuild класса дополнительно нужны:
 - класс в CMDBuild catalog и webhook-записи на нужные события;

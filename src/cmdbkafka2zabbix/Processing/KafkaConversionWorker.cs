@@ -153,44 +153,53 @@ public sealed class KafkaConversionWorker(
             return;
         }
 
-        var result = await converter.ConvertAsync(source, rules, cancellationToken);
-
-        if (!result.ShouldPublish)
+        var results = await converter.ConvertAsync(source, rules, cancellationToken);
+        var publishableResults = results.Where(result => result.ShouldPublish).ToArray();
+        foreach (var skippedResult in results.Where(result => !result.ShouldPublish))
         {
             logger.LogInformation(
-                "Skipped CMDBuild event {EventType} for entity {EntityId}: {SkipReason}",
-                result.EventType,
-                result.EntityId ?? "<unknown>",
-                result.SkipReason);
+                "Skipped CMDBuild event {EventType} for entity {EntityId}, profile {ProfileName}: {SkipReason}",
+                skippedResult.EventType,
+                skippedResult.EntityId ?? "<unknown>",
+                skippedResult.ProfileName ?? "<default>",
+                skippedResult.SkipReason);
+        }
 
+        if (publishableResults.Length == 0)
+        {
             await WriteStateAndCommitAsync(
                 consumed,
                 consumer,
-                result.EntityId,
-                result.EventType,
+                source.EntityId,
+                source.EventType,
                 outputPublished: false,
-                skipReason: result.SkipReason,
+                skipReason: string.Join(';', results.Select(result => result.SkipReason).Where(reason => !string.IsNullOrWhiteSpace(reason))),
                 cancellationToken);
 
             return;
         }
 
-        var deliveryResult = await publisher.PublishAsync(result, cancellationToken);
+        DeliveryResult<string, string>? lastDeliveryResult = null;
+        foreach (var result in publishableResults)
+        {
+            lastDeliveryResult = await publisher.PublishAsync(result, cancellationToken);
+        }
+
         await WriteStateAndCommitAsync(
             consumed,
             consumer,
-            result.EntityId,
-            result.EventType,
+            source.EntityId,
+            source.EventType,
             outputPublished: true,
             skipReason: null,
             cancellationToken,
-            outputTopic: deliveryResult.Topic);
+            outputTopic: lastDeliveryResult?.Topic);
 
         logger.LogInformation(
-            "Processed CMDBuild event {EventType} for entity {EntityId} into Zabbix host {Host}",
-            result.EventType,
-            result.EntityId ?? "<unknown>",
-            result.Host ?? "<unknown>");
+            "Processed CMDBuild event {EventType} for entity {EntityId} into {PublishedCount} Zabbix request(s)",
+            source.EventType,
+            source.EntityId ?? "<unknown>",
+            publishableResults.Length);
     }
 
     private async Task WriteStateAndCommitAsync(

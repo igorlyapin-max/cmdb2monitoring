@@ -56,6 +56,7 @@ public sealed class T4TemplateRenderer(IOptions<ConversionRulesOptions> options)
         var rendered = template
             .Replace("<#= Model.Host #>", model.Host, StringComparison.Ordinal)
             .Replace("<#= Model.VisibleName #>", model.VisibleName, StringComparison.Ordinal)
+            .Replace("<#= Model.HostProfileName #>", model.HostProfileName, StringComparison.Ordinal)
             .Replace("<#= Model.ClassName #>", model.ClassName, StringComparison.Ordinal)
             .Replace("<#= Model.EntityId #>", model.EntityId ?? string.Empty, StringComparison.Ordinal)
             .Replace("<#= Model.Code #>", model.Code ?? string.Empty, StringComparison.Ordinal)

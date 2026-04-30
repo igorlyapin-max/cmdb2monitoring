@@ -8,9 +8,14 @@ public sealed record ZabbixConversionResult(
     string? EntityId,
     string EventType,
     string? Host,
+    string? ProfileName,
     string? SkipReason)
 {
-    public static ZabbixConversionResult Skipped(CmdbSourceEvent source, string method, string reason)
+    public static ZabbixConversionResult Skipped(
+        CmdbSourceEvent source,
+        string method,
+        string reason,
+        string? profileName = null)
     {
         return new ZabbixConversionResult(
             ShouldPublish: false,
@@ -20,6 +25,7 @@ public sealed record ZabbixConversionResult(
             EntityId: source.EntityId,
             EventType: source.EventType,
             Host: null,
+            ProfileName: profileName,
             SkipReason: reason);
     }
 }
@@ -29,6 +35,8 @@ public sealed class ZabbixHostCreateModel
     public string Host { get; init; } = string.Empty;
 
     public string VisibleName { get; init; } = string.Empty;
+
+    public string HostProfileName { get; init; } = "default";
 
     public int Status { get; init; }
 
@@ -66,6 +74,8 @@ public sealed class ZabbixHostCreateModel
     public ZabbixTlsPskModel TlsPsk { get; init; } = new();
 
     public ZabbixInterfaceModel Interface { get; init; } = new();
+
+    public List<ZabbixInterfaceModel> Interfaces { get; init; } = [];
 
     public List<ZabbixGroupModel> Groups { get; init; } = [];
 

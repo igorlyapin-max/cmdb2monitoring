@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `hostProfiles[]` conversion model for one CMDB object -> multiple Zabbix hosts and one host -> multiple `interfaces[]`.
+- `Model.Interfaces` T4 model field with `Model.Interface` retained as backward-compatible first interface.
+- Mapping/Help documentation for host profiles and interface profile/valueField behavior.
+
+### Changed
+
+- `cmdbkafka2zabbix` can publish multiple Zabbix request messages for one CMDB event and writes state only after all messages are published.
+- `zabbixrequests2api` update fallback now matches existing interfaces by type/ip/dns/port when several interfaces are present.
+
 ## 0.2.0 - 2026-04-30
 
 ### Added

@@ -18,6 +18,8 @@ public sealed class ConversionRulesDocument
 
     public EventRoutingRule[] EventRoutingRules { get; init; } = [];
 
+    public HostProfileRule[] HostProfiles { get; init; } = [];
+
     public SelectionRule[] GroupSelectionRules { get; init; } = [];
 
     public SelectionRule[] TemplateSelectionRules { get; init; } = [];
@@ -66,6 +68,56 @@ public sealed class EventRoutingRule
     public string[] RequiredFields { get; init; } = [];
 
     public bool Publish { get; init; } = true;
+}
+
+public sealed class HostProfileRule
+{
+    public string Name { get; init; } = string.Empty;
+
+    public int Priority { get; init; } = 1000;
+
+    public bool Fallback { get; init; }
+
+    public bool Enabled { get; init; } = true;
+
+    public RuleCondition When { get; init; } = new();
+
+    public string HostNameTemplate { get; init; } = string.Empty;
+
+    public string VisibleNameTemplate { get; init; } = string.Empty;
+
+    public string ZabbixHostIdField { get; init; } = string.Empty;
+
+    public string InterfaceRef { get; init; } = string.Empty;
+
+    public string InterfaceProfileRef { get; init; } = string.Empty;
+
+    public string Mode { get; init; } = string.Empty;
+
+    public string ValueField { get; init; } = string.Empty;
+
+    public HostProfileInterfaceRule[] Interfaces { get; init; } = [];
+}
+
+public sealed class HostProfileInterfaceRule
+{
+    public string Name { get; init; } = string.Empty;
+
+    public int Priority { get; init; } = 1000;
+
+    public bool Fallback { get; init; }
+
+    public bool Enabled { get; init; } = true;
+
+    public RuleCondition When { get; init; } = new();
+
+    public string InterfaceRef { get; init; } = string.Empty;
+
+    public string InterfaceProfileRef { get; init; } = string.Empty;
+
+    public string Mode { get; init; } = string.Empty;
+
+    public string ValueField { get; init; } = string.Empty;
 }
 
 public sealed class SourceRules

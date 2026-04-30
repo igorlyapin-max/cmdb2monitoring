@@ -11,7 +11,7 @@ public sealed class CmdbToZabbixConverter(
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(500);
 
-    public async Task<ZabbixConversionResult> ConvertAsync(
+    public async Task<IReadOnlyList<ZabbixConversionResult>> ConvertAsync(
         CmdbSourceEvent source,
         ConversionRulesDocument rules,
         CancellationToken cancellationToken)
@@ -20,68 +20,99 @@ public sealed class CmdbToZabbixConverter(
         if (route is null || !route.Publish)
         {
             var method = string.IsNullOrWhiteSpace(rules.Zabbix.Method) ? "host.create" : rules.Zabbix.Method;
-            return ZabbixConversionResult.Skipped(source, method, $"event_type_not_configured:{source.EventType}");
+            return [ZabbixConversionResult.Skipped(source, method, $"event_type_not_configured:{source.EventType}")];
         }
 
-        var methodName = route.Method;
-        var templateName = route.TemplateName;
-        string? fallbackForMethod = null;
-        if (route.RequiresZabbixHostId && string.IsNullOrWhiteSpace(source.ZabbixHostId))
+        var results = new List<ZabbixConversionResult>();
+        var profiles = ResolveHostProfiles(source, rules);
+        foreach (var profile in profiles)
         {
-            if (string.IsNullOrWhiteSpace(route.FallbackMethod) || string.IsNullOrWhiteSpace(route.FallbackTemplateName))
+            var profileName = ProfileName(profile);
+            var profiledSource = AddHostProfileFields(source, profileName);
+            var zabbixHostId = ResolveProfileZabbixHostId(
+                profiledSource,
+                profile,
+                allowSourceHostId: profiles.Count == 1);
+            var methodName = route.Method;
+            var templateName = route.TemplateName;
+            string? fallbackForMethod = null;
+
+            if (route.RequiresZabbixHostId && string.IsNullOrWhiteSpace(zabbixHostId))
             {
-                return ZabbixConversionResult.Skipped(source, methodName, "missing_zabbix_hostid");
+                if (string.IsNullOrWhiteSpace(route.FallbackMethod) || string.IsNullOrWhiteSpace(route.FallbackTemplateName))
+                {
+                    results.Add(ZabbixConversionResult.Skipped(
+                        profiledSource,
+                        methodName,
+                        "missing_zabbix_hostid",
+                        profileName));
+                    continue;
+                }
+
+                fallbackForMethod = methodName;
+                methodName = route.FallbackMethod;
+                templateName = route.FallbackTemplateName;
             }
 
-            fallbackForMethod = methodName;
-            methodName = route.FallbackMethod;
-            templateName = route.FallbackTemplateName;
+            var model = BuildModel(profiledSource, rules, methodName, fallbackForMethod, profile, zabbixHostId);
+            var validationError = Validate(profiledSource, rules, route.RequiredFields, model.Interfaces);
+            if (!string.IsNullOrWhiteSpace(validationError))
+            {
+                results.Add(ZabbixConversionResult.Skipped(profiledSource, methodName, validationError, profileName));
+                continue;
+            }
+
+            var templateLines = ResolveTemplateLines(rules, templateName);
+            if (templateLines.Length == 0)
+            {
+                throw new InvalidOperationException($"Conversion rules do not contain '{templateName}' T4 template.");
+            }
+
+            var request = await templateRenderer.RenderAsync(templateLines, model, cancellationToken);
+
+            using (JsonDocument.Parse(request))
+            {
+            }
+
+            results.Add(new ZabbixConversionResult(
+                ShouldPublish: true,
+                Key: BuildKafkaKey(source, model),
+                Value: request,
+                Method: methodName,
+                EntityId: source.EntityId,
+                EventType: source.EventType,
+                Host: model.Host,
+                ProfileName: profileName,
+                SkipReason: null));
         }
 
-        var validationError = Validate(source, rules, route.RequiredFields);
-        if (!string.IsNullOrWhiteSpace(validationError))
+        if (results.Count == 0)
         {
-            return ZabbixConversionResult.Skipped(source, methodName, validationError);
+            var method = string.IsNullOrWhiteSpace(rules.Zabbix.Method) ? "host.create" : rules.Zabbix.Method;
+            return [ZabbixConversionResult.Skipped(source, method, "no_host_profile_matched")];
         }
 
-        var model = BuildModel(source, rules, methodName, fallbackForMethod);
-        var templateLines = ResolveTemplateLines(rules, templateName);
-        if (templateLines.Length == 0)
-        {
-            throw new InvalidOperationException($"Conversion rules do not contain '{templateName}' T4 template.");
-        }
-
-        var request = await templateRenderer.RenderAsync(templateLines, model, cancellationToken);
-
-        using (JsonDocument.Parse(request))
-        {
-        }
-
-        return new ZabbixConversionResult(
-            ShouldPublish: true,
-            Key: source.EntityId ?? model.Host,
-            Value: request,
-            Method: methodName,
-            EntityId: source.EntityId,
-            EventType: source.EventType,
-            Host: model.Host,
-            SkipReason: null);
+        return results;
     }
 
     private ZabbixHostCreateModel BuildModel(
         CmdbSourceEvent source,
         ConversionRulesDocument rules,
         string currentMethod,
-        string? fallbackForMethod)
+        string? fallbackForMethod,
+        HostProfileRule profile,
+        string? zabbixHostId)
     {
+        var profileName = ProfileName(profile);
         var initialModel = new ZabbixHostCreateModel
         {
+            HostProfileName = profileName,
             ClassName = source.ClassName ?? source.EntityType ?? "unknown",
             EntityId = source.EntityId,
             Code = source.Code,
             IpAddress = source.IpAddress ?? string.Empty,
             DnsName = source.DnsName ?? string.Empty,
-            ZabbixHostId = source.ZabbixHostId,
+            ZabbixHostId = zabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
             EventType = source.EventType,
@@ -92,22 +123,25 @@ public sealed class CmdbToZabbixConverter(
             InventoryMode = rules.Defaults.Host.InventoryMode
         };
 
-        var host = BuildHostName(source, rules, initialModel);
-        var visibleName = BuildVisibleName(source, rules, initialModel);
+        var host = BuildHostName(source, rules, initialModel, profile);
+        var visibleName = BuildVisibleName(source, rules, initialModel, profile);
         var status = SelectHostStatus(source, rules) ?? rules.Defaults.Host.Status;
         var proxy = SelectProxy(source, rules);
         var proxyGroup = SelectProxyGroup(source, rules);
         var tlsPsk = SelectTlsPsk(source, rules);
+        var interfaces = SelectInterfaces(source, rules, profile);
+        var firstInterface = interfaces.FirstOrDefault() ?? new ZabbixInterfaceModel();
         var renderModel = new ZabbixHostCreateModel
         {
             Host = host,
             VisibleName = visibleName,
+            HostProfileName = profileName,
             ClassName = initialModel.ClassName,
             EntityId = source.EntityId,
             Code = source.Code,
             IpAddress = source.IpAddress ?? string.Empty,
             DnsName = source.DnsName ?? string.Empty,
-            ZabbixHostId = source.ZabbixHostId,
+            ZabbixHostId = zabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
             EventType = source.EventType,
@@ -118,19 +152,22 @@ public sealed class CmdbToZabbixConverter(
             InventoryMode = rules.Defaults.Host.InventoryMode,
             ProxyId = proxy?.ProxyId,
             ProxyGroupId = proxyGroup?.ProxyGroupId,
-            TlsPsk = MapTlsPsk(tlsPsk)
+            TlsPsk = MapTlsPsk(tlsPsk),
+            Interface = firstInterface,
+            Interfaces = interfaces
         };
 
         return new ZabbixHostCreateModel
         {
             Host = host,
             VisibleName = visibleName,
+            HostProfileName = profileName,
             ClassName = initialModel.ClassName,
             EntityId = source.EntityId,
             Code = source.Code,
             IpAddress = source.IpAddress ?? string.Empty,
             DnsName = source.DnsName ?? string.Empty,
-            ZabbixHostId = source.ZabbixHostId,
+            ZabbixHostId = zabbixHostId,
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
             EventType = source.EventType,
@@ -142,7 +179,8 @@ public sealed class CmdbToZabbixConverter(
             TlsPsk = MapTlsPsk(tlsPsk),
             Status = status,
             InventoryMode = rules.Defaults.Host.InventoryMode,
-            Interface = MapInterface(SelectInterface(source, rules), SelectInterfaceAddress(source, rules), source),
+            Interface = firstInterface,
+            Interfaces = interfaces,
             Groups = SelectGroups(source, rules),
             Templates = SelectTemplates(source, rules),
             Tags = BuildTags(source, rules, renderModel),
@@ -150,11 +188,15 @@ public sealed class CmdbToZabbixConverter(
             InventoryFields = BuildInventoryFields(source, rules, renderModel),
             Maintenances = SelectMaintenances(source, rules),
             ValueMaps = SelectValueMaps(source, rules),
-            RequestId = BuildRequestId(source.EntityId ?? host)
+            RequestId = BuildRequestId($"{source.EntityId ?? host}:{profileName}")
         };
     }
 
-    private string Validate(CmdbSourceEvent source, ConversionRulesDocument rules, string[] requiredFields)
+    private string Validate(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        string[] requiredFields,
+        IReadOnlyCollection<ZabbixInterfaceModel> interfaces)
     {
         foreach (var requiredField in requiredFields)
         {
@@ -188,10 +230,7 @@ public sealed class CmdbToZabbixConverter(
             }
         }
 
-        if (RequiresInterfaceAddress(requiredFields)
-            && SelectInterfaceAddress(source, rules) is null
-            && string.IsNullOrWhiteSpace(source.IpAddress)
-            && string.IsNullOrWhiteSpace(source.DnsName))
+        if (RequiresInterfaceAddress(requiredFields) && !interfaces.Any(HasAddress))
         {
             return "missing_interface_address";
         }
@@ -204,6 +243,104 @@ public sealed class CmdbToZabbixConverter(
         return requiredFields.Contains("interfaceAddress", StringComparer.OrdinalIgnoreCase)
             || requiredFields.Contains("ipAddress", StringComparer.OrdinalIgnoreCase)
             || requiredFields.Contains("dnsName", StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool HasAddress(ZabbixInterfaceModel zabbixInterface)
+    {
+        return !string.IsNullOrWhiteSpace(zabbixInterface.Ip)
+            || !string.IsNullOrWhiteSpace(zabbixInterface.Dns);
+    }
+
+    private static IReadOnlyList<HostProfileRule> ResolveHostProfiles(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules)
+    {
+        if (rules.HostProfiles.Length == 0)
+        {
+            return [DefaultHostProfile()];
+        }
+
+        var matched = rules.HostProfiles
+            .Where(profile => profile.Enabled && !profile.Fallback && MatchesProfile(source, profile.When))
+            .OrderBy(profile => profile.Priority)
+            .ToArray();
+        if (matched.Length > 0)
+        {
+            return matched;
+        }
+
+        var fallback = rules.HostProfiles
+            .Where(profile => profile.Enabled && profile.Fallback && MatchesProfile(source, profile.When))
+            .OrderBy(profile => profile.Priority)
+            .ToArray();
+
+        return fallback.Length > 0 ? fallback : [];
+    }
+
+    private static HostProfileRule DefaultHostProfile()
+    {
+        return new HostProfileRule
+        {
+            Name = "default",
+            Enabled = true,
+            When = new RuleCondition { Always = true }
+        };
+    }
+
+    private static bool MatchesProfile(CmdbSourceEvent source, RuleCondition condition)
+    {
+        return IsEmptyCondition(condition) || Matches(source, condition);
+    }
+
+    private static bool IsEmptyCondition(RuleCondition condition)
+    {
+        return !condition.Always
+            && string.IsNullOrWhiteSpace(condition.FieldExists)
+            && condition.FieldsExist.Length == 0
+            && condition.AnyRegex.Length == 0
+            && condition.AllRegex.Length == 0;
+    }
+
+    private static string ProfileName(HostProfileRule profile)
+    {
+        return string.IsNullOrWhiteSpace(profile.Name) ? "default" : profile.Name;
+    }
+
+    private static CmdbSourceEvent AddHostProfileFields(CmdbSourceEvent source, string profileName)
+    {
+        var sourceFields = new Dictionary<string, string>(source.SourceFields, StringComparer.OrdinalIgnoreCase)
+        {
+            ["hostProfile"] = profileName,
+            ["outputProfile"] = profileName
+        };
+
+        return source with { SourceFields = sourceFields };
+    }
+
+    private static string? ResolveProfileZabbixHostId(
+        CmdbSourceEvent source,
+        HostProfileRule profile,
+        bool allowSourceHostId)
+    {
+        if (!string.IsNullOrWhiteSpace(profile.ZabbixHostIdField))
+        {
+            return ReadField(source, profile.ZabbixHostIdField);
+        }
+
+        return allowSourceHostId || IsDefaultProfile(profile) ? source.ZabbixHostId : null;
+    }
+
+    private static bool IsDefaultProfile(HostProfileRule profile)
+    {
+        return string.Equals(ProfileName(profile), "default", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildKafkaKey(CmdbSourceEvent source, ZabbixHostCreateModel model)
+    {
+        return string.IsNullOrWhiteSpace(model.HostProfileName)
+            || string.Equals(model.HostProfileName, "default", StringComparison.OrdinalIgnoreCase)
+                ? source.EntityId ?? model.Host
+                : $"{source.EntityId ?? model.Host}:{model.HostProfileName}";
     }
 
     private EventRoutingRule? ResolveRoute(CmdbSourceEvent source, ConversionRulesDocument rules)
@@ -230,8 +367,17 @@ public sealed class CmdbToZabbixConverter(
         return null;
     }
 
-    private string BuildHostName(CmdbSourceEvent source, ConversionRulesDocument rules, ZabbixHostCreateModel model)
+    private string BuildHostName(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        ZabbixHostCreateModel model,
+        HostProfileRule profile)
     {
+        if (!string.IsNullOrWhiteSpace(profile.HostNameTemplate))
+        {
+            return NormalizeHostName(templateRenderer.RenderSimple(profile.HostNameTemplate, model), rules, source);
+        }
+
         var selectedInput = rules.Normalization.HostName.InputPriority
             .Select(field => ReadField(source, field))
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
@@ -240,6 +386,11 @@ public sealed class CmdbToZabbixConverter(
             ? templateRenderer.RenderSimple(rules.Normalization.HostName.PrefixTemplate, model) + selectedInput
             : templateRenderer.RenderSimple(rules.Normalization.HostName.FallbackTemplate, model);
 
+        return NormalizeHostName(rawHost, rules, source);
+    }
+
+    private static string NormalizeHostName(string rawHost, ConversionRulesDocument rules, CmdbSourceEvent source)
+    {
         foreach (var replacement in rules.Normalization.HostName.RegexReplacements)
         {
             if (string.IsNullOrWhiteSpace(replacement.Pattern))
@@ -265,8 +416,17 @@ public sealed class CmdbToZabbixConverter(
             : rawHost;
     }
 
-    private string BuildVisibleName(CmdbSourceEvent source, ConversionRulesDocument rules, ZabbixHostCreateModel model)
+    private string BuildVisibleName(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        ZabbixHostCreateModel model,
+        HostProfileRule profile)
     {
+        if (!string.IsNullOrWhiteSpace(profile.VisibleNameTemplate))
+        {
+            return templateRenderer.RenderSimple(profile.VisibleNameTemplate, model);
+        }
+
         if (!string.IsNullOrWhiteSpace(rules.Normalization.VisibleName.Template))
         {
             return templateRenderer.RenderSimple(rules.Normalization.VisibleName.Template, model);
@@ -363,6 +523,110 @@ public sealed class CmdbToZabbixConverter(
         return ResolveInterface(matchedRule?.InterfaceRef, rules);
     }
 
+    private List<ZabbixInterfaceModel> SelectInterfaces(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        HostProfileRule profile)
+    {
+        var profileInterfaces = SelectProfileInterfaceRules(source, profile);
+        var interfaces = new List<ZabbixInterfaceModel>();
+
+        if (profileInterfaces.Count > 0)
+        {
+            foreach (var rule in profileInterfaces)
+            {
+                var mappedInterface = MapInterface(
+                    ResolveInterfaceForProfileRule(rule, profile, source, rules),
+                    SelectInterfaceAddress(source, rules, profile, rule),
+                    source);
+                if (!HasAddress(mappedInterface))
+                {
+                    continue;
+                }
+
+                if (rule.Fallback && interfaces.Any(item => item.Type == mappedInterface.Type))
+                {
+                    continue;
+                }
+
+                interfaces.Add(mappedInterface);
+            }
+        }
+        else if (HasProfileInterfaceSettings(profile))
+        {
+            interfaces.Add(MapInterface(
+                ResolveInterfaceForProfile(profile, source, rules),
+                SelectInterfaceAddress(source, rules, profile, null),
+                source));
+        }
+        else
+        {
+            interfaces.Add(MapInterface(SelectInterface(source, rules), SelectInterfaceAddress(source, rules), source));
+        }
+
+        return interfaces
+            .Where(HasAddress)
+            .GroupBy(item => $"{item.Type}|{item.UseIp}|{item.Ip}|{item.Dns}|{item.Port}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static List<HostProfileInterfaceRule> SelectProfileInterfaceRules(
+        CmdbSourceEvent source,
+        HostProfileRule profile)
+    {
+        return profile.Interfaces
+            .Where(rule => rule.Enabled && MatchesProfile(source, rule.When))
+            .OrderBy(rule => rule.Fallback ? 1 : 0)
+            .ThenBy(rule => rule.Priority)
+            .ToList();
+    }
+
+    private static bool HasProfileInterfaceSettings(HostProfileRule profile)
+    {
+        return !string.IsNullOrWhiteSpace(profile.InterfaceProfileRef)
+            || !string.IsNullOrWhiteSpace(profile.InterfaceRef)
+            || !string.IsNullOrWhiteSpace(profile.ValueField)
+            || !string.IsNullOrWhiteSpace(profile.Mode);
+    }
+
+    private InterfaceSettings ResolveInterfaceForProfileRule(
+        HostProfileInterfaceRule rule,
+        HostProfileRule profile,
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules)
+    {
+        if (!string.IsNullOrWhiteSpace(rule.InterfaceProfileRef))
+        {
+            return ResolveInterface(rule.InterfaceProfileRef, rules);
+        }
+
+        if (!string.IsNullOrWhiteSpace(rule.InterfaceRef))
+        {
+            return ResolveInterface(rule.InterfaceRef, rules);
+        }
+
+        return ResolveInterfaceForProfile(profile, source, rules);
+    }
+
+    private InterfaceSettings ResolveInterfaceForProfile(
+        HostProfileRule profile,
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules)
+    {
+        if (!string.IsNullOrWhiteSpace(profile.InterfaceProfileRef))
+        {
+            return ResolveInterface(profile.InterfaceProfileRef, rules);
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.InterfaceRef))
+        {
+            return ResolveInterface(profile.InterfaceRef, rules);
+        }
+
+        return SelectInterface(source, rules);
+    }
+
     private static InterfaceAddressSelection? SelectInterfaceAddress(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
         if (rules.InterfaceAddressRules.Length == 0)
@@ -405,6 +669,36 @@ public sealed class CmdbToZabbixConverter(
             ? InferAddressMode(valueField)
             : matchedRule.Mode;
         return new InterfaceAddressSelection(mode, value);
+    }
+
+    private static InterfaceAddressSelection? SelectInterfaceAddress(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        HostProfileRule profile,
+        HostProfileInterfaceRule? profileInterface)
+    {
+        var mode = profileInterface?.Mode;
+        var valueField = profileInterface?.ValueField;
+        if (string.IsNullOrWhiteSpace(valueField))
+        {
+            mode = profile.Mode;
+            valueField = profile.ValueField;
+        }
+
+        if (string.IsNullOrWhiteSpace(valueField))
+        {
+            return SelectInterfaceAddress(source, rules);
+        }
+
+        var value = ReadField(source, valueField);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return new InterfaceAddressSelection(
+            string.IsNullOrWhiteSpace(mode) ? InferAddressMode(valueField) : mode,
+            value);
     }
 
     private static string InferAddressMode(string valueField)

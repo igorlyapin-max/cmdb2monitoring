@@ -47,6 +47,7 @@ public sealed class ZabbixResponsePublisher(
             ["entityId"] = result.EntityId,
             ["requestId"] = result.RequestId,
             ["host"] = result.Host,
+            ["hostProfile"] = result.HostProfileName,
             ["errorCode"] = result.ErrorCode,
             ["errorMessage"] = result.ErrorMessage,
             ["zabbixRequestSent"] = result.ZabbixRequestSent,

@@ -22,6 +22,8 @@ public sealed class ZabbixRequestDocument
 
     public string? Host { get; init; }
 
+    public string? HostProfileName { get; init; }
+
     public string? FallbackForMethod { get; init; }
 
     public JsonElement FallbackUpdateParams { get; init; }

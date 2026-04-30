@@ -41,7 +41,7 @@
 1. Пользователь создает карточку `Computer`-наследника в CMDBuild.
 2. CMDBuild отправляет webhook `card_create_after`.
 3. `cmdbwebhooks2kafka` проверяет Bearer token, нормализует событие и публикует envelope в `cmdbuild.webhooks.*`.
-4. `cmdbkafka2zabbix` читает событие, применяет JSON rules и T4-шаблон, публикует `host.create` в `zabbix.host.requests.*`.
+4. `cmdbkafka2zabbix` читает событие, применяет JSON rules, `hostProfiles[]` и T4-шаблон, публикует один или несколько `host.create` в `zabbix.host.requests.*`.
 5. `zabbixrequests2api` валидирует payload, проверяет host groups/templates/template groups и совместимость расширенных host-полей, вызывает Zabbix API.
 6. Zabbix создает host.
 7. `zabbixrequests2api` публикует результат в `zabbix.host.responses.*`.
@@ -50,8 +50,8 @@
 
 1. Пользователь изменяет IP, OS, zabbixTag или другие поддерживаемые поля.
 2. CMDBuild отправляет webhook `card_update_after`.
-3. Если `zabbix_hostid` не передан, `cmdbkafka2zabbix` формирует fallback `host.get` с metadata `fallbackForMethod=host.update` и целевыми `fallbackUpdateParams`.
-4. `zabbixrequests2api` выполняет `host.get`, получает `hostid` и `interfaceid`, затем выполняет `host.update`.
+3. Если `zabbix_hostid` не передан, `cmdbkafka2zabbix` формирует fallback `host.get` с metadata `hostProfile`, `fallbackForMethod=host.update` и целевыми `fallbackUpdateParams`.
+4. `zabbixrequests2api` выполняет `host.get`, получает `hostid` и существующие `interfaceid`, затем выполняет `host.update` с сопоставлением interfaces по type/ip/dns/port.
 5. Результат публикуется в response topic.
 
 ### Delete

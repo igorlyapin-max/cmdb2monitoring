@@ -69,6 +69,7 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 | `Kafka:Input:Topic` | Входной topic CMDB events | Должен совпадать с output первого сервиса |
 | `Kafka:Input:GroupId` | Consumer group | Менять при отдельном независимом потребителе |
 | `Kafka:Output:Topic` | Output topic Zabbix JSON-RPC | Должен совпадать с input третьего сервиса |
+| `Kafka:Output:ProfileHeaderName` | Kafka header с именем host profile | Менять только если downstream consumer ожидает другой header |
 | `ConversionRules:RepositoryPath` | Git working copy rules | Если rules вынесены в отдельный repo |
 | `ConversionRules:RulesFilePath` | Путь к JSON rules | Если меняется файл правил |
 | `ConversionRules:PullOnStartup` | Выполнять `git pull` при старте | Для внешнего repo правил |
@@ -78,10 +79,11 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 Rules-файл `rules/cmdbuild-to-zabbix-host-create.json` управляет:
 - event routing create/update/delete;
 - regex validation;
+- hostProfiles fan-out: один CMDB object -> один Zabbix host с несколькими interfaces[] или несколько Zabbix hosts;
 - выбором groups/templates/interfaces/tags;
 - расширенными Zabbix host параметрами: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances, value maps;
 - T4 templates для Zabbix JSON-RPC;
-- fallback metadata для update/delete без `zabbix_hostid`.
+- fallback metadata для update/delete без `zabbix_hostid`, включая `hostProfile`.
 
 При наличии `inventory` в rules/T4 payload необходимо использовать `inventory_mode=0` или другой разрешенный режим inventory. `inventory_mode=-1` отключает inventory, и Zabbix отклоняет такие запросы.
 
@@ -226,7 +228,7 @@ Rules UI:
 - Mapping показывает CMDBuild, rules и Zabbix в трех колонках;
 - Mapping edit mode позволяет добавлять rules в draft JSON, удалять rules по группам, выполнять undo/redo и сохранять draft через `Save file as`;
 - `Save file as` дополнительно формирует текстовый файл CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
-- перед сохранением Mapping проверяет IP/DNS binding: каждый мониторинговый класс из `source.entityClasses` или `className` regex должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules`;
+- перед сохранением Mapping проверяет IP/DNS binding: каждый мониторинговый класс из `source.entityClasses` или `className` regex должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
 - Validate rules mapping подсвечивает только отсутствующие элементы и позволяет удалить выбранные элементы после подтверждения;
 - перед удалением rules-файл копируется в `rules/.backup/*.bak`;
 - `rules/.backup/` является локальным backup и не коммитится.

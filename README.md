@@ -17,7 +17,7 @@ Run .NET commands through the repository wrapper:
 ## Services
 
 - `cmdbwebhooks2kafka`: receives CMDBuild webhook payloads on `POST /webhooks/cmdbuild` and publishes normalized events to Kafka.
-- `cmdbkafka2zabbix`: reads CMDB events from Kafka, applies JSON/T4 conversion rules, and publishes Zabbix JSON-RPC requests.
+- `cmdbkafka2zabbix`: reads CMDB events from Kafka, applies JSON/T4 conversion rules including `hostProfiles[]`, and publishes one or more Zabbix JSON-RPC requests.
 - `zabbixrequests2api`: reads Zabbix JSON-RPC requests from Kafka, validates them, calls Zabbix API, and publishes responses.
 - `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, Events Kafka browser, rules upload/dry-run, Mapping edit/delete, SAML2 IdP login/settings, and CMDBuild/Zabbix catalog sync.
 

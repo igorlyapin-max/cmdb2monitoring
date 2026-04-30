@@ -131,6 +131,14 @@ components:
               type: string
             ip_address:
               type: string
+            management_ip:
+              type: string
+              description: Management/OOB IP для дополнительных interfaces[] или отдельного hostProfile.
+            dns_name:
+              type: string
+            management_dns:
+              type: string
+              description: Management/OOB DNS для дополнительных interfaces[] или отдельного hostProfile.
             description:
               type: string
             OS:
@@ -148,7 +156,7 @@ components:
       properties:
         cmdb2monitoring:
           type: object
-          description: Внутренняя metadata для fallback update/delete, перед вызовом Zabbix API удаляется.
+          description: Внутренняя metadata для lifecycle/fallback, перед вызовом Zabbix API удаляется.
           properties:
             eventType:
               type: string
@@ -156,6 +164,9 @@ components:
               type: string
             host:
               type: string
+            hostProfile:
+              type: string
+              description: Имя hostProfiles[] элемента, который сформировал request.
             fallbackForMethod:
               type: string
               enum: [host.update, host.delete]
@@ -191,6 +202,7 @@ components:
           description: Не использовать -1, если передается объект inventory.
         interfaces:
           type: array
+          description: Один или несколько Zabbix interfaces[] для одного host.
           items:
             type: object
         groups:
