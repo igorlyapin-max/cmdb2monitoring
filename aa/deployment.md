@@ -36,6 +36,7 @@
 | monitoring-ui-api | CMDBuild REST API | HTTP |
 | monitoring-ui-api | Zabbix API | HTTP JSON-RPC |
 | monitoring-ui-api | .NET services health endpoints | HTTP |
+| monitoring-ui-api | Kafka `localhost:9092` / `kafka:29092` | Kafka protocol, read-only Events |
 | cmdbwebhooks2kafka | Kafka | Kafka protocol |
 | cmdbkafka2zabbix | Kafka | Kafka protocol |
 | cmdbkafka2zabbix | Git repository/working copy | local FS или git |

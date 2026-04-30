@@ -28,6 +28,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -54,6 +55,7 @@ button.danger {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   min-height: 34px;
@@ -69,6 +71,10 @@ textarea {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+}
+
+select {
+  appearance: none;
 }
 
 label span {
@@ -220,6 +226,14 @@ h2 {
   flex-wrap: wrap;
 }
 
+.actions select {
+  width: min(420px, 42vw);
+}
+
+.actions input[type="number"] {
+  width: 92px;
+}
+
 .metrics-grid,
 .catalog-grid {
   display: grid;
@@ -244,6 +258,24 @@ h2 {
   background: var(--panel);
   padding: 14px;
   box-shadow: var(--shadow);
+}
+
+.topic-list {
+  margin-top: 14px;
+}
+
+.settings-stack {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.settings-stack h2:not(:first-child) {
+  margin-top: 18px;
+}
+
+.wide-field {
+  display: block;
+  margin-top: 14px;
 }
 
 .metric {
@@ -388,5 +420,10 @@ th {
   .nav-item {
     min-width: 150px;
     margin: 0;
+  }
+
+  .actions select,
+  .actions input[type="number"] {
+    width: 100%;
   }
 }

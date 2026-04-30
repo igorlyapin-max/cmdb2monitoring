@@ -8,6 +8,7 @@ flowchart TD
     monui -->|health dashboard| wh
     monui -->|health dashboard| conv
     monui -->|health dashboard| api
+    monui -->|events read-only| kafka
     ui --> cmdb[CMDBuild]
     cmdb -->|POST /webhooks/cmdbuild| wh[cmdbwebhooks2kafka]
     wh -->|cmdbuild.webhooks.*| kafka[(Kafka)]

@@ -3,9 +3,9 @@ info:
   title: cmdb2monitoring monitoring UI API
   version: 0.1.0
   description: >
-    Backend-for-frontend API for dashboard, server-side sessions, rules
-    validation, dry-run, upload, IdP settings, and CMDBuild/Zabbix catalog
-    synchronization.
+    Backend-for-frontend API for dashboard, server-side sessions, Kafka event
+    browsing, rules validation, dry-run, upload, runtime settings, IdP settings,
+    and CMDBuild/Zabbix catalog synchronization.
 servers:
   - url: http://localhost:5090
 security:
@@ -147,15 +147,27 @@ paths:
   /api/events:
     get:
       summary: Read recent integration events
-      description: Placeholder until Kafka adapter is added to monitoring-ui-api.
+      description: Reads recent messages from configured Kafka topics through the BFF adapter.
+      parameters:
+        - name: topic
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: maxMessages
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
       responses:
         "200":
-          description: Event list or not configured marker.
+          description: Event list and configured topic list.
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/EventList"
   /api/rules/current:
     get:
       summary: Read current conversion rules
@@ -325,6 +337,31 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/settings/runtime:
+    get:
+      summary: Read runtime settings shown on Settings page
+      responses:
+        "200":
+          description: Runtime settings merged from config and persisted UI settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeSettings"
+    put:
+      summary: Save runtime settings to the configured UI settings file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuntimeSettings"
+      responses:
+        "200":
+          description: Saved runtime settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeSettings"
 components:
   securitySchemes:
     sessionCookie:
@@ -421,6 +458,47 @@ components:
           items:
             type: object
             additionalProperties: true
+    EventList:
+      type: object
+      required:
+        - items
+        - topics
+        - source
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        topics:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        selectedTopic:
+          type: string
+          nullable: true
+        source:
+          type: string
+        message:
+          type: string
+    RuntimeSettings:
+      type: object
+      properties:
+        filePath:
+          type: string
+        auth:
+          type: object
+          additionalProperties: true
+        cmdbuild:
+          type: object
+          additionalProperties: true
+        zabbix:
+          type: object
+          additionalProperties: true
+        eventBrowser:
+          type: object
+          additionalProperties: true
     RulesDocument:
       type: object
       properties:

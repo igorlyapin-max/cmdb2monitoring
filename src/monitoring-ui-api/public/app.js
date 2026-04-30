@@ -1,6 +1,7 @@
 const state = {
   currentRules: null,
-  uploadedRulesText: null
+  uploadedRulesText: null,
+  runtimeSettings: null
 };
 
 const $ = selector => document.querySelector(selector);
@@ -28,6 +29,7 @@ async function initialize() {
   const status = await api('/api/auth/status');
   renderAuth(status);
   if (status.authenticated) {
+    await loadRuntimeSettings();
     await loadDashboard();
     await loadRules();
   }
@@ -70,6 +72,7 @@ function bindForms() {
         }
       });
       renderAuth({ authenticated: true, user: result.user });
+      await loadRuntimeSettings();
       await loadDashboard();
       await loadRules();
     } catch (error) {
@@ -88,6 +91,7 @@ function bindForms() {
 
   $('#refreshDashboard').addEventListener('click', loadDashboard);
   $('#refreshEvents').addEventListener('click', loadEvents);
+  $('#eventsTopic').addEventListener('change', loadEvents);
   $('#loadRules').addEventListener('click', loadRules);
   $('#validateRules').addEventListener('click', validateRules);
   $('#dryRunRules').addEventListener('click', dryRunRules);
@@ -96,6 +100,8 @@ function bindForms() {
   $('#loadZabbix').addEventListener('click', loadZabbix);
   $('#syncCmdbuild').addEventListener('click', syncCmdbuild);
   $('#loadCmdbuild').addEventListener('click', loadCmdbuild);
+  $('#loadSettings').addEventListener('click', loadRuntimeSettings);
+  $('#saveRuntimeSettings').addEventListener('click', saveRuntimeSettings);
   $('#saveIdp').addEventListener('click', saveIdp);
   $('#rulesFile').addEventListener('change', async event => {
     const file = event.target.files?.[0];
@@ -154,12 +160,67 @@ async function loadDashboard() {
 }
 
 async function loadEvents() {
-  const events = await api('/api/events');
+  const params = new URLSearchParams();
+  const selectedTopic = $('#eventsTopic').value;
+  const maxMessages = $('#eventsMaxMessages').value;
+  if (selectedTopic) {
+    params.set('topic', selectedTopic);
+  }
+  if (maxMessages) {
+    params.set('maxMessages', maxMessages);
+  }
+
+  const events = await api(`/api/events${params.size ? `?${params}` : ''}`);
+  renderEventTopics(events.topics ?? [], events.selectedTopic);
   renderRows($('#eventsTable'), events.items.length ? events.items : [{
-    source: events.source,
-    status: 'empty',
-    message: events.message
-  }], item => [item.source, item.status, item.message]);
+    topic: events.selectedTopic ?? events.source,
+    service: '',
+    partition: '',
+    offset: '',
+    timestamp: '',
+    key: '',
+    value: events.message || 'empty'
+  }], item => [
+    item.topic,
+    item.service,
+    item.partition,
+    item.offset,
+    item.timestamp,
+    item.key,
+    formatEventValue(item.value)
+  ]);
+}
+
+function renderEventTopics(topics, selectedTopic) {
+  const select = $('#eventsTopic');
+  const current = selectedTopic || select.value;
+  clear(select);
+  for (const topic of topics) {
+    const option = document.createElement('option');
+    option.value = topic.name;
+    option.textContent = topic.name;
+    option.selected = topic.name === current;
+    select.append(option);
+  }
+
+  renderRows($('#eventsTopicsTable'), topics, item => [
+    item.name,
+    item.service,
+    item.direction,
+    item.description
+  ]);
+}
+
+function formatEventValue(value) {
+  if (typeof value !== 'string') {
+    return value ?? '';
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 }
 
 async function loadRules() {
@@ -249,6 +310,109 @@ function renderCmdbuild(catalog) {
   ]);
 }
 
+async function loadRuntimeSettings() {
+  state.runtimeSettings = await api('/api/settings/runtime');
+  fillRuntimeSettingsForm(state.runtimeSettings);
+  renderEventTopics(state.runtimeSettings.eventBrowser?.topics ?? [], $('#eventsTopic').value);
+  $('#eventsMaxMessages').value = state.runtimeSettings.eventBrowser?.maxMessages ?? 50;
+  return state.runtimeSettings;
+}
+
+async function saveRuntimeSettings() {
+  const body = readRuntimeSettingsForm();
+  const result = await api('/api/settings/runtime', {
+    method: 'PUT',
+    body
+  });
+  state.runtimeSettings = result;
+  fillRuntimeSettingsForm(result);
+  renderEventTopics(result.eventBrowser?.topics ?? [], $('#eventsTopic').value);
+  toast('Runtime settings saved');
+}
+
+function fillRuntimeSettingsForm(settings) {
+  const form = $('#runtimeSettingsForm');
+  const defaults = settings.auth?.localLoginDefaults ?? {};
+  const cmdbuild = settings.cmdbuild ?? {};
+  const zabbix = settings.zabbix ?? {};
+  const eventBrowser = settings.eventBrowser ?? {};
+
+  form.elements.filePath.value = settings.filePath ?? '';
+  form.elements.localDefaultsEnabled.checked = Boolean(defaults.enabled);
+  form.elements.cmdbuildBaseUrl.value = cmdbuild.baseUrl ?? defaults.cmdbuildBaseUrl ?? '';
+  form.elements.cmdbuildServiceUsername.value = cmdbuild.serviceAccount?.username ?? '';
+  form.elements.cmdbuildServicePassword.value = cmdbuild.serviceAccount?.password ?? '';
+  form.elements.cmdbuildDefaultUsername.value = defaults.cmdbuildUsername ?? '';
+  form.elements.cmdbuildDefaultPassword.value = defaults.cmdbuildPassword ?? '';
+  form.elements.zabbixApiEndpoint.value = zabbix.apiEndpoint ?? defaults.zabbixApiEndpoint ?? '';
+  form.elements.zabbixServiceUser.value = zabbix.serviceAccount?.user ?? '';
+  form.elements.zabbixServicePassword.value = zabbix.serviceAccount?.password ?? '';
+  form.elements.zabbixServiceApiToken.value = zabbix.serviceAccount?.apiToken ?? '';
+  form.elements.zabbixDefaultUsername.value = defaults.zabbixUsername ?? '';
+  form.elements.zabbixDefaultPassword.value = defaults.zabbixPassword ?? '';
+  form.elements.zabbixDefaultApiToken.value = defaults.zabbixApiToken ?? '';
+
+  form.elements.eventsEnabled.checked = Boolean(eventBrowser.enabled);
+  form.elements.eventsBootstrapServers.value = eventBrowser.bootstrapServers ?? '';
+  form.elements.eventsClientId.value = eventBrowser.clientId ?? '';
+  form.elements.eventsSecurityProtocol.value = eventBrowser.securityProtocol ?? 'Plaintext';
+  form.elements.eventsSaslMechanism.value = eventBrowser.saslMechanism ?? '';
+  form.elements.eventsUsername.value = eventBrowser.username ?? '';
+  form.elements.eventsPassword.value = eventBrowser.password ?? '';
+  form.elements.eventsSslRejectUnauthorized.checked = eventBrowser.sslRejectUnauthorized !== false;
+  form.elements.eventsMaxMessages.value = eventBrowser.maxMessages ?? 50;
+  form.elements.eventsReadTimeoutMs.value = eventBrowser.readTimeoutMs ?? 2500;
+  form.elements.eventsTopics.value = JSON.stringify(eventBrowser.topics ?? [], null, 2);
+}
+
+function readRuntimeSettingsForm() {
+  const form = new FormData($('#runtimeSettingsForm'));
+  const cmdbuildBaseUrl = form.get('cmdbuildBaseUrl');
+  const zabbixApiEndpoint = form.get('zabbixApiEndpoint');
+  return {
+    auth: {
+      localLoginDefaults: {
+        enabled: form.get('localDefaultsEnabled') === 'on',
+        cmdbuildBaseUrl,
+        cmdbuildUsername: form.get('cmdbuildDefaultUsername'),
+        cmdbuildPassword: form.get('cmdbuildDefaultPassword'),
+        zabbixApiEndpoint,
+        zabbixUsername: form.get('zabbixDefaultUsername'),
+        zabbixPassword: form.get('zabbixDefaultPassword'),
+        zabbixApiToken: form.get('zabbixDefaultApiToken')
+      }
+    },
+    cmdbuild: {
+      baseUrl: cmdbuildBaseUrl,
+      serviceAccount: {
+        username: form.get('cmdbuildServiceUsername'),
+        password: form.get('cmdbuildServicePassword')
+      }
+    },
+    zabbix: {
+      apiEndpoint: zabbixApiEndpoint,
+      serviceAccount: {
+        user: form.get('zabbixServiceUser'),
+        password: form.get('zabbixServicePassword'),
+        apiToken: form.get('zabbixServiceApiToken')
+      }
+    },
+    eventBrowser: {
+      enabled: form.get('eventsEnabled') === 'on',
+      bootstrapServers: form.get('eventsBootstrapServers'),
+      clientId: form.get('eventsClientId'),
+      securityProtocol: form.get('eventsSecurityProtocol'),
+      saslMechanism: form.get('eventsSaslMechanism'),
+      username: form.get('eventsUsername'),
+      password: form.get('eventsPassword'),
+      sslRejectUnauthorized: form.get('eventsSslRejectUnauthorized') === 'on',
+      maxMessages: Number(form.get('eventsMaxMessages')),
+      readTimeoutMs: Number(form.get('eventsReadTimeoutMs')),
+      topics: JSON.parse(form.get('eventsTopics') || '[]')
+    }
+  };
+}
+
 async function saveIdp() {
   const form = new FormData($('#idpForm'));
   const result = await api('/api/settings/idp', {
@@ -310,7 +474,7 @@ function renderRows(tbody, items, columns) {
   if (items.length === 0) {
     const row = document.createElement('tr');
     const cell = el('td', '', 'empty');
-    cell.colSpan = 4;
+    cell.colSpan = 10;
     row.append(cell);
     tbody.append(row);
   }

@@ -17,7 +17,8 @@
 | IF-011 | monitoring-ui-api | CMDBuild REST API | HTTP | Classes, attributes, lookup types, optional service account |
 | IF-012 | monitoring-ui-api | Zabbix API | HTTP JSON-RPC | Templates, host groups, template groups, known tags |
 | IF-013 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
-| IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json` | Catalog cache и persisted UI settings без runtime secrets в git |
+| IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json` | Catalog cache и persisted UI settings; runtime-файл не попадает в git |
+| IF-015 | monitoring-ui-api | Kafka | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
 
 ## Срез бизнес-описания
 
@@ -25,11 +26,12 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-014:
+Срез поддержки включает IF-006..IF-015:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
 - frontend/BFF catalog cache;
+- read-only просмотр Kafka topics через monitoring-ui-api;
 - SAML2 session и IdP settings;
 - секреты и credentials через конфиги/переменные окружения.
 

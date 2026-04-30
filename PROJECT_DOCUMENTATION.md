@@ -147,12 +147,14 @@ Rules-файл отвечает за:
 | Секция | Что задавать |
 | --- | --- |
 | `Service` | Host, port, health route, public frontend dir |
+| `UiSettings` | Путь к runtime settings JSON, который сохраняет UI |
 | `Auth` | IdP mode, session cookie, session timeout, SAML POST limit |
 | `Auth:LocalLoginDefaults` | Prefill local login form; только dev/временный режим, в prod должен быть выключен |
 | `Idp` | SAML2 SP/IdP настройки |
 | `Cmdbuild` | CMDBuild REST base URL, service account для IdP режима, catalog cache |
 | `Zabbix` | Zabbix API endpoint, service account/API token для IdP режима, catalog cache |
 | `Rules` | Rules path, upload/save policy, optional git auto-commit |
+| `EventBrowser` | Kafka read-only browser для вкладки Events: bootstrap, auth, topics, limits |
 | `Services:HealthEndpoints` | Health endpoints микросервисов для dashboard |
 
 SAML2 endpoints:
@@ -174,11 +176,24 @@ Local login defaults:
 - `appsettings.Development.json` временно заполняет форму текущими dev-значениями;
 - при переносе в prod или после перехода на IdP выключить `Enabled` и очистить значения.
 
+Runtime settings:
+- вкладка Settings читает текущие значения из merged config и runtime-файла;
+- `Save runtime` пишет overrides в `src/monitoring-ui-api/state/ui-settings.json`;
+- runtime-файл не коммитится и может содержать dev credentials;
+- текущий dev `EventBrowser` смотрит Kafka `localhost:9092` и topics `*.dev`.
+
+Events:
+- вкладка Events читает Kafka topics только через BFF;
+- браузер не имеет прямого доступа к Kafka;
+- список topics берется из `EventBrowser:Topics` и может быть изменен через Settings;
+- для SASL/TLS заполняются `EventBrowser:SecurityProtocol`, `SaslMechanism`, `Username`, `Password`.
+
 Поддержанные env vars:
 
 ```bash
 PORT=5090
 MONITORING_UI_HOST=0.0.0.0
+MONITORING_UI_SETTINGS_FILE=state/ui-settings.json
 MONITORING_UI_USE_IDP=true
 SAML2_METADATA_URL=https://idp.example/metadata
 SAML2_ENTITY_ID=https://idp.example/entity
@@ -195,6 +210,13 @@ CMDBUILD_SERVICE_PASSWORD=<secret>
 ZABBIX_API_ENDPOINT=https://zabbix.example/api_jsonrpc.php
 ZABBIX_SERVICE_API_TOKEN=<secret>
 RULES_FILE_PATH=rules/cmdbuild-to-zabbix-host-create.json
+MONITORING_UI_EVENTS_ENABLED=true
+MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+MONITORING_UI_KAFKA_SECURITY_PROTOCOL=SaslSsl
+MONITORING_UI_KAFKA_SASL_MECHANISM=ScramSha512
+MONITORING_UI_KAFKA_USERNAME=<secret>
+MONITORING_UI_KAFKA_PASSWORD=<secret>
+MONITORING_UI_EVENTS_TOPICS=cmdbuild.webhooks,zabbix.host.requests,zabbix.host.responses
 ```
 
 Runtime cache/state:

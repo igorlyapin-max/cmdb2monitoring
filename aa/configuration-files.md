@@ -127,6 +127,7 @@ Kafka__Input__Password=<secret>
 | `Service:Host` | IP/interface для bind Node.js сервера | При запуске в контейнере/на сервере |
 | `Service:Port` | HTTP port UI/API | При конфликте портов |
 | `Service:PublicDir` | Папка статического frontend | При смене сборки UI |
+| `UiSettings:FilePath` | Runtime settings JSON, куда UI сохраняет настройки | При смене расположения state-файла |
 | `Auth:UseIdp` | Включение IdP режима | После настройки SAML2 |
 | `Auth:SessionCookieName` | Имя session cookie | При конфликте cookie |
 | `Auth:SessionTimeoutMinutes` | Время жизни server-side session | По требованиям ИБ |
@@ -152,6 +153,7 @@ Kafka__Input__Password=<secret>
 | `Rules:AllowUpload` | Разрешить upload rules через UI | Для admin UI |
 | `Rules:AllowSave` | Разрешить запись rules-файла | Для read-only окружений отключать |
 | `Rules:AutoCommit` | Делать git commit из UI | По умолчанию false |
+| `EventBrowser:*` | Read-only просмотр Kafka topics на вкладке Events | При смене Kafka, auth или списка topics |
 | `Services:HealthEndpoints` | Health endpoints микросервисов | При добавлении сервисов |
 
 Поддержанные env overrides `monitoring-ui-api`:
@@ -160,6 +162,7 @@ Kafka__Input__Password=<secret>
 | --- | --- |
 | `PORT` | `Service:Port` |
 | `MONITORING_UI_HOST` | `Service:Host` |
+| `MONITORING_UI_SETTINGS_FILE` | `UiSettings:FilePath` |
 | `MONITORING_UI_USE_IDP` | `Auth:UseIdp` |
 | `SAML2_METADATA_URL` | `Idp:MetadataUrl` |
 | `SAML2_ENTITY_ID` | `Idp:EntityId` |
@@ -179,6 +182,15 @@ Kafka__Input__Password=<secret>
 | `ZABBIX_SERVICE_PASSWORD` | `Zabbix:ServiceAccount:Password` |
 | `ZABBIX_SERVICE_API_TOKEN` | `Zabbix:ServiceAccount:ApiToken` |
 | `RULES_FILE_PATH` | `Rules:RulesFilePath` |
+| `MONITORING_UI_EVENTS_ENABLED` | `EventBrowser:Enabled` |
+| `MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS` | `EventBrowser:BootstrapServers` |
+| `MONITORING_UI_KAFKA_SECURITY_PROTOCOL` | `EventBrowser:SecurityProtocol` |
+| `MONITORING_UI_KAFKA_SASL_MECHANISM` | `EventBrowser:SaslMechanism` |
+| `MONITORING_UI_KAFKA_USERNAME` | `EventBrowser:Username` |
+| `MONITORING_UI_KAFKA_PASSWORD` | `EventBrowser:Password` |
+| `MONITORING_UI_EVENTS_MAX_MESSAGES` | `EventBrowser:MaxMessages` |
+| `MONITORING_UI_EVENTS_READ_TIMEOUT_MS` | `EventBrowser:ReadTimeoutMs` |
+| `MONITORING_UI_EVENTS_TOPICS` | `EventBrowser:Topics`, список через запятую или точку с запятой |
 
 SAML2 endpoints:
 - SP metadata: `GET /auth/saml2/metadata`;
@@ -187,6 +199,13 @@ SAML2 endpoints:
 - logout: `GET /auth/saml2/logout`.
 
 В IdP-режиме `Cmdbuild:ServiceAccount` и `Zabbix:ServiceAccount` используются BFF для server-side API calls. В режиме без IdP пользователь вводит credentials при входе, они хранятся только в памяти server-side session.
+
+Events:
+- `EventBrowser:Enabled=true` включает чтение Kafka topics через BFF;
+- `EventBrowser:BootstrapServers` в dev равен `localhost:9092`;
+- `EventBrowser:SecurityProtocol=Plaintext` для текущей локальной Kafka без авторизации;
+- `EventBrowser:Topics` должен содержать используемые сервисами topics, включая request/response/log topics;
+- UI Settings сохраняет runtime overrides в `UiSettings:FilePath`, по умолчанию `src/monitoring-ui-api/state/ui-settings.json`.
 
 Runtime cache:
 - `src/monitoring-ui-api/data/zabbix-catalog-cache.json`;
@@ -212,6 +231,8 @@ CMDBUILD_BASE_URL=http://cmdbuild:8080/cmdbuild/services/rest/v3
 ZABBIX_API_ENDPOINT=http://zabbix/api_jsonrpc.php
 RULES_FILE_PATH=rules/cmdbuild-to-zabbix-host-create.json
 MONITORING_UI_USE_IDP=true
+MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+MONITORING_UI_EVENTS_TOPICS=cmdbuild.webhooks,zabbix.host.requests,zabbix.host.responses
 SAML2_METADATA_URL=https://idp.example/metadata
 SAML2_IDP_CERT_PATH=/run/secrets/idp-signing.crt
 CMDBUILD_SERVICE_USERNAME=<secret>

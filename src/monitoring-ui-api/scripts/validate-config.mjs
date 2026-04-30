@@ -17,6 +17,7 @@ for (const relativePath of ['config/appsettings.json', 'config/appsettings.Devel
 const config = JSON.parse(readFileSync(join(serviceRoot, 'config/appsettings.json'), 'utf8'));
 required(config, 'Service.Name');
 required(config, 'Service.HealthRoute');
+required(config, 'UiSettings.FilePath');
 required(config, 'Auth.SessionCookieName');
 required(config, 'Auth.MaxSamlPostBytes');
 required(config, 'Auth.LocalLoginDefaults');
@@ -31,10 +32,22 @@ required(config, 'Cmdbuild.ServiceAccount');
 required(config, 'Zabbix.ApiEndpoint');
 required(config, 'Zabbix.ServiceAccount');
 required(config, 'Rules.RulesFilePath');
+required(config, 'EventBrowser.BootstrapServers');
+required(config, 'EventBrowser.ClientId');
+required(config, 'EventBrowser.SecurityProtocol');
+required(config, 'EventBrowser.Topics');
 required(config, 'Services.HealthEndpoints');
 
 if (!existsSync(join(repoRoot, config.Rules.RulesFilePath))) {
   errors.push(`Rules file does not exist: ${config.Rules.RulesFilePath}`);
+}
+
+if (!Array.isArray(config.EventBrowser.Topics) || config.EventBrowser.Topics.length === 0) {
+  errors.push('EventBrowser.Topics must contain at least one topic.');
+}
+
+if (!['Plaintext', 'Ssl', 'SaslPlaintext', 'SaslSsl'].includes(config.EventBrowser.SecurityProtocol)) {
+  errors.push(`EventBrowser.SecurityProtocol has unsupported value: ${config.EventBrowser.SecurityProtocol}`);
 }
 
 for (const relativePath of ['package.json', 'package-lock.json', 'server.mjs', 'public/index.html', 'public/styles.css', 'public/app.js']) {

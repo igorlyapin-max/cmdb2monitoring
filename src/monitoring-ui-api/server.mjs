@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, createReadStream } from 'node:fs';
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { basename, extname, join, normalize, resolve } from 'node:path';
+import { basename, dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Kafka, logLevel } from 'kafkajs';
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from '@node-saml/node-saml';
 import { parseStringPromise } from 'xml2js';
 
@@ -123,11 +124,7 @@ async function routeApi(request, response, url, path) {
   }
 
   if (request.method === 'GET' && path === '/api/events') {
-    sendJson(response, 200, {
-      items: [],
-      source: 'not_configured',
-      message: 'Kafka event browsing requires a Kafka adapter in monitoring-ui-api.'
-    });
+    sendJson(response, 200, await readKafkaEvents(url));
     return;
   }
 
@@ -232,6 +229,22 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'GET' && path === '/api/settings/runtime') {
+    sendJson(response, 200, publicRuntimeSettings());
+    return;
+  }
+
+  if (request.method === 'PUT' && path === '/api/settings/runtime') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await saveRuntimeSettings(payload));
+    return;
+  }
+
   sendJson(response, 404, {
     error: 'not_found',
     path
@@ -318,7 +331,7 @@ async function loadConfig() {
 }
 
 async function applyPersistedUiSettings(target) {
-  const settingsPath = join(serviceRoot, 'state/ui-settings.json');
+  const settingsPath = resolveUiSettingsFile(target);
   if (!existsSync(settingsPath)) {
     return;
   }
@@ -328,6 +341,8 @@ async function applyPersistedUiSettings(target) {
     Object.assign(target.Idp, persisted.idp, { Enabled: Boolean(persisted.idp.enabled) });
     target.Auth.UseIdp = Boolean(persisted.idp.enabled);
   }
+
+  applyRuntimeSettings(target, persisted);
 }
 
 function mergeObjects(base, override) {
@@ -365,7 +380,16 @@ function applyEnvOverrides(target) {
     ZABBIX_SERVICE_USER: ['Zabbix', 'ServiceAccount', 'User'],
     ZABBIX_SERVICE_PASSWORD: ['Zabbix', 'ServiceAccount', 'Password'],
     ZABBIX_SERVICE_API_TOKEN: ['Zabbix', 'ServiceAccount', 'ApiToken'],
-    RULES_FILE_PATH: ['Rules', 'RulesFilePath']
+    RULES_FILE_PATH: ['Rules', 'RulesFilePath'],
+    MONITORING_UI_SETTINGS_FILE: ['UiSettings', 'FilePath'],
+    MONITORING_UI_EVENTS_ENABLED: ['EventBrowser', 'Enabled'],
+    MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS: ['EventBrowser', 'BootstrapServers'],
+    MONITORING_UI_KAFKA_SECURITY_PROTOCOL: ['EventBrowser', 'SecurityProtocol'],
+    MONITORING_UI_KAFKA_SASL_MECHANISM: ['EventBrowser', 'SaslMechanism'],
+    MONITORING_UI_KAFKA_USERNAME: ['EventBrowser', 'Username'],
+    MONITORING_UI_KAFKA_PASSWORD: ['EventBrowser', 'Password'],
+    MONITORING_UI_EVENTS_MAX_MESSAGES: ['EventBrowser', 'MaxMessages'],
+    MONITORING_UI_EVENTS_READ_TIMEOUT_MS: ['EventBrowser', 'ReadTimeoutMs']
   };
 
   for (const [envName, path] of Object.entries(mapping)) {
@@ -375,13 +399,18 @@ function applyEnvOverrides(target) {
 
     setPath(target, path, parseEnvValue(process.env[envName]));
   }
+
+  if (process.env.MONITORING_UI_EVENTS_TOPICS !== undefined) {
+    target.EventBrowser.Topics = normalizeStringArray(process.env.MONITORING_UI_EVENTS_TOPICS)
+      .map(name => ({ Name: name, Service: '', Direction: '', Description: '' }));
+  }
 }
 
 async function ensureRuntimeDirectories() {
   for (const configuredPath of [
     config.Cmdbuild.Catalog.CacheFilePath,
     config.Zabbix.Catalog.CacheFilePath,
-    'state/ui-settings.json'
+    config.UiSettings?.FilePath ?? 'state/ui-settings.json'
   ]) {
     await mkdir(resolveServicePath(configuredPath, true), { recursive: true });
   }
@@ -455,6 +484,242 @@ async function readServicesHealth() {
 
   items.sort((left, right) => left.name.localeCompare(right.name));
   return { items };
+}
+
+async function readKafkaEvents(url) {
+  const eventBrowser = config.EventBrowser ?? {};
+  const topics = publicEventTopics();
+  if (!eventBrowser.Enabled) {
+    return {
+      items: [],
+      topics,
+      selectedTopic: null,
+      source: 'disabled',
+      message: 'Kafka event browsing is disabled.'
+    };
+  }
+
+  if (topics.length === 0) {
+    return {
+      items: [],
+      topics,
+      selectedTopic: null,
+      source: 'not_configured',
+      message: 'Kafka event browsing has no configured topics.'
+    };
+  }
+
+  const requestedTopic = url.searchParams.get('topic') || topics[0].name;
+  const topic = topics.find(item => item.name === requestedTopic);
+  if (!topic) {
+    throw httpError(400, 'unknown_topic', `Topic '${requestedTopic}' is not configured for event browsing.`);
+  }
+
+  const maxMessages = clampInt(url.searchParams.get('maxMessages'), eventBrowser.MaxMessages ?? 50, 1, 500);
+  const readTimeoutMs = clampInt(url.searchParams.get('readTimeoutMs'), eventBrowser.ReadTimeoutMs ?? 2500, 500, 30000);
+  const items = await readKafkaTopicMessages(topic, maxMessages, readTimeoutMs);
+
+  return {
+    items,
+    topics,
+    selectedTopic: topic.name,
+    source: 'kafka',
+    settings: {
+      bootstrapServers: eventBrowser.BootstrapServers,
+      maxMessages,
+      readTimeoutMs
+    },
+    message: items.length === 0 ? 'Topic has no readable messages in the selected offset window.' : ''
+  };
+}
+
+async function readKafkaTopicMessages(topic, maxMessages, readTimeoutMs) {
+  const kafka = createKafkaClient();
+  const admin = kafka.admin();
+  const consumer = kafka.consumer({
+    groupId: `${config.EventBrowser.ClientId || 'monitoring-ui-api-events'}-${randomUUID()}`
+  });
+  const partitionTargets = new Map();
+  const items = [];
+  let done = false;
+  let resolveDone = () => {};
+
+  try {
+    await admin.connect();
+    const offsets = await admin.fetchTopicOffsets(topic.name);
+    for (const partitionOffset of offsets) {
+      const high = BigInt(partitionOffset.high ?? partitionOffset.offset ?? '0');
+      const low = BigInt(partitionOffset.low ?? '0');
+      if (high <= low) {
+        continue;
+      }
+
+      const requestedStart = high - BigInt(maxMessages);
+      const start = requestedStart > low ? requestedStart : low;
+      partitionTargets.set(Number(partitionOffset.partition), {
+        start,
+        high,
+        done: false
+      });
+    }
+  } finally {
+    await disconnectKafka(admin);
+  }
+
+  if (partitionTargets.size === 0) {
+    return [];
+  }
+
+  const donePromise = new Promise(resolvePromise => {
+    resolveDone = resolvePromise;
+  });
+
+  try {
+    await consumer.connect();
+    await consumer.subscribe({ topic: topic.name, fromBeginning: true });
+    await consumer.run({
+      autoCommit: false,
+      eachMessage: async ({ partition, message }) => {
+        const target = partitionTargets.get(Number(partition));
+        if (!target) {
+          return;
+        }
+
+        const offset = BigInt(message.offset);
+        if (offset < target.start || offset >= target.high) {
+          return;
+        }
+
+        items.push({
+          topic: topic.name,
+          service: topic.service,
+          direction: topic.direction,
+          partition,
+          offset: message.offset,
+          timestamp: message.timestamp ? new Date(Number(message.timestamp)).toISOString() : '',
+          key: message.key?.toString('utf8') ?? '',
+          value: message.value?.toString('utf8') ?? '',
+          headers: headersToObject(message.headers)
+        });
+
+        if (offset >= target.high - 1n) {
+          target.done = true;
+        }
+
+        if (items.length >= maxMessages || [...partitionTargets.values()].every(item => item.done)) {
+          done = true;
+          resolveDone();
+        }
+      }
+    });
+
+    for (const [partition, target] of partitionTargets) {
+      consumer.seek({
+        topic: topic.name,
+        partition,
+        offset: target.start.toString()
+      });
+    }
+
+    await Promise.race([donePromise, sleep(readTimeoutMs)]);
+  } catch (error) {
+    throw httpError(502, 'kafka_event_browser_error', error instanceof Error ? error.message : 'Kafka event browsing failed.');
+  } finally {
+    if (!done) {
+      resolveDone();
+    }
+
+    await disconnectKafka(consumer);
+  }
+
+  return items
+    .sort((left, right) => {
+      if (left.topic !== right.topic) {
+        return left.topic.localeCompare(right.topic);
+      }
+
+      if (left.partition !== right.partition) {
+        return left.partition - right.partition;
+      }
+
+      return Number(BigInt(left.offset) - BigInt(right.offset));
+    })
+    .slice(-maxMessages);
+}
+
+function createKafkaClient() {
+  const eventBrowser = config.EventBrowser ?? {};
+  const brokers = normalizeStringArray(eventBrowser.BootstrapServers);
+  if (brokers.length === 0) {
+    throw httpError(500, 'kafka_event_browser_config_invalid', 'EventBrowser.BootstrapServers is not configured.');
+  }
+
+  return new Kafka({
+    clientId: eventBrowser.ClientId || 'monitoring-ui-api-events',
+    brokers,
+    ssl: kafkaSslOptions(eventBrowser),
+    sasl: kafkaSaslOptions(eventBrowser),
+    logLevel: logLevel.NOTHING
+  });
+}
+
+function kafkaSslOptions(eventBrowser) {
+  const protocol = eventBrowser.SecurityProtocol ?? 'Plaintext';
+  if (!String(protocol).toLowerCase().includes('ssl')) {
+    return undefined;
+  }
+
+  return {
+    rejectUnauthorized: eventBrowser.SslRejectUnauthorized !== false
+  };
+}
+
+function kafkaSaslOptions(eventBrowser) {
+  const protocol = eventBrowser.SecurityProtocol ?? 'Plaintext';
+  if (!String(protocol).toLowerCase().includes('sasl')) {
+    return undefined;
+  }
+
+  const mechanism = kafkaSaslMechanism(eventBrowser.SaslMechanism);
+  if (!mechanism) {
+    throw httpError(500, 'kafka_event_browser_config_invalid', 'EventBrowser.SaslMechanism is not supported by monitoring-ui-api.');
+  }
+
+  if (isBlank(eventBrowser.Username) || isBlank(eventBrowser.Password)) {
+    throw httpError(500, 'kafka_event_browser_config_invalid', 'EventBrowser SASL username/password are required.');
+  }
+
+  return {
+    mechanism,
+    username: eventBrowser.Username,
+    password: eventBrowser.Password
+  };
+}
+
+function kafkaSaslMechanism(value) {
+  const normalized = String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return {
+    plain: 'plain',
+    scramsha256: 'scram-sha-256',
+    scramsha512: 'scram-sha-512'
+  }[normalized];
+}
+
+async function disconnectKafka(client) {
+  try {
+    await client.disconnect();
+  } catch {
+    // Ignore cleanup errors after read timeout or failed connection attempts.
+  }
+}
+
+function headersToObject(headers = {}) {
+  return Object.fromEntries(Object.entries(headers).map(([key, value]) => [
+    key,
+    Array.isArray(value)
+      ? value.map(item => item?.toString('utf8') ?? '')
+      : value?.toString('utf8') ?? ''
+  ]));
 }
 
 async function readCurrentRules() {
@@ -807,7 +1072,7 @@ async function cmdbuildGet(baseUrl, path, credentials) {
 }
 
 async function saveIdpSettings(payload) {
-  const statePath = resolveServiceFile('state/ui-settings.json');
+  const persisted = await readPersistedUiSettings();
   const safePayload = {
     idp: {
       provider: 'SAML2',
@@ -834,12 +1099,149 @@ async function saveIdpSettings(payload) {
     }
   };
 
-  await mkdir(resolveServicePath('state', false), { recursive: true });
-  await writeFile(statePath, `${JSON.stringify(safePayload, null, 2)}\n`, 'utf8');
+  Object.assign(persisted, safePayload);
+  await writePersistedUiSettings(persisted);
   Object.assign(config.Idp, safePayload.idp, { Enabled: safePayload.idp.enabled });
   config.Auth.UseIdp = safePayload.idp.enabled;
 
   return publicIdpSettings();
+}
+
+async function saveRuntimeSettings(payload) {
+  const persisted = await readPersistedUiSettings();
+  const runtime = normalizeRuntimeSettingsPayload(payload);
+
+  Object.assign(persisted, runtime);
+  await writePersistedUiSettings(persisted);
+  applyRuntimeSettings(config, runtime);
+
+  return publicRuntimeSettings();
+}
+
+function normalizeRuntimeSettingsPayload(payload = {}) {
+  const localDefaults = payload.auth?.localLoginDefaults ?? {};
+  const cmdbuild = payload.cmdbuild ?? {};
+  const zabbix = payload.zabbix ?? {};
+  const serviceAccount = {
+    cmdbuild: cmdbuild.serviceAccount ?? {},
+    zabbix: zabbix.serviceAccount ?? {}
+  };
+
+  return {
+    auth: {
+      localLoginDefaults: {
+        enabled: Boolean(localDefaults.enabled),
+        cmdbuildBaseUrl: localDefaults.cmdbuildBaseUrl ?? cmdbuild.baseUrl ?? '',
+        cmdbuildUsername: localDefaults.cmdbuildUsername ?? '',
+        cmdbuildPassword: localDefaults.cmdbuildPassword ?? '',
+        zabbixApiEndpoint: localDefaults.zabbixApiEndpoint ?? zabbix.apiEndpoint ?? '',
+        zabbixUsername: localDefaults.zabbixUsername ?? '',
+        zabbixPassword: localDefaults.zabbixPassword ?? '',
+        zabbixApiToken: localDefaults.zabbixApiToken ?? ''
+      }
+    },
+    cmdbuild: {
+      baseUrl: cmdbuild.baseUrl ?? '',
+      serviceAccount: {
+        username: serviceAccount.cmdbuild.username ?? '',
+        password: serviceAccount.cmdbuild.password ?? ''
+      }
+    },
+    zabbix: {
+      apiEndpoint: zabbix.apiEndpoint ?? '',
+      serviceAccount: {
+        user: serviceAccount.zabbix.user ?? '',
+        password: serviceAccount.zabbix.password ?? '',
+        apiToken: serviceAccount.zabbix.apiToken ?? ''
+      }
+    },
+    eventBrowser: {
+      enabled: Boolean(payload.eventBrowser?.enabled),
+      bootstrapServers: payload.eventBrowser?.bootstrapServers ?? '',
+      clientId: payload.eventBrowser?.clientId ?? 'monitoring-ui-api-events',
+      securityProtocol: payload.eventBrowser?.securityProtocol ?? 'Plaintext',
+      saslMechanism: payload.eventBrowser?.saslMechanism ?? '',
+      username: payload.eventBrowser?.username ?? '',
+      password: payload.eventBrowser?.password ?? '',
+      sslRejectUnauthorized: payload.eventBrowser?.sslRejectUnauthorized !== false,
+      maxMessages: clampInt(payload.eventBrowser?.maxMessages, config.EventBrowser?.MaxMessages ?? 50, 1, 500),
+      readTimeoutMs: clampInt(payload.eventBrowser?.readTimeoutMs, config.EventBrowser?.ReadTimeoutMs ?? 2500, 500, 30000),
+      topics: normalizeEventTopics(payload.eventBrowser?.topics)
+    }
+  };
+}
+
+function applyRuntimeSettings(target, persisted = {}) {
+  if (persisted.auth?.localLoginDefaults) {
+    const defaults = persisted.auth.localLoginDefaults;
+    target.Auth.LocalLoginDefaults = {
+      Enabled: Boolean(defaults.enabled),
+      CmdbuildBaseUrl: defaults.cmdbuildBaseUrl ?? '',
+      CmdbuildUsername: defaults.cmdbuildUsername ?? '',
+      CmdbuildPassword: defaults.cmdbuildPassword ?? '',
+      ZabbixApiEndpoint: defaults.zabbixApiEndpoint ?? '',
+      ZabbixUsername: defaults.zabbixUsername ?? '',
+      ZabbixPassword: defaults.zabbixPassword ?? '',
+      ZabbixApiToken: defaults.zabbixApiToken ?? ''
+    };
+  }
+
+  if (persisted.cmdbuild) {
+    target.Cmdbuild.BaseUrl = persisted.cmdbuild.baseUrl ?? target.Cmdbuild.BaseUrl;
+    target.Cmdbuild.ServiceAccount = {
+      ...(target.Cmdbuild.ServiceAccount ?? {}),
+      Username: persisted.cmdbuild.serviceAccount?.username ?? target.Cmdbuild.ServiceAccount?.Username ?? '',
+      Password: persisted.cmdbuild.serviceAccount?.password ?? target.Cmdbuild.ServiceAccount?.Password ?? ''
+    };
+  }
+
+  if (persisted.zabbix) {
+    target.Zabbix.ApiEndpoint = persisted.zabbix.apiEndpoint ?? target.Zabbix.ApiEndpoint;
+    target.Zabbix.ServiceAccount = {
+      ...(target.Zabbix.ServiceAccount ?? {}),
+      User: persisted.zabbix.serviceAccount?.user ?? target.Zabbix.ServiceAccount?.User ?? '',
+      Password: persisted.zabbix.serviceAccount?.password ?? target.Zabbix.ServiceAccount?.Password ?? '',
+      ApiToken: persisted.zabbix.serviceAccount?.apiToken ?? target.Zabbix.ServiceAccount?.ApiToken ?? ''
+    };
+  }
+
+  if (persisted.eventBrowser) {
+    const eventBrowser = persisted.eventBrowser;
+    target.EventBrowser = {
+      ...(target.EventBrowser ?? {}),
+      Enabled: Boolean(eventBrowser.enabled),
+      BootstrapServers: eventBrowser.bootstrapServers ?? target.EventBrowser?.BootstrapServers ?? '',
+      ClientId: eventBrowser.clientId ?? target.EventBrowser?.ClientId ?? '',
+      SecurityProtocol: eventBrowser.securityProtocol ?? target.EventBrowser?.SecurityProtocol ?? 'Plaintext',
+      SaslMechanism: eventBrowser.saslMechanism ?? target.EventBrowser?.SaslMechanism ?? '',
+      Username: eventBrowser.username ?? target.EventBrowser?.Username ?? '',
+      Password: eventBrowser.password ?? target.EventBrowser?.Password ?? '',
+      SslRejectUnauthorized: eventBrowser.sslRejectUnauthorized !== false,
+      MaxMessages: clampInt(eventBrowser.maxMessages, target.EventBrowser?.MaxMessages ?? 50, 1, 500),
+      ReadTimeoutMs: clampInt(eventBrowser.readTimeoutMs, target.EventBrowser?.ReadTimeoutMs ?? 2500, 500, 30000),
+      Topics: normalizeEventTopics(eventBrowser.topics).map(topic => ({
+        Name: topic.name,
+        Service: topic.service,
+        Direction: topic.direction,
+        Description: topic.description
+      }))
+    };
+  }
+}
+
+async function readPersistedUiSettings() {
+  const settingsPath = resolveUiSettingsFile(config);
+  if (!existsSync(settingsPath)) {
+    return {};
+  }
+
+  return JSON.parse(await readFile(settingsPath, 'utf8'));
+}
+
+async function writePersistedUiSettings(settings) {
+  const settingsPath = resolveUiSettingsFile(config);
+  await mkdir(dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
 }
 
 function createSamlSession(profile) {
@@ -1153,6 +1555,83 @@ function publicLocalLoginDefaults() {
       apiToken: defaults.ZabbixApiToken ?? ''
     }
   };
+}
+
+function publicRuntimeSettings() {
+  const cmdbuildServiceAccount = config.Cmdbuild.ServiceAccount ?? {};
+  const zabbixServiceAccount = config.Zabbix.ServiceAccount ?? {};
+  const localDefaults = config.Auth.LocalLoginDefaults ?? {};
+  const eventBrowser = config.EventBrowser ?? {};
+
+  return {
+    filePath: config.UiSettings?.FilePath ?? 'state/ui-settings.json',
+    auth: {
+      localLoginDefaults: {
+        enabled: Boolean(localDefaults.Enabled),
+        cmdbuildBaseUrl: localDefaults.CmdbuildBaseUrl ?? '',
+        cmdbuildUsername: localDefaults.CmdbuildUsername ?? '',
+        cmdbuildPassword: localDefaults.CmdbuildPassword ?? '',
+        zabbixApiEndpoint: localDefaults.ZabbixApiEndpoint ?? '',
+        zabbixUsername: localDefaults.ZabbixUsername ?? '',
+        zabbixPassword: localDefaults.ZabbixPassword ?? '',
+        zabbixApiToken: localDefaults.ZabbixApiToken ?? ''
+      }
+    },
+    cmdbuild: {
+      baseUrl: config.Cmdbuild.BaseUrl ?? '',
+      serviceAccount: {
+        username: cmdbuildServiceAccount.Username ?? cmdbuildServiceAccount.username ?? '',
+        password: cmdbuildServiceAccount.Password ?? cmdbuildServiceAccount.password ?? ''
+      }
+    },
+    zabbix: {
+      apiEndpoint: config.Zabbix.ApiEndpoint ?? '',
+      serviceAccount: {
+        user: zabbixServiceAccount.User ?? zabbixServiceAccount.user ?? '',
+        password: zabbixServiceAccount.Password ?? zabbixServiceAccount.password ?? '',
+        apiToken: zabbixServiceAccount.ApiToken ?? zabbixServiceAccount.apiToken ?? ''
+      }
+    },
+    eventBrowser: {
+      enabled: Boolean(eventBrowser.Enabled),
+      bootstrapServers: eventBrowser.BootstrapServers ?? '',
+      clientId: eventBrowser.ClientId ?? '',
+      securityProtocol: eventBrowser.SecurityProtocol ?? 'Plaintext',
+      saslMechanism: eventBrowser.SaslMechanism ?? '',
+      username: eventBrowser.Username ?? '',
+      password: eventBrowser.Password ?? '',
+      sslRejectUnauthorized: eventBrowser.SslRejectUnauthorized !== false,
+      maxMessages: eventBrowser.MaxMessages ?? 50,
+      readTimeoutMs: eventBrowser.ReadTimeoutMs ?? 2500,
+      topics: publicEventTopics()
+    }
+  };
+}
+
+function publicEventTopics() {
+  return normalizeEventTopics(config.EventBrowser?.Topics);
+}
+
+function normalizeEventTopics(topics) {
+  return (Array.isArray(topics) ? topics : [])
+    .map(topic => {
+      if (typeof topic === 'string') {
+        return {
+          name: topic,
+          service: '',
+          direction: '',
+          description: ''
+        };
+      }
+
+      return {
+        name: topic?.Name ?? topic?.name ?? '',
+        service: topic?.Service ?? topic?.service ?? '',
+        direction: topic?.Direction ?? topic?.direction ?? '',
+        description: topic?.Description ?? topic?.description ?? ''
+      };
+    })
+    .filter(topic => !isBlank(topic.name));
 }
 
 function buildDryRunModel(rules, source, route) {
@@ -1708,6 +2187,10 @@ function resolveRepoPath(path) {
   return fullPath;
 }
 
+function resolveUiSettingsFile(target) {
+  return resolve(serviceRoot, target.UiSettings?.FilePath ?? 'state/ui-settings.json');
+}
+
 function trimTrailingSlash(path) {
   return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
 }
@@ -1882,6 +2365,25 @@ function preferredSamlBindingLocation(services) {
 
 function equalsIgnoreCase(left, right) {
   return String(left ?? '').toLowerCase() === String(right ?? '').toLowerCase();
+}
+
+function clampInt(value, fallback, min, max) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.trunc(number)));
+}
+
+function sleep(ms) {
+  return new Promise(resolvePromise => {
+    setTimeout(resolvePromise, ms);
+  });
 }
 
 function requireString(object, property, errors) {

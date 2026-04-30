@@ -82,18 +82,40 @@
           <section class="view" id="events">
             <div class="view-header">
               <h1>Events</h1>
-              <button id="refreshEvents" type="button">Refresh</button>
+              <div class="actions">
+                <select id="eventsTopic"></select>
+                <input id="eventsMaxMessages" type="number" min="1" max="500" value="50">
+                <button id="refreshEvents" type="button">Refresh</button>
+              </div>
             </div>
             <div class="surface">
               <table>
                 <thead>
                   <tr>
-                    <th>Source</th>
-                    <th>Status</th>
-                    <th>Message</th>
+                    <th>Topic</th>
+                    <th>Service</th>
+                    <th>Partition</th>
+                    <th>Offset</th>
+                    <th>Timestamp</th>
+                    <th>Key</th>
+                    <th>Value</th>
                   </tr>
                 </thead>
                 <tbody id="eventsTable"></tbody>
+              </table>
+            </div>
+            <div class="surface topic-list">
+              <h2>Topics</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody id="eventsTopicsTable"></tbody>
               </table>
             </div>
           </section>
@@ -197,8 +219,73 @@
           <section class="view" id="settings">
             <div class="view-header">
               <h1>Settings</h1>
-              <button id="saveIdp" type="button">Save</button>
+              <div class="actions">
+                <button id="loadSettings" type="button">Load</button>
+                <button id="saveRuntimeSettings" type="button">Save runtime</button>
+                <button id="saveIdp" type="button">Save IdP</button>
+              </div>
             </div>
+            <form id="runtimeSettingsForm" class="surface settings-stack">
+              <h2>Environment</h2>
+              <div class="settings-grid">
+                <label><span>Settings file</span><input name="filePath" readonly></label>
+                <label class="check-row">
+                  <input name="localDefaultsEnabled" type="checkbox">
+                  <span>Prefill login form</span>
+                </label>
+                <label><span>CMDBuild URL</span><input name="cmdbuildBaseUrl"></label>
+                <label><span>CMDBuild service login</span><input name="cmdbuildServiceUsername"></label>
+                <label><span>CMDBuild service password</span><input name="cmdbuildServicePassword" type="password"></label>
+                <label><span>Login form CMDBuild login</span><input name="cmdbuildDefaultUsername"></label>
+                <label><span>Login form CMDBuild password</span><input name="cmdbuildDefaultPassword" type="password"></label>
+                <label><span>Zabbix API</span><input name="zabbixApiEndpoint"></label>
+                <label><span>Zabbix service login</span><input name="zabbixServiceUser"></label>
+                <label><span>Zabbix service password</span><input name="zabbixServicePassword" type="password"></label>
+                <label><span>Zabbix service token</span><input name="zabbixServiceApiToken" type="password"></label>
+                <label><span>Login form Zabbix login</span><input name="zabbixDefaultUsername"></label>
+                <label><span>Login form Zabbix password</span><input name="zabbixDefaultPassword" type="password"></label>
+                <label><span>Login form Zabbix token</span><input name="zabbixDefaultApiToken" type="password"></label>
+              </div>
+              <h2>Kafka events</h2>
+              <div class="settings-grid">
+                <label class="check-row">
+                  <input name="eventsEnabled" type="checkbox">
+                  <span>Enable Events Kafka browser</span>
+                </label>
+                <label><span>Bootstrap servers</span><input name="eventsBootstrapServers"></label>
+                <label><span>Client ID</span><input name="eventsClientId"></label>
+                <label>
+                  <span>Security protocol</span>
+                  <select name="eventsSecurityProtocol">
+                    <option>Plaintext</option>
+                    <option>Ssl</option>
+                    <option>SaslPlaintext</option>
+                    <option>SaslSsl</option>
+                  </select>
+                </label>
+                <label>
+                  <span>SASL mechanism</span>
+                  <select name="eventsSaslMechanism">
+                    <option value=""></option>
+                    <option>Plain</option>
+                    <option>ScramSha256</option>
+                    <option>ScramSha512</option>
+                  </select>
+                </label>
+                <label><span>Kafka username</span><input name="eventsUsername"></label>
+                <label><span>Kafka password</span><input name="eventsPassword" type="password"></label>
+                <label class="check-row">
+                  <input name="eventsSslRejectUnauthorized" type="checkbox">
+                  <span>Reject unauthorized TLS</span>
+                </label>
+                <label><span>Max messages</span><input name="eventsMaxMessages" type="number" min="1" max="500"></label>
+                <label><span>Read timeout ms</span><input name="eventsReadTimeoutMs" type="number" min="500" max="30000"></label>
+              </div>
+              <label class="wide-field">
+                <span>Topics JSON</span>
+                <textarea name="eventsTopics" spellcheck="false"></textarea>
+              </label>
+            </form>
             <form id="idpForm" class="surface settings-grid">
               <label class="check-row">
                 <input name="enabled" type="checkbox">

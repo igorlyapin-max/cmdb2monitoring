@@ -16,7 +16,7 @@
 | cmdbwebhooks2kafka | Прием и нормализация webhook |
 | cmdbkafka2zabbix | Конвертация CMDB-события в Zabbix JSON-RPC |
 | zabbixrequests2api | Вызов Zabbix API и публикация результата |
-| monitoring-ui-api | Frontend/BFF для оператора, rules, catalog sync и SAML2 login |
+| monitoring-ui-api | Frontend/BFF для оператора, rules, catalog sync, Events Kafka browser и SAML2 login |
 | IdP SAML2 | Единая аутентификация для frontend, CMDBuild и Zabbix в целевой модели |
 | Kafka | Асинхронная шина обмена и временный транспорт логов |
 | Zabbix | Целевая система мониторинга |
@@ -56,7 +56,8 @@
 2. Если IdP отключен, оператор вводит CMDBuild и Zabbix credentials; они хранятся только в server-side session.
 3. Если IdP включен, оператор проходит SAML2 login через `/auth/saml2/login`, IdP возвращает SAMLResponse на `/auth/saml2/acs`, BFF создает server-side session.
 4. Оператор проверяет health микросервисов, синхронизирует Zabbix catalog и CMDBuild catalog, валидирует или загружает rules JSON.
-5. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.
+5. Оператор просматривает настроенные Kafka topics на вкладке Events; чтение выполняет BFF, браузер не подключается к Kafka напрямую.
+6. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.
 
 ## Негативные сценарии
 
@@ -79,6 +80,7 @@
 
 - Загрузка rules-файла из Git-managed JSON.
 - Загрузка rules-файла через frontend с серверной валидацией и dry-run.
+- Просмотр последних сообщений в настроенных Kafka topics через BFF Events.
 - Синхронизация Zabbix catalog: templates, host groups, template groups, known tags.
 - Синхронизация CMDBuild catalog: classes, attributes, lookup values.
 - Ведение state-файлов последнего обработанного объекта.
@@ -92,4 +94,4 @@
 | cmdbwebhooks2kafka | Получен webhook, ошибка авторизации, ошибка JSON, публикация в Kafka |
 | cmdbkafka2zabbix | Загружены rules, событие сконвертировано, событие пропущено, Kafka publish |
 | zabbixrequests2api | JSON-RPC принят, validation error, Zabbix API request/response, response опубликован |
-| monitoring-ui-api | Login/logout, SAML2 ACS, settings update, rules validate/upload, catalog sync |
+| monitoring-ui-api | Login/logout, SAML2 ACS, settings update, rules validate/upload, catalog sync, Kafka Events read |

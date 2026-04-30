@@ -5,6 +5,7 @@ flowchart LR
     ui -->|IF-012 catalog| zbx
     ui -->|IF-013 rules upload/validate| rules
     ui -->|IF-014 cache/settings| fs
+    ui -->|IF-015 events read-only| kafka
     cmdb[CMDBuild] -->|IF-001 HTTP webhook| wh[cmdbwebhooks2kafka]
     wh -->|IF-002 cmdbuild.webhooks.*| kafka[(Kafka)]
     kafka -->|cmdbuild.webhooks.*| conv[cmdbkafka2zabbix]

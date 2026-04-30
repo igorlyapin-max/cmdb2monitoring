@@ -13,5 +13,7 @@
 | SEC-009 | monitoring-ui-api SP private key | `SAML2_SP_PRIVATE_KEY_PATH`, `Idp:SpPrivateKey*` | По ротации SP certificates | Нужен для signed AuthnRequest или encrypted assertions |
 | SEC-010 | monitoring-ui-api CMDBuild service account | `CMDBUILD_SERVICE_USERNAME`, `CMDBUILD_SERVICE_PASSWORD` | По политике CMDBuild | Используется в IdP-режиме для server-side API calls |
 | SEC-011 | monitoring-ui-api Zabbix service account/token | `ZABBIX_SERVICE_USER`, `ZABBIX_SERVICE_PASSWORD`, `ZABBIX_SERVICE_API_TOKEN` | По политике Zabbix | Используется в IdP-режиме для server-side API calls |
+| SEC-012 | monitoring-ui-api Kafka SASL для Events | `MONITORING_UI_KAFKA_USERNAME`, `MONITORING_UI_KAFKA_PASSWORD`, `EventBrowser:*` | По политике Kafka | В текущем dev не используется, Events read-only |
+| SEC-013 | monitoring-ui-api runtime settings | `src/monitoring-ui-api/state/ui-settings.json` | По политике окружения | Может содержать dev credentials, не коммитить |
 
 Production/base config не должен хранить реальные секреты. Использовать переменные окружения, secret storage или local config, исключенный из git.
