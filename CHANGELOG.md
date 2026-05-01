@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Documentation now separates product conversion capabilities from the concrete dev CMDBuild/Zabbix model names such as `Computer`, `Server`, `zabbixTag`, `iLo`, and `mgmt`.
+
 ## 0.4.0 - 2026-05-01
 
 ### Added
@@ -27,7 +31,7 @@
 - `createOnUpdateWhenMissing` host profile policy for Server `profile`/`profile2`: update fallback can create the additional Zabbix host when it does not exist yet.
 - Documentation for IP-count limits in `hostProfiles[].interfaces` and Server additional profiles.
 - Config-driven `templateConflictRules` for removing conflicting Zabbix templates such as `ICMP Ping` and agent templates when SNMP templates already provide `icmpping` or the same inventory field.
-- Server webhook/rules naming now requires `interface/interface2/profile/profile2` for additional interfaces and profiles.
+- Dev Server webhook/rules naming uses `interface/interface2/profile/profile2` for additional interfaces and profiles, but product behavior is driven by rules-defined source fields.
 - Mapping metadata `source.fields[].cmdbAttribute` links Server webhook keys `interface/interface2/profile/profile2` to real CMDBuild attributes `iLo/iLo2/mgmt/mgmt2` without restoring legacy input aliases.
 
 ### Changed

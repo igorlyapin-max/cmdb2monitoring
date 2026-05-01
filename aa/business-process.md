@@ -2,7 +2,7 @@
 
 ## Назначение
 
-Процесс обеспечивает автоматическую постановку, обновление и снятие с мониторинга объектов CMDBuild класса `Computer` и наследников `Notebook`, `PC`, `Server`, `tk`.
+Процесс обеспечивает автоматическую постановку, обновление и снятие с мониторинга объектов CMDBuild, классы и атрибуты которых описаны в rules и webhook body. Текущие `Computer`, `Notebook`, `PC`, `Server`, `tk` являются примером dev-модели, а не встроенным ограничением продукта.
 
 Пользователь работает с CMDBuild через веб-интерфейс. Микросервисы получают события не от пользователя напрямую, а через webhook CMDBuild.
 
@@ -40,7 +40,7 @@
 
 ### Create
 
-1. Пользователь создает карточку `Computer`-наследника в CMDBuild.
+1. Пользователь создает карточку CMDBuild класса, включенного в rules.
 2. CMDBuild отправляет webhook `card_create_after`.
 3. `cmdbwebhooks2kafka` проверяет Bearer token, нормализует событие и публикует envelope в `cmdbuild.webhooks.*`.
 4. `cmdbkafka2zabbix` читает событие, при необходимости поднимает scalar/lookup leaf по `source.fields[].cmdbPath` через CMDBuild REST, применяет JSON rules, `hostProfiles[]` и T4-шаблон, публикует один или несколько `host.create` в `zabbix.host.requests.*`.
@@ -50,7 +50,7 @@
 
 ### Update
 
-1. Пользователь изменяет IP, OS, zabbixTag или другие поддерживаемые поля.
+1. Пользователь изменяет IP/DNS, lookup/reference или другие поля, описанные в rules.
 2. CMDBuild отправляет webhook `card_update_after`.
 3. Если `zabbix_hostid` не передан, `cmdbkafka2zabbix` формирует fallback `host.get` с metadata `hostProfile`, `fallbackForMethod=host.update` и целевыми `fallbackUpdateParams`.
 4. `zabbixrequests2api` выполняет `host.get`, получает `hostid` и существующие `interfaceid`, затем выполняет `host.update` с сопоставлением interfaces по type/ip/dns/port.

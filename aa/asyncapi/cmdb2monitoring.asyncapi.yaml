@@ -107,7 +107,7 @@ components:
           description: Тип события жизненного цикла карточки.
         entityType:
           type: string
-          enum: [Notebook, PC, Server, tk]
+          description: CMDBuild class name from the concrete model; current dev examples include Notebook, PC, Server, and tk.
         entityId:
           type: string
         receivedAt:
@@ -140,16 +140,16 @@ components:
               type: string
             interface:
               type: string
-              description: Preferred Server additional interface IP; нормализуется в interfaceIpAddress и используется как дополнительный SNMP interface основного Server host.
+              description: Example source key for an additional interface IP; actual source keys are defined by rules.
             interface2:
               type: string
-              description: Preferred Server second additional interface IP; нормализуется в interface2IpAddress и используется как дополнительный SNMP interface основного Server host.
+              description: Example source key for a second additional interface IP; actual source keys are defined by rules.
             profile:
               type: string
-              description: Preferred Server additional monitoring profile IP; нормализуется в profileIpAddress и используется отдельным hostProfile profile.
+              description: Example source key for an additional monitoring profile IP; actual source keys are defined by rules.
             profile2:
               type: string
-              description: Preferred Server second additional monitoring profile IP; нормализуется в profile2IpAddress и используется отдельным hostProfile profile2.
+              description: Example source key for a second additional monitoring profile IP; actual source keys are defined by rules.
             dns_name:
               type: string
             profile_dns:
@@ -159,13 +159,13 @@ components:
               type: string
             OS:
               type: string
-              description: Фактическое имя lookup-поля CMDBuild для OS; может быть numeric id.
+              description: Example lookup source key for operating system; actual source keys are defined by rules and may carry numeric ids.
             os:
               type: string
               description: Нормализованное поле OS, если payload уже нормализован.
             zabbixTag:
               type: string
-              description: CMDBuild lookup id или tag1/tag2/tag3; downstream rules могут разрешить lookup id в code через `resolve`.
+              description: Example lookup source key for Zabbix tag selection; actual source keys and lookup values are defined by rules.
     ZabbixJsonRpcRequest:
       type: object
       required: [jsonrpc, method, params, id]

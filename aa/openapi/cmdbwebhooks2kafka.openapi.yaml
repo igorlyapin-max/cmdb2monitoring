@@ -73,7 +73,7 @@ components:
           enum: [card_create_after, card_update_after, card_delete_after]
         className:
           type: string
-          enum: [Notebook, PC, Server, tk]
+          description: CMDBuild class name from the concrete model; current dev examples include Notebook, PC, Server, and tk.
         id:
           type: string
         code:
@@ -82,16 +82,16 @@ components:
           type: string
         interface:
           type: string
-          description: Preferred Server additional interface IP; в rules нормализуется в interfaceIpAddress и используется как дополнительный SNMP interface основного Server host.
+          description: Example source key for an additional interface IP; the actual key can be any name declared in rules.
         interface2:
           type: string
-          description: Preferred Server second additional interface IP; в rules нормализуется в interface2IpAddress и используется как дополнительный SNMP interface основного Server host.
+          description: Example source key for a second additional interface IP; the actual key can be any name declared in rules.
         profile:
           type: string
-          description: Preferred Server additional monitoring profile IP; в rules нормализуется в profileIpAddress и используется отдельным hostProfile profile.
+          description: Example source key for an additional monitoring profile IP; the actual key can be any name declared in rules.
         profile2:
           type: string
-          description: Preferred Server second additional monitoring profile IP; в rules нормализуется в profile2IpAddress и используется отдельным hostProfile profile2.
+          description: Example source key for a second additional monitoring profile IP; the actual key can be any name declared in rules.
         dns_name:
           type: string
         profile_dns:
@@ -101,10 +101,10 @@ components:
           type: string
         OS:
           type: string
-          description: CMDBuild lookup id или человекочитаемое значение OS.
+          description: Example lookup source key for operating system; actual source keys are defined by rules and may carry numeric ids.
         os:
           type: string
           description: Нормализованное поле OS, если payload использует lowercase.
         zabbixTag:
           type: string
-          description: CMDBuild lookup id или человекочитаемый tag-код; downstream rules могут разрешить значение через `cmdbPath`/`resolve`.
+          description: Example lookup source key for Zabbix tag selection; actual source keys and lookup values are defined by rules.

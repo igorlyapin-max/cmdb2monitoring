@@ -242,7 +242,7 @@ SAML2 endpoints:
 
 Практический пример: если существующий host уже связан с `Windows by Zabbix agent`, добавление `HP iLO by SNMP` для дополнительного SNMP interface может быть отклонено Zabbix из-за общего inventory field `Name`. В этом случае rules должны оставить целевой SNMP template и передать конфликтующий agent template в `templates_clear`.
 
-Для Server source fields обязательные имена сейчас `interface/interface2` для дополнительных interfaces основного host и `profile/profile2` для отдельных hostProfiles. Если реальные CMDBuild attributes называются иначе, например текущие `iLo/iLo2/mgmt/mgmt2`, связь для `Управление правилами конвертации` и генерации webhook Body задается через `source.fields[].cmdbAttribute`; это не расширяет набор входных alias микросервиса.
+Имена CMDBuild classes, attributes и source fields задаются rules, а не кодом. Текущие dev-имена `Server`, `interface/interface2`, `profile/profile2`, `iLo/iLo2/mgmt/mgmt2` являются примером конкретной модели. Для другой модели можно указать любые source keys в `source.fields[].source` и связать их с реальными CMDBuild attributes через `source.fields[].cmdbAttribute` или `source.fields[].cmdbPath`; далее эти fields используются в `hostProfiles[].interfaces[].valueField`, regex/rules и T4.
 Для reference/lookup полей CMDBuild Body остается плоским: source key получает numeric id или scalar value, а полный путь хранится в rules как `source.fields[].cmdbPath`, например `Server.adr.Ip` или `Server.ipaddr_reference.another_reference_attribute.ipaddr`.
 Смена hostProfile name меняет вычисляемый Zabbix host suffix; ранее созданные дополнительные hosts со старыми suffix не переименовываются автоматически.
 

@@ -29,7 +29,7 @@
 | `src/cmdbkafka2zabbix` | Чтение CMDB events, применение JSON/T4 rules и `hostProfiles[]`, публикация одного или нескольких Zabbix JSON-RPC requests |
 | `src/zabbixrequests2api` | Чтение Zabbix requests, вызов Zabbix API, публикация responses |
 | `src/monitoring-ui-api` | Node.js frontend/BFF |
-| `rules/cmdbuild-to-zabbix-host-create.json` | Правила конвертации CMDBuild Computer-derived events в Zabbix JSON-RPC |
+| `rules/cmdbuild-to-zabbix-host-create.json` | Пример правил конвертации настроенных CMDBuild events в Zabbix JSON-RPC |
 | `aa/` | Архитектурные артефакты, диаграммы, OpenAPI/AsyncAPI, карты |
 | `tests/configvalidation` | Проверки конфигураций и обязательных артефактов |
 | `scripts/test-configs.sh` | Быстрый общий валидатор конфигов |
@@ -306,12 +306,13 @@ Runtime cache/state:
 - один CMDB object -> один Zabbix host с несколькими `interfaces[]`, если несколько IP относятся к одному объекту мониторинга;
 - один CMDB object -> несколько Zabbix hosts, если основной сервер и дополнительный profile object должны иметь разные host names, templates, groups или lifecycle.
 
-Для `Server` в dev-правилах дополнительно настроены оба сценария multi-address обработки:
+Имена классов CMDBuild, attributes и source fields не являются ограничением кода. Оператор задает их в CMDBuild webhook body и rules: `source.fields`, `source.fields[].source`, `source.fields[].cmdbAttribute`, `source.fields[].cmdbPath`, `hostProfiles[].interfaces[].valueField`, selection rules и T4. Текущие `Computer`, `Notebook`, `PC`, `Server`, `tk`, `zabbixTag`, `iLo`, `iLo2`, `mgmt`, `mgmt2`, `interface`, `interface2`, `profile` и `profile2` - это пример dev-модели, а не встроенная схема продукта.
+
+Для `Server` в dev-правилах как пример настроены оба сценария multi-address обработки:
 - основной profile `main` создает один Zabbix host с тремя interfaces: `ip_address -> ipAddress`, `interface -> interfaceIpAddress`, `interface2 -> interface2IpAddress`;
 - дополнительные profiles `profile` и `profile2` создают отдельные Zabbix hosts с suffix `-profile` и `-profile2`.
 
-Webhook body для Server должен использовать `interface/interface2/profile/profile2`; старые имена этих полей больше не поддерживаются rules/UI.
-Реальные CMDBuild attributes остаются `iLo/iLo2/mgmt/mgmt2`; rules связывает их с webhook keys через `source.fields[].cmdbAttribute`. Это поле используется разделом `Управление правилами конвертации` и генератором CMDBuild Body, но не является входным alias для `cmdbkafka2zabbix`.
+Webhook body для этой dev-схемы использует `interface/interface2/profile/profile2`, но это выбранные source keys примера. Если в другой CMDBuild-модели реальные attributes называются `iLo1/iLo2/mgmnt/mgmt2`, можно либо оставить нейтральные source keys и связать их через `cmdbAttribute`/`cmdbPath`, либо назвать source keys так же, как attributes, и указать эти имена в `source.fields[].source`.
 Переименование hostProfile меняет вычисляемое имя Zabbix host: новые дополнительные hosts получают suffix `-profile`/`-profile2`. Ранее созданные дополнительные hosts со старыми suffix автоматически не переименовываются; оператор должен удалить, отключить или мигрировать их отдельно.
 
 `interface/interface2/profile/profile2` используют SNMP interface `:161`; `main` с `interface/interface2` получает `HP iLO by SNMP`, а `profile/profile2` получают отдельные SNMP monitoring rules. Блок `templateConflictRules` в rules-файле удаляет `ICMP Ping` и agent-шаблоны, если выбран `HP iLO by SNMP` или `Generic by SNMP`, потому что эти SNMP-шаблоны уже содержат item key `icmpping` и заполняют inventory field `Name`.
@@ -321,11 +322,13 @@ Webhook body для Server должен использовать `interface/inte
 
 Ограничения по количеству IP:
 - в коде `cmdbkafka2zabbix` нет отдельного числового лимита на `Model.Interfaces`: сервис рендерит столько interfaces, сколько выбрано правилами `hostProfiles[].interfaces`;
-- фактический лимит текущей dev-схемы задается rules и плоским webhook body: `main` сейчас может получить до трех interfaces (`ip_address`, `interface`, `interface2`), а `profile` и `profile2` сейчас являются двумя отдельными дополнительными host profiles по одному IP каждый;
+- фактический лимит конкретной поставки задается rules и плоским webhook body; текущая dev-схема как пример дает `main` до трех interfaces (`ip_address`, `interface`, `interface2`), а `profile` и `profile2` являются двумя отдельными дополнительными host profiles по одному IP каждый;
 - в одном Zabbix host допустимо несколько interfaces, но для каждого Zabbix interface type должен быть только один основной interface с `main=1`; дополнительные interfaces того же type должны иметь `main=0`, иначе Zabbix может отклонить или некорректно применить payload;
 - чтобы добавить еще один фиксированный IP в основной host, нужно добавить CMDBuild attribute, webhook field, `source.fields` и новый элемент `hostProfiles[].interfaces`; если это еще один SNMP interface, его interface profile должен быть не-main (`main=0`), кроме одного выбранного основного SNMP interface;
 - чтобы добавить еще один отдельный monitoring profile, нужно добавить новый named source field и отдельный `hostProfile` с собственным suffix, например `profile3`; при необходимости upsert на update включается `createOnUpdateWhenMissing=true`;
 - произвольное или заранее неизвестное количество IP в одном поле webhook сейчас не поддерживается: текущая модель ожидает плоские именованные поля, а не массив адресов. Для безлимитного списка потребуется отдельное расширение контракта webhook/rules/T4, например массив interfaces или profiles с итерацией.
+
+Пример настройки другой модели: если класс называется `Server`, дополнительные интерфейсы - `iLo1/iLo2`, а адреса управления - `mgmnt/mgmt2`, причем `mgmnt/mgmt2` должны стать отдельными Zabbix hosts, в rules добавляются source fields для `iLo1`, `iLo2`, `mgmnt`, `mgmt2`; `iLo1/iLo2` подключаются как дополнительные `hostProfiles[].interfaces` основного profile, а для `mgmnt/mgmt2` создаются два отдельных `hostProfiles[]` с собственными suffix, templates/groups/tags и lifecycle.
 
 Поведение при пустых дополнительных адресах:
 - если заполнен только `ip_address`, profile `main` все равно создает или обновляет основной Server host с одним agent interface;
