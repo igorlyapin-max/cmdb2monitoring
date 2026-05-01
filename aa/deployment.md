@@ -16,6 +16,20 @@
 | External/Future | SAML2 IdP | `Idp:MetadataUrl`, `Idp:SsoUrl`, `Idp:SloUrl` |
 | Future | ELK | Endpoint будет задан через `ElkLogging` |
 
+## Совместимость Dev-контура
+
+| Компонент | Подтвержденная версия | Контракт |
+| --- | --- | --- |
+| CMDBuild | `4.1.0` | REST API v3, webhook JSON |
+| Zabbix | `7.0.25` | JSON-RPC `/api_jsonrpc.php`, host/catalog methods |
+| Kafka | `3.9.2` | Kafka protocol, KRaft/PLAINTEXT в dev |
+| CMDBuild DB | PostgreSQL `17.9` + PostGIS `3.5.x` | Внутренняя БД CMDBuild; наши сервисы не подключаются напрямую |
+| Zabbix DB | PostgreSQL `16.13` | Внутренняя БД Zabbix; наши сервисы не подключаются напрямую |
+| .NET | SDK `10.0.203`, target `net10.0` | Сборка и запуск .NET-сервисов |
+| Node.js | `>=22` | `monitoring-ui-api` |
+
+Для test/prod допускается перенос на другие patch/minor версии только после проверки контрактов: CMDBuild REST/webhook, Zabbix JSON-RPC, Kafka protocol/security, catalog sync и smoke create/update/delete.
+
 ## Целевые контуры
 
 ### Тест ИТ

@@ -1,7 +1,7 @@
 # Документация проекта cmdb2monitoring
 
 Версия документации: `0.4.0`.
-Дата актуализации: 2026-05-01.
+Дата актуализации: 2026-05-02.
 
 ## Назначение
 
@@ -54,6 +54,27 @@ http://192.168.202.100:5080/webhooks/cmdbuild
 ```
 
 Для локального запуска `cmdbwebhooks2kafka` слушает `0.0.0.0:5080`; если запустить его только на `localhost:5080`, CMDBuild-контейнер не сможет вызвать webhook.
+
+## Совместимость
+
+Подтвержденная матрица dev-окружения на 2026-05-02:
+
+| Компонент | Версия | Примечание |
+| --- | --- | --- |
+| CMDBuild | `4.1.0` | Образ `itmicus/cmdbuild:4.1.0`, WAR manifest `CMDBuild-Version: 4.1.0`; используется REST API v3 и webhook JSON |
+| Zabbix | `7.0.25` | `apiinfo.version=7.0.25`; контейнеры `zabbix-*-pgsql:alpine-7.0-latest` фактически собраны как `7.0.25` |
+| Kafka | `3.9.2` | Образ `apache/kafka:3.9.2`, dev KRaft/PLAINTEXT |
+| CMDBuild DB | PostgreSQL `17.9`, PostGIS `3.5.x` | Наши сервисы напрямую к этой БД не подключаются |
+| Zabbix DB | PostgreSQL `16.13` | Наши сервисы напрямую к этой БД не подключаются |
+| .NET | SDK `10.0.203`, target `net10.0` | Используется wrapper `scripts/dotnet` |
+| Node.js | `>=22` | Требуется для `monitoring-ui-api` |
+
+Поддерживаемым считается не имя Docker tag, а сохранение контрактов:
+- CMDBuild webhook body остается плоским JSON, а catalog/reference/lookup чтение доступно через REST v3;
+- Zabbix предоставляет JSON-RPC `/api_jsonrpc.php` с методами и payload structures, которые используют rules/T4;
+- Kafka topics созданы внешней инфраструктурой, а broker доступен по настроенному protocol/security.
+
+Ожидаемо совместимые версии: CMDBuild `4.x` с REST v3, Zabbix `7.0.x LTS`, Kafka `3.x`. Все остальные major/minor переходы требуют отдельного smoke: health, catalog sync, rules dry-run и create/update/delete цепочка.
 
 ## Kafka topics
 

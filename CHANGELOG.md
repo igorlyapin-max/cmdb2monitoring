@@ -5,6 +5,7 @@
 ### Changed
 
 - Documentation now separates product conversion capabilities from the concrete dev CMDBuild/Zabbix model names such as `Computer`, `Server`, `zabbixTag`, `iLo`, and `mgmt`.
+- Documentation now records the tested compatibility matrix for CMDBuild `4.1.0`, Zabbix `7.0.25`, Kafka `3.9.2`, .NET `10.0.203`, and Node.js `>=22`.
 
 ## 0.4.0 - 2026-05-01
 

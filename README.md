@@ -28,6 +28,16 @@ Dev HTTP ports:
 - `zabbixrequests2api`: `http://localhost:5082`.
 - `monitoring-ui-api`: `http://localhost:5090`.
 
+Tested dev compatibility:
+
+- CMDBuild `4.1.0` with REST API v3 and flat webhook JSON.
+- Zabbix `7.0.25` through JSON-RPC `/api_jsonrpc.php`.
+- Apache Kafka `3.9.2`.
+- .NET SDK `10.0.203`, target `net10.0`.
+- Node.js `>=22` for `monitoring-ui-api`.
+
+Expected compatibility is contract-based: CMDBuild `4.x` with REST v3, Zabbix `7.0.x LTS`, and Kafka `3.x` after environment smoke checks. See `TZ_cmdb2monitoring.txt` and `PROJECT_DOCUMENTATION.md` for the compatibility matrix.
+
 Service settings live in each service `appsettings.json` / `appsettings.Development.json`.
 For a container running in Docker network `cmdbuild_default`, override Kafka with:
 

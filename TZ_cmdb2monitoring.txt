@@ -1,7 +1,7 @@
 Техническое задание
 Проект: cmdb2monitoring
 Версия: 0.4.0
-Дата: 2026-05-01
+Дата: 2026-05-02
 
 1. Назначение проекта
 
@@ -57,13 +57,52 @@ Frontend/BFF: monitoring-ui-api.
 2. Технологический стек
 
 - Язык: C#.
-- Платформа: .NET.
+- Платформа: .NET 10, target framework `net10.0`.
 - Тип сервиса: ASP.NET Core Web API / Minimal API.
 - Брокер сообщений: Apache Kafka.
 - CMDB: CMDBuild.
 - Логи: structured JSON logs, временно через Kafka-топик, в будущем через ELK.
 - Репозиторий: monorepo.
-- Frontend/BFF: Node.js без прямого доступа браузера к Kafka/CMDBuild/Zabbix.
+- Frontend/BFF: Node.js >= 22 без прямого доступа браузера к Kafka/CMDBuild/Zabbix.
+
+2.1. Совместимость и подтвержденные версии
+
+Текущий проект использует интеграционные контракты продуктов, а не прямой доступ к их внутренним БД:
+- CMDBuild: webhook JSON и REST API v3;
+- Zabbix: JSON-RPC API `/api_jsonrpc.php`;
+- Kafka: стандартный Kafka protocol и заранее созданные topics.
+
+Подтвержденные версии dev-окружения на 2026-05-02:
+
+| Компонент | Подтвержденная версия | Как проверено | Статус совместимости |
+| --- | --- | --- | --- |
+| CMDBuild | `4.1.0` | Docker image `itmicus/cmdbuild:4.1.0`, `CMDBuild-Version: 4.1.0` в WAR manifest | Поддержано и используется для smoke/e2e |
+| CMDBuild API | REST v3 | endpoints `/services/rest/v3/...` | Обязательный контракт для catalog sync и `cmdbPath` resolver |
+| Zabbix | `7.0.25` | `apiinfo.version` вернул `7.0.25`, container labels `org.opencontainers.image.version=7.0.25` | Поддержано и используется для smoke/e2e |
+| Zabbix API | JSON-RPC 7.0 LTS | `/api_jsonrpc.php` | Обязательный контракт для `host.create/get/update/delete` и catalog validation |
+| Apache Kafka | `3.9.2` | image `apache/kafka:3.9.2`, `/opt/kafka/bin/kafka-topics.sh --version` | Поддержано в PLAINTEXT/KRaft dev-режиме |
+| CMDBuild DB | PostgreSQL `17.9` + PostGIS image `17-3.5-alpine` | `select version()` в контейнере `cmdbuild_db` | Прямая совместимость нашего ПО не зависит от БД; БД обслуживает CMDBuild |
+| Zabbix DB | PostgreSQL `16.13` | `select version()` в контейнере `zabbix-db` | Прямая совместимость нашего ПО не зависит от БД; БД обслуживает Zabbix |
+| .NET SDK | `10.0.203` | `global.json` и wrapper `scripts/dotnet` | Требуется для сборки сервисов `net10.0` |
+| Node.js | `>=22` | `src/monitoring-ui-api/package.json engines.node` | Требуется для `monitoring-ui-api` |
+
+Ожидаемая совместимость без изменения кода:
+- CMDBuild `4.x`, если сохранены webhook-события, плоский JSON body, REST API v3 endpoints `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/lookup_types/{type}/values` и поведение lookup/reference id;
+- Zabbix `7.0.x LTS`, если сохранены JSON-RPC методы и поля, используемые rules/T4: `host.create`, `host.get`, `host.update`, `host.delete`, `templates_clear`, `selectParentTemplates`, `interfaces[]`, `groups[]`, `templates[]`, `tags[]`, inventory и catalog lookup methods;
+- Kafka `3.x`, если доступен Kafka protocol, заранее созданы topics, а настройки security/auth соответствуют `Confluent.Kafka` и `kafkajs`.
+
+Не сертифицировано без отдельной проверки:
+- CMDBuild 3.x или будущие major-версии CMDBuild, где меняются REST routes, webhook placeholders, lookup/reference representation или session/auth flow;
+- Zabbix 6.x, 7.2+ или будущие major-версии, где меняется JSON-RPC schema, template link/clear behavior, inventory validation или interface model;
+- Kafka major-версии и managed Kafka services с обязательными SASL/TLS настройками, пока не пройден smoke на конкретном контуре.
+
+При смене версии CMDBuild, Zabbix, Kafka, .NET или Node.js необходимо обновить эту матрицу, `PROJECT_DOCUMENTATION.md` и релевантные `aa/` artifacts, а также выполнить минимум:
+- `./scripts/test-configs.sh`;
+- health checks сервисов;
+- CMDBuild catalog sync;
+- Zabbix catalog sync;
+- dry-run rules;
+- smoke create/update/delete или согласованный subset для измененного продукта.
 
 3. Структура репозитория
 

@@ -105,6 +105,7 @@
   - `aa/openapi/*.yaml`;
   - `aa/maps/*.md`.
 - Диаграммы хранить как diagram-as-code (`.mmd`) или другой текстовый формат, пригодный для git diff. Экспорт в картинки/VSDX допустим как производный артефакт, но исходник должен быть текстовым.
+- При изменении версии или major/minor compatibility CMDBuild, Zabbix, Kafka, .NET SDK или Node.js обновлять compatibility matrix в `TZ_cmdb2monitoring.txt`, `PROJECT_DOCUMENTATION.md` и релевантных `aa/` artifacts. Docker tag `latest` не считать зафиксированной версией без проверки runtime/API версии.
 
 ## Тестирование
 
