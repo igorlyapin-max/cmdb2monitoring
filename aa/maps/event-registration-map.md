@@ -19,6 +19,8 @@
 | EV-015 | IF-013 | monitoring-ui-api | Rules validate/upload/dry-run | Information/Warning | rules path, valid, user |
 | EV-016 | IF-012, IF-014 | monitoring-ui-api | Zabbix catalog sync | Information/Error | endpoint, counts, error |
 | EV-017 | IF-011, IF-014 | monitoring-ui-api | CMDBuild catalog sync | Information/Error | endpoint, counts, error |
-| EV-018 | IF-017 | monitoring-ui-api frontend | Mapping save-as draft/webhook instructions | UI status | session change count, validation warnings |
+| EV-018 | IF-017 | monitoring-ui-api frontend | Conversion rules save-as draft/webhook instructions | UI status | session change count, validation warnings |
+| EV-019 | IF-018 | cmdbkafka2zabbix | Lookup/reference field resolution | Warning | fieldName, cmdbPath, reason |
+| EV-020 | IF-009 | monitoring-ui-api frontend | Interface language changed | UI state | language, cookie |
 
 Логи пишутся в JSON и временно публикуются в Kafka log topics для будущей доставки в ELK.

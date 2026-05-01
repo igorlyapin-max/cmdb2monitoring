@@ -1,11 +1,13 @@
 openapi: 3.0.3
 info:
   title: cmdb2monitoring monitoring UI API
-  version: 0.3.0
+  version: 0.4.0
   description: >
     Backend-for-frontend API for dashboard, server-side sessions, Kafka event
     browsing, rules validation, dry-run, upload, runtime settings, IdP settings,
-    and CMDBuild/Zabbix catalog synchronization.
+    CMDBuild/Zabbix catalog synchronization, conversion rules management,
+    and logical control of conversion rules. Interface language is a browser
+    cookie concern and does not change API contracts.
 servers:
   - url: http://localhost:5090
 security:
@@ -197,6 +199,10 @@ paths:
   /api/rules/dry-run:
     post:
       summary: Apply rules to a sample CMDBuild payload without saving
+      description: >
+        Uses uploaded or current rules. Lookup fields can be resolved from the
+        cached CMDBuild lookup values when source field metadata contains
+        lookup type or resolve metadata.
       requestBody:
         required: true
         content:
@@ -228,6 +234,25 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/rules/fix-mapping:
+    post:
+      summary: Validate and repair selected conversion rules logical control issues
+      description: Admin-only helper used by Logical Control of Conversion Rules.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Conversion rules repair result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /api/rules/history:
     get:
       summary: Read configured rules file git history
@@ -250,13 +275,24 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/zabbix/catalog/status:
+    get:
+      summary: Read Zabbix catalog cache metadata
+      responses:
+        "200":
+          description: Catalog cache file status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /api/zabbix/catalog/mapping:
     get:
-      summary: Read lightweight Zabbix catalog for Mapping
+      summary: Read lightweight Zabbix catalog for Conversion Rules Management
       description: Returns counts and lightweight sections; large sections are loaded lazily through `/api/zabbix/catalog/{collection}`.
       responses:
         "200":
-          description: Lightweight Mapping catalog.
+          description: Lightweight conversion rules catalog.
           content:
             application/json:
               schema:
@@ -297,9 +333,24 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/cmdbuild/catalog/status:
+    get:
+      summary: Read CMDBuild catalog cache metadata
+      responses:
+        "200":
+          description: Catalog cache file status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /api/cmdbuild/catalog/sync:
     post:
-      summary: Synchronize CMDBuild classes, class attributes, and lookup types
+      summary: Synchronize CMDBuild classes, class attributes, lookup types, and lookup values
+      description: >
+        Lookup values are included when `Cmdbuild:Catalog:IncludeLookupValues`
+        is enabled. The cache is used by Conversion Rules Management and
+        dry-run lookup resolution.
       responses:
         "200":
           description: Synced catalog.
@@ -536,6 +587,10 @@ components:
           $ref: "#/components/schemas/ValidationResult"
         content:
           type: object
+          description: >
+            Conversion rules JSON. Source fields can include `cmdbPath`,
+            `type`, `lookupType`, and `resolve` metadata for reference/lookup
+            leaf resolution while webhook payload remains flat.
           additionalProperties: true
     RulesPayload:
       type: object

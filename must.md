@@ -15,6 +15,7 @@
 - Runtime state хранится в `state/*.json` и не попадает в git.
 - Production secrets не хранятся в git. Использовать переменные окружения, secret storage или local config, исключенный из git.
 - Frontend credentials не хранить в браузере; использовать server-side session.
+- Для `monitoring-ui-api` пользовательские тексты общего меню, Help и базовых всплывающих подсказок должны поддерживаться в русской и английской локалях. При добавлении нового пункта меню, Help-текста или selector tooltip обязательно обновлять словари `ru/en`.
 - SAML2 реализуется через проверенную библиотеку, с обязательной проверкой IdP signing certificate и InResponseTo; XML-подписи не проверять самописным кодом.
 
 ## Микросервисные соглашения
@@ -79,7 +80,9 @@
 - Rules должны поддерживать расширенные Zabbix host параметры без правки кода: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps.
 - Rules должны поддерживать `hostProfiles[]`: один CMDB object может формировать один Zabbix host с несколькими `interfaces[]` или несколько Zabbix hosts через fan-out.
 - Количество IP в текущем контракте задается явными named fields rules/webhook; произвольные массивы IP не считаются поддержанными без отдельного изменения модели.
-- Для Server обязательные webhook keys: `interface/interface2` означают дополнительные interfaces основного host, `profile/profile2` означают отдельные hostProfiles. Старые имена этих полей не поддерживаются как входные alias; реальные CMDBuild attributes `iLo/iLo2/mgmt/mgmt2` связываются через `source.fields[].cmdbAttribute` только для Mapping и генерации Body.
+- Для Server обязательные webhook keys: `interface/interface2` означают дополнительные interfaces основного host, `profile/profile2` означают отдельные hostProfiles. Старые имена этих полей не поддерживаются как входные alias; реальные CMDBuild attributes `iLo/iLo2/mgmt/mgmt2` связываются через `source.fields[].cmdbAttribute` только для `Управление правилами конвертации` и генерации Body.
+- Webhook payload остается плоским. Reference/lookup metadata хранится в rules: `source.fields[].cmdbPath`, `lookupType` и `resolve`; converter поднимает leaf через CMDBuild REST по пути вида `Server.adr.Ip` или `Server.ref1.ref2.lookup`.
+- Для lookup source fields `OS` и `zabbixTag` штатное значение перед regex/T4 должно быть lookup `code`; numeric id допускаются только как fallback, если CMDBuild resolver не настроен.
 - Для нескольких Zabbix interfaces одного type в одном host только один interface должен иметь `main=1`, остальные должны иметь `main=0`.
 - Несовместимые Zabbix templates должны разрешаться через `templateConflictRules`; для update fallback конфликтующие уже привязанные templates передаются в `templates_clear`.
 - Новые T4-шаблоны должны использовать `Model.Interfaces`; `Model.Interface` допускается только как обратная совместимость с первым интерфейсом.

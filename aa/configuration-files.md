@@ -73,12 +73,18 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 | `ConversionRules:RepositoryPath` | Git working copy rules | Если rules вынесены в отдельный repo |
 | `ConversionRules:RulesFilePath` | Путь к JSON rules | Если меняется файл правил |
 | `ConversionRules:PullOnStartup` | Выполнять `git pull` при старте | Для внешнего repo правил |
+| `Cmdbuild:BaseUrl` | CMDBuild REST v3 base URL для lookup/reference resolver | Для каждого окружения, через secret/env в prod |
+| `Cmdbuild:Username` / `Cmdbuild:Password` | Учетная запись resolver для чтения attributes/cards/lookups | Через secret/env в prod |
+| `Cmdbuild:Enabled` | Включает lookup/reference resolver | Отключать только если rules не используют `cmdbPath` или resolver временно недоступен |
+| `Cmdbuild:RequestTimeoutMs` | Timeout REST-запросов resolver | При медленном CMDBuild API |
+| `Cmdbuild:MaxPathDepth` | Максимальная глубина reference traversal | Если в модели нужны более глубокие пути |
 | `ProcessingState:FilePath` | State-файл offset/объекта | Для отдельного окружения или volume |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK |
 
 Rules-файл `rules/cmdbuild-to-zabbix-host-create.json` управляет:
 - event routing create/update/delete;
 - regex validation;
+- lookup/reference path conversion через `source.fields[].cmdbPath` и `resolve`;
 - hostProfiles fan-out: один CMDB object -> один Zabbix host с несколькими interfaces[] или несколько Zabbix hosts;
 - `hostProfiles[].createOnUpdateWhenMissing`: для update fallback разрешает создать отсутствующий дополнительный Zabbix host по `fallbackCreateParams`, если `host.get` не нашел host;
 - количество IP задается rules: текущий плоский webhook/rules контракт поддерживает named fields, а не произвольный массив IP; для дополнительных IP добавляются новые `source.fields` и `hostProfiles[].interfaces` или отдельные `hostProfiles[]`;
@@ -90,6 +96,16 @@ Rules-файл `rules/cmdbuild-to-zabbix-host-create.json` управляет:
 При наличии `inventory` в rules/T4 payload необходимо использовать `inventory_mode=0` или другой разрешенный режим inventory. `inventory_mode=-1` отключает inventory, и Zabbix отклоняет такие запросы.
 
 State-файл хранит последний успешно обработанный input offset. При старте consumer назначает позицию чтения `lastInputOffset + 1` для сохраненного topic/partition.
+
+Пример prod overrides для lookup/reference resolver:
+
+```bash
+Cmdbuild__Enabled=true
+Cmdbuild__BaseUrl=https://cmdbuild.example/cmdbuild/services/rest/v3
+Cmdbuild__Username=<secret>
+Cmdbuild__Password=<secret>
+Cmdbuild__MaxPathDepth=5
+```
 
 ## zabbixrequests2api
 
@@ -226,7 +242,8 @@ SAML2 endpoints:
 
 Практический пример: если существующий host уже связан с `Windows by Zabbix agent`, добавление `HP iLO by SNMP` для дополнительного SNMP interface может быть отклонено Zabbix из-за общего inventory field `Name`. В этом случае rules должны оставить целевой SNMP template и передать конфликтующий agent template в `templates_clear`.
 
-Для Server source fields обязательные имена сейчас `interface/interface2` для дополнительных interfaces основного host и `profile/profile2` для отдельных hostProfiles. Если реальные CMDBuild attributes называются иначе, например текущие `iLo/iLo2/mgmt/mgmt2`, связь для Mapping и генерации webhook Body задается через `source.fields[].cmdbAttribute`; это не расширяет набор входных alias микросервиса.
+Для Server source fields обязательные имена сейчас `interface/interface2` для дополнительных interfaces основного host и `profile/profile2` для отдельных hostProfiles. Если реальные CMDBuild attributes называются иначе, например текущие `iLo/iLo2/mgmt/mgmt2`, связь для `Управление правилами конвертации` и генерации webhook Body задается через `source.fields[].cmdbAttribute`; это не расширяет набор входных alias микросервиса.
+Для reference/lookup полей CMDBuild Body остается плоским: source key получает numeric id или scalar value, а полный путь хранится в rules как `source.fields[].cmdbPath`, например `Server.adr.Ip` или `Server.ipaddr_reference.another_reference_attribute.ipaddr`.
 Смена hostProfile name меняет вычисляемый Zabbix host suffix; ранее созданные дополнительные hosts со старыми suffix не переименовываются автоматически.
 
 Events:
@@ -238,11 +255,12 @@ Events:
 - UI Settings сохраняет runtime overrides в `UiSettings:FilePath`, по умолчанию `src/monitoring-ui-api/state/ui-settings.json`.
 
 Rules UI:
-- Mapping показывает CMDBuild, rules и Zabbix в трех колонках;
-- Mapping edit mode позволяет добавлять rules в draft JSON, удалять rules по группам, выполнять undo/redo и сохранять draft через `Save file as`;
+- `Управление правилами конвертации` показывает CMDBuild, rules и Zabbix в трех колонках;
+- edit mode раскрывает reference attributes до scalar/lookup leaf-полей и сохраняет путь в `cmdbPath`;
+- edit mode позволяет добавлять rules в draft JSON, удалять rules по группам, выполнять undo/redo и сохранять draft через `Save file as`;
 - `Save file as` дополнительно формирует текстовый файл CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
-- перед сохранением Mapping проверяет IP/DNS binding: каждый мониторинговый класс из `source.entityClasses` или `className` regex должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
-- Validate rules mapping подсвечивает только отсутствующие элементы и позволяет удалить выбранные элементы после подтверждения;
+- перед сохранением проверяется IP/DNS binding: каждый мониторинговый класс из `source.entityClasses` или `className` regex должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
+- `Логический контроль правил конвертации` подсвечивает только отсутствующие элементы и позволяет удалить выбранные элементы после подтверждения;
 - перед удалением rules-файл копируется в `rules/.backup/*.bak`;
 - `rules/.backup/` является локальным backup и не коммитится.
 

@@ -846,7 +846,8 @@ async function dryRunRules(payload) {
   const rules = payload?.rules ? normalizeRulesPayload({ content: payload.rules }) : (await readCurrentRules()).content;
   const source = payload?.payload ?? payload?.source ?? {};
   const validation = await validateRulesObject(rules);
-  const normalized = normalizeSourcePayload(source, rules);
+  const cmdbuildCatalog = await tryReadCatalogCache(config.Cmdbuild.Catalog.CacheFilePath);
+  const normalized = resolveLookupFieldsFromCatalog(normalizeSourcePayload(source, rules), rules, cmdbuildCatalog);
   const route = (rules.eventRoutingRules ?? []).find(item => equalsIgnoreCase(item.eventType, normalized.eventType));
   const model = buildDryRunModel(rules, normalized, route);
 
@@ -1226,7 +1227,29 @@ async function syncCmdbuildCatalog(session) {
   let lookups = [];
   if (config.Cmdbuild.Catalog.IncludeLookupValues) {
     try {
-      lookups = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/lookup_types', session.cmdbuild));
+      const lookupTypes = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/lookup_types', session.cmdbuild));
+      for (const lookup of lookupTypes.slice(0, 500)) {
+        const lookupName = lookup.name ?? lookup._id ?? lookup.id;
+        if (isBlank(lookupName)) {
+          continue;
+        }
+
+        try {
+          const valuesResult = await cmdbuildGet(baseUrl, `/lookup_types/${encodeURIComponent(lookupName)}/values`, session.cmdbuild);
+          lookups.push({
+            ...lookup,
+            name: lookup.name ?? lookupName,
+            values: normalizeCmdbuildList(valuesResult)
+          });
+        } catch (error) {
+          lookups.push({
+            ...lookup,
+            name: lookup.name ?? lookupName,
+            values: [],
+            valuesError: error instanceof Error ? error.message : 'request_failed'
+          });
+        }
+      }
     } catch {
       lookups = [];
     }
@@ -2190,6 +2213,76 @@ function normalizeSourcePayload(payload, rules = null) {
   normalized.dns_name = normalized.dnsName ?? normalized.dns_name;
   normalized.dnsName = normalized.dnsName ?? normalized.dns_name;
   return normalized;
+}
+
+function resolveLookupFieldsFromCatalog(source, rules = null, catalog = null) {
+  if (!rules?.source?.fields || !Array.isArray(catalog?.lookups) || catalog.lookups.length === 0) {
+    return source;
+  }
+
+  const resolved = { ...source };
+  for (const [fieldName, fieldRule] of Object.entries(rules.source.fields)) {
+    if (!isLookupSourceRule(fieldRule)) {
+      continue;
+    }
+
+    const rawValue = readSourceField(resolved, fieldName);
+    if (isBlank(rawValue)) {
+      continue;
+    }
+
+    const lookupType = fieldRule.resolve?.lookupType ?? fieldRule.lookupType;
+    const resolvedValue = resolveLookupValueFromCatalog(
+      catalog,
+      lookupType,
+      rawValue,
+      fieldRule.resolve?.valueMode ?? 'code');
+    if (isBlank(resolvedValue)) {
+      continue;
+    }
+
+    resolved[fieldName] = resolvedValue;
+    const canonical = canonicalSourceField(fieldName);
+    resolved[canonical] = resolvedValue;
+    if (canonical === 'os') {
+      resolved.OS = resolvedValue;
+    }
+    if (canonical === 'zabbixTag') {
+      resolved.zabbixTag = resolvedValue;
+    }
+  }
+
+  return resolved;
+}
+
+function isLookupSourceRule(fieldRule = {}) {
+  return equalsIgnoreCase(fieldRule.type, 'lookup')
+    || equalsIgnoreCase(fieldRule.resolve?.leafType, 'lookup')
+    || !isBlank(fieldRule.lookupType)
+    || !isBlank(fieldRule.resolve?.lookupType);
+}
+
+function resolveLookupValueFromCatalog(catalog, lookupType, rawValue, valueMode = 'code') {
+  if (isBlank(lookupType)) {
+    return rawValue;
+  }
+
+  const lookup = (catalog.lookups ?? []).find(item => equalsIgnoreCase(item.name, lookupType) || equalsIgnoreCase(item._id, lookupType));
+  const values = normalizeCmdbuildList(lookup?.values ?? []);
+  const match = values.find(item => [item._id, item.id, item.code, item.description, item._description_translation]
+    .some(value => equalsIgnoreCase(value, rawValue)));
+  if (!match) {
+    return rawValue;
+  }
+
+  const id = match._id ?? match.id;
+  return String(valueMode).toLowerCase() === 'id'
+    ? id
+    : String(valueMode).toLowerCase() === 'description'
+      ? (match.description ?? match.code ?? id)
+      : String(valueMode).toLowerCase() === 'translation'
+        ? (match._description_translation ?? match.description ?? match.code ?? id)
+        : (match.code ?? match.description ?? id);
 }
 
 function readSourceField(source, field) {

@@ -1,7 +1,11 @@
 openapi: 3.0.3
 info:
   title: cmdbwebhooks2kafka HTTP API
-  version: 0.3.0
+  version: 0.4.0
+  description: >
+    Receives flat CMDBuild webhook payloads. Reference and lookup fields can
+    carry numeric ids; leaf interpretation is driven by conversion rules
+    metadata in downstream cmdbkafka2zabbix.
 servers:
   - url: http://localhost:5080
     description: Dev server from host
@@ -103,3 +107,4 @@ components:
           description: Нормализованное поле OS, если payload использует lowercase.
         zabbixTag:
           type: string
+          description: CMDBuild lookup id или человекочитаемый tag-код; downstream rules могут разрешить значение через `cmdbPath`/`resolve`.

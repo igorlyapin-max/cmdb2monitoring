@@ -90,11 +90,27 @@
       },
       "os": {
         "source": "OS",
+        "type": "lookup",
+        "cmdbPath": "OS",
+        "lookupType": "OS",
+        "resolve": {
+          "mode": "lookup",
+          "lookupType": "OS",
+          "valueMode": "code"
+        },
         "required": false,
         "validationRegex": "(?i)^(windows|windows server|linux|vmware|105130|105152|105146|105161)$"
       },
       "zabbixTag": {
         "source": "zabbixTag",
+        "type": "lookup",
+        "cmdbPath": "zabbixTag",
+        "lookupType": "zabbixTag",
+        "resolve": {
+          "mode": "lookup",
+          "lookupType": "zabbixTag",
+          "valueMode": "code"
+        },
         "required": false,
         "validationRegex": "(?i)^(tag[1-3]|106857|106852|106850)$"
       }

@@ -15,5 +15,6 @@
 | SEC-011 | IF-012 | monitoring-ui-api Zabbix service account/token | `ZABBIX_SERVICE_USER`, `ZABBIX_SERVICE_PASSWORD`, `ZABBIX_SERVICE_API_TOKEN` | По политике Zabbix | Используется в IdP-режиме для server-side API calls |
 | SEC-012 | IF-015 | monitoring-ui-api Kafka SASL для Events | `MONITORING_UI_KAFKA_USERNAME`, `MONITORING_UI_KAFKA_PASSWORD`, `EventBrowser:*` | По политике Kafka | В текущем dev не используется, Events read-only |
 | SEC-013 | IF-014 | monitoring-ui-api runtime settings | `src/monitoring-ui-api/state/ui-settings.json` | По политике окружения | Может содержать dev credentials, не коммитить |
+| SEC-014 | IF-018 | cmdbkafka2zabbix CMDBuild resolver account | `Cmdbuild__Username`, `Cmdbuild__Password`, `Cmdbuild__BaseUrl` | По политике CMDBuild | Нужен для чтения attributes/cards/lookup values при `source.fields[].cmdbPath` |
 
 Production/base config не должен хранить реальные секреты. Использовать переменные окружения, secret storage или local config, исключенный из git.

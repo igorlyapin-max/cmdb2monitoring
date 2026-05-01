@@ -11,6 +11,7 @@ public sealed class KafkaConversionWorker(
     IOptions<KafkaOptions> kafkaOptions,
     IConversionRulesProvider rulesProvider,
     CmdbEventReader eventReader,
+    CmdbSourceFieldResolver fieldResolver,
     CmdbToZabbixConverter converter,
     IZabbixRequestPublisher publisher,
     IProcessingStateStore stateStore,
@@ -131,6 +132,7 @@ public sealed class KafkaConversionWorker(
         try
         {
             source = eventReader.Read(consumed.Message.Value, rules);
+            source = await fieldResolver.ResolveAsync(source, rules, cancellationToken);
         }
         catch (JsonException ex)
         {

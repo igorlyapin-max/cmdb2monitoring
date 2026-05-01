@@ -158,6 +158,25 @@ label span {
   box-shadow: var(--shadow);
 }
 
+.login-heading-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.language-field {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  margin: 0;
+}
+
+.language-field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 h1,
 h2 {
   margin: 0;
@@ -276,6 +295,17 @@ h2 {
 
 .catalog-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.about-panel {
+  max-width: 760px;
+}
+
+.about-panel p {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.6;
 }
 
 .split-layout {
@@ -397,6 +427,17 @@ h2 {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+}
+
+.mapping-grid-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 14px;
+  margin: 0 0 10px;
+}
+
+.mapping-grid-toolbar #mappingClearSelection {
+  justify-self: start;
 }
 
 .mapping-mode-controls {
@@ -1024,6 +1065,7 @@ th {
   .split-layout,
   .catalog-grid,
   .zabbix-catalog-layout,
+  .mapping-grid-toolbar,
   .mapping-grid,
   .metrics-grid,
   .form-grid,
@@ -1037,6 +1079,15 @@ th {
 
   .mapping-editor-grid .wide-field {
     grid-column: auto;
+  }
+
+  .login-heading-row {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .language-field {
+    width: 100%;
   }
 
   .app-shell {

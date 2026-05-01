@@ -5,7 +5,7 @@ flowchart TD
     monui -->|CMDB REST catalog :8090| cmdb
     monui -->|Zabbix JSON-RPC catalog :8081| zabbix
     monui -->|local FS rules validate/upload| rules[(Git rules JSON)]
-    monui -->|Mapping save-as draft/webhook files| downloads[(Local downloads)]
+    monui -->|rules management save-as draft/webhook files| downloads[(Local downloads)]
     monui -->|GET /health :5080| wh
     monui -->|GET /health :5081| conv
     monui -->|GET /health :5082| api
@@ -14,6 +14,7 @@ flowchart TD
     cmdb -->|POST :5080 /webhooks/cmdbuild| wh[cmdbwebhooks2kafka :5080]
     wh -->|cmdbuild.webhooks.* :9092| kafka[(Kafka :9092)]
     kafka -->|consume cmdbuild.webhooks.* :9092| conv[cmdbkafka2zabbix :5081]
+    conv -->|resolve cmdbPath leaf :8090| cmdb
     rules --> conv
     conv -->|produce zabbix.host.requests.* :9092| kafka
     kafka -->|consume zabbix.host.requests.* :9092| api[zabbixrequests2api :5082]
@@ -26,13 +27,14 @@ flowchart TD
 
     subgraph subprocesses[Повторно используемые подпроцессы]
         sp1[SP-001 webhook auth + normalize]
-        sp2[SP-002 rules + hostProfiles + regex + T4 conversion]
+        sp2[SP-002 cmdbPath resolver + rules + hostProfiles + regex + T4 conversion]
         sp3[SP-003 Zabbix payload validation]
         sp4[SP-004 host.get fallback]
         sp5[SP-005 JSON-RPC + response + state]
         sp6[SP-006 catalog sync]
         sp7[SP-007 rules validate + backup + save]
-        sp8[SP-008 Mapping add/delete rules + save-as]
+        sp8[SP-008 conversion rules add/delete + reference drill-down + save-as]
+        sp9[SP-009 UI language ru/en + Help/tooltips]
     end
 
     subgraph fallback[Fallback для update/delete без zabbix_hostid]

@@ -18,9 +18,18 @@
     <main>
       <section id="loginView" class="login-shell hidden">
         <form id="loginForm" class="login-panel">
-          <h1>Вход</h1>
+          <div class="login-heading-row">
+            <h1 data-i18n="login.title">Вход</h1>
+            <label class="language-field" for="interfaceLanguage">
+              <span data-i18n="login.language">Язык интерфейса</span>
+              <select id="interfaceLanguage" name="interfaceLanguage">
+                <option value="ru">Русский</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+          </div>
           <div id="idpLoginBlock" class="idp-login hidden">
-            <button id="idpLoginButton" type="button">Войти через IdP</button>
+            <button id="idpLoginButton" type="button" data-i18n="login.idp">Войти через IdP</button>
           </div>
           <div id="localCredentials" class="form-grid">
             <label>
@@ -28,11 +37,11 @@
               <input name="cmdbuildBaseUrl" autocomplete="url">
             </label>
             <label>
-              <span>CMDBuild login</span>
+              <span data-i18n="login.cmdbuildLogin">CMDBuild login</span>
               <input name="cmdbuildUsername" autocomplete="username" required>
             </label>
             <label>
-              <span>CMDBuild password</span>
+              <span data-i18n="login.cmdbuildPassword">CMDBuild password</span>
               <input name="cmdbuildPassword" type="password" autocomplete="current-password" required>
             </label>
             <label>
@@ -40,11 +49,11 @@
               <input name="zabbixApiEndpoint" autocomplete="url">
             </label>
             <label>
-              <span>Zabbix login</span>
+              <span data-i18n="login.zabbixLogin">Zabbix login</span>
               <input name="zabbixUsername" autocomplete="username">
             </label>
             <label>
-              <span>Zabbix password</span>
+              <span data-i18n="login.zabbixPassword">Zabbix password</span>
               <input name="zabbixPassword" type="password" autocomplete="current-password">
             </label>
             <label>
@@ -53,7 +62,7 @@
             </label>
           </div>
           <div id="localLoginActions" class="actions">
-            <button type="submit">Войти</button>
+            <button type="submit" data-i18n="login.submit">Войти</button>
           </div>
           <p id="loginError" class="error-line"></p>
         </form>
@@ -61,22 +70,23 @@
 
       <section id="appView" class="app-shell hidden">
         <nav class="side-nav" aria-label="Разделы">
-          <button class="nav-item active" data-view="dashboard">Dashboard</button>
-          <button class="nav-item" data-view="events">Events</button>
-          <button class="nav-item" data-view="rules">Rules</button>
-          <button class="nav-item" data-view="mapping">Mapping</button>
-          <button class="nav-item" data-view="validateMapping">Validate rules mapping</button>
-          <button class="nav-item" data-view="zabbix">Zabbix Catalog</button>
-          <button class="nav-item" data-view="cmdbuild">CMDBuild Catalog</button>
-          <button class="nav-item" data-view="settings">Settings</button>
-          <button class="nav-item" data-view="help">Help</button>
-          <button class="nav-item danger" id="logoutButton" type="button">Logout</button>
+          <button class="nav-item active" data-view="dashboard" data-i18n="nav.dashboard">Dashboard</button>
+          <button class="nav-item" data-view="events" data-i18n="nav.events">Events</button>
+          <button class="nav-item" data-view="rules" data-i18n="nav.rules">Rules</button>
+          <button class="nav-item" data-view="mapping" data-i18n="nav.mapping">Управление правилами конвертации</button>
+          <button class="nav-item" data-view="validateMapping" data-i18n="nav.validateMapping">Логический контроль правил конвертации</button>
+          <button class="nav-item" data-view="zabbix" data-i18n="nav.zabbix">Zabbix Catalog</button>
+          <button class="nav-item" data-view="cmdbuild" data-i18n="nav.cmdbuild">CMDBuild Catalog</button>
+          <button class="nav-item" data-view="settings" data-i18n="nav.settings">Settings</button>
+          <button class="nav-item" data-view="about" data-i18n="nav.about">About</button>
+          <button class="nav-item" data-view="help" data-i18n="nav.help">Help</button>
+          <button class="nav-item danger" id="logoutButton" type="button" data-i18n="nav.logout">Logout</button>
         </nav>
 
         <div class="workspace">
           <section class="view active" id="dashboard">
             <div class="view-header">
-              <h1>Dashboard</h1>
+              <h1 data-i18n="nav.dashboard">Dashboard</h1>
               <button id="refreshDashboard" type="button">Refresh</button>
             </div>
             <div class="metrics-grid" id="healthGrid"></div>
@@ -84,7 +94,7 @@
 
           <section class="view" id="events">
             <div class="view-header">
-              <h1>Events</h1>
+              <h1 data-i18n="nav.events">Events</h1>
               <div class="actions">
                 <select id="eventsTopic"></select>
                 <input id="eventsMaxMessages" type="number" min="1" max="500" value="5">
@@ -121,7 +131,7 @@
 
           <section class="view" id="rules">
             <div class="view-header">
-              <h1>Rules</h1>
+              <h1 data-i18n="nav.rules">Rules</h1>
               <div class="actions">
                 <button id="loadRules" type="button">Load</button>
                 <button id="validateRules" type="button">Validate</button>
@@ -152,7 +162,7 @@
           <section class="view" id="mapping">
             <div class="view-header">
               <div class="view-title-block">
-                <h1>Mapping</h1>
+                <h1 data-i18n="nav.mapping">Управление правилами конвертации</h1>
                 <div class="mapping-mode-controls">
                   <label class="mapping-mode-field" for="mappingMode">
                     <span>Режим</span>
@@ -164,7 +174,6 @@
                 </div>
               </div>
               <div class="actions">
-                <button id="mappingClearSelection" class="secondary" type="button" disabled>Снять выделение</button>
                 <button id="mappingUndo" class="secondary" type="button" disabled>Undo</button>
                 <button id="mappingRedo" class="secondary" type="button" disabled>Redo</button>
                 <button id="mappingSaveAs" class="secondary" type="button" disabled>Save file as</button>
@@ -203,6 +212,9 @@
               </div>
               <p id="mappingEditorStatus" class="mapping-editor-status"></p>
             </div>
+            <div class="mapping-grid-toolbar">
+              <button id="mappingClearSelection" class="secondary" type="button" disabled data-i18n="common.clearSelection">Снять выделение</button>
+            </div>
             <div class="mapping-grid">
               <div class="mapping-column surface">
                 <h2>CMDBuild</h2>
@@ -221,7 +233,7 @@
 
           <section class="view" id="validateMapping">
             <div class="view-header">
-              <h1>Validate rules mapping</h1>
+              <h1 data-i18n="nav.validateMapping">Логический контроль правил конвертации</h1>
               <div class="actions">
                 <button id="loadValidateMapping" type="button">Load</button>
               </div>
@@ -260,7 +272,7 @@
 
           <section class="view" id="zabbix">
             <div class="view-header">
-              <h1>Zabbix Catalog</h1>
+              <h1 data-i18n="nav.zabbix">Zabbix Catalog</h1>
               <div class="actions">
                 <button id="syncZabbix" type="button">Sync</button>
                 <button id="loadZabbix" type="button">Load</button>
@@ -277,7 +289,7 @@
 
           <section class="view" id="cmdbuild">
             <div class="view-header">
-              <h1>CMDBuild Catalog</h1>
+              <h1 data-i18n="nav.cmdbuild">CMDBuild Catalog</h1>
               <div class="actions">
                 <button id="syncCmdbuild" type="button">Sync</button>
                 <button id="loadCmdbuild" type="button">Load</button>
@@ -303,7 +315,7 @@
 
           <section class="view" id="settings">
             <div class="view-header">
-              <h1>Settings</h1>
+              <h1 data-i18n="nav.settings">Settings</h1>
               <div class="actions">
                 <button id="loadSettings" type="button">Load</button>
                 <button id="saveRuntimeSettings" type="button">Save runtime</button>
@@ -399,71 +411,80 @@
             </form>
           </section>
 
+          <section class="view" id="about">
+            <div class="view-header">
+              <h1 data-i18n="about.title">About</h1>
+            </div>
+            <div class="surface about-panel">
+              <p data-i18n="about.text">Наговорено при помощи вайбкодинга Игорем Ляпиным в 2026. Igor.Lyapin(*)gmail.com. Для свободного использования.</p>
+            </div>
+          </section>
+
           <section class="view" id="help">
             <div class="view-header">
-              <h1>Help</h1>
+              <h1 data-i18n="nav.help">Help</h1>
             </div>
             <div class="catalog-grid">
               <div class="surface">
-                <h2>Общий принцип</h2>
+                <h2 data-i18n="help.general.title">Общий принцип</h2>
                 <ul>
-                  <li>Браузер работает только с <code>monitoring-ui-api</code>; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.</li>
-                  <li>Все адреса, учетные данные, Kafka topics, IdP/SAML2 и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Settings.</li>
-                  <li>Всплывающие подсказки показываются при наведении или фокусе на элементе интерфейса.</li>
+                  <li data-i18n="help.general.1">Браузер работает только с monitoring-ui-api; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.</li>
+                  <li data-i18n="help.general.2">Все адреса, учетные данные, Kafka topics, IdP/SAML2 и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Settings.</li>
+                  <li data-i18n="help.general.3">Всплывающие подсказки показываются при наведении или фокусе на элементе интерфейса.</li>
                 </ul>
               </div>
               <div class="surface">
-                <h2>Dashboard и Events</h2>
+                <h2 data-i18n="help.dashboard.title">Панель и события</h2>
                 <ul>
-                  <li>Dashboard показывает доступность <code>cmdbwebhooks2kafka</code>, <code>cmdbkafka2zabbix</code>, <code>zabbixrequests2api</code> и самого BFF.</li>
-                  <li>Events читает последние сообщения из настроенных Kafka topics через backend-адаптер.</li>
-                  <li>Количество в Events означает "последние N сообщений"; по умолчанию выводятся 5 последних.</li>
+                  <li data-i18n="help.dashboard.1">Панель показывает доступность cmdbwebhooks2kafka, cmdbkafka2zabbix, zabbixrequests2api и самого BFF.</li>
+                  <li data-i18n="help.dashboard.2">События читают последние сообщения из настроенных Kafka topics через backend-адаптер.</li>
+                  <li data-i18n="help.dashboard.3">Количество в событиях означает последние N сообщений; по умолчанию выводятся 5 последних.</li>
                 </ul>
               </div>
               <div class="surface">
-                <h2>Rules</h2>
+                <h2 data-i18n="help.rules.title">Правила</h2>
                 <ul>
-                  <li>Load загружает текущий JSON правил конвертации.</li>
-                  <li>Validate проверяет структуру правил на backend.</li>
-                  <li>Dry-run применяет правила к тестовому CMDBuild payload без сохранения.</li>
-                  <li>Upload сохраняет новый JSON правил на backend после проверки.</li>
+                  <li data-i18n="help.rules.1">Load загружает текущий JSON правил конвертации.</li>
+                  <li data-i18n="help.rules.2">Validate проверяет структуру правил на backend.</li>
+                  <li data-i18n="help.rules.3">Dry-run применяет правила к тестовому CMDBuild payload без сохранения.</li>
+                  <li data-i18n="help.rules.4">Upload сохраняет новый JSON правил на backend после проверки.</li>
                 </ul>
               </div>
               <div class="surface">
-                <h2>Mapping</h2>
+                <h2 data-i18n="help.mapping.title">Управление правилами конвертации</h2>
                 <ul>
-                  <li>Страница показывает цепочку <code>CMDBuild -> Conversion Rules -> Zabbix</code>.</li>
-                  <li>Режим просмотра показывает выбранную цепочку и скрывает лишние атрибуты классов, другие rule-подблоки и несвязанные элементы списков Zabbix.</li>
-                  <li>Снять выделение доступно в режиме просмотра и возвращает Mapping к обычному обзору без подсветки цепочки.</li>
-                  <li>Режим редактирования меняет draft JSON текущей сессии: можно выбрать CMDBuild class/class attribute field, структуру конвертации, Zabbix object/payload, priority и regex.</li>
-                  <li>Действие "Удаление правила" показывает rules текущего draft JSON, удаляет отмеченные правила после подтверждения и оставляет классы/class attribute fields на месте.</li>
-                  <li>Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
-                  <li>Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или <code>hostProfiles[].interfaces</code>.</li>
-                  <li>Повторное нажатие на выбранный элемент снимает выделение.</li>
-                  <li>Interface address rules выбирают, чем заполнить Zabbix interface: <code>ipAddress</code> дает <code>useip=1</code>, <code>dnsName</code> дает <code>useip=0</code>.</li>
-                  <li>Host profiles описывают два режима: несколько <code>interfaces[]</code> внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.</li>
-                  <li>Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а <code>valueField</code> указывает, какой CMDB атрибут станет IP или DNS.</li>
-                  <li>Для Server webhook keys <code>interface/interface2/profile/profile2</code> связаны с реальными CMDBuild attributes <code>iLo/iLo2/mgmt/mgmt2</code> через <code>cmdbAttribute</code>; это нужно для Mapping и Body, но не добавляет старые alias в обработку payload.</li>
-                  <li>Для lookup выделяется только конкретная связка класса, lookup и значения, например <code>Notebook.zabbixTag.tag1</code>.</li>
-                  <li>Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
+                  <li data-i18n="help.mapping.1">Страница показывает цепочку CMDBuild -> Conversion Rules -> Zabbix.</li>
+                  <li data-i18n="help.mapping.2">Режим просмотра показывает выбранную цепочку и скрывает лишние атрибуты классов, другие rule-подблоки и несвязанные элементы списков Zabbix.</li>
+                  <li data-i18n="help.mapping.3">Снять выделение доступно в режиме просмотра и возвращает обычный обзор без подсветки цепочки.</li>
+                  <li data-i18n="help.mapping.4">Режим редактирования меняет draft JSON текущей сессии: можно выбрать CMDBuild class/class attribute field, структуру конвертации, Zabbix object/payload, priority и regex.</li>
+                  <li data-i18n="help.mapping.5">Действие Удаление правила показывает rules текущего draft JSON, удаляет отмеченные правила после подтверждения и оставляет classes/class attribute fields на месте.</li>
+                  <li data-i18n="help.mapping.6">Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
+                  <li data-i18n="help.mapping.7">Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.</li>
+                  <li data-i18n="help.mapping.8">Повторное нажатие на выбранный элемент снимает выделение.</li>
+                  <li data-i18n="help.mapping.9">Interface address rules выбирают, чем заполнить Zabbix interface: ipAddress дает useip=1, dnsName дает useip=0.</li>
+                  <li data-i18n="help.mapping.10">Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.</li>
+                  <li data-i18n="help.mapping.11">Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.</li>
+                  <li data-i18n="help.mapping.12">Для Server webhook keys interface/interface2/profile/profile2 связаны с реальными CMDBuild attributes iLo/iLo2/mgmt/mgmt2 через cmdbAttribute; это нужно для раздела управления правилами конвертации и Body, но не добавляет старые alias в обработку payload.</li>
+                  <li data-i18n="help.mapping.13">Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.</li>
+                  <li data-i18n="help.mapping.14">Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
                 </ul>
               </div>
               <div class="surface">
-                <h2>Validate rules mapping</h2>
+                <h2 data-i18n="help.validate.title">Логический контроль правил конвертации</h2>
                 <ul>
-                  <li>Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.</li>
-                  <li>Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.</li>
-                  <li>Checkbox над отсутствующим элементом включает его в удаление из rules JSON.</li>
-                  <li>Delete спрашивает подтверждение, сохраняет предыдущую версию и исправляет выбранные ссылки в правилах.</li>
+                  <li data-i18n="help.validate.1">Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.</li>
+                  <li data-i18n="help.validate.2">Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.</li>
+                  <li data-i18n="help.validate.3">Checkbox над отсутствующим элементом включает его в удаление из rules JSON.</li>
+                  <li data-i18n="help.validate.4">Delete спрашивает подтверждение, сохраняет предыдущую версию и исправляет выбранные ссылки в правилах.</li>
                 </ul>
               </div>
               <div class="surface">
-                <h2>Каталоги и Settings</h2>
+                <h2 data-i18n="help.catalogs.title">Каталоги и настройки</h2>
                 <ul>
-                  <li>Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.</li>
-                  <li>CMDBuild Catalog загружает классы, атрибуты и lookup-значения.</li>
-                  <li>Settings сохраняет runtime-настройки подключений, Events Kafka browser и IdP/SAML2.</li>
-                  <li>Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.</li>
+                  <li data-i18n="help.catalogs.1">Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.</li>
+                  <li data-i18n="help.catalogs.2">CMDBuild Catalog загружает классы, атрибуты и lookup-значения.</li>
+                  <li data-i18n="help.catalogs.3">Settings сохраняет runtime-настройки подключений, Events Kafka browser и IdP/SAML2.</li>
+                  <li data-i18n="help.catalogs.4">Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.</li>
                 </ul>
               </div>
             </div>
@@ -475,7 +496,7 @@
 
     <div id="toast" class="toast hidden"></div>
     <div id="helpPopover" class="help-popover hidden" role="dialog" aria-live="polite">
-      <button id="helpPopoverClose" class="help-popover-close" type="button">Закрыть</button>
+      <button id="helpPopoverClose" class="help-popover-close" type="button" data-i18n="common.close">Закрыть</button>
       <div id="helpPopoverText"></div>
     </div>
     <script type="module" src="/app.js"></script>

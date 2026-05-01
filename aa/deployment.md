@@ -61,6 +61,7 @@
 - secrets через переменные окружения или secret storage;
 - внешний процесс создания Kafka topics;
 - отдельные service accounts для CMDBuild webhook, Kafka и Zabbix API;
+- отдельная CMDBuild service account для `cmdbkafka2zabbix` lookup/reference resolver, если rules используют `source.fields[].cmdbPath`;
 - отдельные service accounts для `monitoring-ui-api` при IdP-режиме;
 - публичный URL `monitoring-ui-api` должен совпадать с SAML2 `AcsUrl` и `SloCallbackUrl`;
 - IdP должен знать SP metadata из `/auth/saml2/metadata`;
@@ -79,6 +80,7 @@
 | monitoring-ui-api | Kafka `localhost:9092` / `kafka:29092` | Kafka protocol, read-only Events |
 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | Kafka protocol |
 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | Kafka protocol |
+| cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP для lookup/reference resolver по `cmdbPath` |
 | cmdbkafka2zabbix | Git repository/working copy | local FS или git |
 | zabbixrequests2api `:5082` | Kafka `:9092` | Kafka protocol |
 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP JSON-RPC |

@@ -47,6 +47,12 @@ builder.Services.AddOptions<ConversionRulesOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.TemplateName), "Conversion template name is required.")
     .ValidateOnStart();
 
+builder.Services.AddOptions<CmdbuildOptions>()
+    .Bind(builder.Configuration.GetSection(CmdbuildOptions.SectionName))
+    .Validate(options => options.RequestTimeoutMs > 0, "CMDBuild request timeout must be greater than zero.")
+    .Validate(options => options.MaxPathDepth > 0, "CMDBuild max path depth must be greater than zero.")
+    .ValidateOnStart();
+
 builder.Services.AddOptions<ProcessingStateOptions>()
     .Bind(builder.Configuration.GetSection(ProcessingStateOptions.SectionName))
     .Validate(options => !string.IsNullOrWhiteSpace(options.FilePath), "Processing state file path is required.")
@@ -80,6 +86,7 @@ builder.Logging.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerPro
 
 builder.Services.AddSingleton<IConversionRulesProvider, GitConversionRulesProvider>();
 builder.Services.AddSingleton<CmdbEventReader>();
+builder.Services.AddHttpClient<CmdbSourceFieldResolver>();
 builder.Services.AddSingleton<T4TemplateRenderer>();
 builder.Services.AddSingleton<CmdbToZabbixConverter>();
 builder.Services.AddSingleton<IZabbixRequestPublisher, ZabbixRequestPublisher>();

@@ -152,6 +152,7 @@ static void ValidateServiceConfig(
             ValidateTopicSuffix(config, "Kafka:Input:Topic", environment, context, errors);
             ValidateTopicSuffix(config, "Kafka:Output:Topic", environment, context, errors);
             ValidateConversionRules(config, service, repositoryRoot, context, errors);
+            ValidateCmdbuildResolver(config, context, errors);
             ValidateProcessingState(config, context, errors);
             break;
         case ServiceKind.ZabbixApi:
@@ -252,6 +253,12 @@ static void ValidateConversionRules(
     }
 }
 
+static void ValidateCmdbuildResolver(JsonObject config, string context, List<string> errors)
+{
+    RequirePositiveInt(config, "Cmdbuild:RequestTimeoutMs", context, errors);
+    RequirePositiveInt(config, "Cmdbuild:MaxPathDepth", context, errors);
+}
+
 static void ValidateZabbix(JsonObject config, string context, List<string> errors, List<string> warnings)
 {
     RequireNonEmpty(config, "Zabbix:ApiEndpoint", context, errors);
@@ -343,6 +350,7 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
     RequireObject(rules, "source:fields:interface2IpAddress", "rules", errors);
     RequireArray(rules, "templateConflictRules", "rules", errors);
     ValidateNoLegacyServerFieldAliases(rules, errors);
+    ValidateCmdbPathSourceFields(rules, errors);
 
     var hostProfiles = GetArray(rules, "hostProfiles");
     if (hostProfiles.Count == 0)
@@ -414,6 +422,69 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
         if (!hostGetTemplate.Contains(marker, StringComparison.Ordinal))
         {
             errors.Add($"hostGetByHostJsonRpcRequestLines must include '{marker}' for update/delete fallback.");
+        }
+    }
+}
+
+static void ValidateCmdbPathSourceFields(JsonObject rules, List<string> errors)
+{
+    if (GetNode(rules, "source:fields") is not JsonObject sourceFields)
+    {
+        errors.Add("Rules file must contain source.fields object.");
+        return;
+    }
+
+    foreach (var (fieldName, node) in sourceFields)
+    {
+        if (node is not JsonObject field)
+        {
+            errors.Add($"Rules file source field '{fieldName}' must be an object.");
+            continue;
+        }
+
+        var cmdbPath = GetString(field, "cmdbPath") ?? string.Empty;
+        var type = GetString(field, "type") ?? string.Empty;
+        var mode = GetString(field, "resolve:mode") ?? string.Empty;
+        var leafType = GetString(field, "resolve:leafType") ?? string.Empty;
+        var lookupType = GetString(field, "resolve:lookupType") ?? GetString(field, "lookupType") ?? string.Empty;
+        var valueMode = GetString(field, "resolve:valueMode") ?? string.Empty;
+        var maxDepth = GetInt(field, "resolve:maxDepth");
+
+        if (!string.IsNullOrWhiteSpace(mode)
+            && !IsOneOf(mode, "none", "lookup", "cmdbPath", "referenceLeaf", "referenceLookupLeaf"))
+        {
+            errors.Add($"Rules file source field '{fieldName}' has unsupported resolve.mode '{mode}'.");
+        }
+
+        if (IsOneOf(mode, "cmdbPath", "referenceLeaf", "referenceLookupLeaf")
+            && string.IsNullOrWhiteSpace(cmdbPath))
+        {
+            errors.Add($"Rules file source field '{fieldName}' uses resolve.mode '{mode}' but cmdbPath is empty.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(cmdbPath) && string.IsNullOrWhiteSpace(GetString(field, "source")))
+        {
+            errors.Add($"Rules file source field '{fieldName}' defines cmdbPath but has no source webhook field.");
+        }
+
+        if ((string.Equals(type, "lookup", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(leafType, "lookup", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mode, "lookup", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mode, "referenceLookupLeaf", StringComparison.OrdinalIgnoreCase))
+            && string.IsNullOrWhiteSpace(lookupType))
+        {
+            errors.Add($"Rules file source field '{fieldName}' resolves a lookup but lookupType is empty.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(valueMode)
+            && !IsOneOf(valueMode, "id", "code", "description", "translation", "leaf"))
+        {
+            errors.Add($"Rules file source field '{fieldName}' has unsupported resolve.valueMode '{valueMode}'.");
+        }
+
+        if (maxDepth is <= 0)
+        {
+            errors.Add($"Rules file source field '{fieldName}' resolve.maxDepth must be greater than zero.");
         }
     }
 }
@@ -849,7 +920,8 @@ static void ValidateNoProductionSecrets(ServiceDefinition service, JsonObject ba
         "ElkLogging:Kafka:Password",
         "ElkLogging:Elk:ApiKey",
         "Zabbix:ApiToken",
-        "Zabbix:Password"
+        "Zabbix:Password",
+        "Cmdbuild:Password"
     })
     {
         var value = GetString(baseConfig, path);

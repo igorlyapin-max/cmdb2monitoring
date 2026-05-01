@@ -20,7 +20,8 @@
 | IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json` | Catalog cache и persisted UI settings; runtime-файл не попадает в git |
 | IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
 | IF-016 | monitoring-ui-api `:5090` | .NET services `:5080/:5081/:5082` | HTTP GET `/health` | Проверка готовности микросервисов на dashboard |
-| IF-017 | Browser | Local downloads | rules JSON и `*-webhook-bodies.txt` | Mapping `Save file as`: draft rules и webhook Body/DELETE-инструкции только по изменениям текущей UI-сессии |
+| IF-017 | Browser | Local downloads | rules JSON и `*-webhook-bodies.txt` | `Управление правилами конвертации` / `Save file as`: draft rules и webhook Body/DELETE-инструкции только по изменениям текущей UI-сессии |
+| IF-018 | cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP GET `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/lookup_types/{type}/values` | Подъем reference/lookup leaf-значений по `source.fields[].cmdbPath` |
 
 ## Срез бизнес-описания
 
@@ -28,7 +29,7 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-017:
+Срез поддержки включает IF-006..IF-018:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
@@ -36,6 +37,7 @@
 - read-only просмотр Kafka topics через monitoring-ui-api;
 - health dashboard микросервисов через HTTP endpoints;
 - локальный save-as draft rules и webhook-инструкций для оператора;
+- чтение CMDBuild reference/lookup leaf-значений конвертером по path metadata из rules;
 - SAML2 session и IdP settings;
 - секреты и credentials через конфиги/переменные окружения.
 
@@ -127,9 +129,12 @@ Zabbix cache:
 CMDBuild cache:
 - classes;
 - attributes;
-- lookups.
+- lookups;
+- lookup values, если `Cmdbuild:Catalog:IncludeLookupValues=true`.
 
-### Mapping draft session
+Conversion rules могут содержать `source.fields[].cmdbPath`. Webhook payload при этом остается плоским: значение source key является scalar или numeric id первого reference/lookup, а converter поднимает leaf через CMDBuild REST по path metadata из rules.
+
+### Conversion rules draft session
 
 Хранится в памяти браузера текущей вкладки `monitoring-ui-api`.
 
@@ -142,3 +147,13 @@ CMDBuild cache:
 `Save file as` не пишет draft на backend. Пользователь сохраняет два локальных файла:
 - draft rules JSON;
 - текстовый файл с CMDBuild webhook Body snippets для добавлений и DELETE-инструкциями для удалений.
+
+### Interface language preference
+
+Хранится в cookie браузера `c2m_lang`.
+
+Значения:
+- `ru`;
+- `en`.
+
+Выбор языка применяется к меню, заголовкам разделов, разделу Help и всплывающим подсказкам. Серверные API и Kafka contracts от выбора языка не зависят.

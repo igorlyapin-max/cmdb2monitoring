@@ -9,12 +9,17 @@ const state = {
   mappingHistoryIndex: -1,
   mappingCmdbuildCatalog: null,
   mappingZabbixCatalog: null,
+  mappingEditorFieldOptions: new Map(),
   mappingLoaded: false,
-  validateMappingLoaded: false
+  validateMappingLoaded: false,
+  language: 'ru',
+  authenticated: false,
+  user: null
 };
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+const languageCookieName = 'c2m_lang';
 const defaultEventMaxMessages = 5;
 const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
@@ -216,19 +221,235 @@ const zabbixExtensionDefinitions = [
     lazyCatalogPath: 'value-maps',
     label: item => item.name || item.valuemapid,
     meta: item => `${item.mappings?.length ?? 0} mappings`,
-    help: 'Value map - объект Zabbix для отображения значений items. В CMDB->host mapping обычно справочный, применять его напрямую к host payload нужно осторожно.'
+    help: 'Value map - объект Zabbix для отображения значений items. В CMDB->host conversion обычно справочный, применять его напрямую к host payload нужно осторожно.'
   }
 ];
+const translations = {
+  ru: {
+    'login.title': 'Вход',
+    'login.language': 'Язык интерфейса',
+    'login.idp': 'Войти через IdP',
+    'login.cmdbuildLogin': 'CMDBuild логин',
+    'login.cmdbuildPassword': 'CMDBuild пароль',
+    'login.zabbixLogin': 'Zabbix логин',
+    'login.zabbixPassword': 'Zabbix пароль',
+    'login.submit': 'Войти',
+    'nav.dashboard': 'Панель',
+    'nav.events': 'События',
+    'nav.rules': 'Правила',
+    'nav.mapping': 'Управление правилами конвертации',
+    'nav.validateMapping': 'Логический контроль правил конвертации',
+    'nav.zabbix': 'Каталог Zabbix',
+    'nav.cmdbuild': 'Каталог CMDBuild',
+    'nav.settings': 'Настройки',
+    'nav.about': 'About',
+    'nav.help': 'Справка',
+    'nav.logout': 'Выйти',
+    'about.title': 'About',
+    'about.text': 'Наговорено при помощи вайбкодинга Игорем Ляпиным в 2026. Igor.Lyapin(*)gmail.com. Для свободного использования.',
+    'common.clearSelection': 'Снять выделение',
+    'common.close': 'Закрыть',
+    'session.notAuthenticated': 'не авторизован',
+    'help.general.title': 'Общий принцип',
+    'help.general.1': 'Браузер работает только с monitoring-ui-api; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.',
+    'help.general.2': 'Все адреса, учетные данные, Kafka topics, IdP/SAML2 и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Settings.',
+    'help.general.3': 'Всплывающие подсказки показываются при наведении или фокусе на элементе интерфейса.',
+    'help.dashboard.title': 'Панель и события',
+    'help.dashboard.1': 'Панель показывает доступность cmdbwebhooks2kafka, cmdbkafka2zabbix, zabbixrequests2api и самого BFF.',
+    'help.dashboard.2': 'События читают последние сообщения из настроенных Kafka topics через backend-адаптер.',
+    'help.dashboard.3': 'Количество в событиях означает последние N сообщений; по умолчанию выводятся 5 последних.',
+    'help.rules.title': 'Правила',
+    'help.rules.1': 'Load загружает текущий JSON правил конвертации.',
+    'help.rules.2': 'Validate проверяет структуру правил на backend.',
+    'help.rules.3': 'Dry-run применяет правила к тестовому CMDBuild payload без сохранения.',
+    'help.rules.4': 'Upload сохраняет новый JSON правил на backend после проверки.',
+    'help.mapping.title': 'Управление правилами конвертации',
+    'help.mapping.1': 'Страница показывает цепочку CMDBuild -> Conversion Rules -> Zabbix.',
+    'help.mapping.2': 'Режим просмотра показывает выбранную цепочку и скрывает лишние атрибуты классов, другие rule-подблоки и несвязанные элементы списков Zabbix.',
+    'help.mapping.3': 'Снять выделение доступно в режиме просмотра и возвращает обычный обзор без подсветки цепочки.',
+    'help.mapping.4': 'Режим редактирования меняет draft JSON текущей сессии: можно выбрать CMDBuild class/class attribute field, структуру конвертации, Zabbix object/payload, priority и regex.',
+    'help.mapping.5': 'Действие Удаление правила показывает rules текущего draft JSON, удаляет отмеченные правила после подтверждения и оставляет classes/class attribute fields на месте.',
+    'help.mapping.6': 'Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.',
+    'help.mapping.7': 'Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.',
+    'help.mapping.8': 'Повторное нажатие на выбранный элемент снимает выделение.',
+    'help.mapping.9': 'Interface address rules выбирают, чем заполнить Zabbix interface: ipAddress дает useip=1, dnsName дает useip=0.',
+    'help.mapping.10': 'Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.',
+    'help.mapping.11': 'Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.',
+    'help.mapping.12': 'Для Server webhook keys interface/interface2/profile/profile2 связаны с реальными CMDBuild attributes iLo/iLo2/mgmt/mgmt2 через cmdbAttribute; это нужно для раздела управления правилами конвертации и Body, но не добавляет старые alias в обработку payload.',
+    'help.mapping.13': 'Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.',
+    'help.mapping.14': 'Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.',
+    'help.validate.title': 'Логический контроль правил конвертации',
+    'help.validate.1': 'Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.',
+    'help.validate.2': 'Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.',
+    'help.validate.3': 'Checkbox над отсутствующим элементом включает его в удаление из rules JSON.',
+    'help.validate.4': 'Delete спрашивает подтверждение, сохраняет предыдущую версию и исправляет выбранные ссылки в правилах.',
+    'help.catalogs.title': 'Каталоги и настройки',
+    'help.catalogs.1': 'Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.',
+    'help.catalogs.2': 'CMDBuild Catalog загружает классы, атрибуты и lookup-значения.',
+    'help.catalogs.3': 'Settings сохраняет runtime-настройки подключений, Events Kafka browser и IdP/SAML2.',
+    'help.catalogs.4': 'Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.',
+    'tooltip.brand': 'Название приложения cmdb2monitoring.',
+    'tooltip.sessionSummary': 'Текущий пользователь и способ авторизации.',
+    'tooltip.idpLoginButton': 'Запускает вход через внешний IdP по SAML2.',
+    'tooltip.logoutButton': 'Завершает текущую пользовательскую сессию.',
+    'tooltip.refreshDashboard': 'Повторно проверяет доступность сервисов.',
+    'tooltip.eventsMaxMessages': 'Количество последних сообщений Kafka, которое будет выведено снизу.',
+    'tooltip.refreshEvents': 'Загружает список топиков и последние сообщения выбранного топика.',
+    'tooltip.loadRules': 'Загружает текущий JSON правил конвертации.',
+    'tooltip.validateRules': 'Проверяет JSON правил по серверной схеме.',
+    'tooltip.rulesFile': 'Выбор локального JSON-файла правил для проверки или загрузки.',
+    'tooltip.dryRunPayload': 'Тестовый CMDBuild payload для dry-run конвертации.',
+    'tooltip.dryRunRules': 'Выполняет пробную конвертацию без сохранения правил.',
+    'tooltip.uploadRules': 'Сохраняет выбранный JSON правил на backend.',
+    'tooltip.loadMapping': 'Загружает визуальную карту связей Zabbix, правил и CMDBuild.',
+    'tooltip.mappingMode': 'Переключает управление правилами конвертации между просмотром и редактированием draft-правил текущей сессии.',
+    'tooltip.mappingEditAction': 'Переключает действие редактора: добавление нового conversion rule или удаление существующих rules из draft JSON.',
+    'tooltip.mappingClearSelection': 'Снимает выделение цепочки и возвращает обычный обзор.',
+    'tooltip.mappingUndo': 'Отменяет последнее изменение draft-правил текущей сессии.',
+    'tooltip.mappingRedo': 'Возвращает отмененное изменение draft-правил.',
+    'tooltip.mappingSaveAs': 'Сохраняет текущий draft JSON правил без отправки на backend. Вторым файлом формируются только webhook Body/DELETE-инструкции по добавленным и удаленным правилам текущей сессии.',
+    'tooltip.mappingAddRule': 'Добавляет выбранную conversion structure в draft JSON правил.',
+    'tooltip.mappingDeleteSelectAll': 'Отмечает все rules в режиме удаления.',
+    'tooltip.mappingDeleteClear': 'Снимает отметки со всех rules в режиме удаления.',
+    'tooltip.mappingDeleteSelected': 'Удаляет отмеченные rules из draft JSON после подтверждения. Классы и class attribute fields остаются на месте.',
+    'tooltip.loadValidateMapping': 'Запускает логический контроль правил против текущих каталогов Zabbix и CMDBuild.',
+    'tooltip.syncZabbix': 'Обновляет каталог Zabbix из API Zabbix.',
+    'tooltip.loadZabbix': 'Загружает сохраненный каталог Zabbix.',
+    'tooltip.syncCmdbuild': 'Обновляет каталог CMDBuild через API CMDBuild.',
+    'tooltip.loadCmdbuild': 'Загружает сохраненный каталог CMDBuild.',
+    'tooltip.loadSettings': 'Загружает runtime-настройки из внешнего файла.',
+    'tooltip.saveRuntimeSettings': 'Сохраняет runtime-настройки во внешний файл.',
+    'tooltip.saveIdp': 'Сохраняет настройки IdP/SAML2.',
+    'tooltip.helpPopoverClose': 'Закрывает открытую подсказку.',
+    'tooltip.field': 'Поле "{label}". Значение используется соответствующим разделом интерфейса или сохраняется во внешний конфигурационный файл.',
+    'tooltip.tableColumn': 'Колонка таблицы "{label}".'
+  },
+  en: {
+    'login.title': 'Login',
+    'login.language': 'Interface language',
+    'login.idp': 'Sign in with IdP',
+    'login.cmdbuildLogin': 'CMDBuild login',
+    'login.cmdbuildPassword': 'CMDBuild password',
+    'login.zabbixLogin': 'Zabbix login',
+    'login.zabbixPassword': 'Zabbix password',
+    'login.submit': 'Login',
+    'nav.dashboard': 'Dashboard',
+    'nav.events': 'Events',
+    'nav.rules': 'Rules',
+    'nav.mapping': 'Conversion Rules Management',
+    'nav.validateMapping': 'Conversion Rules Logical Control',
+    'nav.zabbix': 'Zabbix Catalog',
+    'nav.cmdbuild': 'CMDBuild Catalog',
+    'nav.settings': 'Settings',
+    'nav.about': 'About',
+    'nav.help': 'Help',
+    'nav.logout': 'Logout',
+    'about.title': 'About',
+    'about.text': 'Spoken with vibe coding by Igor Lyapin in 2026. Igor.Lyapin(*)gmail.com. Free to use.',
+    'common.clearSelection': 'Clear selection',
+    'common.close': 'Close',
+    'session.notAuthenticated': 'not authenticated',
+    'help.general.title': 'General Principle',
+    'help.general.1': 'The browser works only with monitoring-ui-api; it does not connect directly to CMDBuild, Zabbix, or Kafka.',
+    'help.general.2': 'Addresses, credentials, Kafka topics, IdP/SAML2, and Events read settings are configured externally or through Settings.',
+    'help.general.3': 'Tooltips are shown when you hover or focus interface elements.',
+    'help.dashboard.title': 'Dashboard And Events',
+    'help.dashboard.1': 'Dashboard shows availability for cmdbwebhooks2kafka, cmdbkafka2zabbix, zabbixrequests2api, and the BFF itself.',
+    'help.dashboard.2': 'Events reads the latest messages from configured Kafka topics through the backend adapter.',
+    'help.dashboard.3': 'The Events count means the last N messages; by default, the last 5 messages are shown.',
+    'help.rules.title': 'Rules',
+    'help.rules.1': 'Load fetches the current conversion rules JSON.',
+    'help.rules.2': 'Validate checks the rules structure on the backend.',
+    'help.rules.3': 'Dry-run applies rules to a test CMDBuild payload without saving.',
+    'help.rules.4': 'Upload saves a new rules JSON file on the backend after validation.',
+    'help.mapping.title': 'Conversion Rules Management',
+    'help.mapping.1': 'The page shows the CMDBuild -> Conversion Rules -> Zabbix chain.',
+    'help.mapping.2': 'View mode shows the selected chain and hides unrelated class attributes, rule sub-blocks, and Zabbix list items.',
+    'help.mapping.3': 'Clear selection is available in view mode and returns the page to the normal overview.',
+    'help.mapping.4': 'Edit mode changes the current session draft JSON: choose a CMDBuild class/class attribute field, conversion structure, Zabbix object/payload, priority, and regex.',
+    'help.mapping.5': 'The Delete rule action shows rules from the current draft JSON, removes checked rules after confirmation, and leaves classes/class attribute fields in place.',
+    'help.mapping.6': 'Undo and Redo work with the current session history, and Save file as saves the draft to a separate JSON file without sending it to the backend.',
+    'help.mapping.7': 'Save file as also checks that every configured class has an IP or DNS class attribute field linked to Zabbix interface rules or hostProfiles[].interfaces.',
+    'help.mapping.8': 'Clicking the selected item again clears the selection.',
+    'help.mapping.9': 'Interface address rules choose how to fill the Zabbix interface: ipAddress gives useip=1, dnsName gives useip=0.',
+    'help.mapping.10': 'Host profiles describe two modes: multiple interfaces[] inside one Zabbix host, or several Zabbix hosts from one CMDB object.',
+    'help.mapping.11': 'Inside a host profile, interface profile selects agent/SNMP/IPMI/JMX monitoring type, and valueField points to the CMDB attribute used as IP or DNS.',
+    'help.mapping.12': 'For Server, webhook keys interface/interface2/profile/profile2 are linked to real CMDBuild attributes iLo/iLo2/mgmt/mgmt2 through cmdbAttribute; this is for Conversion Rules Management and Body generation and does not add old aliases to payload processing.',
+    'help.mapping.13': 'For lookup values, only the exact class + lookup + value link is highlighted, for example Notebook.zabbixTag.tag1.',
+    'help.mapping.14': 'Regex rules show which class attribute fields select groups, templates, tags, and extended Zabbix objects.',
+    'help.validate.title': 'Conversion Rules Logical Control',
+    'help.validate.1': 'The page does not build an interactive chain; it highlights only missing entities.',
+    'help.validate.2': 'Red marks classes and attributes missing from the CMDBuild catalog, as well as Zabbix references missing from the Zabbix catalog.',
+    'help.validate.3': 'A checkbox above a missing item includes it in removal from the rules JSON.',
+    'help.validate.4': 'Delete asks for confirmation, saves the previous version, and fixes the selected references in rules.',
+    'help.catalogs.title': 'Catalogs And Settings',
+    'help.catalogs.1': 'Zabbix Catalog loads templates, host groups, template groups, tags, and extended Zabbix catalogs.',
+    'help.catalogs.2': 'CMDBuild Catalog loads classes, attributes, and lookup values.',
+    'help.catalogs.3': 'Settings saves runtime connection settings, Events Kafka browser settings, and IdP/SAML2 settings.',
+    'help.catalogs.4': 'Source catalogs should usually be changed in CMDBuild/Zabbix, while conversion behavior is changed in JSON rules.',
+    'tooltip.brand': 'Application name: cmdb2monitoring.',
+    'tooltip.sessionSummary': 'Current user and authentication method.',
+    'tooltip.idpLoginButton': 'Starts login through the external SAML2 IdP.',
+    'tooltip.logoutButton': 'Ends the current user session.',
+    'tooltip.refreshDashboard': 'Checks service availability again.',
+    'tooltip.eventsMaxMessages': 'Number of latest Kafka messages shown below.',
+    'tooltip.refreshEvents': 'Loads the topic list and latest messages for the selected topic.',
+    'tooltip.loadRules': 'Loads the current conversion rules JSON.',
+    'tooltip.validateRules': 'Validates rules JSON against the backend schema.',
+    'tooltip.rulesFile': 'Selects a local rules JSON file for validation or upload.',
+    'tooltip.dryRunPayload': 'Test CMDBuild payload for dry-run conversion.',
+    'tooltip.dryRunRules': 'Runs a trial conversion without saving rules.',
+    'tooltip.uploadRules': 'Saves the selected rules JSON on the backend.',
+    'tooltip.loadMapping': 'Loads the visual map of Zabbix, rules, and CMDBuild links.',
+    'tooltip.mappingMode': 'Switches conversion rules management between view and current-session draft editing.',
+    'tooltip.mappingEditAction': 'Switches the editor action: add a new conversion rule or delete existing rules from draft JSON.',
+    'tooltip.mappingClearSelection': 'Clears the highlighted chain and returns the normal overview.',
+    'tooltip.mappingUndo': 'Undoes the latest draft-rules change in the current session.',
+    'tooltip.mappingRedo': 'Restores the reverted draft-rules change.',
+    'tooltip.mappingSaveAs': 'Saves the current draft rules JSON without sending it to the backend. A second file contains only webhook Body/DELETE instructions for rules added or removed in the current session.',
+    'tooltip.mappingAddRule': 'Adds the selected conversion structure to draft rules JSON.',
+    'tooltip.mappingDeleteSelectAll': 'Checks all rules in delete mode.',
+    'tooltip.mappingDeleteClear': 'Clears all rule checks in delete mode.',
+    'tooltip.mappingDeleteSelected': 'Deletes checked rules from draft JSON after confirmation. Classes and class attribute fields remain in place.',
+    'tooltip.loadValidateMapping': 'Runs logical control of rules against current Zabbix and CMDBuild catalogs.',
+    'tooltip.syncZabbix': 'Refreshes the Zabbix catalog from the Zabbix API.',
+    'tooltip.loadZabbix': 'Loads the saved Zabbix catalog.',
+    'tooltip.syncCmdbuild': 'Refreshes the CMDBuild catalog through the CMDBuild API.',
+    'tooltip.loadCmdbuild': 'Loads the saved CMDBuild catalog.',
+    'tooltip.loadSettings': 'Loads runtime settings from the external file.',
+    'tooltip.saveRuntimeSettings': 'Saves runtime settings to the external file.',
+    'tooltip.saveIdp': 'Saves IdP/SAML2 settings.',
+    'tooltip.helpPopoverClose': 'Closes the open tooltip.',
+    'tooltip.field': 'Field "{label}". The value is used by the relevant interface section or saved to an external configuration file.',
+    'tooltip.tableColumn': 'Table column "{label}".'
+  }
+};
+
 const viewDescriptions = {
-  dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
-  events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
-  rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и upload нового файла правил.',
-  mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
-  validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
-  zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
-  cmdbuild: 'Показывает классы, атрибуты и lookup-справочники, загруженные из CMDBuild.',
-  settings: 'Содержит runtime-настройки подключений, Kafka Events и IdP/SAML2.',
-  help: 'Содержит справку по разделам интерфейса, правилам Mapping/Validate rules mapping и настройкам.'
+  ru: {
+    dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
+    events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
+    rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и upload нового файла правил.',
+    mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
+    validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
+    zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
+    cmdbuild: 'Показывает классы, атрибуты и lookup-справочники, загруженные из CMDBuild.',
+    settings: 'Содержит runtime-настройки подключений, Kafka Events и IdP/SAML2.',
+    about: 'Информация об авторстве и свободном использовании.',
+    help: 'Содержит справку по разделам интерфейса, управлению правилами конвертации, логическому контролю правил конвертации и настройкам.'
+  },
+  en: {
+    dashboard: 'Shows service availability and quick checks for the current environment.',
+    events: 'Shows configured Kafka topics and the latest messages from the selected topic.',
+    rules: 'Loads the current rules JSON, validates it, runs dry-run, and uploads a new rules file.',
+    mapping: 'Shows the CMDBuild -> conversion rules -> Zabbix chain. Host profiles show fan-out and interfaces; Template rules select templates; Tag rules create tags.',
+    validateMapping: 'Validates rules against Zabbix and CMDBuild catalogs; only missing source entities are highlighted.',
+    zabbix: 'Shows templates, host groups, template groups, tags, and extended Zabbix catalogs.',
+    cmdbuild: 'Shows classes, attributes, and lookup catalogs loaded from CMDBuild.',
+    settings: 'Contains runtime connection settings, Kafka Events, and IdP/SAML2 settings.',
+    about: 'Authorship and free-use information.',
+    help: 'Contains help for UI sections, Conversion Rules Management, Conversion Rules Logical Control, and settings.'
+  }
 };
 
 const defaultPayload = {
@@ -249,6 +470,8 @@ const defaultPayload = {
   zabbixTag: '106852'
 };
 
+initializeLanguage();
+applyLanguage();
 $('#dryRunPayload').value = JSON.stringify(defaultPayload, null, 2);
 
 await initialize();
@@ -311,7 +534,7 @@ function ensureViewDescription(view) {
     titleBlock.append(description);
   }
 
-  description.textContent = viewDescriptions[view.id] ?? '';
+  description.textContent = viewDescription(view.id);
   return description;
 }
 
@@ -323,7 +546,87 @@ function updateViewDescription(viewId) {
   ensureViewDescription(view);
 }
 
+function initializeLanguage() {
+  state.language = normalizeLanguage(readCookie(languageCookieName));
+  document.documentElement.lang = state.language;
+  const selector = $('#interfaceLanguage');
+  if (selector) {
+    selector.value = state.language;
+  }
+}
+
+function setLanguage(value) {
+  state.language = normalizeLanguage(value);
+  writeCookie(languageCookieName, state.language, 365);
+  hideHelp();
+  applyLanguage();
+}
+
+function applyLanguage() {
+  document.documentElement.lang = state.language;
+  const selector = $('#interfaceLanguage');
+  if (selector && selector.value !== state.language) {
+    selector.value = state.language;
+  }
+
+  $$('[data-i18n]').forEach(node => {
+    node.textContent = t(node.dataset.i18n);
+  });
+  $$('.view').forEach(ensureViewDescription);
+  updateSessionSummary();
+  applyHelpText();
+}
+
+function t(key) {
+  return translations[state.language]?.[key] ?? translations.ru[key] ?? key;
+}
+
+function tf(key, values = {}) {
+  return Object.entries(values).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, value ?? ''),
+    t(key));
+}
+
+function viewDescription(viewId) {
+  return viewDescriptions[state.language]?.[viewId]
+    ?? viewDescriptions.ru[viewId]
+    ?? '';
+}
+
+function normalizeLanguage(value) {
+  return ['ru', 'en'].includes(value) ? value : 'ru';
+}
+
+function readCookie(name) {
+  const prefix = `${encodeURIComponent(name)}=`;
+  return document.cookie
+    .split(';')
+    .map(item => item.trim())
+    .find(item => item.startsWith(prefix))
+    ?.slice(prefix.length) ?? '';
+}
+
+function writeCookie(name, value, maxAgeDays) {
+  const maxAge = Math.max(1, Number(maxAgeDays) || 365) * 24 * 60 * 60;
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+}
+
+function updateSessionSummary() {
+  const summary = $('#sessionSummary');
+  if (!summary) {
+    return;
+  }
+
+  summary.textContent = state.authenticated
+    ? `${state.user?.identity?.displayName ?? state.user?.cmdbuild?.username ?? 'user'} | ${state.user?.authMethod ?? 'local'}`
+    : t('session.notAuthenticated');
+}
+
 function bindForms() {
+  $('#interfaceLanguage')?.addEventListener('change', event => {
+    setLanguage(event.target.value);
+  });
+
   $('#loginForm').addEventListener('submit', async event => {
     event.preventDefault();
     if (state.auth?.useIdp) {
@@ -433,14 +736,14 @@ function bindForms() {
 
 function renderAuth(status) {
   state.auth = status.auth ?? {};
+  state.authenticated = Boolean(status.authenticated);
+  state.user = status.user ?? null;
   $('#loginView').classList.toggle('hidden', status.authenticated);
   $('#appView').classList.toggle('hidden', !status.authenticated);
   $('#idpLoginBlock').classList.toggle('hidden', !state.auth.useIdp || status.authenticated);
   $('#localCredentials').classList.toggle('hidden', state.auth.useIdp);
   $('#localLoginActions').classList.toggle('hidden', state.auth.useIdp);
-  $('#sessionSummary').textContent = status.authenticated
-    ? `${status.user?.identity?.displayName ?? status.user?.cmdbuild?.username ?? 'user'} | ${status.user?.authMethod ?? 'local'}`
-    : 'not authenticated';
+  updateSessionSummary();
   if (status.authenticated && status.idp) {
     fillIdpForm(status.idp);
   }
@@ -855,7 +1158,7 @@ function renderMappingLoadError(error) {
     clear(container);
     appendMappingSection(container, title, [
       mappingNode({
-        label: 'Ошибка загрузки Mapping',
+        label: 'Ошибка загрузки управления правилами конвертации',
         meta: message,
         level: 1,
         kind: 'rule',
@@ -878,7 +1181,7 @@ function renderMapping(rules, zabbixCatalog, cmdbuildCatalog) {
   appendMappingSection(zabbixContainer, 'Zabbix', [
     mappingNode({
       label: 'Загрузка легкого Zabbix catalog',
-      meta: 'CMDBuild и Conversion Rules уже доступны; полный Zabbix catalog не загружается в Mapping',
+      meta: 'CMDBuild и Conversion Rules уже доступны; полный Zabbix catalog не загружается в управление правилами конвертации',
       level: 1,
       kind: 'zabbix'
     })
@@ -896,7 +1199,7 @@ function renderMappingColumn(container, name, render) {
   try {
     render();
   } catch (error) {
-    console.error(`Mapping render failed for ${name}`, error);
+    console.error(`Conversion rules render failed for ${name}`, error);
     clear(container);
     appendMappingSection(container, `${name} render error`, [
       mappingNode({
@@ -905,7 +1208,7 @@ function renderMappingColumn(container, name, render) {
         level: 1,
         kind: 'rule',
         status: 'error',
-        help: `Колонка "${name}" не отрисовалась из-за клиентской ошибки. Остальные колонки Mapping продолжают работать.`
+        help: `Колонка "${name}" не отрисовалась из-за клиентской ошибки. Остальные колонки управления правилами конвертации продолжают работать.`
       })
     ], { status: 'error' });
   }
@@ -986,7 +1289,7 @@ function updateMappingEditor(message = '') {
   populateMappingEditorTargets();
   renderMappingDeleteRules();
   updateMappingEditorSuggestedName();
-  setMappingEditorStatusForDraft(message || 'Перед сохранением проверьте Validate rules mapping: для создания/обновления host должен приходить ipAddress или dnsName.');
+  setMappingEditorStatusForDraft(message || 'Перед сохранением проверьте логический контроль правил конвертации: для создания/обновления host должен приходить ipAddress или dnsName.');
 }
 
 function updateMappingEditorAction() {
@@ -999,7 +1302,7 @@ function updateMappingEditorAction() {
   }
   setMappingEditorStatusForDraft(state.mappingEditAction === 'delete'
     ? 'Выберите правила для удаления из draft JSON. Классы и class attribute fields не удаляются автоматически.'
-    : 'Добавьте новое правило конвертации. После добавления будет сразу выполнена проверка IP/DNS для host mapping.');
+    : 'Добавьте новое правило конвертации. После добавления будет сразу выполнена проверка IP/DNS для host binding.');
 }
 
 function renderMappingDeleteRules() {
@@ -1012,7 +1315,7 @@ function renderMappingDeleteRules() {
   const rules = currentMappingRules();
   const items = mappingDeleteRuleItems(rules);
   if (!state.mappingDraftRules) {
-    container.append(mappingDeleteEmptyNode('Сначала загрузите Mapping.'));
+    container.append(mappingDeleteEmptyNode('Сначала загрузите управление правилами конвертации.'));
     updateMappingDeleteControls();
     return;
   }
@@ -1191,7 +1494,7 @@ function setMappingDeleteSelection(checked) {
 
 function deleteSelectedMappingRules() {
   if (!state.mappingDraftRules) {
-    setMappingEditorStatus('Сначала загрузите Mapping.');
+    setMappingEditorStatus('Сначала загрузите управление правилами конвертации.');
     return;
   }
 
@@ -1293,18 +1596,16 @@ function populateMappingEditorFields() {
   const sourceFields = rules.source?.fields ?? {};
   const selectedClass = $('#mappingEditClass').value;
   const configuredOptions = Object.entries(sourceFields)
-    .filter(([fieldKey, field]) => !selectedClass || isVirtualSourceFieldRule(fieldKey, field) || mappingEditorAttributeForField(selectedClass, fieldKey, rules))
+    .filter(([fieldKey, field]) => !selectedClass || isVirtualSourceFieldRule(fieldKey, field) || mappingEditorAttributeForField(selectedClass, fieldKey, rules) || field.cmdbPath)
     .sort(([left], [right]) => compareText(left, right))
     .map(([fieldKey, field]) => ({
       value: fieldKey,
       label: mappingEditorSourceFieldLabel(fieldKey, field)
     }));
-  const catalogOptions = mappingEditorClassAttributes(selectedClass)
-    .filter(attribute => !sourceFieldHasCatalogAttribute(sourceFields, attribute.name))
-    .map(attribute => ({
-      value: attribute.name,
-      label: `${attribute.name}${attribute.type ? ` / ${attribute.type}` : ''}`
-    }));
+  const catalogOptions = mappingEditorCatalogFieldOptions(selectedClass, sourceFields);
+  state.mappingEditorFieldOptions = new Map(catalogOptions
+    .filter(option => option.fieldRule)
+    .map(option => [option.value, option]));
   const options = selectedClass
     ? [...configuredOptions, ...catalogOptions]
     : configuredOptions;
@@ -1586,7 +1887,9 @@ function setSelectOptions(select, options, selectedValue = '') {
 
 function mappingEditorSourceFieldLabel(fieldKey, field) {
   const attribute = findCatalogAttributeForField(mappingEditorClassAttributes($('#mappingEditClass').value), field, fieldKey);
-  return attribute?.name ?? fieldKey;
+  return field.cmdbPath
+    ? `${fieldKey} / ${field.cmdbPath}`
+    : attribute?.name ?? fieldKey;
 }
 
 function mappingEditorAttributeForField(className, fieldKey, rules = currentMappingRules()) {
@@ -1604,6 +1907,10 @@ function isMappingEditorFieldValidForClass(className, fieldKey) {
     return true;
   }
 
+  if (state.mappingEditorFieldOptions?.has(fieldKey)) {
+    return true;
+  }
+
   const field = currentMappingRules().source?.fields?.[fieldKey] ?? { source: fieldKey };
   return isVirtualSourceFieldRule(fieldKey, field)
     || Boolean(mappingEditorAttributeForField(className, fieldKey));
@@ -1611,7 +1918,7 @@ function isMappingEditorFieldValidForClass(className, fieldKey) {
 
 function addMappingConversionRule() {
   if (!state.mappingDraftRules) {
-    setMappingEditorStatus('Сначала загрузите Mapping.');
+    setMappingEditorStatus('Сначала загрузите управление правилами конвертации.');
     return;
   }
 
@@ -1701,12 +2008,174 @@ function ensureMappingEditorSourceField(rules, field) {
 
   rules.source ??= {};
   rules.source.fields ??= {};
+  const generatedOption = state.mappingEditorFieldOptions?.get(field);
+  if (generatedOption?.fieldRule) {
+    rules.source.fields[field] = cloneJson(generatedOption.fieldRule);
+    return;
+  }
+
   const attribute = mappingEditorClassAttributes($('#mappingEditClass').value)
     .find(item => equalsIgnoreCase(item.name, field));
-  rules.source.fields[field] = {
-    source: attribute?.name ?? field,
+  rules.source.fields[field] = sourceFieldRuleForDirectAttribute(catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass').value), attribute, field);
+}
+
+function mappingEditorCatalogFieldOptions(className, sourceFields) {
+  if (!className) {
+    return [];
+  }
+
+  const rootClass = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, className);
+  const options = [];
+  for (const attribute of mappingEditorClassAttributes(className)) {
+    if (!isReadableMappingAttribute(attribute)) {
+      continue;
+    }
+
+    if (isReferenceAttribute(attribute)) {
+      options.push(...referenceLeafFieldOptions(rootClass, attribute));
+      continue;
+    }
+
+    const fieldKey = attribute.name;
+    const fieldRule = sourceFieldRuleForDirectAttribute(rootClass, attribute, fieldKey);
+    options.push({
+      value: fieldKey,
+      label: `${attribute.name}${attribute.type ? ` / ${attribute.type}` : ''}`,
+      fieldRule
+    });
+  }
+
+  return options
+    .filter(option => !sourceFieldHasCatalogOption(sourceFields, option))
+    .sort((left, right) => compareText(left.label, right.label));
+}
+
+function referenceLeafFieldOptions(rootClass, attribute, prefix = [], depth = 1, seen = new Set()) {
+  const maxDepth = 5;
+  const targetClass = attribute.targetClass;
+  if (!targetClass || depth > maxDepth) {
+    return [];
+  }
+
+  const visitKey = `${targetClass}:${attribute.name}`;
+  if (seen.has(visitKey)) {
+    return [];
+  }
+
+  const nextSeen = new Set(seen);
+  nextSeen.add(visitKey);
+  const path = [...prefix, attribute];
+  const options = [];
+  for (const targetAttribute of mappingEditorClassAttributes(targetClass)) {
+    if (!isReadableMappingAttribute(targetAttribute)) {
+      continue;
+    }
+
+    if (isReferenceAttribute(targetAttribute)) {
+      options.push(...referenceLeafFieldOptions(rootClass, targetAttribute, path, depth + 1, nextSeen));
+      continue;
+    }
+
+    const leafPath = [...path, targetAttribute];
+    const cmdbPath = [rootClass, ...leafPath.map(item => item.name)].join('.');
+    const fieldKey = fieldKeyForCmdbPath(leafPath);
+    const fieldRule = sourceFieldRuleForCmdbPath(cmdbPath, leafPath);
+    options.push({
+      value: fieldKey,
+      label: `${leafPath.map(item => item.name).join(' -> ')}${targetAttribute.type ? ` / ${targetAttribute.type}` : ''}`,
+      fieldRule
+    });
+  }
+
+  return options;
+}
+
+function sourceFieldRuleForDirectAttribute(rootClass, attribute, fieldKey) {
+  const rule = {
+    source: attribute?.name ?? fieldKey,
+    cmdbAttribute: attribute?.name ?? fieldKey,
+    cmdbPath: attribute?.name ? `${rootClass}.${attribute.name}` : '',
     required: false
   };
+  if (attribute?.type) {
+    rule.type = attribute.type;
+  }
+  if (isLookupAttribute(attribute)) {
+    rule.lookupType = attribute.lookupType ?? attribute.name;
+    rule.resolve = {
+      mode: 'lookup',
+      lookupType: rule.lookupType,
+      valueMode: 'code'
+    };
+  } else if (rule.cmdbPath) {
+    rule.resolve = { mode: 'none' };
+  }
+  return rule;
+}
+
+function sourceFieldRuleForCmdbPath(cmdbPath, path) {
+  const first = path[0];
+  const leaf = path[path.length - 1];
+  const rule = {
+    source: first.name,
+    cmdbAttribute: first.name,
+    cmdbPath,
+    type: leaf.type ?? '',
+    required: false,
+    resolve: {
+      mode: 'cmdbPath',
+      valueMode: isLookupAttribute(leaf) ? 'code' : 'leaf'
+    }
+  };
+  if (isLookupAttribute(leaf)) {
+    rule.lookupType = leaf.lookupType ?? leaf.name;
+    rule.resolve.leafType = 'lookup';
+    rule.resolve.lookupType = rule.lookupType;
+  }
+  return rule;
+}
+
+function fieldKeyForCmdbPath(path) {
+  const text = path
+    .map(item => item.name ?? '')
+    .filter(Boolean)
+    .map((item, index) => camelPathSegment(item, index === 0))
+    .join('');
+  return text || 'cmdbPathField';
+}
+
+function camelPathSegment(value, lowerFirst) {
+  const text = String(value ?? '')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
+  return lowerFirst ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
+
+function sourceFieldHasCatalogOption(sourceFields, option) {
+  if (sourceFields?.[option.value]) {
+    return true;
+  }
+
+  const cmdbPath = option.fieldRule?.cmdbPath;
+  if (cmdbPath) {
+    return Object.values(sourceFields ?? {}).some(field => equalsIgnoreCase(field.cmdbPath, cmdbPath));
+  }
+
+  return sourceFieldHasCatalogAttribute(sourceFields, option.fieldRule?.cmdbAttribute ?? option.value);
+}
+
+function isReadableMappingAttribute(attribute) {
+  return attribute?.name
+    && attribute.active !== false
+    && attribute._can_read !== false
+    && !equalsIgnoreCase(attribute.mode, 'syshidden')
+    && !['IdClass', 'IdTenant'].some(name => equalsIgnoreCase(attribute.name, name));
+}
+
+function isReferenceAttribute(attribute) {
+  return Boolean(attribute) && equalsIgnoreCase(attribute.type, 'reference');
 }
 
 function applyMappingEditorExtensionTarget(rule, type, target, field) {
@@ -1836,7 +2305,7 @@ async function saveMappingDraftAsFile() {
   const validation = validateMappingDraftBeforeSave(state.mappingDraftRules, state.mappingCmdbuildCatalog);
   const changes = mappingSessionChanges(initialMappingRules(), state.mappingDraftRules);
   if (validation.issues.length > 0) {
-    setMappingEditorStatusForDraft(`Save file as: найдена неконсистентность IP/DNS mapping. Изменений для webhook-файла: ${sessionWebhookChangeCount(changes)}.`);
+    setMappingEditorStatusForDraft(`Save file as: найдена неконсистентность IP/DNS binding. Изменений для webhook-файла: ${sessionWebhookChangeCount(changes)}.`);
     const confirmed = window.confirm([
       'В rules найдены проблемы связи IP/DNS class attribute field с Zabbix interface structure.',
       '',
@@ -2154,8 +2623,8 @@ function buildWebhookBodiesFile(rules, cmdbuildCatalog, validation, changes) {
     '# Content-Type вручную лучше не добавлять в headers CMDBuild: CMDBuild сам выставляет его для JSON body.',
     '#',
     validation.issues.length > 0
-      ? `# Save validation warnings: ${validation.issues.length}. Перед применением проверьте IP/DNS -> Zabbix interface mapping.`
-      : '# Save validation: критичных предупреждений по IP/DNS -> Zabbix interface mapping нет.',
+      ? `# Save validation warnings: ${validation.issues.length}. Перед применением проверьте IP/DNS -> Zabbix interface binding.`
+      : '# Save validation: критичных предупреждений по IP/DNS -> Zabbix interface binding нет.',
     ''
   ];
 
@@ -2275,12 +2744,14 @@ function appendWebhookBodiesForClass(lines, rules, cmdbuildCatalog, className, e
     emitted.add(emitKey);
 
     const body = webhookBodyForClassEvent(rules, cmdbuildCatalog, classItem.name, event);
+    const pathComments = webhookBodyPathComments(rules, cmdbuildCatalog, classItem.name);
     lines.push(
       `## ${actionLabel} / ${classItem.name} / ${event.eventType}`,
       '# Action: ADD or UPDATE CMDBuild webhook Body',
       '# Method: POST',
       '# URL: http://192.168.202.100:5080/webhooks/cmdbuild',
       '# Headers: Authorization: Bearer <token>',
+      ...pathComments,
       JSON.stringify(body, null, 2),
       ''
     );
@@ -2433,6 +2904,28 @@ function webhookBodyForClassEvent(rules, cmdbuildCatalog, className, event) {
   }
 
   return body;
+}
+
+function webhookBodyPathComments(rules, cmdbuildCatalog, className) {
+  const catalogClass = findCatalogClass(cmdbuildCatalog ?? {}, className);
+  const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass ?? className);
+  const comments = [];
+  for (const [fieldKey, field] of Object.entries(rules.source?.fields ?? {})) {
+    if (!field.cmdbPath || !findCatalogAttributeForField(attributes, field, fieldKey)) {
+      continue;
+    }
+
+    const bodyKey = webhookBodyKeyForField(fieldKey, field);
+    if (!bodyKey) {
+      continue;
+    }
+
+    const mode = field.resolve?.mode && field.resolve.mode !== 'none'
+      ? `, resolve=${field.resolve.mode}${field.resolve.leafType ? `/${field.resolve.leafType}` : ''}`
+      : '';
+    comments.push(`# Path metadata: ${bodyKey} -> ${field.cmdbPath}${mode}. Payload stays flat; CMDBuild sends the numeric id/value in "${bodyKey}".`);
+  }
+  return comments.length > 0 ? comments : ['# Path metadata: no CMDB path fields for this class.'];
 }
 
 function webhookBodyKeyForField(fieldKey, field) {
@@ -3144,15 +3637,30 @@ function sourceFieldCatalogLabel(field = {}) {
 }
 
 function sourceFieldMeta(field = {}) {
+  const parts = [sourceFieldLabel(field)];
   const catalogLabel = sourceFieldCatalogLabel(field);
-  return catalogLabel ? `${sourceFieldLabel(field)} -> CMDB ${catalogLabel}` : sourceFieldLabel(field);
+  if (catalogLabel) {
+    parts.push(`CMDB ${catalogLabel}`);
+  }
+  if (field.cmdbPath) {
+    parts.push(`path ${field.cmdbPath}`);
+  }
+  if (field.resolve?.mode && field.resolve.mode !== 'none') {
+    const leaf = field.resolve.leafType ? `/${field.resolve.leafType}` : '';
+    parts.push(`resolve ${field.resolve.mode}${leaf}`);
+  }
+  return parts.join(' -> ');
 }
 
 function sourceFieldTokensForRule(fieldKey, field = {}) {
   return uniqueTokens([
     ...sourceFieldTokens(fieldKey),
     ...sourceFieldSources(field).flatMap(sourceName => sourceFieldTokens(fieldKey, sourceName)),
-    ...sourceFieldCatalogSources(field).flatMap(sourceName => sourceFieldTokens(fieldKey, sourceName))
+    ...sourceFieldCatalogSources(field).flatMap(sourceName => sourceFieldTokens(fieldKey, sourceName)),
+    ...String(field.cmdbPath ?? '')
+      .split('.')
+      .filter(Boolean)
+      .flatMap(sourceName => sourceFieldTokens(fieldKey, sourceName))
   ]);
 }
 
@@ -3415,7 +3923,7 @@ function cmdbClassHierarchyBranch(item, level, childrenByParent, attributesByCla
     status: field.present ? 'normal' : 'warning',
     help: field.present
       ? `Обязательное поле "${field.label}" найдено для класса "${item.name}": ${field.detail}.`
-      : `Обязательное поле "${field.label}" не найдено для класса "${item.name}". Перед добавлением класса в rules проверьте CMDBuild attribute или webhook mapping.`
+      : `Обязательное поле "${field.label}" не найдено для класса "${item.name}". Перед добавлением класса в rules проверьте CMDBuild attribute или webhook binding.`
   }));
 
   return [
@@ -3566,7 +4074,7 @@ function appendLazyMappingSection(container, title, buildNodes, options = {}) {
     try {
       body.replaceChildren(...await Promise.resolve(buildNodes()));
     } catch (error) {
-      console.error(`Mapping lazy render failed for ${title}`, error);
+      console.error(`Conversion rules lazy render failed for ${title}`, error);
       body.replaceChildren(mappingNode({
         label: 'Ошибка отрисовки',
         meta: error.message ?? String(error),
@@ -3628,7 +4136,7 @@ function zabbixExtensionMappingNodes(definition, items, rules = null) {
       level: 1,
       kind: 'zabbix',
       status: 'warning',
-      help: 'Раздел слишком большой для полной интерактивной отрисовки в Mapping. Ограничение защищает UI от зависания.'
+      help: 'Раздел слишком большой для полной интерактивной отрисовки в управлении правилами конвертации. Ограничение защищает UI от зависания.'
     }));
   }
 
@@ -3669,7 +4177,7 @@ function mappingSectionHelp(title) {
   };
 
   return helpByTitle[title]
-    ?? `Блок "${title}" группирует элементы mapping. Если это класс CMDBuild, сам класс и его attributes приходят из CMDBuild; в JSON правил меняется только список допустимых классов и правила обработки, а источник не редактируется.`;
+    ?? `Блок "${title}" группирует элементы карты правил конвертации. Если это класс CMDBuild, сам класс и его attributes приходят из CMDBuild; в JSON правил меняется только список допустимых классов и правила обработки, а источник не редактируется.`;
 }
 
 function sourceFieldHelp(fieldKey, field) {
@@ -3680,9 +4188,12 @@ function sourceFieldHelp(fieldKey, field) {
     ? ' Поле обязательное: событие без него не должно проходить нормальную обработку.'
     : ' Поле необязательное: правило может использовать его, если значение пришло в payload.';
   const catalogText = sourceFieldCatalogLabel(field)
-    ? ` Для Mapping и генерации CMDBuild Body оно связано с атрибутом CMDBuild "${sourceFieldCatalogLabel(field)}"; это не входной alias для микросервиса.`
+    ? ` Для управления правилами конвертации и генерации CMDBuild Body оно связано с атрибутом CMDBuild "${sourceFieldCatalogLabel(field)}"; это не входной alias для микросервиса.`
     : '';
-  return `Conversion field "${fieldKey}" читает source "${sourceFieldLabel(field)}" из CMDBuild webhook и кладет значение в Model.${modelFieldName(fieldKey)}.${requiredText}${regexText} Если указано несколько source-алиасов, берется первый найденный в payload.${catalogText}`;
+  const pathText = field.cmdbPath
+    ? ` CMDB path "${field.cmdbPath}" хранится в rules: webhook остается плоским и передает значение source "${sourceFieldLabel(field)}"; converter при необходимости поднимает leaf через CMDBuild REST.`
+    : '';
+  return `Conversion field "${fieldKey}" читает source "${sourceFieldLabel(field)}" из CMDBuild webhook и кладет значение в Model.${modelFieldName(fieldKey)}.${requiredText}${regexText} Если указано несколько source-алиасов, берется первый найденный в payload.${catalogText}${pathText}`;
 }
 
 function cmdbFieldHelp(className, fieldKey, field, attribute) {
@@ -3699,7 +4210,7 @@ function lookupHelp(className, lookupName, lookup) {
   const catalogText = lookup
     ? `Справочник найден в CMDBuild catalog: ${lookup.name ?? lookupName}.`
     : 'Справочник показан по правилам, но не найден в текущем каталоге CMDBuild.';
-  return `${catalogText} Для mapping используется связка class="${className}" + lookup="${lookupName}". Сам lookup и его значения меняются в CMDBuild, а поведение конвертации меняется regex-правилами в JSON.`;
+  return `${catalogText} Для управления правилами конвертации используется связка class="${className}" + lookup="${lookupName}". Сам lookup и его значения меняются в CMDBuild, а поведение конвертации меняется regex-правилами в JSON.`;
 }
 
 function lookupValueHelp(className, lookupName, value) {
@@ -3785,7 +4296,7 @@ function mappingNodeHelp(label, meta, kind, status) {
     regex: 'Регулярное выражение правила',
     zabbix: 'Элемент Zabbix',
     target: 'Поле JSON-RPC payload'
-  }[kind] ?? 'Элемент mapping';
+  }[kind] ?? 'Элемент карты правил конвертации';
   const statusText = status === 'error'
     ? ' Есть ошибка: элемент отсутствует в подключенной системе или некорректно сопоставлен.'
     : status === 'warning'
@@ -4787,7 +5298,10 @@ function lookupSourceFields(rules, catalog = null) {
   for (const [fieldKey, field] of Object.entries(rules.source?.fields ?? {})) {
     const sources = sourceFieldSources(field);
     if (sources.some(sourceName => equalsIgnoreCase(sourceName, 'OS') || equalsIgnoreCase(sourceName, 'zabbixTag'))
-        || equalsIgnoreCase(field.type, 'lookup')) {
+        || equalsIgnoreCase(field.type, 'lookup')
+        || equalsIgnoreCase(field.resolve?.leafType, 'lookup')
+        || Boolean(field.lookupType)
+        || Boolean(field.resolve?.lookupType)) {
       fields.add(canonicalSourceField(fieldKey));
       continue;
     }
@@ -4836,7 +5350,7 @@ function cmdbLookupNodes(rules, catalog, lookupName, className, level = 1) {
     help: lookupHelp(className, lookupName, lookup)
   })];
 
-  for (const value of lookupValuesFromRules(rules, lookupName)) {
+  for (const value of lookupValuesForMapping(rules, catalog, lookupName, lookup)) {
     nodes.push(mappingNode({
       label: value.label,
       meta: value.id ? `id ${value.id}` : 'value',
@@ -4854,6 +5368,34 @@ function cmdbLookupNodes(rules, catalog, lookupName, className, level = 1) {
   }
 
   return nodes;
+}
+
+function lookupValuesForMapping(rules, catalog, lookupName, lookup = null) {
+  const values = new Map();
+  const put = value => {
+    const key = normalizeToken(value.id || value.label);
+    if (key && !values.has(key)) {
+      values.set(key, value);
+    }
+  };
+
+  const catalogLookup = lookup ?? (catalog.lookups ?? [])
+    .find(item => equalsIgnoreCase(item.name, lookupName) || equalsIgnoreCase(item._id, lookupName));
+  for (const value of lookupValuesFromCatalog(catalogLookup)) {
+    put(value);
+  }
+  for (const value of lookupValuesFromRules(rules, lookupName)) {
+    put(value);
+  }
+  return [...values.values()];
+}
+
+function lookupValuesFromCatalog(lookup) {
+  return asArray(lookup?.values).map(item => {
+    const id = item?._id ?? item?.id ?? '';
+    const label = item?.code ?? item?.description ?? item?._description_translation ?? id;
+    return { id, label };
+  }).filter(item => item.id || item.label);
 }
 
 function lookupValuesFromRules(rules, lookupName) {
@@ -5182,42 +5724,42 @@ function bindHelp() {
 
 function applyHelpText() {
   const selectorHelp = {
-    '.brand': 'Название приложения cmdb2monitoring.',
-    '#sessionSummary': 'Текущий пользователь и способ авторизации.',
-    '#idpLoginButton': 'Запускает вход через внешний IdP по SAML2.',
-    '#logoutButton': 'Завершает текущую пользовательскую сессию.',
-    '#refreshDashboard': 'Повторно проверяет доступность сервисов.',
-    '#eventsMaxMessages': 'Количество последних сообщений Kafka, которое будет выведено снизу.',
-    '#refreshEvents': 'Загружает список топиков и последние сообщения выбранного топика.',
-    '#loadRules': 'Загружает текущий JSON правил конвертации.',
-    '#validateRules': 'Проверяет JSON правил по серверной схеме.',
-    '#rulesFile': 'Выбор локального JSON-файла правил для проверки или загрузки.',
-    '#dryRunPayload': 'Тестовый CMDBuild payload для dry-run конвертации.',
-    '#dryRunRules': 'Выполняет пробную конвертацию без сохранения правил.',
-    '#uploadRules': 'Сохраняет выбранный JSON правил на backend.',
-    '#loadMapping': 'Загружает визуальную карту связей Zabbix, правил и CMDBuild.',
-    '#mappingMode': 'Переключает Mapping между просмотром и редактированием draft-правил текущей сессии.',
-    '#mappingEditAction': 'Переключает действие редактора: добавление нового conversion rule или удаление существующих rules из draft JSON.',
-    '#mappingClearSelection': 'Снимает выделение цепочки Mapping в режиме просмотра и возвращает обычный обзор.',
-    '#mappingUndo': 'Отменяет последнее изменение draft-правил Mapping в текущей сессии.',
-    '#mappingRedo': 'Возвращает отмененное изменение draft-правил Mapping.',
-    '#mappingSaveAs': 'Сохраняет текущий draft JSON правил без отправки на backend. Вторым файлом формируются только webhook Body/DELETE-инструкции по добавленным и удаленным правилам текущей сессии.',
-    '#mappingAddRule': 'Добавляет выбранную conversion structure в draft JSON правил.',
-    '#mappingDeleteSelectAll': 'Отмечает все rules в режиме удаления.',
-    '#mappingDeleteClear': 'Снимает отметки со всех rules в режиме удаления.',
-    '#mappingDeleteSelected': 'Удаляет отмеченные rules из draft JSON после подтверждения. Классы и class attribute fields остаются на месте.',
-    '#loadValidateMapping': 'Запускает проверку правил против текущих каталогов Zabbix и CMDBuild.',
-    '#syncZabbix': 'Обновляет каталог Zabbix из API Zabbix.',
-    '#loadZabbix': 'Загружает сохраненный каталог Zabbix.',
-    '#syncCmdbuild': 'Обновляет каталог CMDBuild через API CMDBuild.',
-    '#loadCmdbuild': 'Загружает сохраненный каталог CMDBuild.',
-    '#loadSettings': 'Загружает runtime-настройки из внешнего файла.',
-    '#saveRuntimeSettings': 'Сохраняет runtime-настройки во внешний файл.',
-    '#saveIdp': 'Сохраняет настройки IdP/SAML2.',
-    '#helpPopoverClose': 'Закрывает открытую подсказку.'
+    '.brand': 'tooltip.brand',
+    '#sessionSummary': 'tooltip.sessionSummary',
+    '#idpLoginButton': 'tooltip.idpLoginButton',
+    '#logoutButton': 'tooltip.logoutButton',
+    '#refreshDashboard': 'tooltip.refreshDashboard',
+    '#eventsMaxMessages': 'tooltip.eventsMaxMessages',
+    '#refreshEvents': 'tooltip.refreshEvents',
+    '#loadRules': 'tooltip.loadRules',
+    '#validateRules': 'tooltip.validateRules',
+    '#rulesFile': 'tooltip.rulesFile',
+    '#dryRunPayload': 'tooltip.dryRunPayload',
+    '#dryRunRules': 'tooltip.dryRunRules',
+    '#uploadRules': 'tooltip.uploadRules',
+    '#loadMapping': 'tooltip.loadMapping',
+    '#mappingMode': 'tooltip.mappingMode',
+    '#mappingEditAction': 'tooltip.mappingEditAction',
+    '#mappingClearSelection': 'tooltip.mappingClearSelection',
+    '#mappingUndo': 'tooltip.mappingUndo',
+    '#mappingRedo': 'tooltip.mappingRedo',
+    '#mappingSaveAs': 'tooltip.mappingSaveAs',
+    '#mappingAddRule': 'tooltip.mappingAddRule',
+    '#mappingDeleteSelectAll': 'tooltip.mappingDeleteSelectAll',
+    '#mappingDeleteClear': 'tooltip.mappingDeleteClear',
+    '#mappingDeleteSelected': 'tooltip.mappingDeleteSelected',
+    '#loadValidateMapping': 'tooltip.loadValidateMapping',
+    '#syncZabbix': 'tooltip.syncZabbix',
+    '#loadZabbix': 'tooltip.loadZabbix',
+    '#syncCmdbuild': 'tooltip.syncCmdbuild',
+    '#loadCmdbuild': 'tooltip.loadCmdbuild',
+    '#loadSettings': 'tooltip.loadSettings',
+    '#saveRuntimeSettings': 'tooltip.saveRuntimeSettings',
+    '#saveIdp': 'tooltip.saveIdp',
+    '#helpPopoverClose': 'tooltip.helpPopoverClose'
   };
-  for (const [selector, text] of Object.entries(selectorHelp)) {
-    $$(selector).forEach(node => setHelp(node, text));
+  for (const [selector, key] of Object.entries(selectorHelp)) {
+    $$(selector).forEach(node => setHelpKey(node, key));
   }
 
   $$('label').forEach(label => {
@@ -5226,18 +5768,26 @@ function applyHelpText() {
     if (control?.tagName === 'SELECT') {
       return;
     }
-    if (labelText && control && !control.dataset.help) {
-      setHelp(control, `Поле "${labelText}". Значение используется соответствующим разделом интерфейса или сохраняется во внешний конфигурационный файл.`);
+    if (labelText && control && !control.dataset.helpKey) {
+      setHelp(control, tf('tooltip.field', { label: labelText }));
     }
   });
 
   $$('table th').forEach(header => {
     const text = header.textContent.trim();
     if (text) {
-      setHelp(header, `Колонка таблицы "${text}".`);
+      setHelp(header, tf('tooltip.tableColumn', { label: text }));
     }
   });
 
+}
+
+function setHelpKey(node, key) {
+  if (!node || !key) {
+    return node;
+  }
+  node.dataset.helpKey = key;
+  return setHelp(node, t(key));
 }
 
 function setHelp(node, text) {

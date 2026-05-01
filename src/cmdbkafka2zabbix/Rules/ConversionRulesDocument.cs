@@ -141,9 +141,32 @@ public sealed class SourceFieldRule
 
     public string CmdbAttribute { get; init; } = string.Empty;
 
+    public string CmdbPath { get; init; } = string.Empty;
+
+    public string Type { get; init; } = string.Empty;
+
+    public string LookupType { get; init; } = string.Empty;
+
+    public SourceFieldResolveRule Resolve { get; init; } = new();
+
     public bool Required { get; init; }
 
     public string ValidationRegex { get; init; } = string.Empty;
+}
+
+public sealed class SourceFieldResolveRule
+{
+    public string Mode { get; init; } = string.Empty;
+
+    public string SourceField { get; init; } = string.Empty;
+
+    public string LeafType { get; init; } = string.Empty;
+
+    public string LookupType { get; init; } = string.Empty;
+
+    public string ValueMode { get; init; } = string.Empty;
+
+    public int? MaxDepth { get; init; }
 }
 
 public sealed class ZabbixRules

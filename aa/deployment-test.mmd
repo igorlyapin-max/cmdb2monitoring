@@ -31,6 +31,7 @@ flowchart TB
     wh -->|produce :9092| kafka
     kafka -->|consume :9092| conv
     rules -->|local FS| conv
+    conv -->|CMDB REST resolver :8090| cmdb
     conv -->|produce :9092| kafka
     kafka -->|consume :9092| api
     api -->|JSON-RPC :8081| zbx

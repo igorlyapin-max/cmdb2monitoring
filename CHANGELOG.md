@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-05-01
+
+### Added
+
+- `cmdbkafka2zabbix` resolves CMDBuild lookup ids and iterative reference paths from `source.fields[].cmdbPath`.
+- Mapping edit mode can expand reference attributes to readable leaf fields and store the selected path in rules.
+- `monitoring-ui-api` has an About menu item and a login-screen language selector for Russian/English menu, Help, and interface tooltip text.
+- Architecture artifacts document the CMDBuild resolver flow, UI localization, and updated conversion rules menu names.
+
+### Changed
+
+- Current `OS` and `zabbixTag` lookup source fields now declare lookup resolution metadata while keeping numeric-id regex fallback.
+- CMDBuild catalog sync in `monitoring-ui-api` stores lookup values under lookup types when enabled.
+
 ## 0.3.0 - 2026-05-01
 
 ### Added

@@ -27,12 +27,14 @@
 | ID | Подпроцесс | Где используется |
 | --- | --- | --- |
 | SP-001 | Проверка Bearer token, нормализация CMDBuild webhook и публикация в Kafka | Create, Update, Delete |
-| SP-002 | Чтение Kafka-события, применение rules JSON, regex-выборов и T4-шаблонов | Create, Update, Delete |
+| SP-002 | Чтение Kafka-события, подъем lookup/reference leaf через `cmdbPath`, применение rules JSON, regex-выборов и T4-шаблонов | Create, Update, Delete |
 | SP-003 | Валидация Zabbix payload по catalog cache: host groups, templates, template groups, tags и расширенные host-поля | Create, Update |
 | SP-004 | Fallback-поиск Zabbix host через `host.get`, если `zabbix_hostid` отсутствует | Update, Delete |
 | SP-005 | Вызов Zabbix JSON-RPC, публикация response topic, запись state-файла и offset | Create, Update, Delete |
-| SP-006 | Синхронизация catalog cache CMDBuild/Zabbix через `monitoring-ui-api` | Operator UI, Validate rules mapping, Mapping |
-| SP-007 | Валидация, dry-run, backup и сохранение rules JSON через `monitoring-ui-api` | Operator UI, Validate rules mapping |
+| SP-006 | Синхронизация catalog cache CMDBuild/Zabbix через `monitoring-ui-api` | Operator UI, `Логический контроль правил конвертации`, `Управление правилами конвертации` |
+| SP-007 | Валидация, dry-run, backup и сохранение rules JSON через `monitoring-ui-api` | Operator UI, `Логический контроль правил конвертации` |
+| SP-008 | Визуальное управление rules: add/delete, reference drill-down, undo/redo, save-as draft/webhook instructions | `Управление правилами конвертации` |
+| SP-009 | Локализация frontend: язык `ru/en`, Help и всплывающие подсказки | Login, меню UI, Help |
 
 ## Позитивные сценарии
 
@@ -41,7 +43,7 @@
 1. Пользователь создает карточку `Computer`-наследника в CMDBuild.
 2. CMDBuild отправляет webhook `card_create_after`.
 3. `cmdbwebhooks2kafka` проверяет Bearer token, нормализует событие и публикует envelope в `cmdbuild.webhooks.*`.
-4. `cmdbkafka2zabbix` читает событие, применяет JSON rules, `hostProfiles[]` и T4-шаблон, публикует один или несколько `host.create` в `zabbix.host.requests.*`.
+4. `cmdbkafka2zabbix` читает событие, при необходимости поднимает scalar/lookup leaf по `source.fields[].cmdbPath` через CMDBuild REST, применяет JSON rules, `hostProfiles[]` и T4-шаблон, публикует один или несколько `host.create` в `zabbix.host.requests.*`.
 5. `zabbixrequests2api` валидирует payload, проверяет host groups/templates/template groups и совместимость расширенных host-полей, вызывает Zabbix API.
 6. Zabbix создает host.
 7. `zabbixrequests2api` публикует результат в `zabbix.host.responses.*`.
@@ -67,11 +69,12 @@
 1. Оператор открывает `monitoring-ui-api`.
 2. Если IdP отключен, оператор вводит CMDBuild и Zabbix credentials; они хранятся только в server-side session.
 3. Если IdP включен, оператор проходит SAML2 login через `/auth/saml2/login`, IdP возвращает SAMLResponse на `/auth/saml2/acs`, BFF создает server-side session.
-4. Оператор проверяет health микросервисов, синхронизирует Zabbix catalog и CMDBuild catalog, валидирует или загружает rules JSON.
-5. Оператор просматривает настроенные Kafka topics на вкладке Events; чтение выполняет BFF, браузер не подключается к Kafka напрямую.
-6. Оператор использует Mapping edit mode для добавления или удаления rules в draft JSON, проверяет IP/DNS consistency и сохраняет draft через `Save file as`.
-7. `Save file as` формирует два локальных файла: draft rules JSON и `*-webhook-bodies.txt` только по добавленным/удаленным в текущей сессии rules/classes/source fields.
-8. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.
+4. Оператор выбирает язык интерфейса на форме входа; выбор сохраняется в cookie и применяется к меню, Help и всплывающим подсказкам.
+5. Оператор проверяет health микросервисов, синхронизирует Zabbix catalog и CMDBuild catalog, валидирует или загружает rules JSON.
+6. Оператор просматривает настроенные Kafka topics на вкладке Events; чтение выполняет BFF, браузер не подключается к Kafka напрямую.
+7. Оператор использует `Управление правилами конвертации` для добавления или удаления rules в draft JSON, раскрывает reference attributes до leaf-полей, проверяет IP/DNS consistency и сохраняет draft через `Save file as`.
+8. `Save file as` формирует два локальных файла: draft rules JSON и `*-webhook-bodies.txt` только по добавленным/удаленным в текущей сессии rules/classes/source fields. Для reference/lookup webhook Body остается плоским, а путь leaf сохраняется в `source.fields[].cmdbPath`.
+9. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.
 
 ## Негативные сценарии
 
@@ -88,12 +91,15 @@
 | Zabbix host не найден для delete | `zabbixrequests2api` публикует `host_not_found` |
 | Zabbix API недоступен | retry по конфигу, затем error response |
 | Kafka publish error | ошибка логируется, offset не коммитится до успешной обработки |
+| CMDBuild resolver не настроен для `cmdbPath` | `cmdbkafka2zabbix` пишет warning и оставляет исходный numeric id/scalar value |
+| Reference path содержит цикл или глубже `Cmdbuild:MaxPathDepth` | `cmdbkafka2zabbix` пишет warning по полю и продолжает обработку с исходным значением |
 | SAML2 IdP не настроен | `/auth/saml2/login` возвращает конфигурационную ошибку, local login остается доступен только при `Auth:UseIdp=false` |
 | SAMLResponse не подписан доверенным IdP cert | `monitoring-ui-api` отклоняет ACS POST и не создает session |
 | SAML groups не попали в `RoleMapping` | Пользователь получает роль `readonly` |
 | Catalog sync недоступен | UI показывает ошибку BFF, runtime cache не обновляется |
-| Mapping rule добавляет класс без IP/DNS binding | UI показывает предупреждение save validation; `Save file as` требует подтверждения перед сохранением |
+| Правило в `Управление правилами конвертации` добавляет класс без IP/DNS binding | UI показывает предупреждение save validation; `Save file as` требует подтверждения перед сохранением |
 | CMDBuild class name записан как `NetworkDevice`, а catalog содержит `Network device` | UI нормализует имя класса и предпочитает отображение из CMDBuild catalog |
+| Переключен язык интерфейса | Меню, Help и всплывающие подсказки перестраиваются по словарю `ru/en`; серверные контракты не меняются |
 
 ## Вспомогательные процессы
 
@@ -103,7 +109,9 @@
 - Синхронизация Zabbix catalog: templates, host groups, template groups, known tags.
 - Синхронизация расширенного Zabbix catalog: proxies, proxy groups, macros, inventory fields, interface profiles, host statuses, maintenances, TLS/PSK modes, value maps.
 - Синхронизация CMDBuild catalog: classes, attributes, lookup values.
-- Mapping edit mode: добавление rules, удаление rules по группам, undo/redo, локальный save-as draft JSON и webhook-инструкций.
+- `Управление правилами конвертации`: добавление rules, удаление rules по группам, раскрытие reference attributes до leaf-полей, undo/redo, локальный save-as draft JSON и webhook-инструкций.
+- `Логический контроль правил конвертации`: проверка rules против актуальных catalog cache и удаление выбранных некорректных элементов после подтверждения.
+- Переключение языка интерфейса `ru/en` с сохранением в cookie и синхронным переводом Help/tooltip-текстов.
 - Ведение state-файлов последнего обработанного объекта и восстановление Kafka consumer с `lastInputOffset + 1`.
 - Структурное логирование в Kafka topics для будущей интеграции с ELK.
 - Проверка конфигураций скриптом `scripts/test-configs.sh`.

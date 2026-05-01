@@ -1,6 +1,6 @@
 # Документация проекта cmdb2monitoring
 
-Версия документации: `0.3.0`.
+Версия документации: `0.4.0`.
 Дата актуализации: 2026-05-01.
 
 ## Назначение
@@ -11,12 +11,13 @@
 Дополнительный компонент `monitoring-ui-api` предоставляет frontend/BFF для оператора:
 - health dashboard микросервисов;
 - загрузка, валидация и dry-run rules JSON;
-- визуальный Mapping и Validate rules mapping с подсветкой связей CMDBuild -> rules -> Zabbix;
-- режим редактирования Mapping: добавление и удаление rules в draft JSON, undo/redo, save-as без записи на backend;
+- визуальное управление правилами конвертации и логический контроль правил конвертации с подсветкой связей CMDBuild -> rules -> Zabbix;
+- режим `Управление правилами конвертации`: добавление и удаление rules в draft JSON, undo/redo, save-as без записи на backend;
 - безопасное удаление отсутствующих элементов из rules с локальным backup в `rules/.backup/`;
 - просмотр последних сообщений Kafka topics на вкладке Events;
 - синхронизация справочников Zabbix и CMDBuild;
 - runtime Settings для endpoint/topic/auth параметров;
+- выбор русского или английского языка интерфейса на экране входа; меню, Help и базовые подсказки должны использовать выбранный язык;
 - local login без IdP;
 - SAML2 login через единый IdP.
 
@@ -126,12 +127,14 @@ http://0.0.0.0:5080
 | `Kafka:Input` | Topic `cmdbuild.webhooks.*`, group id, consumer auth/security |
 | `Kafka:Output` | Topic `zabbix.host.requests.*`, producer auth/security, `ProfileHeaderName` |
 | `ConversionRules` | Repository path, rules file path, git pull behavior, template engine |
+| `Cmdbuild` | CMDBuild REST base URL and resolver limits for lookup/reference path conversion |
 | `ProcessingState` | State-файл последнего обработанного объекта |
 | `ElkLogging` | Kafka log topic или будущий ELK |
 
 Rules-файл отвечает за:
 - `create/update/delete` routing;
 - regex validation;
+- lookup/reference path conversion: `source.fields[].cmdbPath` хранит путь CMDBuild, а `resolve` задает, нужно ли поднять leaf через REST;
 - выбор host profiles, host groups/templates/interfaces/tags;
 - выбор proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps;
 - T4 templates для JSON-RPC;
@@ -141,6 +144,8 @@ Rules-файл отвечает за:
 При наличии блока `inventory` в Zabbix payload `inventory_mode` должен быть `0` или другим разрешенным режимом inventory. Значение `-1` отключает inventory и несовместимо с передачей inventory fields.
 
 `ProcessingState` читается при старте. После назначения Kafka partition сервис стартует чтение с `lastInputOffset + 1`, чтобы после рестарта не переобрабатывать уже обработанные сообщения.
+
+Webhook payload остается плоским. Для reference-полей CMDBuild webhook передает только numeric id первого reference attribute, например `adr: 12345`; полный путь хранится в rules как `cmdbPath`, например `Server.adr.Ip`. `cmdbkafka2zabbix` по этому пути итеративно читает карточки CMDBuild REST и подставляет leaf-значение перед применением regex/T4. Для lookup leaf применяется тот же механизм, но результатом по умолчанию становится lookup `code`.
 
 ## zabbixrequests2api
 
@@ -224,24 +229,26 @@ Events:
 - вывод по умолчанию показывает последние сообщения выбранного topic, сортировка выполняется от более новых сообщений к более старым;
 - раскрытие topic показывает timestamp, сводку service/partition/offset/key и value.
 
-Mapping:
+Управление правилами конвертации:
 - левая колонка показывает CMDBuild classes/attributes/lookups;
+- reference attributes раскрываются итеративно до читаемых leaf-полей; выбранное leaf-поле сохраняет `source.fields[].cmdbPath`;
 - центральная колонка показывает conversion fields, regex, selection rules и T4 blocks;
 - Host profiles в центральной колонке показывают fan-out и конкретные interface profile/valueField связи;
 - правая колонка показывает Zabbix catalog entities;
 - повторное нажатие на элемент снимает выделение;
 - для lookup выделяется только конкретная связка class + lookup + value;
 - блоки списков скрываются, если не участвуют в выделении, и могут быть раскрыты пользователем.
-- Zabbix catalog sections в Mapping закрыты по умолчанию и лениво загружаются по `+` или при попадании в выделенную цепочку;
+- Zabbix catalog sections закрыты по умолчанию и лениво загружаются по `+` или при попадании в выделенную цепочку;
 - edit mode имеет действия `Добавление правила` и `Удаление правила`;
 - добавление правила выбирает CMDBuild class, class attribute field, conversion structure, Zabbix object/payload, priority и regex;
 - удаление правила группирует rules по типам, держит группы закрытыми через `+`, удаляет только выбранные rules из draft JSON и оставляет classes/source fields без автоматической чистки;
 - undo/redo работают только с draft текущей browser-сессии;
 - `Save file as` сохраняет draft JSON и второй текстовый файл с CMDBuild webhook Body/DELETE-инструкциями только по добавленным и удаленным в текущей сессии rules/classes/source fields;
+- webhook-инструкции показывают path metadata, но сам CMDBuild Body остается плоским и содержит только source key со значением/id;
 - перед сохранением проверяется, что каждый мониторинговый класс из `source.entityClasses` или `className` regex имеет IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
 - имена классов CMDBuild нормализуются для UI: например, `NetworkDevice` и `Network device` считаются одним классом, а отображение предпочитает имя/описание из CMDBuild catalog.
 
-Validate rules mapping:
+Логический контроль правил конвертации:
 - интерактивно не строит цепочки, а подсвечивает только отсутствующие элементы в CMDBuild/Zabbix источниках;
 - для отсутствующих элементов выводятся checkbox;
 - кнопка удаления спрашивает подтверждение, создает backup предыдущей версии в `rules/.backup/`, затем удаляет выбранные элементы из rules;
@@ -304,7 +311,7 @@ Runtime cache/state:
 - дополнительные profiles `profile` и `profile2` создают отдельные Zabbix hosts с suffix `-profile` и `-profile2`.
 
 Webhook body для Server должен использовать `interface/interface2/profile/profile2`; старые имена этих полей больше не поддерживаются rules/UI.
-Реальные CMDBuild attributes остаются `iLo/iLo2/mgmt/mgmt2`; rules связывает их с webhook keys через `source.fields[].cmdbAttribute`. Это поле используется Mapping UI и генератором CMDBuild Body, но не является входным alias для `cmdbkafka2zabbix`.
+Реальные CMDBuild attributes остаются `iLo/iLo2/mgmt/mgmt2`; rules связывает их с webhook keys через `source.fields[].cmdbAttribute`. Это поле используется разделом `Управление правилами конвертации` и генератором CMDBuild Body, но не является входным alias для `cmdbkafka2zabbix`.
 Переименование hostProfile меняет вычисляемое имя Zabbix host: новые дополнительные hosts получают suffix `-profile`/`-profile2`. Ранее созданные дополнительные hosts со старыми suffix автоматически не переименовываются; оператор должен удалить, отключить или мигрировать их отдельно.
 
 `interface/interface2/profile/profile2` используют SNMP interface `:161`; `main` с `interface/interface2` получает `HP iLO by SNMP`, а `profile/profile2` получают отдельные SNMP monitoring rules. Блок `templateConflictRules` в rules-файле удаляет `ICMP Ping` и agent-шаблоны, если выбран `HP iLO by SNMP` или `Generic by SNMP`, потому что эти SNMP-шаблоны уже содержат item key `icmpping` и заполняют inventory field `Name`.
@@ -344,6 +351,7 @@ Webhook body для Server должен использовать `interface/inte
 
 Без переписывания микросервисов можно менять JSON rules:
 - `source.fields` для уже приходящих CMDBuild атрибутов;
+- `source.fields[].cmdbPath` для путей вида `Server.adr.Ip`, `Server.ipaddr_reference.another_reference_attribute.ipaddr` или `Server.lookup_reference.another_reference_attribute.lookup`;
 - regex validation и selection rules;
 - ссылки на существующие Zabbix host groups/templates/template groups/tags;
 - T4 templates, если итоговый JSON-RPC остается валидным для Zabbix.
