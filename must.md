@@ -61,6 +61,7 @@
 
 - `create` должен приводить к `host.create`.
 - `update` без `zabbix_hostid` должен проходить через fallback `host.get -> host.update`.
+- Для profile rules с `createOnUpdateWhenMissing=true` update fallback допускает upsert: если `host.get` не нашел host, `zabbixrequests2api` должен валидировать `fallbackCreateParams` и выполнить `host.create`.
 - `delete` без `zabbix_hostid` должен проходить через fallback `host.get -> host.delete`.
 - Служебная metadata `cmdb2monitoring` допустима только во внутреннем Kafka request. Перед вызовом Zabbix API она должна удаляться.
 - Перед `host.create` и `host.update` проверять наличие:
@@ -77,6 +78,10 @@
 - Regex используется не только для валидации, но и для выбора groups/templates/interfaces/tags.
 - Rules должны поддерживать расширенные Zabbix host параметры без правки кода: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps.
 - Rules должны поддерживать `hostProfiles[]`: один CMDB object может формировать один Zabbix host с несколькими `interfaces[]` или несколько Zabbix hosts через fan-out.
+- Количество IP в текущем контракте задается явными named fields rules/webhook; произвольные массивы IP не считаются поддержанными без отдельного изменения модели.
+- Для Server обязательные webhook keys: `interface/interface2` означают дополнительные interfaces основного host, `profile/profile2` означают отдельные hostProfiles. Старые имена этих полей не поддерживаются как входные alias; реальные CMDBuild attributes `iLo/iLo2/mgmt/mgmt2` связываются через `source.fields[].cmdbAttribute` только для Mapping и генерации Body.
+- Для нескольких Zabbix interfaces одного type в одном host только один interface должен иметь `main=1`, остальные должны иметь `main=0`.
+- Несовместимые Zabbix templates должны разрешаться через `templateConflictRules`; для update fallback конфликтующие уже привязанные templates передаются в `templates_clear`.
 - Новые T4-шаблоны должны использовать `Model.Interfaces`; `Model.Interface` допускается только как обратная совместимость с первым интерфейсом.
 - Итоговый JSON-RPC payload формируется T4-шаблонами из rules-файла.
 - При изменении rules-файла нужно прогнать:
@@ -116,6 +121,7 @@ git diff --check
 
 - `create`: CMDBuild -> Kafka -> Zabbix `host.create` -> response topic -> host есть в Zabbix.
 - `update`: CMDBuild -> Kafka -> fallback `host.get -> host.update` -> response topic -> поля реально изменились в Zabbix.
+- `update` с новым дополнительным profile и `createOnUpdateWhenMissing=true`: CMDBuild -> Kafka -> fallback `host.get -> host.create` -> response topic -> дополнительный host есть в Zabbix.
 - `delete`: CMDBuild -> Kafka -> fallback `host.get -> host.delete` -> response topic -> host отсутствует в Zabbix.
 
 Для конфигов:

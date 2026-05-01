@@ -2,16 +2,25 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-05-01
+
 ### Added
 
 - `hostProfiles[]` conversion model for one CMDB object -> multiple Zabbix hosts and one host -> multiple `interfaces[]`.
 - `Model.Interfaces` T4 model field with `Model.Interface` retained as backward-compatible first interface.
 - Mapping/Help documentation for host profiles and interface profile/valueField behavior.
+- Server multi-address rules: the main Server Zabbix host now uses `ip_address`, `interface` and `interface2` as three interfaces, while `profile` and `profile2` create separate additional monitoring hosts.
+- `createOnUpdateWhenMissing` host profile policy for Server `profile`/`profile2`: update fallback can create the additional Zabbix host when it does not exist yet.
+- Documentation for IP-count limits in `hostProfiles[].interfaces` and Server additional profiles.
+- Config-driven `templateConflictRules` for removing conflicting Zabbix templates such as `ICMP Ping` and agent templates when SNMP templates already provide `icmpping` or the same inventory field.
+- Server webhook/rules naming now requires `interface/interface2/profile/profile2` for additional interfaces and profiles.
+- Mapping metadata `source.fields[].cmdbAttribute` links Server webhook keys `interface/interface2/profile/profile2` to real CMDBuild attributes `iLo/iLo2/mgmt/mgmt2` without restoring legacy input aliases.
 
 ### Changed
 
 - `cmdbkafka2zabbix` can publish multiple Zabbix request messages for one CMDB event and writes state only after all messages are published.
 - `zabbixrequests2api` update fallback now matches existing interfaces by type/ip/dns/port when several interfaces are present.
+- `zabbixrequests2api` filters `templates_clear` against currently linked Zabbix templates before host.update fallback calls.
 
 ## 0.2.0 - 2026-04-30
 

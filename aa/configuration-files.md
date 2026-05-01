@@ -80,6 +80,8 @@ Rules-файл `rules/cmdbuild-to-zabbix-host-create.json` управляет:
 - event routing create/update/delete;
 - regex validation;
 - hostProfiles fan-out: один CMDB object -> один Zabbix host с несколькими interfaces[] или несколько Zabbix hosts;
+- `hostProfiles[].createOnUpdateWhenMissing`: для update fallback разрешает создать отсутствующий дополнительный Zabbix host по `fallbackCreateParams`, если `host.get` не нашел host;
+- количество IP задается rules: текущий плоский webhook/rules контракт поддерживает named fields, а не произвольный массив IP; для дополнительных IP добавляются новые `source.fields` и `hostProfiles[].interfaces` или отдельные `hostProfiles[]`;
 - выбором groups/templates/interfaces/tags;
 - расширенными Zabbix host параметрами: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances, value maps;
 - T4 templates для Zabbix JSON-RPC;
@@ -215,6 +217,17 @@ SAML2 endpoints:
 - logout: `GET /auth/saml2/logout`.
 
 В IdP-режиме `Cmdbuild:ServiceAccount` и `Zabbix:ServiceAccount` используются BFF для server-side API calls. В режиме без IdP пользователь вводит credentials при входе, они хранятся только в памяти server-side session.
+
+## Conversion rules conflict handling
+
+В `rules/cmdbuild-to-zabbix-host-create.json` блок `templateConflictRules` применяется после `templateSelectionRules`. Он нужен для случаев, когда несколько правил выбрали шаблоны Zabbix с одинаковыми item keys или конфликтующими inventory field links. В текущем dev-окружении `ICMP Ping` и agent-шаблоны удаляются при выборе `HP iLO by SNMP` или `Generic by SNMP`, чтобы Zabbix API не отклонял host payload из-за дублирующего key `icmpping` или inventory field `Name`.
+
+Для update fallback rules формируют `templates_clear`. `zabbixrequests2api` получает текущие linked templates через `selectParentTemplates` и передает в Zabbix только те `templateid` из `templates_clear`, которые действительно привязаны к host.
+
+Практический пример: если существующий host уже связан с `Windows by Zabbix agent`, добавление `HP iLO by SNMP` для дополнительного SNMP interface может быть отклонено Zabbix из-за общего inventory field `Name`. В этом случае rules должны оставить целевой SNMP template и передать конфликтующий agent template в `templates_clear`.
+
+Для Server source fields обязательные имена сейчас `interface/interface2` для дополнительных interfaces основного host и `profile/profile2` для отдельных hostProfiles. Если реальные CMDBuild attributes называются иначе, например текущие `iLo/iLo2/mgmt/mgmt2`, связь для Mapping и генерации webhook Body задается через `source.fields[].cmdbAttribute`; это не расширяет набор входных alias микросервиса.
+Смена hostProfile name меняет вычисляемый Zabbix host suffix; ранее созданные дополнительные hosts со старыми suffix не переименовываются автоматически.
 
 Events:
 - `EventBrowser:Enabled=true` включает чтение Kafka topics через BFF;

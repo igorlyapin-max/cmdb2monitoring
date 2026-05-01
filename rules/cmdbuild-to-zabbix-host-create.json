@@ -43,16 +43,27 @@
         "required": false,
         "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
       },
-      "managementIpAddress": {
-        "source": "management_ip",
-        "sources": [
-          "management_ip",
-          "mgmt_ip",
-          "oob_ip",
-          "ilo_ip",
-          "idrac_ip",
-          "managementIpAddress"
-        ],
+      "profileIpAddress": {
+        "source": "profile",
+        "cmdbAttribute": "mgmt",
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "profile2IpAddress": {
+        "source": "profile2",
+        "cmdbAttribute": "mgmt2",
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "interfaceIpAddress": {
+        "source": "interface",
+        "cmdbAttribute": "iLo",
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "interface2IpAddress": {
+        "source": "interface2",
+        "cmdbAttribute": "iLo2",
         "required": false,
         "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
       },
@@ -68,16 +79,8 @@
         "required": false,
         "validationRegex": "^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
       },
-      "managementDnsName": {
-        "source": "management_dns",
-        "sources": [
-          "management_dns",
-          "mgmt_dns",
-          "oob_dns",
-          "ilo_dns",
-          "idrac_dns",
-          "managementDnsName"
-        ],
+      "profileDnsName": {
+        "source": "profile_dns",
         "required": false,
         "validationRegex": "^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
       },
@@ -195,6 +198,10 @@
         "templateid": "10226"
       },
       {
+        "name": "HP iLO by SNMP",
+        "templateid": "10256"
+      },
+      {
         "name": "Zabbix server health",
         "templateid": "10047"
       }
@@ -233,7 +240,12 @@
       "main": 1,
       "useip": 1,
       "dns": "",
-      "port": "161"
+      "port": "161",
+      "details": {
+        "version": 2,
+        "bulk": 1,
+        "community": "{$SNMP_COMMUNITY}"
+      }
     },
     "interfaceProfiles": {
       "agent": {
@@ -248,7 +260,12 @@
         "main": 1,
         "useip": 1,
         "dns": "",
-        "port": "161"
+        "port": "161",
+        "details": {
+          "version": 2,
+          "bulk": 1,
+          "community": "{$SNMP_COMMUNITY}"
+        }
       },
       "ipmi": {
         "type": 3,
@@ -256,6 +273,30 @@
         "useip": 1,
         "dns": "",
         "port": "623"
+      },
+      "interface": {
+        "type": 2,
+        "main": 1,
+        "useip": 1,
+        "dns": "",
+        "port": "161",
+        "details": {
+          "version": 2,
+          "bulk": 1,
+          "community": "{$SNMP_COMMUNITY}"
+        }
+      },
+      "interface2": {
+        "type": 2,
+        "main": 0,
+        "useip": 1,
+        "dns": "",
+        "port": "161",
+        "details": {
+          "version": 2,
+          "bulk": 1,
+          "community": "{$SNMP_COMMUNITY}"
+        }
       },
       "jmx": {
         "type": 4,
@@ -410,39 +451,41 @@
           }
         },
         {
-          "name": "management-snmp-ip",
+          "name": "interface-snmp-ip",
           "priority": 30,
-          "interfaceProfileRef": "snmp",
+          "interfaceProfileRef": "interface",
           "mode": "ip",
-          "valueField": "managementIpAddress",
+          "valueField": "interfaceIpAddress",
           "when": {
-            "fieldExists": "managementIpAddress"
+            "fieldExists": "interfaceIpAddress"
           }
         },
         {
-          "name": "management-snmp-dns",
+          "name": "interface2-snmp-ip",
           "priority": 40,
-          "fallback": true,
-          "interfaceProfileRef": "snmp",
-          "mode": "dns",
-          "valueField": "managementDnsName",
+          "interfaceProfileRef": "interface2",
+          "mode": "ip",
+          "valueField": "interface2IpAddress",
           "when": {
-            "fieldExists": "managementDnsName"
+            "fieldExists": "interface2IpAddress"
           }
         }
       ]
     },
     {
-      "name": "management",
+      "name": "profile",
       "priority": 20,
+      "createOnUpdateWhenMissing": true,
       "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^server$"
+          }
+        ],
         "anyRegex": [
           {
-            "field": "managementIpAddress",
-            "pattern": ".+"
-          },
-          {
-            "field": "managementDnsName",
+            "field": "profileIpAddress",
             "pattern": ".+"
           },
           {
@@ -451,28 +494,54 @@
           }
         ]
       },
-      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-mgmt",
-      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> management",
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-profile",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> profile",
       "interfaces": [
         {
-          "name": "management-host-snmp-ip",
+          "name": "profile-host-snmp-ip",
           "priority": 10,
           "interfaceProfileRef": "snmp",
           "mode": "ip",
-          "valueField": "managementIpAddress",
+          "valueField": "profileIpAddress",
           "when": {
-            "fieldExists": "managementIpAddress"
+            "fieldExists": "profileIpAddress"
           }
-        },
+        }
+      ]
+    },
+    {
+      "name": "profile2",
+      "priority": 30,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^server$"
+          }
+        ],
+        "anyRegex": [
+          {
+            "field": "profile2IpAddress",
+            "pattern": ".+"
+          },
+          {
+            "field": "eventType",
+            "pattern": "(?i)^delete$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-profile2",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> profile2",
+      "interfaces": [
         {
-          "name": "management-host-snmp-dns",
-          "priority": 20,
-          "fallback": true,
+          "name": "profile2-host-snmp-ip",
+          "priority": 10,
           "interfaceProfileRef": "snmp",
-          "mode": "dns",
-          "valueField": "managementDnsName",
+          "mode": "ip",
+          "valueField": "profile2IpAddress",
           "when": {
-            "fieldExists": "managementDnsName"
+            "fieldExists": "profile2IpAddress"
           }
         }
       ]
@@ -493,13 +562,13 @@
   },
   "groupSelectionRules": [
     {
-      "name": "management-profile-hosts",
+      "name": "additional-profile-hosts",
       "priority": 5,
       "when": {
         "anyRegex": [
           {
             "field": "hostProfile",
-            "pattern": "(?i)^management$"
+            "pattern": "(?i)^(profile|profile2)$"
           }
         ]
       },
@@ -842,13 +911,49 @@
       ]
     },
     {
-      "name": "management-profile-snmp",
+      "name": "server-main-additional-interfaces",
+      "priority": 39,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^server$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^main$"
+          }
+        ],
+        "anyRegex": [
+          {
+            "field": "interfaceIpAddress",
+            "pattern": ".+"
+          },
+          {
+            "field": "interface2IpAddress",
+            "pattern": ".+"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "HP iLO by SNMP",
+          "templateid": "10256"
+        }
+      ]
+    },
+    {
+      "name": "additional-profile-snmp",
       "priority": 40,
       "when": {
         "anyRegex": [
           {
             "field": "hostProfile",
-            "pattern": "(?i)^management$"
+            "pattern": "(?i)^(profile|profile2)$"
           }
         ]
       },
@@ -871,6 +976,36 @@
         "always": true
       },
       "templatesRef": "defaults.templates"
+    }
+  ],
+  "templateConflictRules": [
+    {
+      "name": "hp-interface-removes-conflicting-agent-templates",
+      "whenTemplateIds": [
+        "10256"
+      ],
+      "removeTemplateIds": [
+        "10564",
+        "10001",
+        "10081",
+        "10561",
+        "10562"
+      ],
+      "reason": "HP iLO by SNMP already contains item key icmpping and populates inventory field Name; keeping ICMP Ping or agent templates with it makes Zabbix reject host.create/host.update."
+    },
+    {
+      "name": "generic-snmp-removes-conflicting-agent-templates",
+      "whenTemplateIds": [
+        "10563"
+      ],
+      "removeTemplateIds": [
+        "10564",
+        "10001",
+        "10081",
+        "10561",
+        "10562"
+      ],
+      "reason": "Generic by SNMP already contains item key icmpping and populates inventory field Name; keeping ICMP Ping or agent templates with it makes Zabbix reject host.create/host.update."
     }
   ],
   "interfaceAddressRules": [
@@ -1122,20 +1257,38 @@
       ]
     },
     {
-      "name": "host-profile-management",
+      "name": "host-profile-profile",
       "priority": 70,
       "when": {
         "anyRegex": [
           {
             "field": "hostProfile",
-            "pattern": "(?i)^management$"
+            "pattern": "(?i)^profile$"
           }
         ]
       },
       "tags": [
         {
           "tag": "cmdb.hostProfile",
-          "value": "management"
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "name": "host-profile-profile2",
+      "priority": 71,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^profile2$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.hostProfile",
+          "value": "profile2"
         }
       ]
     },
@@ -1191,7 +1344,18 @@
       "        \"useip\": <#= zif.UseIp #>,",
       "        \"ip\": \"<#= zif.Ip #>\",",
       "        \"dns\": \"<#= zif.Dns #>\",",
-      "        \"port\": \"<#= zif.Port #>\"",
+      "        \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "        \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "          \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "          \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "          \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "        }<# } #>",
       "      }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
       "      <# } #>",
       "    ],",
@@ -1263,7 +1427,18 @@
       "        \"useip\": <#= zif.UseIp #>,",
       "        \"ip\": \"<#= zif.Ip #>\",",
       "        \"dns\": \"<#= zif.Dns #>\",",
-      "        \"port\": \"<#= zif.Port #>\"",
+      "        \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "        \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "          \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "          \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "          \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "        }<# } #>",
       "      }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
       "      <# } #>",
       "    ],",
@@ -1320,10 +1495,13 @@
       "    \"host\": \"<#= Model.Host #>\",",
       "    \"hostProfile\": \"<#= Model.HostProfileName #>\",",
       "    \"fallbackForMethod\": \"<#= Model.FallbackForMethod #>\",",
-      "    \"fallbackUpdateParams\": {",
+      "    \"createOnUpdateWhenMissing\": <#= Model.CreateOnUpdateWhenMissing ? \"true\" : \"false\" #>,",
+      "<# if (Model.CreateOnUpdateWhenMissing) { #>",
+      "    \"fallbackCreateParams\": {",
       "      \"host\": \"<#= Model.Host #>\",",
       "      \"name\": \"<#= Model.VisibleName #>\",",
       "      \"status\": <#= Model.Status #>,",
+      "      \"inventory_mode\": <#= Model.InventoryMode #>,",
       "<# if (!string.IsNullOrWhiteSpace(Model.ProxyId)) { #>",
       "      \"proxyid\": \"<#= Model.ProxyId #>\",",
       "<# } #>",
@@ -1348,7 +1526,18 @@
       "          \"useip\": <#= zif.UseIp #>,",
       "          \"ip\": \"<#= zif.Ip #>\",",
       "          \"dns\": \"<#= zif.Dns #>\",",
-      "          \"port\": \"<#= zif.Port #>\"",
+      "          \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "          \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "            \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "            \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "            \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "          }<# } #>",
       "        }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
       "        <# } #>",
       "      ],",
@@ -1377,6 +1566,83 @@
       "        \"<#= Model.InventoryFields[i].Field #>\": \"<#= Model.InventoryFields[i].Value #>\"<#= i + 1 < Model.InventoryFields.Count ? \",\" : \"\" #>",
       "        <# } #>",
       "      }<# } #>",
+      "    },",
+      "<# } #>",
+      "    \"fallbackUpdateParams\": {",
+      "      \"host\": \"<#= Model.Host #>\",",
+      "      \"name\": \"<#= Model.VisibleName #>\",",
+      "      \"status\": <#= Model.Status #>,",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyId)) { #>",
+      "      \"proxyid\": \"<#= Model.ProxyId #>\",",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyGroupId)) { #>",
+      "      \"proxy_groupid\": \"<#= Model.ProxyGroupId #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.Enabled) { #>",
+      "      \"tls_connect\": <#= Model.TlsPsk.TlsConnect ?? 1 #>,",
+      "      \"tls_accept\": <#= Model.TlsPsk.TlsAccept ?? 1 #>,",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasIdentity) { #>",
+      "      \"tls_psk_identity\": \"<#= Model.TlsPsk.TlsPskIdentity #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasPsk) { #>",
+      "      \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
+      "<# } #>",
+      "      \"interfaces\": [",
+      "        <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
+      "        {",
+      "          \"type\": <#= zif.Type #>,",
+      "          \"main\": <#= zif.Main #>,",
+      "          \"useip\": <#= zif.UseIp #>,",
+      "          \"ip\": \"<#= zif.Ip #>\",",
+      "          \"dns\": \"<#= zif.Dns #>\",",
+      "          \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "          \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "            \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "            \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "            \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "          }<# } #>",
+      "        }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "      \"groups\": [",
+      "        <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
+      "        { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "      \"templates\": [",
+      "        <# for (var i = 0; i < Model.Templates.Count; i++) { #>",
+      "        { \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "<# if (Model.TemplatesToClear.Count > 0) { #>",
+      "      \"templates_clear\": [",
+      "        <# for (var i = 0; i < Model.TemplatesToClear.Count; i++) { #>",
+      "        { \"templateid\": \"<#= Model.TemplatesToClear[i].TemplateId #>\" }<#= i + 1 < Model.TemplatesToClear.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "<# } #>",
+      "      \"tags\": [",
+      "        <# for (var i = 0; i < Model.Tags.Count; i++) { #>",
+      "        { \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ]<# if (Model.Macros.Count > 0) { #>,",
+      "      \"macros\": [",
+      "        <# for (var i = 0; i < Model.Macros.Count; i++) { #>",
+      "        { \"macro\": \"<#= Model.Macros[i].Macro #>\", \"value\": \"<#= Model.Macros[i].Value #>\"<# if (!string.IsNullOrWhiteSpace(Model.Macros[i].Description)) { #>, \"description\": \"<#= Model.Macros[i].Description #>\"<# } #> }<#= i + 1 < Model.Macros.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ]<# } #><# if (Model.InventoryFields.Count > 0) { #>,",
+      "      \"inventory\": {",
+      "        <# for (var i = 0; i < Model.InventoryFields.Count; i++) { #>",
+      "        \"<#= Model.InventoryFields[i].Field #>\": \"<#= Model.InventoryFields[i].Value #>\"<#= i + 1 < Model.InventoryFields.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      }<# } #>",
       "    }",
       "  },",
       "  \"jsonrpc\": \"2.0\",",
@@ -1384,6 +1650,7 @@
       "  \"params\": {",
       "    \"output\": [\"hostid\", \"host\", \"name\"],",
       "    \"selectInterfaces\": [\"interfaceid\", \"type\", \"main\", \"useip\", \"ip\", \"dns\", \"port\"],",
+      "    \"selectParentTemplates\": [\"templateid\"],",
       "    \"filter\": {",
       "      \"host\": [\"<#= Model.Host #>\"]",
       "    }",
@@ -1399,9 +1666,9 @@
     "id": "97805",
     "code": "NB-97805",
     "ip_address": "192.168.1.1",
-    "management_ip": "192.168.1.101",
+    "profile": "192.168.1.101",
     "dns_name": "nb-97805.example.local",
-    "management_dns": "nb-97805-mgmt.example.local",
+    "profile_dns": "nb-97805-profile.example.local",
     "description": "Office notebook",
     "os": "Linux",
     "zabbixTag": "tag2"

@@ -792,7 +792,7 @@ async function validateRulesObject(rules) {
   }
 
   const hostGetTemplate = (rules.t4Templates?.hostGetByHostJsonRpcRequestLines ?? []).join('\n');
-  for (const marker of ['cmdb2monitoring', 'fallbackForMethod', 'fallbackUpdateParams', 'selectInterfaces']) {
+  for (const marker of ['cmdb2monitoring', 'fallbackForMethod', 'fallbackUpdateParams', 'fallbackCreateParams', 'createOnUpdateWhenMissing', 'selectInterfaces']) {
     if (!hostGetTemplate.includes(marker)) {
       errors.push(`hostGetByHostJsonRpcRequestLines must contain '${marker}'.`);
     }
@@ -2210,11 +2210,22 @@ function readSourceField(source, field) {
     class: source.className,
     ipaddress: source.ipAddress ?? source.ip_address,
     ip_address: source.ipAddress ?? source.ip_address,
+    profileipaddress: source.profileIpAddress ?? source.profile,
+    profile: source.profileIpAddress ?? source.profile,
+    profile2ipaddress: source.profile2IpAddress ?? source.profile2,
+    profile2: source.profile2IpAddress ?? source.profile2,
+    interfaceipaddress: source.interfaceIpAddress ?? source.interface,
+    interface: source.interfaceIpAddress ?? source.interface,
+    interface2ipaddress: source.interface2IpAddress ?? source.interface2,
+    interface2: source.interface2IpAddress ?? source.interface2,
     dnsname: source.dnsName ?? source.dns_name,
     dns_name: source.dnsName ?? source.dns_name,
     fqdn: source.dnsName ?? source.dns_name,
     hostname: source.dnsName ?? source.dns_name,
     host_dns: source.dnsName ?? source.dns_name,
+    profilednsname: source.profileDnsName ?? source.profile_dns,
+    profiledns: source.profileDnsName ?? source.profile_dns,
+    profile_dns: source.profileDnsName ?? source.profile_dns,
     os: source.os,
     operatingsystem: source.os,
     zabbixtag: source.zabbixTag,
@@ -2253,10 +2264,20 @@ function canonicalSourceField(field) {
     classname: 'className',
     class: 'className',
     ipaddress: 'ipAddress',
+    profileipaddress: 'profileIpAddress',
+    profile: 'profileIpAddress',
+    profile2ipaddress: 'profile2IpAddress',
+    profile2: 'profile2IpAddress',
+    interfaceipaddress: 'interfaceIpAddress',
+    interface: 'interfaceIpAddress',
+    interface2ipaddress: 'interface2IpAddress',
+    interface2: 'interface2IpAddress',
     dnsname: 'dnsName',
     fqdn: 'dnsName',
     hostname: 'dnsName',
     hostdns: 'dnsName',
+    profilednsname: 'profileDnsName',
+    profiledns: 'profileDnsName',
     zabbixhostid: 'zabbixHostId',
     os: 'os',
     operatingsystem: 'os',

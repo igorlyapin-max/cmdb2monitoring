@@ -118,6 +118,8 @@ public sealed class CmdbToZabbixConverter(
             EventType = source.EventType,
             CurrentMethod = currentMethod,
             FallbackForMethod = fallbackForMethod,
+            CreateOnUpdateWhenMissing = profile.CreateOnUpdateWhenMissing
+                && string.Equals(fallbackForMethod, "host.update", StringComparison.OrdinalIgnoreCase),
             SourceFields = source.SourceFields,
             Status = rules.Defaults.Host.Status,
             InventoryMode = rules.Defaults.Host.InventoryMode
@@ -130,6 +132,7 @@ public sealed class CmdbToZabbixConverter(
         var proxyGroup = SelectProxyGroup(source, rules);
         var tlsPsk = SelectTlsPsk(source, rules);
         var interfaces = SelectInterfaces(source, rules, profile);
+        var templateSelection = SelectTemplateSelection(source, rules);
         var firstInterface = interfaces.FirstOrDefault() ?? new ZabbixInterfaceModel();
         var renderModel = new ZabbixHostCreateModel
         {
@@ -147,6 +150,8 @@ public sealed class CmdbToZabbixConverter(
             EventType = source.EventType,
             CurrentMethod = currentMethod,
             FallbackForMethod = fallbackForMethod,
+            CreateOnUpdateWhenMissing = profile.CreateOnUpdateWhenMissing
+                && string.Equals(fallbackForMethod, "host.update", StringComparison.OrdinalIgnoreCase),
             SourceFields = source.SourceFields,
             Status = status,
             InventoryMode = rules.Defaults.Host.InventoryMode,
@@ -173,6 +178,8 @@ public sealed class CmdbToZabbixConverter(
             EventType = source.EventType,
             CurrentMethod = currentMethod,
             FallbackForMethod = fallbackForMethod,
+            CreateOnUpdateWhenMissing = profile.CreateOnUpdateWhenMissing
+                && string.Equals(fallbackForMethod, "host.update", StringComparison.OrdinalIgnoreCase),
             SourceFields = source.SourceFields,
             ProxyId = proxy?.ProxyId,
             ProxyGroupId = proxyGroup?.ProxyGroupId,
@@ -182,7 +189,8 @@ public sealed class CmdbToZabbixConverter(
             Interface = firstInterface,
             Interfaces = interfaces,
             Groups = SelectGroups(source, rules),
-            Templates = SelectTemplates(source, rules),
+            Templates = templateSelection.Templates,
+            TemplatesToClear = templateSelection.TemplatesToClear,
             Tags = BuildTags(source, rules, renderModel),
             Macros = BuildHostMacros(source, rules, renderModel),
             InventoryFields = BuildInventoryFields(source, rules, renderModel),
@@ -464,7 +472,7 @@ public sealed class CmdbToZabbixConverter(
             .ToList();
     }
 
-    private List<ZabbixTemplateModel> SelectTemplates(CmdbSourceEvent source, ConversionRulesDocument rules)
+    private TemplateSelectionResult SelectTemplateSelection(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
         var matched = new List<LookupItem>();
         foreach (var rule in rules.TemplateSelectionRules.Where(rule => !rule.Fallback).OrderBy(rule => rule.Priority))
@@ -486,12 +494,70 @@ public sealed class CmdbToZabbixConverter(
             }
         }
 
-        return matched
+        var templatesWithIds = matched
             .Where(item => !string.IsNullOrWhiteSpace(item.TemplateId))
+            .ToList();
+        var conflictResult = ApplyTemplateConflictRules(templatesWithIds, rules.TemplateConflictRules);
+        var selectedTemplates = conflictResult.Templates
             .GroupBy(item => item.TemplateId, StringComparer.OrdinalIgnoreCase)
             .Select(group => new ZabbixTemplateModel(group.First().Name, group.Key))
             .ToList();
+        var templatesToClear = conflictResult.TemplateIdsToClear
+            .Where(templateId => !selectedTemplates.Any(template => string.Equals(template.TemplateId, templateId, StringComparison.OrdinalIgnoreCase)))
+            .Select(templateId => new ZabbixTemplateModel(FindTemplateName(templateId, rules), templateId))
+            .ToList();
+
+        return new TemplateSelectionResult(selectedTemplates, templatesToClear);
     }
+
+    private static TemplateConflictResult ApplyTemplateConflictRules(
+        IReadOnlyCollection<LookupItem> templates,
+        IEnumerable<TemplateConflictRule> conflictRules)
+    {
+        var selectedIds = templates
+            .Where(item => !string.IsNullOrWhiteSpace(item.TemplateId))
+            .Select(item => item.TemplateId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var idsToRemove = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rule in conflictRules)
+        {
+            if (rule.WhenTemplateIds.Length == 0 || rule.RemoveTemplateIds.Length == 0)
+            {
+                continue;
+            }
+
+            if (rule.WhenTemplateIds.Any(selectedIds.Contains))
+            {
+                foreach (var templateId in rule.RemoveTemplateIds.Where(id => !string.IsNullOrWhiteSpace(id)))
+                {
+                    idsToRemove.Add(templateId);
+                }
+            }
+        }
+
+        var selectedTemplates = idsToRemove.Count == 0
+            ? templates.ToList()
+            : templates.Where(item => !idsToRemove.Contains(item.TemplateId)).ToList();
+
+        return new TemplateConflictResult(selectedTemplates, idsToRemove.ToList());
+    }
+
+    private static string FindTemplateName(string templateId, ConversionRulesDocument rules)
+    {
+        return rules.Defaults.Templates
+            .Concat(rules.TemplateSelectionRules.SelectMany(rule => rule.Templates))
+            .FirstOrDefault(template => string.Equals(template.TemplateId, templateId, StringComparison.OrdinalIgnoreCase))
+            ?.Name ?? string.Empty;
+    }
+
+    private sealed record TemplateSelectionResult(
+        List<ZabbixTemplateModel> Templates,
+        List<ZabbixTemplateModel> TemplatesToClear);
+
+    private sealed record TemplateConflictResult(
+        List<LookupItem> Templates,
+        List<string> TemplateIdsToClear);
 
     private InterfaceSettings SelectInterface(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
@@ -568,7 +634,43 @@ public sealed class CmdbToZabbixConverter(
             .Where(HasAddress)
             .GroupBy(item => $"{item.Type}|{item.UseIp}|{item.Ip}|{item.Dns}|{item.Port}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
+            .GroupBy(item => item.Type)
+            .SelectMany(NormalizeInterfaceMainFlags)
             .ToList();
+    }
+
+    private static IEnumerable<ZabbixInterfaceModel> NormalizeInterfaceMainFlags(IGrouping<int, ZabbixInterfaceModel> interfacesByType)
+    {
+        var items = interfacesByType.ToList();
+        var hasConfiguredMain = items.Any(candidate => candidate.Main == 1);
+        var mainSelected = false;
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            var main = !mainSelected && (item.Main == 1 || !hasConfiguredMain);
+            if (main)
+            {
+                mainSelected = true;
+            }
+
+            yield return item.Main == (main ? 1 : 0)
+                ? item
+                : CopyInterface(item, main ? 1 : 0);
+        }
+    }
+
+    private static ZabbixInterfaceModel CopyInterface(ZabbixInterfaceModel item, int main)
+    {
+        return new ZabbixInterfaceModel
+        {
+            Type = item.Type,
+            Main = main,
+            UseIp = item.UseIp,
+            Ip = item.Ip,
+            Dns = item.Dns,
+            Port = item.Port,
+            Details = item.Details
+        };
     }
 
     private static List<HostProfileInterfaceRule> SelectProfileInterfaceRules(
@@ -969,6 +1071,11 @@ public sealed class CmdbToZabbixConverter(
             "classname" or "class" => "className",
             "ipaddress" => "ipAddress",
             "dnsname" or "fqdn" or "hostname" or "hostdns" => "dnsName",
+            "profileipaddress" or "profileip" or "profile" => "profileIpAddress",
+            "profile2ipaddress" or "profile2ip" or "profile2" => "profile2IpAddress",
+            "interfaceipaddress" or "interfaceip" or "interface" => "interfaceIpAddress",
+            "interface2ipaddress" or "interface2ip" or "interface2" => "interface2IpAddress",
+            "profilednsname" or "profiledns" => "profileDnsName",
             "zabbixhostid" => "zabbixHostId",
             "os" or "operatingsystem" => "os",
             "zabbixtag" => "zabbixTag",
@@ -1252,7 +1359,18 @@ public sealed class CmdbToZabbixConverter(
             UseIp = address is null ? settings.UseIp : useDns ? 0 : 1,
             Ip = ip,
             Dns = dns,
-            Port = settings.Port
+            Port = settings.Port,
+            Details = MapInterfaceDetails(settings.Details)
+        };
+    }
+
+    private static ZabbixInterfaceDetailsModel MapInterfaceDetails(InterfaceDetailsSettings settings)
+    {
+        return new ZabbixInterfaceDetailsModel
+        {
+            Version = settings.Version,
+            Bulk = settings.Bulk,
+            Community = settings.Community
         };
     }
 

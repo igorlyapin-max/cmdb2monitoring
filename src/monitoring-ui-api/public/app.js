@@ -223,7 +223,7 @@ const viewDescriptions = {
   dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
   events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
   rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и upload нового файла правил.',
-  mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags.',
+  mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
   validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
   zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
   cmdbuild: 'Показывает классы, атрибуты и lookup-справочники, загруженные из CMDBuild.',
@@ -238,9 +238,12 @@ const defaultPayload = {
   id: '109921',
   code: 's1',
   ip_address: '1.1.1.2',
-  management_ip: '1.1.1.102',
+  interface: '1.1.1.101',
+  interface2: '1.1.1.102',
+  profile: '1.1.1.201',
+  profile2: '1.1.1.202',
   dns_name: 's1.example.local',
-  management_dns: 's1-mgmt.example.local',
+  profile_dns: 's1-profile.example.local',
   description: 's1',
   os: '105146',
   zabbixTag: '106852'
@@ -1486,7 +1489,7 @@ function mappingEditorClassAttributes(className) {
 
 function sourceFieldHasCatalogAttribute(sourceFields, attributeName) {
   return Object.entries(sourceFields ?? {}).some(([fieldKey, field]) => {
-    const names = [fieldKey, canonicalSourceField(fieldKey), ...sourceFieldSources(field)]
+    const names = [fieldKey, canonicalSourceField(fieldKey), ...sourceFieldSources(field), ...sourceFieldCatalogSources(field)]
       .map(normalizeToken);
     return names.includes(normalizeToken(attributeName));
   });
@@ -1582,9 +1585,7 @@ function setSelectOptions(select, options, selectedValue = '') {
 }
 
 function mappingEditorSourceFieldLabel(fieldKey, field) {
-  const attribute = mappingEditorClassAttributes($('#mappingEditClass').value)
-    .find(item => sourceFieldSources(field)
-      .some(sourceName => equalsIgnoreCase(item.name, sourceName)));
+  const attribute = findCatalogAttributeForField(mappingEditorClassAttributes($('#mappingEditClass').value), field, fieldKey);
   return attribute?.name ?? fieldKey;
 }
 
@@ -2709,7 +2710,7 @@ function renderValidateMappingRules(container, rules, cmdbuildCatalog, validatio
     ];
     return mappingNode({
       label: fieldKey,
-      meta: `${sourceFieldLabel(field)}${field.required ? ' required' : ''}${field.validationRegex ? ` | ${field.validationRegex}` : ''}`,
+      meta: `${sourceFieldMeta(field)}${field.required ? ' required' : ''}${field.validationRegex ? ` | ${field.validationRegex}` : ''}`,
       tokens,
       level: 1,
       kind: 'source',
@@ -2788,7 +2789,7 @@ function renderValidateMappingCmdbuild(container, rules, catalog, validation) {
         classFieldToken(className, canonicalField)
       ];
       const rawNode = mappingNode({
-        label: attribute?.name ?? sourceFieldLabel(field),
+        label: attribute?.name ?? (sourceFieldCatalogLabel(field) || sourceFieldLabel(field)),
         meta: attribute
           ? `${attribute.type}${attribute.mandatory ? ' mandatory' : ''}`
           : `обязательный атрибут для class attribute field "${fieldKey}" отсутствует`,
@@ -2967,7 +2968,7 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
       if (!attribute) {
         addIssue({
           source: 'cmdbuild',
-          message: `CMDBuild attribute отсутствует: ${catalogClassDisplayName(cmdbuildCatalog, className)}.${sourceFieldLabel(field)}`,
+          message: `CMDBuild attribute отсутствует: ${catalogClassDisplayName(cmdbuildCatalog, className)}.${sourceFieldCatalogLabel(field) || sourceFieldLabel(field)}`,
           tokens: [
             ...sourceFieldTokensForRule(fieldKey, field),
             classFieldToken(className, canonicalSourceField(fieldKey))
@@ -3125,19 +3126,44 @@ function sourceFieldSources(field = {}) {
   ].filter(Boolean));
 }
 
+function sourceFieldCatalogSources(field = {}) {
+  return uniqueTokens([
+    field.cmdbAttribute,
+    ...(Array.isArray(field.cmdbAttributes) ? field.cmdbAttributes : [])
+  ].filter(Boolean));
+}
+
 function sourceFieldLabel(field = {}) {
   const sources = sourceFieldSources(field);
   return sources.length > 0 ? sources.join(' | ') : '<not configured>';
 }
 
+function sourceFieldCatalogLabel(field = {}) {
+  const sources = sourceFieldCatalogSources(field);
+  return sources.length > 0 ? sources.join(' | ') : '';
+}
+
+function sourceFieldMeta(field = {}) {
+  const catalogLabel = sourceFieldCatalogLabel(field);
+  return catalogLabel ? `${sourceFieldLabel(field)} -> CMDB ${catalogLabel}` : sourceFieldLabel(field);
+}
+
 function sourceFieldTokensForRule(fieldKey, field = {}) {
   return uniqueTokens([
     ...sourceFieldTokens(fieldKey),
-    ...sourceFieldSources(field).flatMap(sourceName => sourceFieldTokens(fieldKey, sourceName))
+    ...sourceFieldSources(field).flatMap(sourceName => sourceFieldTokens(fieldKey, sourceName)),
+    ...sourceFieldCatalogSources(field).flatMap(sourceName => sourceFieldTokens(fieldKey, sourceName))
   ]);
 }
 
 function findCatalogAttributeForField(attributes, field, fieldKey) {
+  for (const sourceName of sourceFieldCatalogSources(field)) {
+    const attribute = findCatalogAttribute(attributes, sourceName, fieldKey);
+    if (attribute) {
+      return attribute;
+    }
+  }
+
   for (const sourceName of sourceFieldSources(field)) {
     const attribute = findCatalogAttribute(attributes, sourceName, fieldKey);
     if (attribute) {
@@ -3153,7 +3179,7 @@ function renderMappingZabbix(container, rules, catalog) {
   appendMappingSection(container, 'JSON-RPC fields', (rules.zabbix?.expectedMonitoringFields ?? []).map(field => mappingNode({
     label: field,
     meta: 'payload',
-    tokens: [`target:${targetKey(field)}`, 'target:payload'],
+    tokens: [...monitoringFieldTokens(field), 'target:payload'],
     level: 1,
     kind: 'target'
   })));
@@ -3207,7 +3233,7 @@ function renderMappingRules(container, rules, cmdbuildCatalog = null) {
 
   appendMappingSection(container, 'Class attribute fields', Object.entries(rules.source?.fields ?? {}).map(([fieldKey, field]) => mappingNode({
     label: fieldKey,
-    meta: `${sourceFieldLabel(field)}${field.required ? ' required' : ''}${field.validationRegex ? ` | ${field.validationRegex}` : ''}`,
+    meta: `${sourceFieldMeta(field)}${field.required ? ' required' : ''}${field.validationRegex ? ` | ${field.validationRegex}` : ''}`,
     tokens: [
       ...sourceFieldTokensForRule(fieldKey, field),
       ...sourceFieldTargetTokens(fieldKey),
@@ -3633,9 +3659,9 @@ function mappingSectionHelp(title) {
     'Entity classes': 'Список классов CMDBuild, события которых правила считают допустимыми. Можно добавлять или удалять имя класса в JSON правил только если такой класс уже есть в CMDBuild и webhook передает его события.',
     'Class attribute fields': 'Conversion fields: поле слева является нормализованным Model-полем конвертера, source справа указывает атрибут или ключ webhook CMDBuild. Без правки микросервиса безопасно менять source, required и validationRegex для уже поддержанных Model-полей и реально существующих CMDBuild attributes.',
     'Event routing': 'Маршрутизация create/update/delete в JSON-RPC методы Zabbix и T4-шаблоны. Без правки микросервисов можно менять метод, templateName и fallbackTemplateName только в рамках уже поддержанных сценариев и существующих T4 templates.',
-    'Host profiles': 'Host profiles описывают fan-out: один CMDB object может дать один или несколько Zabbix hosts. Внутри profile задаются hostName/visibleName templates и interfaces. Если нужен один Zabbix host с несколькими IP, добавляйте несколько interfaces в один profile; если нужны отдельные hosts, добавляйте несколько profiles.',
+    'Host profiles': 'Host profiles описывают fan-out: один CMDB object может дать один или несколько Zabbix hosts. Внутри profile задаются hostName/visibleName templates и interfaces. Для Server используйте interface/interface2 как дополнительные interfaces основного host и profile/profile2 как отдельные Zabbix hosts. Переименование profile меняет suffix нового Zabbix host, старые hosts не переименовываются автоматически.',
     'Group rules': 'Правила выбора host groups по regex над class attribute fields. Обычно редактируются в JSON правил: priority, when.anyRegex/when.allRegex и ссылки на существующие Zabbix host groups. CMDBuild менять не нужно, если поля уже приходят в webhook.',
-    'Template rules': 'Правила выбора Zabbix templates по regex над class attribute fields. В условии можно использовать lookup/class attribute field zabbixTag, если tag из CMDBuild должен влиять на выбор шаблона. Результатом Template rules должны оставаться только templates/templateRef; выбирать или назначать Zabbix tags в этом блоке нецелесообразно, для этого есть Tag rules.',
+    'Template rules': 'Правила выбора Zabbix templates по regex над class attribute fields. В условии можно использовать lookup/class attribute field zabbixTag, если tag из CMDBuild должен влиять на выбор шаблона. Результатом Template rules должны оставаться только templates/templateRef; выбирать или назначать Zabbix tags в этом блоке нецелесообразно, для этого есть Tag rules. После выбора применяется templateConflictRules: на create конфликтующие templates не попадают в payload, на update fallback они также попадают в templates_clear.',
     'Interface address rules': 'Правила выбора адреса Zabbix interface. Можно выбирать IP или DNS через mode и valueField; valueField ссылается на нормализованное class attribute field, например ipAddress или dnsName.',
     'Interface rules': 'Правила выбора интерфейса мониторинга. Без изменения микросервисов можно менять regex и ссылки на уже описанные interface defaults, пока Zabbix writer поддерживает этот тип интерфейса.',
     'Tag rules': 'Правила формирования Zabbix tags. Они читают class attribute fields через regex, например zabbixTag, и добавляют tag/value в payload. Связь с блоком Tags прямая: Tag rules создают элементы, которые видны как Tags. Tag rules не выбирают templates; если tag должен влиять на template, используйте тот же class attribute field как условие в Template rules.',
@@ -3653,14 +3679,20 @@ function sourceFieldHelp(fieldKey, field) {
   const requiredText = field.required
     ? ' Поле обязательное: событие без него не должно проходить нормальную обработку.'
     : ' Поле необязательное: правило может использовать его, если значение пришло в payload.';
-  return `Conversion field "${fieldKey}" читает source "${sourceFieldLabel(field)}" из CMDBuild webhook и кладет значение в Model.${modelFieldName(fieldKey)}.${requiredText}${regexText} Если указано несколько source-алиасов, берется первый найденный в payload.`;
+  const catalogText = sourceFieldCatalogLabel(field)
+    ? ` Для Mapping и генерации CMDBuild Body оно связано с атрибутом CMDBuild "${sourceFieldCatalogLabel(field)}"; это не входной alias для микросервиса.`
+    : '';
+  return `Conversion field "${fieldKey}" читает source "${sourceFieldLabel(field)}" из CMDBuild webhook и кладет значение в Model.${modelFieldName(fieldKey)}.${requiredText}${regexText} Если указано несколько source-алиасов, берется первый найденный в payload.${catalogText}`;
 }
 
 function cmdbFieldHelp(className, fieldKey, field, attribute) {
   const sourceText = attribute
     ? `Атрибут CMDBuild найден: ${attribute.name}, тип ${attribute.type}.`
     : `Ни один source-алиас "${sourceFieldLabel(field)}" не найден в каталоге класса или поле является служебным webhook-полем.`;
-  return `Для класса "${className}" conversion field "${fieldKey}" читает CMDBuild source "${sourceFieldLabel(field)}". ${sourceText} CMDBuild attribute здесь не редактируется; меняются только JSON rules, если источник уже передает это поле.`;
+  const catalogText = sourceFieldCatalogLabel(field)
+    ? ` В rules явно указано соответствие source -> CMDBuild attribute: ${sourceFieldLabel(field)} -> ${sourceFieldCatalogLabel(field)}.`
+    : '';
+  return `Для класса "${className}" conversion field "${fieldKey}" читает CMDBuild source "${sourceFieldLabel(field)}". ${sourceText}${catalogText} CMDBuild attribute здесь не редактируется; меняются только JSON rules, если источник уже передает это поле.`;
 }
 
 function lookupHelp(className, lookupName, lookup) {
@@ -3682,13 +3714,13 @@ function eventRoutingHelp(rule) {
 }
 
 function hostProfileHelp(profile) {
-  return `Host profile "${profile.name || 'default'}" задает один выходной Zabbix host для подходящего CMDB object. Несколько profiles создают несколько Kafka messages и несколько Zabbix hosts. Поля hostNameTemplate/visibleNameTemplate можно менять в rules; сами CMDB attributes должны уже приходить в webhook.`;
+  return `Host profile "${profile.name || 'default'}" задает один выходной Zabbix host для подходящего CMDB object. Несколько profiles создают несколько Kafka messages и несколько Zabbix hosts. Profile с условием по пустому адресу на create/update не публикуется. Если адрес появился только на update и profile включает createOnUpdateWhenMissing, поток делает host.get, затем host.update для найденного host или host.create для отсутствующего host. Очистка поля не удаляет Zabbix host автоматически: по объекту мониторинга нужно принять отдельное решение. Поля hostNameTemplate/visibleNameTemplate можно менять в rules; сами CMDB attributes должны уже приходить в webhook.`;
 }
 
 function hostProfileInterfaceHelp(profile, item) {
   const valueField = item.valueField || profile.valueField || 'interfaceAddressRules';
   const mode = item.mode || profile.mode || 'auto';
-  return `Interface "${item.name || valueField}" внутри host profile "${profile.name || 'default'}" добавляет элемент в Model.Interfaces и затем в Zabbix interfaces[]. mode=${mode}: ip заполняет interfaces[].ip/useip=1, dns заполняет interfaces[].dns/useip=0. Для одного Zabbix host с несколькими IP держите такие interfaces в одном profile; для отдельного management host используйте отдельный host profile.`;
+  return `Interface "${item.name || valueField}" внутри host profile "${profile.name || 'default'}" добавляет элемент в Model.Interfaces и затем в Zabbix interfaces[]. mode=${mode}: ip заполняет interfaces[].ip/useip=1, dns заполняет interfaces[].dns/useip=0. Если valueField пустой, interface не попадает в payload и это не считается ошибкой. Количество interfaces задается rules, но текущий webhook использует named fields, а не массив IP. Для нескольких interfaces одного Zabbix type оставляйте main=1 только у одного profile, остальные должны быть main=0. Для одного Zabbix host с несколькими IP держите такие interfaces в одном profile; для отдельного profile host используйте отдельный host profile.`;
 }
 
 function conversionRuleHelp(rule, type) {
@@ -3697,7 +3729,7 @@ function conversionRuleHelp(rule, type) {
   }
 
   if (type === 'templates') {
-    return `Template rule "${rule.name}" выбирает Zabbix templates. Условия when.anyRegex/when.allRegex могут читать любой class attribute field, включая lookup zabbixTag, если значение tag должно влиять на выбор шаблона. Результатом должны быть templates/templateRef; назначать tags здесь не нужно и обычно вредно для читаемости правил.`;
+    return `Template rule "${rule.name}" выбирает Zabbix templates. Условия when.anyRegex/when.allRegex могут читать любой class attribute field, включая lookup zabbixTag, если значение tag должно влиять на выбор шаблона. Результатом должны быть templates/templateRef; назначать tags здесь не нужно и обычно вредно для читаемости правил. После объединения Template rules применяются templateConflictRules.`;
   }
 
   if (type === 'tags') {
@@ -3826,11 +3858,15 @@ function selectionTokenSet(sourceNode, includeBroadTokens, lookupValueMode) {
   const tokens = lookupValueMode
     ? lookupValueSourceTokensFor(sourceNode)
     : relationTokensFor(sourceNode, includeBroadTokens);
-  return new Set(refineSelectionTokens(tokens));
+  return new Set(refineSelectionTokens(tokens, sourceNode));
 }
 
-function refineSelectionTokens(tokens) {
+function refineSelectionTokens(tokens, sourceNode = null) {
   const unique = uniqueTokens(tokens);
+  if (sourceNode && isSourceSideNode(sourceNode) && unique.some(isSpecificSourceMappingToken)) {
+    return unique.filter(token => !isTargetMappingToken(token));
+  }
+
   const hasSpecificTarget = unique.some(token => token.startsWith('target:') && token !== 'target:payload');
   return hasSpecificTarget
     ? unique.filter(token => token !== 'target:payload')
@@ -3858,6 +3894,10 @@ function isRelatedMappingNode(sourceNode, node, relatedTokens, sameColumn, looku
     return false;
   }
 
+  if (isSourceSideNode(sourceNode) && node.dataset.kind !== 'target' && relatedTokens.every(isPayloadTargetFieldToken)) {
+    return false;
+  }
+
   const sourceKind = sourceNode.dataset.kind;
   const nodeKind = node.dataset.kind;
   if (sameColumn && (sourceKind === 'lookup' || nodeKind === 'lookup')) {
@@ -3882,6 +3922,21 @@ function isSourceSideNode(node) {
 
 function isTargetMappingToken(token) {
   return token.startsWith('target:');
+}
+
+function isPayloadTargetFieldToken(token) {
+  return token.startsWith('target-field:');
+}
+
+function isSpecificSourceMappingToken(token) {
+  return token.startsWith('source:')
+    || token.startsWith('cmdb-field:')
+    || token.startsWith('class-field:')
+    || token.startsWith('class-lookup-value:')
+    || token.startsWith('field-lookup:')
+    || token.startsWith('lookup:')
+    || token.startsWith('lookup-value:')
+    || token.startsWith('match:');
 }
 
 async function loadRelatedLazyMappingSections(scope, tokens, sourceNode) {
@@ -3973,6 +4028,7 @@ function isStrongMappingToken(token) {
     || token.startsWith('match:')
     || token.startsWith('zbx-')
     || token.startsWith('template:')
+    || token.startsWith('target-field:')
     || (token.startsWith('target:') && token !== 'target:payload')
     || token.startsWith('event:')
     || token.startsWith('method:')
@@ -4418,7 +4474,8 @@ function ruleTokens(rule, type, rules = null) {
     tokens.push(
       'target:interfaces',
       `interface-address:${normalizeToken(rule.mode || rule.valueField)}`,
-      ...sourceFieldTokens(rule.valueField)
+      ...sourceFieldTokens(rule.valueField),
+      ...sourceFieldTargetTokens(rule.valueField)
     );
   }
   if (type === 'hostProfiles') {
@@ -4440,6 +4497,7 @@ function hostProfileTokens(profile) {
       `interface:${normalizeToken(interfaceProfile)}`,
       `zbx-interfaceProfiles:${normalizeToken(interfaceProfile)}`,
       ...sourceFieldTokens(item.valueField || profile.valueField),
+      ...sourceFieldTargetTokens(item.valueField || profile.valueField),
       ...conditionTokens(item.when),
       ...conditionMatchTokens(item.when)
     ];
@@ -4513,6 +4571,7 @@ function hostProfileInterfaceMappingNodes(profile, item) {
     `interface:${normalizeToken(interfaceProfile)}`,
     `zbx-interfaceProfiles:${normalizeToken(interfaceProfile)}`,
     ...sourceFieldTokens(valueField),
+    ...sourceFieldTargetTokens(valueField),
     ...targetTokensForRuleType('hostProfiles'),
     ...conditionTokens(item.when),
     ...conditionMatchTokens(item.when)
@@ -4671,10 +4730,13 @@ function sourceFieldTargetTokens(fieldKey) {
     id: ['target:host', 'target:id', 'target:tags', 'target:fallback'],
     code: ['target:host', 'target:name'],
     className: ['target:name', 'target:tags', 'target:groups', 'target:templates'],
-    ipAddress: ['target:interfaces'],
-    dnsName: ['target:interfaces'],
-    managementIpAddress: ['target:interfaces', 'target:host'],
-    managementDnsName: ['target:interfaces', 'target:host'],
+    ipAddress: interfaceIpPayloadTokens(),
+    dnsName: interfaceDnsPayloadTokens(),
+    profileIpAddress: interfaceIpPayloadTokens(),
+    profile2IpAddress: interfaceIpPayloadTokens(),
+    profileDnsName: interfaceDnsPayloadTokens(),
+    interfaceIpAddress: interfaceIpPayloadTokens(),
+    interface2IpAddress: interfaceIpPayloadTokens(),
     hostProfile: ['target:host', 'target:interfaces', 'target:groups', 'target:templates', 'target:tags'],
     outputProfile: ['target:host', 'target:interfaces', 'target:groups', 'target:templates', 'target:tags'],
     description: ['target:groups', 'target:templates', 'target:interfaces'],
@@ -4683,6 +4745,14 @@ function sourceFieldTargetTokens(fieldKey) {
     zabbixHostId: ['target:hostid', 'target:fallback'],
     eventType: ['target:method', 'target:tags']
   }[canonicalSourceField(fieldKey)] ?? [];
+}
+
+function interfaceIpPayloadTokens() {
+  return ['target-field:interfaces.ip', 'target-field:interfaces.useip'];
+}
+
+function interfaceDnsPayloadTokens() {
+  return ['target-field:interfaces.dns', 'target-field:interfaces.useip'];
 }
 
 function templateTargetTokens(name) {
@@ -4858,6 +4928,24 @@ function targetKey(field) {
   return normalizeToken(value);
 }
 
+function monitoringFieldTokens(field) {
+  const key = monitoringFieldKey(field);
+  return uniqueTokens([
+    `target:${targetKey(field)}`,
+    key ? `target-field:${key}` : ''
+  ]);
+}
+
+function monitoringFieldKey(field) {
+  return String(field ?? '')
+    .toLowerCase()
+    .replace(/\[\]/g, '')
+    .replace(/[^a-z0-9.]+/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^\./, '')
+    .replace(/\.$/, '');
+}
+
 function canonicalSourceField(field) {
   const normalized = normalizeToken(field);
   return {
@@ -4868,20 +4956,26 @@ function canonicalSourceField(field) {
     class: 'className',
     ipaddress: 'ipAddress',
     ip_address: 'ipAddress',
-    managementipaddress: 'managementIpAddress',
-    management_ip: 'managementIpAddress',
-    mgmtip: 'managementIpAddress',
-    mgmt_ip: 'managementIpAddress',
-    oobip: 'managementIpAddress',
-    oob_ip: 'managementIpAddress',
+    profileipaddress: 'profileIpAddress',
+    profile_ip: 'profileIpAddress',
+    profile: 'profileIpAddress',
+    profile2ipaddress: 'profile2IpAddress',
+    profile2_ip: 'profile2IpAddress',
+    profile2: 'profile2IpAddress',
+    interfaceipaddress: 'interfaceIpAddress',
+    interface_ip_address: 'interfaceIpAddress',
+    interfaceip: 'interfaceIpAddress',
+    interface_ip: 'interfaceIpAddress',
+    interface: 'interfaceIpAddress',
+    interface2ipaddress: 'interface2IpAddress',
+    interface2_ip_address: 'interface2IpAddress',
+    interface2ip: 'interface2IpAddress',
+    interface2_ip: 'interface2IpAddress',
+    interface2: 'interface2IpAddress',
     dnsname: 'dnsName',
     dns_name: 'dnsName',
-    managementdnsname: 'managementDnsName',
-    management_dns: 'managementDnsName',
-    mgmtdns: 'managementDnsName',
-    mgmt_dns: 'managementDnsName',
-    oobdns: 'managementDnsName',
-    oob_dns: 'managementDnsName',
+    profiledns: 'profileDnsName',
+    profile_dns: 'profileDnsName',
     fqdn: 'dnsName',
     hostname: 'dnsName',
     hostdns: 'dnsName',

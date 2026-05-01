@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: cmdb2monitoring monitoring UI API
-  version: 0.2.0
+  version: 0.3.0
   description: >
     Backend-for-frontend API for dashboard, server-side sessions, Kafka event
     browsing, rules validation, dry-run, upload, runtime settings, IdP settings,

@@ -443,6 +443,7 @@
                   <li>Interface address rules выбирают, чем заполнить Zabbix interface: <code>ipAddress</code> дает <code>useip=1</code>, <code>dnsName</code> дает <code>useip=0</code>.</li>
                   <li>Host profiles описывают два режима: несколько <code>interfaces[]</code> внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.</li>
                   <li>Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а <code>valueField</code> указывает, какой CMDB атрибут станет IP или DNS.</li>
+                  <li>Для Server webhook keys <code>interface/interface2/profile/profile2</code> связаны с реальными CMDBuild attributes <code>iLo/iLo2/mgmt/mgmt2</code> через <code>cmdbAttribute</code>; это нужно для Mapping и Body, но не добавляет старые alias в обработку payload.</li>
                   <li>Для lookup выделяется только конкретная связка класса, lookup и значения, например <code>Notebook.zabbixTag.tag1</code>.</li>
                   <li>Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
                 </ul>

@@ -84,7 +84,8 @@
 | Отсутствует обязательное поле | `cmdbkafka2zabbix` пропускает событие или `zabbixrequests2api` публикует validation error |
 | Отсутствует Zabbix host group/template | `zabbixrequests2api` не вызывает host.create/host.update и публикует ошибку |
 | Передан `inventory`, но `inventory_mode=-1` | Zabbix отклоняет запрос; rules должны использовать `inventory_mode=0` или не передавать inventory |
-| Zabbix host не найден для update/delete | `zabbixrequests2api` публикует `host_not_found` |
+| Zabbix host не найден для update | Если request metadata содержит `createOnUpdateWhenMissing=true` и `fallbackCreateParams`, `zabbixrequests2api` выполняет `host.create`; иначе публикует `host_not_found` |
+| Zabbix host не найден для delete | `zabbixrequests2api` публикует `host_not_found` |
 | Zabbix API недоступен | retry по конфигу, затем error response |
 | Kafka publish error | ошибка логируется, offset не коммитится до успешной обработки |
 | SAML2 IdP не настроен | `/auth/saml2/login` возвращает конфигурационную ошибку, local login остается доступен только при `Auth:UseIdp=false` |

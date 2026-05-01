@@ -24,6 +24,8 @@ public sealed class ConversionRulesDocument
 
     public SelectionRule[] TemplateSelectionRules { get; init; } = [];
 
+    public TemplateConflictRule[] TemplateConflictRules { get; init; } = [];
+
     public SelectionRule[] InterfaceSelectionRules { get; init; } = [];
 
     public InterfaceAddressRule[] InterfaceAddressRules { get; init; } = [];
@@ -96,6 +98,8 @@ public sealed class HostProfileRule
 
     public string ValueField { get; init; } = string.Empty;
 
+    public bool CreateOnUpdateWhenMissing { get; init; }
+
     public HostProfileInterfaceRule[] Interfaces { get; init; } = [];
 }
 
@@ -134,6 +138,8 @@ public sealed class SourceFieldRule
     public string Source { get; init; } = string.Empty;
 
     public string[] Sources { get; init; } = [];
+
+    public string CmdbAttribute { get; init; } = string.Empty;
 
     public bool Required { get; init; }
 
@@ -195,6 +201,17 @@ public sealed class LookupItem
     public string TemplateId { get; init; } = string.Empty;
 }
 
+public sealed class TemplateConflictRule
+{
+    public string Name { get; init; } = string.Empty;
+
+    public string[] WhenTemplateIds { get; init; } = [];
+
+    public string[] RemoveTemplateIds { get; init; } = [];
+
+    public string Reason { get; init; } = string.Empty;
+}
+
 public sealed class InterfaceSettings
 {
     public int Type { get; init; }
@@ -206,6 +223,19 @@ public sealed class InterfaceSettings
     public string Dns { get; init; } = string.Empty;
 
     public string Port { get; init; } = string.Empty;
+
+    public InterfaceDetailsSettings Details { get; init; } = new();
+}
+
+public sealed class InterfaceDetailsSettings
+{
+    public int? Version { get; init; }
+
+    public int? Bulk { get; init; }
+
+    public string Community { get; init; } = string.Empty;
+
+    public bool Enabled => Version.HasValue || Bulk.HasValue || !string.IsNullOrWhiteSpace(Community);
 }
 
 public sealed class InterfaceAddressRule

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: cmdbwebhooks2kafka HTTP API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: http://localhost:5080
     description: Dev server from host
@@ -76,14 +76,23 @@ components:
           type: string
         ip_address:
           type: string
-        management_ip:
+        interface:
           type: string
-          description: Дополнительный management/OOB IP для hostProfiles или второго Zabbix interface.
+          description: Preferred Server additional interface IP; в rules нормализуется в interfaceIpAddress и используется как дополнительный SNMP interface основного Server host.
+        interface2:
+          type: string
+          description: Preferred Server second additional interface IP; в rules нормализуется в interface2IpAddress и используется как дополнительный SNMP interface основного Server host.
+        profile:
+          type: string
+          description: Preferred Server additional monitoring profile IP; в rules нормализуется в profileIpAddress и используется отдельным hostProfile profile.
+        profile2:
+          type: string
+          description: Preferred Server second additional monitoring profile IP; в rules нормализуется в profile2IpAddress и используется отдельным hostProfile profile2.
         dns_name:
           type: string
-        management_dns:
+        profile_dns:
           type: string
-          description: Дополнительное management/OOB DNS-имя для hostProfiles или второго Zabbix interface.
+          description: DNS field for profileDnsName.
         description:
           type: string
         OS:
@@ -91,6 +100,6 @@ components:
           description: CMDBuild lookup id или человекочитаемое значение OS.
         os:
           type: string
-          description: Нормализованный alias OS, если payload использует lowercase.
+          description: Нормализованное поле OS, если payload использует lowercase.
         zabbixTag:
           type: string

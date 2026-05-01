@@ -302,6 +302,11 @@ public sealed class KafkaZabbixRequestWorker(
         var hostInfo = ReadFirstHostLookupInfo(lookupResult.ResponseJson);
         if (hostInfo is null)
         {
+            if (lookupRequest.CreateOnUpdateWhenMissing)
+            {
+                return await ProcessCreateOnMissingUpdateAsync(lookupRequest, cancellationToken);
+            }
+
             return ZabbixProcessingResult.FromValidationError(
                 lookupRequest,
                 "host_not_found",
@@ -340,6 +345,39 @@ public sealed class KafkaZabbixRequestWorker(
 
         var updateResult = await zabbixClient.ExecuteAsync(updateRequest, cancellationToken);
         return ZabbixProcessingResult.FromApiResult(updateRequest, updateResult);
+    }
+
+    private async Task<ZabbixProcessingResult> ProcessCreateOnMissingUpdateAsync(
+        ZabbixRequestDocument lookupRequest,
+        CancellationToken cancellationToken)
+    {
+        if (lookupRequest.FallbackCreateParams.ValueKind != JsonValueKind.Object)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                lookupRequest,
+                "missing_create_payload",
+                "Fallback host.create params are missing in cmdb2monitoring metadata.",
+                [],
+                [],
+                []);
+        }
+
+        var createRequestJson = BuildHostCreateRequestJson(lookupRequest);
+        var createRequest = requestReader.Read(lookupRequest.EntityId, createRequestJson, lookupRequest.Host);
+        var createValidation = await requestValidator.ValidateAsync(createRequest, cancellationToken);
+        if (!createValidation.IsValid)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                createRequest,
+                createValidation.PrimaryErrorCode(),
+                createValidation.PrimaryErrorMessage(),
+                createValidation.MissingHostGroups.ToArray(),
+                createValidation.MissingTemplates.ToArray(),
+                createValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var createResult = await zabbixClient.ExecuteAsync(createRequest, cancellationToken);
+        return ZabbixProcessingResult.FromApiResult(createRequest, createResult);
     }
 
     private static bool IsDeleteFallbackRequest(ZabbixRequestDocument request)
@@ -383,7 +421,7 @@ public sealed class KafkaZabbixRequestWorker(
                     continue;
                 }
 
-                return new ZabbixHostLookupInfo(parsedHostId, ReadInterfaces(host));
+                return new ZabbixHostLookupInfo(parsedHostId, ReadInterfaces(host), ReadTemplateIds(host));
             }
         }
 
@@ -419,6 +457,27 @@ public sealed class KafkaZabbixRequestWorker(
         return result.ToArray();
     }
 
+    private static string[] ReadTemplateIds(JsonElement host)
+    {
+        foreach (var propertyName in new[] { "parentTemplates", "templates" })
+        {
+            if (!host.TryGetProperty(propertyName, out var templates)
+                || templates.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            return templates.EnumerateArray()
+                .Select(template => ReadString(template, "templateid"))
+                .Where(templateId => !string.IsNullOrWhiteSpace(templateId))
+                .Select(templateId => templateId!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        return [];
+    }
+
     private static string BuildHostUpdateRequestJson(
         ZabbixRequestDocument lookupRequest,
         ZabbixHostLookupInfo hostInfo)
@@ -446,10 +505,54 @@ public sealed class KafkaZabbixRequestWorker(
                     continue;
                 }
 
+                if (string.Equals(property.Name, "templates_clear", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    WriteTemplatesClearWithExistingIds(writer, property.Value, hostInfo.TemplateIds);
+                    continue;
+                }
+
                 property.WriteTo(writer);
             }
 
             writer.WriteEndObject();
+            writer.WritePropertyName("id");
+            lookupRequest.Id.WriteTo(writer);
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string BuildHostCreateRequestJson(ZabbixRequestDocument lookupRequest)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WritePropertyName("cmdb2monitoring");
+            writer.WriteStartObject();
+            if (!string.IsNullOrWhiteSpace(lookupRequest.EntityId))
+            {
+                writer.WriteString("entityId", lookupRequest.EntityId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(lookupRequest.Host))
+            {
+                writer.WriteString("host", lookupRequest.Host);
+            }
+
+            if (!string.IsNullOrWhiteSpace(lookupRequest.HostProfileName))
+            {
+                writer.WriteString("hostProfile", lookupRequest.HostProfileName);
+            }
+
+            writer.WriteString("fallbackSource", "createOnUpdateWhenMissing");
+            writer.WriteEndObject();
+            writer.WriteString("jsonrpc", "2.0");
+            writer.WriteString("method", "host.create");
+            writer.WritePropertyName("params");
+            lookupRequest.FallbackCreateParams.WriteTo(writer);
             writer.WritePropertyName("id");
             lookupRequest.Id.WriteTo(writer);
             writer.WriteEndObject();
@@ -495,6 +598,42 @@ public sealed class KafkaZabbixRequestWorker(
 
             writer.WriteEndObject();
             index++;
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteTemplatesClearWithExistingIds(
+        Utf8JsonWriter writer,
+        JsonElement templatesClear,
+        IReadOnlyCollection<string> existingTemplateIds)
+    {
+        var requestedTemplateIds = templatesClear.EnumerateArray()
+            .Select(template => ReadString(template, "templateid"))
+            .Where(templateId => !string.IsNullOrWhiteSpace(templateId))
+            .Select(templateId => templateId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (requestedTemplateIds.Count == 0 || existingTemplateIds.Count == 0)
+        {
+            return;
+        }
+
+        var templateIdsToClear = existingTemplateIds
+            .Where(requestedTemplateIds.Contains)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (templateIdsToClear.Length == 0)
+        {
+            return;
+        }
+
+        writer.WritePropertyName("templates_clear");
+        writer.WriteStartArray();
+        foreach (var templateId in templateIdsToClear)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("templateid", templateId);
+            writer.WriteEndObject();
         }
 
         writer.WriteEndArray();
@@ -569,7 +708,10 @@ public sealed class KafkaZabbixRequestWorker(
         };
     }
 
-    private sealed record ZabbixHostLookupInfo(string HostId, ZabbixInterfaceLookupInfo[] Interfaces);
+    private sealed record ZabbixHostLookupInfo(
+        string HostId,
+        ZabbixInterfaceLookupInfo[] Interfaces,
+        string[] TemplateIds);
 
     private sealed record ZabbixInterfaceLookupInfo(
         string? InterfaceId,

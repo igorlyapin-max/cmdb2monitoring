@@ -31,6 +31,11 @@ public sealed class ZabbixRequestReader
             && updateParams.ValueKind == JsonValueKind.Object
                 ? updateParams.Clone()
                 : default;
+        var fallbackCreateParams = metadata.ValueKind == JsonValueKind.Object
+            && metadata.TryGetProperty("fallbackCreateParams", out var createParams)
+            && createParams.ValueKind == JsonValueKind.Object
+                ? createParams.Clone()
+                : default;
 
         return new ZabbixRequestDocument
         {
@@ -45,7 +50,9 @@ public sealed class ZabbixRequestReader
             Host = hostOverride ?? ReadHost(method, parameters) ?? ReadString(metadata, "host"),
             HostProfileName = ReadString(metadata, "hostProfile"),
             FallbackForMethod = ReadString(metadata, "fallbackForMethod"),
-            FallbackUpdateParams = fallbackUpdateParams
+            CreateOnUpdateWhenMissing = ReadBool(metadata, "createOnUpdateWhenMissing"),
+            FallbackUpdateParams = fallbackUpdateParams,
+            FallbackCreateParams = fallbackCreateParams
         };
     }
 
@@ -108,6 +115,22 @@ public sealed class ZabbixRequestReader
         }
 
         return ReadScalar(value);
+    }
+
+    private static bool ReadBool(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+        {
+            return false;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
+            _ => false
+        };
     }
 
     private static string? ReadScalar(JsonElement value)

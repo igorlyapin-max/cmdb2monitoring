@@ -26,5 +26,9 @@ public sealed class ZabbixRequestDocument
 
     public string? FallbackForMethod { get; init; }
 
+    public bool CreateOnUpdateWhenMissing { get; init; }
+
     public JsonElement FallbackUpdateParams { get; init; }
+
+    public JsonElement FallbackCreateParams { get; init; }
 }

@@ -64,6 +64,8 @@ public sealed class ZabbixHostCreateModel
 
     public string? FallbackForMethod { get; init; }
 
+    public bool CreateOnUpdateWhenMissing { get; init; }
+
     public IReadOnlyDictionary<string, string> SourceFields { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -80,6 +82,8 @@ public sealed class ZabbixHostCreateModel
     public List<ZabbixGroupModel> Groups { get; init; } = [];
 
     public List<ZabbixTemplateModel> Templates { get; init; } = [];
+
+    public List<ZabbixTemplateModel> TemplatesToClear { get; init; } = [];
 
     public List<ZabbixTagModel> Tags { get; init; } = [];
 
@@ -112,6 +116,19 @@ public sealed class ZabbixInterfaceModel
     public string Dns { get; init; } = string.Empty;
 
     public string Port { get; init; } = string.Empty;
+
+    public ZabbixInterfaceDetailsModel Details { get; init; } = new();
+}
+
+public sealed class ZabbixInterfaceDetailsModel
+{
+    public int? Version { get; init; }
+
+    public int? Bulk { get; init; }
+
+    public string Community { get; init; } = string.Empty;
+
+    public bool Enabled => Version.HasValue || Bulk.HasValue || !string.IsNullOrWhiteSpace(Community);
 }
 
 public sealed record ZabbixGroupModel(string Name, string GroupId);
