@@ -13,7 +13,7 @@
 | M-007 | IF-003, IF-004, IF-005 | zabbixrequests2api | processing latency | Время обработки объекта | Кандидат |
 | M-008 | IF-002, IF-003, IF-005 | Kafka | consumer lag | Отставание consumer groups | Внешний мониторинг |
 | M-009 | IF-009 | monitoring-ui-api | active session count | Количество активных server-side sessions | Кандидат |
-| M-010 | IF-010 | monitoring-ui-api | saml login success/error count | Контроль SAML2 авторизации | Кандидат |
+| M-010 | IF-010 | monitoring-ui-api | authorization login success/error count | Контроль локальной, MS AD и IdP авторизации | Кандидат |
 | M-011 | IF-011, IF-012, IF-014 | monitoring-ui-api | catalog sync duration/error count | Контроль синхронизации CMDBuild/Zabbix catalog | Кандидат |
 | M-012 | IF-013, IF-014 | monitoring-ui-api | rules validate/upload count | Контроль изменений rules через UI | Кандидат |
-| M-013 | IF-018 | cmdbkafka2zabbix | cmdb resolver duration/error count | Контроль чтения CMDBuild reference/lookup leaf-значений | Кандидат |
+| M-013 | IF-018 | cmdbkafka2zabbix | cmdb resolver duration/error count | Контроль чтения CMDBuild reference/lookup/domain leaf-значений | Кандидат |

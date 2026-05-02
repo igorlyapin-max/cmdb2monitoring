@@ -7,4 +7,8 @@ public sealed class ServiceOptions
     public string Name { get; init; } = string.Empty;
 
     public string HealthRoute { get; init; } = string.Empty;
+
+    public string RulesReloadRoute { get; init; } = string.Empty;
+
+    public string RulesReloadToken { get; init; } = string.Empty;
 }

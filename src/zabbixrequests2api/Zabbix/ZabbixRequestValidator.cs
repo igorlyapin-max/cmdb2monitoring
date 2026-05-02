@@ -167,13 +167,18 @@ public sealed class ZabbixRequestValidator(
             return;
         }
 
-        if (!request.Params.TryGetProperty("filter", out var filter)
-            || filter.ValueKind != JsonValueKind.Object
-            || !filter.TryGetProperty("host", out var hostFilter)
-            || hostFilter.ValueKind != JsonValueKind.Array
-            || hostFilter.GetArrayLength() == 0)
+        var hasHostFilter = request.Params.TryGetProperty("filter", out var filter)
+            && filter.ValueKind == JsonValueKind.Object
+            && filter.TryGetProperty("host", out var hostFilter)
+            && hostFilter.ValueKind == JsonValueKind.Array
+            && hostFilter.GetArrayLength() > 0;
+        var hasHostIds = request.Params.TryGetProperty("hostids", out var hostIds)
+            && hostIds.ValueKind == JsonValueKind.Array
+            && hostIds.GetArrayLength() > 0;
+
+        if (!hasHostFilter && !hasHostIds)
         {
-            result.AddError("missing_host_filter", "host.get params.filter.host must contain at least one host name.");
+            result.AddError("missing_host_filter", "host.get params.filter.host or params.hostids must contain at least one host identifier.");
         }
     }
 

@@ -1,11 +1,11 @@
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Kafka, logLevel } from 'kafkajs';
+import { Client as LdapClient } from 'ldapts';
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from '@node-saml/node-saml';
 import { parseStringPromise } from 'xml2js';
 
@@ -14,9 +14,47 @@ const repositoryRoot = resolve(serviceRoot, '../..');
 const environment = process.env.NODE_ENV || 'Development';
 const config = await loadConfig();
 const sessions = new Map();
+const oauthStates = new Map();
 let samlMetadataCache = null;
 
+const roles = {
+  viewer: {
+    key: 'viewer',
+    label: 'Просмотр',
+    legacy: ['readonly'],
+    views: ['dashboard', 'events']
+  },
+  editor: {
+    key: 'editor',
+    label: 'Редактирование правил',
+    legacy: ['operator'],
+    views: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'about', 'help']
+  },
+  admin: {
+    key: 'admin',
+    label: 'Администрирование',
+    legacy: [],
+    views: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'authSettings', 'runtimeSettings', 'about', 'help']
+  }
+};
+
+const managedCmdbuildWebhookPrefix = 'cmdbwebhooks2kafka-';
+
+const defaultLocalUsers = [
+  { username: 'viewer', password: 'viewer', role: 'viewer', displayName: 'Просмотр' },
+  { username: 'editor', password: 'editor', role: 'editor', displayName: 'Редактирование правил' },
+  { username: 'admin', password: 'admin', role: 'admin', displayName: 'Администрирование' }
+];
+
+const passwordHashSettings = {
+  algorithm: 'pbkdf2-sha256',
+  iterations: 210000,
+  keyLength: 32,
+  digest: 'sha256'
+};
+
 await ensureRuntimeDirectories();
+await ensureUsersFile();
 
 if (config.Zabbix?.Catalog?.SyncOnStartup) {
   console.warn('Zabbix catalog SyncOnStartup is configured but requires user credentials; skipping startup sync.');
@@ -37,7 +75,8 @@ const server = createServer(async (request, response) => {
 
     sendJson(response, statusCode, {
       error: error?.code ?? 'internal_error',
-      message: error instanceof Error ? error.message : 'Unexpected error'
+      message: error instanceof Error ? error.message : 'Unexpected error',
+      ...(error?.details ? error.details : {})
     });
   }
 });
@@ -68,6 +107,11 @@ async function route(request, response) {
     return;
   }
 
+  if (path.startsWith('/auth/oauth2')) {
+    await routeOauth2(request, response, url, path);
+    return;
+  }
+
   await serveStatic(response, path);
 }
 
@@ -80,9 +124,9 @@ async function routeApi(request, response, url, path) {
       idp: publicIdpSettings(),
       auth: {
         useIdp: isIdpEnabled(),
-        requireCmdbuildCredentialsWhenIdpDisabled: Boolean(config.Auth.RequireCmdbuildCredentialsWhenIdpDisabled),
-        requireZabbixCredentialsWhenIdpDisabled: Boolean(config.Auth.RequireZabbixCredentialsWhenIdpDisabled),
-        localLoginDefaults: publicLocalLoginDefaults()
+        provider: idpProvider(),
+        roles: publicRoles(),
+        usersFilePath: publicUsersFilePath()
       }
     });
     return;
@@ -113,89 +157,206 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'POST' && path === '/api/auth/change-password') {
+    const session = requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await changeOwnPassword(session, payload));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/auth/session-credentials') {
+    const session = requireSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await saveSessionCredentials(session, payload));
+    return;
+  }
+
   const session = requireSession(request, response);
   if (!session) {
     return;
   }
 
+  if (request.method === 'GET' && path === '/api/users') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, await readPublicUsers());
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/users/reset-password') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await resetUserPassword(payload));
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/services/health') {
+    requireRole(session, response, ['viewer', 'editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, await readServicesHealth());
     return;
   }
 
+  if (request.method === 'POST' && path.startsWith('/api/services/') && path.endsWith('/reload-rules')) {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const serviceName = decodeURIComponent(path.slice('/api/services/'.length, -'/reload-rules'.length));
+    sendJson(response, 200, await reloadServiceRules(serviceName));
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/events') {
+    requireRole(session, response, ['viewer', 'editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, await readKafkaEvents(url));
     return;
   }
 
   if (request.method === 'GET' && path === '/api/rules/current') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, await readCurrentRules());
     return;
   }
 
   if (request.method === 'POST' && path === '/api/rules/validate') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
     sendJson(response, 200, await validateRulesPayload(payload));
     return;
   }
 
   if (request.method === 'POST' && path === '/api/rules/dry-run') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
     sendJson(response, 200, await dryRunRules(payload));
     return;
   }
 
+  if (request.method === 'POST' && path === '/api/rules/starter') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, await createStarterRules());
+    return;
+  }
+
   if (request.method === 'POST' && path === '/api/rules/upload') {
-    requireRole(session, response, ['admin']);
+    requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
       return;
     }
 
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
-    sendJson(response, 200, await uploadRules(payload, session));
+    sendJson(response, 200, await uploadRules(payload));
     return;
   }
 
   if (request.method === 'POST' && path === '/api/rules/fix-mapping') {
-    requireRole(session, response, ['admin']);
+    requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
       return;
     }
 
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
-    sendJson(response, 200, await fixRulesMapping(payload, session));
+    sendJson(response, 200, await fixRulesMapping(payload));
     return;
   }
 
   if (request.method === 'GET' && path === '/api/rules/history') {
-    sendJson(response, 200, await readRulesHistory());
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 410, {
+      error: 'rules_history_disabled',
+      message: 'Git history is managed outside monitoring-ui-api.'
+    });
     return;
   }
 
   if (request.method === 'GET' && path === '/api/zabbix/catalog/status') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, await readCatalogStatus(config.Zabbix.Catalog.CacheFilePath));
     return;
   }
 
   if (request.method === 'GET' && path === '/api/zabbix/catalog') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, await readCatalogCache(config.Zabbix.Catalog.CacheFilePath));
     return;
   }
 
   if (request.method === 'GET' && path === '/api/zabbix/catalog/mapping') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     const catalog = await readCatalogCache(config.Zabbix.Catalog.CacheFilePath);
     sendJson(response, 200, readZabbixMappingCatalog(catalog));
     return;
   }
 
   if (request.method === 'GET' && path.startsWith('/api/zabbix/catalog/')) {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     const catalog = await readCatalogCache(config.Zabbix.Catalog.CacheFilePath);
     sendJson(response, 200, readCatalogCollection(catalog, path.split('/').pop()));
     return;
   }
 
   if (request.method === 'POST' && path === '/api/zabbix/catalog/sync') {
-    requireRole(session, response, ['admin', 'operator']);
+    requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
       return;
     }
@@ -205,23 +366,38 @@ async function routeApi(request, response, url, path) {
   }
 
   if (request.method === 'GET' && path === '/api/cmdbuild/catalog/status') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, await readCatalogStatus(config.Cmdbuild.Catalog.CacheFilePath));
     return;
   }
 
   if (request.method === 'GET' && path === '/api/cmdbuild/catalog') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, await readCatalogCache(config.Cmdbuild.Catalog.CacheFilePath));
     return;
   }
 
   if (request.method === 'GET' && path.startsWith('/api/cmdbuild/catalog/')) {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     const catalog = await readCatalogCache(config.Cmdbuild.Catalog.CacheFilePath);
     sendJson(response, 200, readCatalogCollection(catalog, path.split('/').pop()));
     return;
   }
 
   if (request.method === 'POST' && path === '/api/cmdbuild/catalog/sync') {
-    requireRole(session, response, ['admin', 'operator']);
+    requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
       return;
     }
@@ -230,7 +406,33 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'GET' && path === '/api/cmdbuild/webhooks') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, await readCmdbuildWebhooks(session));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/cmdbuild/webhooks/apply') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await applyCmdbuildWebhookOperations(session, payload));
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/settings/idp') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, publicIdpSettings());
     return;
   }
@@ -247,6 +449,11 @@ async function routeApi(request, response, url, path) {
   }
 
   if (request.method === 'GET' && path === '/api/settings/runtime') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
     sendJson(response, 200, publicRuntimeSettings());
     return;
   }
@@ -270,6 +477,7 @@ async function routeApi(request, response, url, path) {
 
 async function routeSaml(request, response, url, path) {
   if (request.method === 'GET' && path === '/auth/saml2/metadata') {
+    assertIdpProvider('saml2');
     const metadata = await buildSamlMetadata();
     response.writeHead(200, {
       'content-type': 'application/samlmetadata+xml; charset=utf-8',
@@ -281,6 +489,7 @@ async function routeSaml(request, response, url, path) {
 
   if (request.method === 'GET' && path === '/auth/saml2/login') {
     assertSamlEnabled();
+    assertIdpProvider('saml2');
     const saml = await createSamlClient();
     const relayState = safeRelayState(url.searchParams.get('returnUrl') ?? '/');
     const redirectUrl = await saml.getAuthorizeUrlAsync(relayState, request.headers.host, {});
@@ -290,6 +499,7 @@ async function routeSaml(request, response, url, path) {
 
   if (request.method === 'POST' && path === '/auth/saml2/acs') {
     assertSamlEnabled();
+    assertIdpProvider('saml2');
     const form = await readFormBody(request, config.Auth.MaxSamlPostBytes ?? 1048576);
     const saml = await createSamlClient();
     const validation = await saml.validatePostResponseAsync(form);
@@ -302,7 +512,7 @@ async function routeSaml(request, response, url, path) {
       throw httpError(401, 'saml_profile_missing', 'SAML response did not contain a user profile.');
     }
 
-    const session = createSamlSession(validation.profile);
+    const session = await createSamlSession(validation.profile);
     sessions.set(session.id, session);
     sendRedirect(response, safeRelayState(form.RelayState ?? '/'), {
       'Set-Cookie': buildSessionCookie(session.id)
@@ -335,6 +545,59 @@ async function routeSaml(request, response, url, path) {
   });
 }
 
+async function routeOauth2(request, response, url, path) {
+  if (request.method === 'GET' && path === '/auth/oauth2/login') {
+    assertOauth2Enabled();
+    const settings = resolveOauth2Settings();
+    const state = randomBytes(24).toString('hex');
+    oauthStates.set(state, {
+      returnUrl: safeRelayState(url.searchParams.get('returnUrl') ?? '/'),
+      createdAt: Date.now()
+    });
+
+    pruneOauthStates();
+    const redirectUrl = new URL(settings.authorizationUrl);
+    redirectUrl.searchParams.set('response_type', 'code');
+    redirectUrl.searchParams.set('client_id', settings.clientId);
+    redirectUrl.searchParams.set('redirect_uri', settings.redirectUri);
+    redirectUrl.searchParams.set('scope', settings.scopes);
+    redirectUrl.searchParams.set('state', state);
+    sendRedirect(response, redirectUrl.toString());
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/auth/oauth2/callback') {
+    assertOauth2Enabled();
+    const state = url.searchParams.get('state') ?? '';
+    const code = url.searchParams.get('code') ?? '';
+    const error = url.searchParams.get('error') ?? '';
+    const stateRecord = oauthStates.get(state);
+    oauthStates.delete(state);
+
+    if (!isBlank(error)) {
+      throw httpError(401, 'oauth2_error', url.searchParams.get('error_description') || error);
+    }
+
+    if (!stateRecord || isBlank(code)) {
+      throw httpError(401, 'oauth2_state_invalid', 'OAuth2 state or code is invalid.');
+    }
+
+    const tokenSet = await exchangeOauth2Code(code);
+    const claims = await readOauth2UserInfo(tokenSet);
+    const session = await createOauth2Session(claims, tokenSet);
+    sessions.set(session.id, session);
+    sendRedirect(response, stateRecord.returnUrl, {
+      'Set-Cookie': buildSessionCookie(session.id)
+    });
+    return;
+  }
+
+  sendJson(response, 404, {
+    error: 'not_found',
+    path
+  });
+}
+
 async function loadConfig() {
   const base = JSON.parse(await readFile(join(serviceRoot, 'config/appsettings.json'), 'utf8'));
   const environmentConfigPath = join(serviceRoot, `config/appsettings.${environment}.json`);
@@ -355,8 +618,7 @@ async function applyPersistedUiSettings(target) {
 
   const persisted = JSON.parse(await readFile(settingsPath, 'utf8'));
   if (persisted.idp) {
-    Object.assign(target.Idp, persisted.idp, { Enabled: Boolean(persisted.idp.enabled) });
-    target.Auth.UseIdp = Boolean(persisted.idp.enabled);
+    applyIdpSettings(target, persisted.idp);
   }
 
   applyRuntimeSettings(target, persisted);
@@ -380,6 +642,7 @@ function applyEnvOverrides(target) {
     PORT: ['Service', 'Port'],
     MONITORING_UI_HOST: ['Service', 'Host'],
     MONITORING_UI_USE_IDP: ['Auth', 'UseIdp'],
+    IDP_PROVIDER: ['Idp', 'Provider'],
     SAML2_METADATA_URL: ['Idp', 'MetadataUrl'],
     SAML2_ENTITY_ID: ['Idp', 'EntityId'],
     SAML2_SSO_URL: ['Idp', 'SsoUrl'],
@@ -390,15 +653,42 @@ function applyEnvOverrides(target) {
     SAML2_ACS_URL: ['Idp', 'AcsUrl'],
     SAML2_SP_CERT_PATH: ['Idp', 'SpCertificatePath'],
     SAML2_SP_PRIVATE_KEY_PATH: ['Idp', 'SpPrivateKeyPath'],
+    OAUTH2_AUTHORIZATION_URL: ['Idp', 'OAuth2', 'AuthorizationUrl'],
+    OAUTH2_TOKEN_URL: ['Idp', 'OAuth2', 'TokenUrl'],
+    OAUTH2_USERINFO_URL: ['Idp', 'OAuth2', 'UserInfoUrl'],
+    OAUTH2_CLIENT_ID: ['Idp', 'OAuth2', 'ClientId'],
+    OAUTH2_CLIENT_SECRET: ['Idp', 'OAuth2', 'ClientSecret'],
+    OAUTH2_REDIRECT_URI: ['Idp', 'OAuth2', 'RedirectUri'],
+    OAUTH2_SCOPES: ['Idp', 'OAuth2', 'Scopes'],
+    OAUTH2_LOGIN_CLAIM: ['Idp', 'OAuth2', 'LoginClaim'],
+    OAUTH2_EMAIL_CLAIM: ['Idp', 'OAuth2', 'EmailClaim'],
+    OAUTH2_DISPLAY_NAME_CLAIM: ['Idp', 'OAuth2', 'DisplayNameClaim'],
+    OAUTH2_GROUPS_CLAIM: ['Idp', 'OAuth2', 'GroupsClaim'],
+    LDAP_PROTOCOL: ['Idp', 'Ldap', 'Protocol'],
+    LDAP_HOST: ['Idp', 'Ldap', 'Host'],
+    LDAP_PORT: ['Idp', 'Ldap', 'Port'],
+    LDAP_BASE_DN: ['Idp', 'Ldap', 'BaseDn'],
+    LDAP_BIND_DN: ['Idp', 'Ldap', 'BindDn'],
+    LDAP_BIND_PASSWORD: ['Idp', 'Ldap', 'BindPassword'],
+    LDAP_USER_DN_TEMPLATE: ['Idp', 'Ldap', 'UserDnTemplate'],
+    LDAP_USER_SEARCH_BASE: ['Idp', 'Ldap', 'UserSearchBase'],
+    LDAP_USER_FILTER: ['Idp', 'Ldap', 'UserFilter'],
+    LDAP_GROUP_SEARCH_BASE: ['Idp', 'Ldap', 'GroupSearchBase'],
+    LDAP_GROUP_FILTER: ['Idp', 'Ldap', 'GroupFilter'],
+    LDAP_GROUP_NAME_ATTRIBUTE: ['Idp', 'Ldap', 'GroupNameAttribute'],
+    LDAP_LOGIN_ATTRIBUTE: ['Idp', 'Ldap', 'LoginAttribute'],
+    LDAP_EMAIL_ATTRIBUTE: ['Idp', 'Ldap', 'EmailAttribute'],
+    LDAP_DISPLAY_NAME_ATTRIBUTE: ['Idp', 'Ldap', 'DisplayNameAttribute'],
+    LDAP_GROUPS_ATTRIBUTE: ['Idp', 'Ldap', 'GroupsAttribute'],
+    LDAP_TLS_REJECT_UNAUTHORIZED: ['Idp', 'Ldap', 'TlsRejectUnauthorized'],
     CMDBUILD_BASE_URL: ['Cmdbuild', 'BaseUrl'],
-    CMDBUILD_SERVICE_USERNAME: ['Cmdbuild', 'ServiceAccount', 'Username'],
-    CMDBUILD_SERVICE_PASSWORD: ['Cmdbuild', 'ServiceAccount', 'Password'],
     ZABBIX_API_ENDPOINT: ['Zabbix', 'ApiEndpoint'],
-    ZABBIX_SERVICE_USER: ['Zabbix', 'ServiceAccount', 'User'],
-    ZABBIX_SERVICE_PASSWORD: ['Zabbix', 'ServiceAccount', 'Password'],
-    ZABBIX_SERVICE_API_TOKEN: ['Zabbix', 'ServiceAccount', 'ApiToken'],
+    ZABBIX_API_TOKEN: ['Zabbix', 'ApiToken'],
+    RULES_READ_FROM_GIT: ['Rules', 'ReadFromGit'],
+    RULES_REPOSITORY_URL: ['Rules', 'RepositoryUrl'],
     RULES_FILE_PATH: ['Rules', 'RulesFilePath'],
     MONITORING_UI_SETTINGS_FILE: ['UiSettings', 'FilePath'],
+    MONITORING_UI_USERS_FILE: ['Auth', 'UsersFilePath'],
     MONITORING_UI_EVENTS_ENABLED: ['EventBrowser', 'Enabled'],
     MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS: ['EventBrowser', 'BootstrapServers'],
     MONITORING_UI_KAFKA_SECURITY_PROTOCOL: ['EventBrowser', 'SecurityProtocol'],
@@ -427,7 +717,8 @@ async function ensureRuntimeDirectories() {
   for (const configuredPath of [
     config.Cmdbuild.Catalog.CacheFilePath,
     config.Zabbix.Catalog.CacheFilePath,
-    config.UiSettings?.FilePath ?? 'state/ui-settings.json'
+    config.UiSettings?.FilePath ?? 'state/ui-settings.json',
+    config.Auth?.UsersFilePath ?? join(dirname(config.UiSettings?.FilePath ?? 'state/ui-settings.json'), 'users.json')
   ]) {
     await mkdir(resolveServicePath(configuredPath, true), { recursive: true });
   }
@@ -435,42 +726,291 @@ async function ensureRuntimeDirectories() {
 
 async function login(payload) {
   if (isIdpEnabled()) {
-    throw httpError(409, 'idp_enabled', 'Use /auth/saml2/login when IdP mode is enabled.');
+    if (idpProvider() === 'ldap') {
+      const session = await loginWithLdap(payload);
+      sessions.set(session.id, session);
+      return session;
+    }
+
+    throw httpError(409, 'idp_enabled', `Use ${idpLoginRoute()} when IdP mode is enabled.`);
   }
 
-  const cmdbuild = payload?.cmdbuild ?? {};
-  const zabbix = payload?.zabbix ?? {};
-  if (config.Auth.RequireCmdbuildCredentialsWhenIdpDisabled
-      && (isBlank(cmdbuild.username) || isBlank(cmdbuild.password))) {
-    throw httpError(400, 'missing_cmdbuild_credentials', 'CMDBuild login/password are required when IdP is disabled.');
+  const username = String(payload?.username ?? '').trim();
+  const password = String(payload?.password ?? '');
+  if (isBlank(username) || isBlank(password)) {
+    throw httpError(400, 'missing_local_credentials', 'Local username and password are required.');
   }
 
-  if (config.Auth.RequireZabbixCredentialsWhenIdpDisabled
-      && isBlank(zabbix.apiToken)
-      && (isBlank(zabbix.username) || isBlank(zabbix.password))) {
-    throw httpError(400, 'missing_zabbix_credentials', 'Zabbix login/password or API token are required when IdP is disabled.');
+  const store = await readUsersStore();
+  const user = store.users.find(item => item.username.toLowerCase() === username.toLowerCase());
+  if (!user || !verifyPassword(password, user.password)) {
+    throw httpError(401, 'invalid_local_credentials', 'Invalid username or password.');
   }
+
+  const role = normalizeRoleKey(user.role);
 
   const session = {
     id: randomUUID(),
+    authMethod: 'local',
+    localUsername: user.username,
     createdAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
-    roles: ['admin', 'operator', 'readonly'],
-    cmdbuild: {
-      baseUrl: cmdbuild.baseUrl || config.Cmdbuild.BaseUrl,
-      username: cmdbuild.username,
-      password: cmdbuild.password
+    roles: [role],
+    passwordChangeRequired: Boolean(user.mustChangePassword),
+    identity: {
+      login: user.username,
+      email: user.email ?? '',
+      displayName: user.displayName || user.username,
+      groups: []
     },
-    zabbix: {
-      apiEndpoint: zabbix.apiEndpoint || config.Zabbix.ApiEndpoint,
-      username: zabbix.username,
-      password: zabbix.password,
-      apiToken: zabbix.apiToken
-    }
+    cmdbuild: buildLocalCmdbuildSessionCredentials(),
+    zabbix: buildLocalZabbixSessionCredentials()
   };
 
   sessions.set(session.id, session);
   return session;
+}
+
+async function ensureUsersFile() {
+  const usersPath = resolveUsersFile(config);
+  await mkdir(dirname(usersPath), { recursive: true });
+
+  if (!existsSync(usersPath)) {
+    const now = new Date().toISOString();
+    const store = {
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      users: defaultLocalUsers.map(user => ({
+        username: user.username,
+        displayName: user.displayName,
+        role: user.role,
+        password: hashPassword(user.password),
+        mustChangePassword: false,
+        createdAt: now,
+        updatedAt: now
+      }))
+    };
+    await writeUsersStore(store);
+    return;
+  }
+
+  const store = await readUsersStore();
+  let changed = false;
+  for (const defaultUser of defaultLocalUsers) {
+    if (store.users.some(user => user.username.toLowerCase() === defaultUser.username)) {
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    store.users.push({
+      username: defaultUser.username,
+      displayName: defaultUser.displayName,
+      role: defaultUser.role,
+      password: hashPassword(defaultUser.password),
+      mustChangePassword: false,
+      createdAt: now,
+      updatedAt: now
+    });
+    changed = true;
+  }
+
+  if (changed) {
+    store.updatedAt = new Date().toISOString();
+    await writeUsersStore(store);
+  }
+}
+
+async function readUsersStore() {
+  const usersPath = resolveUsersFile(config);
+  if (!existsSync(usersPath)) {
+    await ensureUsersFile();
+  }
+
+  const store = JSON.parse(await readFile(usersPath, 'utf8'));
+  return {
+    version: Number(store.version ?? 1),
+    createdAt: store.createdAt ?? '',
+    updatedAt: store.updatedAt ?? '',
+    users: Array.isArray(store.users) ? store.users.map(normalizeStoredUser) : []
+  };
+}
+
+async function writeUsersStore(store) {
+  const usersPath = resolveUsersFile(config);
+  await mkdir(dirname(usersPath), { recursive: true });
+  await writeFile(usersPath, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
+}
+
+function normalizeStoredUser(user) {
+  return {
+    username: String(user.username ?? '').trim(),
+    displayName: user.displayName ?? user.username ?? '',
+    email: user.email ?? '',
+    role: normalizeRoleKey(user.role),
+    password: normalizePasswordHash(user.password),
+    mustChangePassword: Boolean(user.mustChangePassword),
+    createdAt: user.createdAt ?? '',
+    updatedAt: user.updatedAt ?? ''
+  };
+}
+
+function normalizePasswordHash(password) {
+  if (password?.algorithm === passwordHashSettings.algorithm && password.hash && password.salt) {
+    return {
+      algorithm: passwordHashSettings.algorithm,
+      iterations: Number(password.iterations ?? passwordHashSettings.iterations),
+      keyLength: Number(password.keyLength ?? passwordHashSettings.keyLength),
+      digest: password.digest ?? passwordHashSettings.digest,
+      salt: String(password.salt),
+      hash: String(password.hash)
+    };
+  }
+
+  return {
+    ...passwordHashSettings,
+    salt: '',
+    hash: ''
+  };
+}
+
+function hashPassword(password) {
+  const salt = randomBytes(16).toString('hex');
+  const hash = pbkdf2Sync(
+    String(password),
+    salt,
+    passwordHashSettings.iterations,
+    passwordHashSettings.keyLength,
+    passwordHashSettings.digest
+  ).toString('hex');
+
+  return {
+    ...passwordHashSettings,
+    salt,
+    hash
+  };
+}
+
+function verifyPassword(password, hashSettings) {
+  const settings = normalizePasswordHash(hashSettings);
+  if (isBlank(settings.salt) || isBlank(settings.hash)) {
+    return false;
+  }
+
+  const calculated = pbkdf2Sync(
+    String(password),
+    settings.salt,
+    settings.iterations,
+    settings.keyLength,
+    settings.digest
+  );
+  const expected = Buffer.from(settings.hash, 'hex');
+  return calculated.length === expected.length && timingSafeEqual(calculated, expected);
+}
+
+async function changeOwnPassword(session, payload) {
+  if (session.authMethod !== 'local' || isBlank(session.localUsername)) {
+    throw httpError(400, 'password_change_not_supported', 'Password change is supported only for local users.');
+  }
+
+  const currentPassword = String(payload?.currentPassword ?? '');
+  const newPassword = String(payload?.newPassword ?? '');
+  assertNewPassword(newPassword);
+
+  const store = await readUsersStore();
+  const user = store.users.find(item => item.username.toLowerCase() === session.localUsername.toLowerCase());
+  if (!user || !verifyPassword(currentPassword, user.password)) {
+    throw httpError(401, 'invalid_current_password', 'Current password is invalid.');
+  }
+
+  user.password = hashPassword(newPassword);
+  user.mustChangePassword = false;
+  user.updatedAt = new Date().toISOString();
+  store.updatedAt = user.updatedAt;
+  await writeUsersStore(store);
+
+  session.passwordChangeRequired = false;
+  return {
+    success: true,
+    user: publicUser(session)
+  };
+}
+
+async function readPublicUsers() {
+  const store = await readUsersStore();
+  return {
+    usersFilePath: publicUsersFilePath(),
+    roles: publicRoles(),
+    users: store.users
+      .filter(user => !isBlank(user.username))
+      .map(publicStoredUser)
+      .sort((left, right) => left.username.localeCompare(right.username))
+  };
+}
+
+async function resetUserPassword(payload) {
+  const username = String(payload?.username ?? '').trim();
+  const newPassword = String(payload?.newPassword ?? '');
+  assertNewPassword(newPassword);
+
+  const store = await readUsersStore();
+  const user = store.users.find(item => item.username.toLowerCase() === username.toLowerCase());
+  if (!user) {
+    throw httpError(404, 'user_not_found', `User "${username}" was not found.`);
+  }
+
+  user.password = hashPassword(newPassword);
+  user.mustChangePassword = payload?.mustChangePassword !== false;
+  user.updatedAt = new Date().toISOString();
+  store.updatedAt = user.updatedAt;
+  await writeUsersStore(store);
+
+  for (const activeSession of sessions.values()) {
+    if (activeSession.localUsername?.toLowerCase() === username.toLowerCase()) {
+      activeSession.passwordChangeRequired = Boolean(user.mustChangePassword);
+    }
+  }
+
+  return await readPublicUsers();
+}
+
+async function saveSessionCredentials(session, payload) {
+  const service = String(payload?.service ?? '').toLowerCase();
+  if (!['cmdbuild', 'zabbix'].includes(service)) {
+    throw httpError(400, 'invalid_service', 'Credential service must be cmdbuild or zabbix.');
+  }
+
+  const username = String(payload?.username ?? '').trim();
+  const password = String(payload?.password ?? '');
+  if (isBlank(username) || isBlank(password)) {
+    throw httpError(400, 'missing_integration_credentials', 'Integration username and password are required.');
+  }
+
+  if (service === 'cmdbuild') {
+    session.cmdbuild = {
+      baseUrl: String(payload?.baseUrl || session.cmdbuild?.baseUrl || config.Cmdbuild.BaseUrl || '').trim(),
+      username,
+      password
+    };
+  } else {
+    session.zabbix = {
+      apiEndpoint: String(payload?.apiEndpoint || session.zabbix?.apiEndpoint || config.Zabbix.ApiEndpoint || '').trim(),
+      username,
+      password,
+      apiToken: session.zabbix?.apiToken ?? ''
+    };
+  }
+
+  return {
+    success: true,
+    user: publicUser(session)
+  };
+}
+
+function assertNewPassword(password) {
+  if (isBlank(password) || String(password).length < 5) {
+    throw httpError(400, 'weak_password', 'Password must contain at least 5 characters.');
+  }
 }
 
 async function readServicesHealth() {
@@ -485,6 +1025,7 @@ async function readServicesHealth() {
         ok: result.ok,
         statusCode: result.status,
         latencyMs: Date.now() - startedAt,
+        rulesReloadSupported: !isBlank(endpoint.RulesReloadUrl ?? endpoint.rulesReloadUrl),
         body: await safeJson(result)
       });
     } catch (error) {
@@ -494,6 +1035,7 @@ async function readServicesHealth() {
         ok: false,
         statusCode: null,
         latencyMs: Date.now() - startedAt,
+        rulesReloadSupported: !isBlank(endpoint.RulesReloadUrl ?? endpoint.rulesReloadUrl),
         error: error instanceof Error ? error.message : 'request_failed'
       });
     }
@@ -501,6 +1043,46 @@ async function readServicesHealth() {
 
   items.sort((left, right) => left.name.localeCompare(right.name));
   return { items };
+}
+
+async function reloadServiceRules(serviceName) {
+  const endpoint = (config.Services.HealthEndpoints ?? [])
+    .find(item => String(item.Name ?? item.name ?? '').toLowerCase() === String(serviceName ?? '').toLowerCase());
+  if (!endpoint) {
+    throw httpError(404, 'service_not_found', `Service '${serviceName}' is not configured.`);
+  }
+
+  const reloadUrl = endpoint.RulesReloadUrl ?? endpoint.rulesReloadUrl ?? '';
+  if (isBlank(reloadUrl)) {
+    throw httpError(404, 'rules_reload_not_supported', `Service '${serviceName}' does not support rules reload.`);
+  }
+
+  const token = endpoint.RulesReloadToken ?? endpoint.rulesReloadToken ?? '';
+  const startedAt = Date.now();
+  const response = await fetch(reloadUrl, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      ...(isBlank(token) ? {} : { authorization: `Bearer ${token}` })
+    },
+    signal: AbortSignal.timeout(10000)
+  });
+  const payload = await safeJson(response);
+  if (!response.ok) {
+    throw httpError(502, 'rules_reload_failed', payload?.detail || payload?.title || payload?.message || `Rules reload returned HTTP ${response.status}.`, {
+      service: endpoint.Name,
+      statusCode: response.status,
+      body: payload
+    });
+  }
+
+  return {
+    service: endpoint.Name,
+    ok: true,
+    statusCode: response.status,
+    latencyMs: Date.now() - startedAt,
+    response: payload
+  };
 }
 
 async function readKafkaEvents(url) {
@@ -747,6 +1329,7 @@ async function readCurrentRules() {
     path: config.Rules.RulesFilePath,
     fileName: basename(path),
     schemaVersion: rules.schemaVersion,
+    rulesVersion: rules.rulesVersion ?? '',
     name: rules.name,
     validation: await validateRulesObject(rules),
     content: rules
@@ -763,6 +1346,7 @@ async function validateRulesObject(rules) {
   const warnings = [];
 
   requireString(rules, 'schemaVersion', errors);
+  requireString(rules, 'rulesVersion', errors);
   requireString(rules, 'name', errors);
   requireObject(rules, 'source', errors);
   requireObject(rules, 'zabbix', errors);
@@ -808,10 +1392,14 @@ async function validateRulesObject(rules) {
 }
 
 async function validateRulesAgainstCatalogs(rules, errors, warnings) {
+  const ruleReferences = {
+    ...rules,
+    catalog: undefined
+  };
   const zabbixCatalog = await tryReadCatalogCache(config.Zabbix.Catalog.CacheFilePath);
   if (zabbixCatalog?.templates?.length) {
     const templateIds = new Set(zabbixCatalog.templates.map(template => String(template.templateid)));
-    for (const templateId of collectLookupIds(rules, 'templateid')) {
+    for (const templateId of collectLookupIds(ruleReferences, 'templateid')) {
       if (!templateIds.has(templateId)) {
         errors.push(`Zabbix templateid '${templateId}' is not present in catalog cache.`);
       }
@@ -822,7 +1410,7 @@ async function validateRulesAgainstCatalogs(rules, errors, warnings) {
 
   if (zabbixCatalog?.hostGroups?.length) {
     const groupIds = new Set(zabbixCatalog.hostGroups.map(group => String(group.groupid)));
-    for (const groupId of collectLookupIds(rules, 'groupid')) {
+    for (const groupId of collectLookupIds(ruleReferences, 'groupid')) {
       if (!groupIds.has(groupId)) {
         errors.push(`Zabbix host groupid '${groupId}' is not present in catalog cache.`);
       }
@@ -865,9 +1453,230 @@ async function dryRunRules(payload) {
   };
 }
 
-async function uploadRules(payload, session) {
+async function createStarterRules() {
+  const templatePath = 'rules/cmdbuild-to-zabbix-host-create.production-empty.json';
+  const template = JSON.parse(await readFile(resolveRepoPath(templatePath), 'utf8'));
+  const current = await readCurrentRules();
+  const cmdbuildCatalog = await tryReadCatalogCache(config.Cmdbuild.Catalog.CacheFilePath);
+  const zabbixCatalog = await tryReadCatalogCache(config.Zabbix.Catalog.CacheFilePath);
+  assertStarterCatalogCaches(cmdbuildCatalog, zabbixCatalog);
+  const rules = structuredClone(template);
+  const generatedAt = new Date().toISOString();
+  const hostGroups = normalizeStarterHostGroups(zabbixCatalog?.hostGroups);
+  const templates = normalizeStarterTemplates(zabbixCatalog?.templates);
+  const templateGroups = normalizeStarterTemplateGroups(zabbixCatalog?.templateGroups);
+
+  rules.name = 'cmdbuild-to-zabbix-host-create-production-starter';
+  rules.rulesVersion = `starter-${generatedAt.replace(/[:.]/g, '-')}`;
+  rules.description = `Clean production starter generated from current monitoring-ui-api environment at ${generatedAt}. Routes remain publish=false until an operator completes and validates rules.`;
+  rules.source = {
+    ...(rules.source ?? {}),
+    topic: selectCmdbuildEventsTopic()
+  };
+  rules.zabbix = {
+    ...(rules.zabbix ?? {}),
+    apiEndpoint: config.Zabbix?.ApiEndpoint ?? zabbixCatalog?.zabbixEndpoint ?? ''
+  };
+  rules.catalog = {
+    ...(rules.catalog ?? {}),
+    generatedAt,
+    hostGroups,
+    templateGroups,
+    templates,
+    proxies: normalizeStarterByFields(zabbixCatalog?.proxies, ['proxyid', 'name', 'operating_mode']),
+    proxyGroups: normalizeStarterByFields(zabbixCatalog?.proxyGroups, ['proxy_groupid', 'name', 'failover_delay']),
+    globalMacros: normalizeStarterByFields(zabbixCatalog?.globalMacros, ['globalmacroid', 'macro', 'description', 'type']),
+    hostMacros: normalizeStarterHostMacros(zabbixCatalog?.hostMacros),
+    inventoryFields: normalizeStarterByFields(zabbixCatalog?.inventoryFields ?? zabbixInventoryFields(), ['name']),
+    interfaceProfiles: normalizeStarterByFields(zabbixCatalog?.interfaceProfiles ?? zabbixInterfaceProfiles(), ['name', 'type', 'defaultPort', 'payload']),
+    hostStatuses: normalizeStarterByFields(zabbixCatalog?.hostStatuses ?? zabbixHostStatuses(), ['status', 'name']),
+    tlsPskModes: normalizeStarterByFields(zabbixCatalog?.tlsPskModes ?? zabbixTlsPskModes(), ['name', 'tls_connect', 'tls_accept']),
+    maintenances: normalizeStarterByFields(zabbixCatalog?.maintenances, ['maintenanceid', 'name', 'maintenance_type']),
+    valueMaps: normalizeStarterValueMaps(zabbixCatalog?.valueMaps),
+    cmdbuild: normalizeStarterCmdbuildCatalog(cmdbuildCatalog)
+  };
+  rules.lookups = {
+    ...(rules.lookups ?? {}),
+    hostGroups,
+    templates
+  };
+  delete rules.lookups.templateGroups;
+
+  if (!hasCompleteT4Templates(rules) && hasCompleteT4Templates(current.content)) {
+    rules.t4Templates = structuredClone(current.content.t4Templates);
+  }
+
+  const validation = await validateRulesObject(rules);
+  return {
+    generatedAt,
+    templatePath,
+    targetPath: config.Rules.RulesFilePath,
+    saved: false,
+    note: 'Starter was generated in memory only. Save it through the browser, review it locally, then publish it to the rules git repository outside monitoring-ui-api.',
+    source: {
+      topic: rules.source.topic,
+      zabbixApiEndpoint: rules.zabbix.apiEndpoint,
+      catalogSyncedAt: zabbixCatalog?.syncedAt ?? null,
+      cmdbuildCatalogSyncedAt: cmdbuildCatalog?.syncedAt ?? null,
+      zabbixCatalogSyncedAt: zabbixCatalog?.syncedAt ?? null,
+      cmdbuildCatalogCounts: {
+        classes: rules.catalog.cmdbuild.classes.length,
+        attributes: rules.catalog.cmdbuild.attributes.length,
+        lookups: rules.catalog.cmdbuild.lookups.length,
+        domains: rules.catalog.cmdbuild.domains.length
+      },
+      catalogCounts: {
+        hostGroups: rules.catalog.hostGroups.length,
+        templates: rules.catalog.templates.length,
+        templateGroups: rules.catalog.templateGroups.length,
+        proxies: rules.catalog.proxies.length,
+        proxyGroups: rules.catalog.proxyGroups.length,
+        globalMacros: rules.catalog.globalMacros.length,
+        hostMacros: rules.catalog.hostMacros.length,
+        inventoryFields: rules.catalog.inventoryFields.length,
+        maintenances: rules.catalog.maintenances.length,
+        valueMaps: rules.catalog.valueMaps.length
+      }
+    },
+    validation,
+    content: rules
+  };
+}
+
+function assertStarterCatalogCaches(cmdbuildCatalog, zabbixCatalog) {
+  const catalogs = [
+    starterCatalogStatus('cmdbuild', config.Cmdbuild.Catalog.CacheFilePath, cmdbuildCatalog, ['classes', 'attributes']),
+    starterCatalogStatus('zabbix', config.Zabbix.Catalog.CacheFilePath, zabbixCatalog, ['hostGroups', 'templates'])
+  ];
+  const missing = catalogs.filter(item => !item.ready);
+  if (missing.length === 0) {
+    return;
+  }
+
+  throw httpError(
+    409,
+    'starter_catalog_cache_empty',
+    'CMDBuild and Zabbix catalog caches must be loaded before creating an empty rules starter.',
+    { catalogs, missing: missing.map(item => item.system) }
+  );
+}
+
+function starterCatalogStatus(system, path, catalog, requiredCollections) {
+  const collectionCounts = Object.fromEntries(requiredCollections.map(collection => [
+    collection,
+    Array.isArray(catalog?.[collection]) ? catalog[collection].length : 0
+  ]));
+  const emptyCollections = Object.entries(collectionCounts)
+    .filter(([, count]) => count === 0)
+    .map(([collection]) => collection);
+  const exists = Boolean(catalog) && catalog.exists !== false;
+
+  return {
+    system,
+    path,
+    exists,
+    syncedAt: catalog?.syncedAt ?? null,
+    requiredCollections,
+    collectionCounts,
+    emptyCollections,
+    ready: exists && emptyCollections.length === 0
+  };
+}
+
+function selectCmdbuildEventsTopic() {
+  const topics = publicEventTopics();
+  return topics.find(topic =>
+    equalsIgnoreCase(topic.service, 'cmdbwebhooks2kafka')
+    && equalsIgnoreCase(topic.direction, 'output'))?.name
+    ?? topics.find(topic => topic.name.includes('cmdbuild.webhooks'))?.name
+    ?? '';
+}
+
+function hasCompleteT4Templates(rules) {
+  return [
+    'hostCreateJsonRpcRequestLines',
+    'hostUpdateJsonRpcRequestLines',
+    'hostDeleteJsonRpcRequestLines',
+    'hostGetByHostJsonRpcRequestLines'
+  ].every(templateName => Array.isArray(rules?.t4Templates?.[templateName]) && rules.t4Templates[templateName].length > 0);
+}
+
+function normalizeStarterHostGroups(items = []) {
+  return normalizeStarterByFields(items, ['name', 'groupid']);
+}
+
+function normalizeStarterTemplateGroups(items = []) {
+  return normalizeStarterByFields(items, ['name', 'groupid']);
+}
+
+function normalizeStarterTemplates(items = []) {
+  return normalizeStarterByFields(items, ['name', 'templateid', 'host']);
+}
+
+function normalizeStarterHostMacros(items = []) {
+  return normalizeStarterByFields(items, ['hostmacroid', 'hostid', 'macro', 'description', 'type', 'host']);
+}
+
+function normalizeStarterValueMaps(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map(item => ({
+      ...pickFields(item, ['valuemapid', 'name']),
+      mappings: Array.isArray(item?.mappings)
+        ? item.mappings.map(mapping => pickFields(mapping, ['type', 'value', 'newvalue']))
+        : []
+    }))
+    .filter(item => Object.keys(item).some(key => key !== 'mappings' || item.mappings.length > 0));
+}
+
+function normalizeStarterCmdbuildCatalog(catalog = {}) {
+  return {
+    syncedAt: catalog?.syncedAt ?? null,
+    cmdbuildEndpoint: catalog?.cmdbuildEndpoint ?? null,
+    classes: normalizeStarterByFields(catalog?.classes, ['name', 'description', 'active', 'parent']),
+    attributes: (Array.isArray(catalog?.attributes) ? catalog.attributes : [])
+      .map(item => ({
+        className: item.className,
+        items: normalizeStarterByFields(item.items, [
+          'name',
+          'description',
+          'type',
+          'lookupType',
+          'targetClass',
+          'domain',
+          'direction',
+          'index'
+        ])
+      }))
+      .filter(item => item.className && item.items.length > 0),
+    lookups: (Array.isArray(catalog?.lookups) ? catalog.lookups : [])
+      .map(item => ({
+        ...pickFields(item, ['name', 'description', '_id']),
+        values: normalizeStarterByFields(item.values, ['code', 'description', '_id', 'active'])
+      }))
+      .filter(item => Object.keys(item).some(key => key !== 'values' || item.values.length > 0)),
+    domains: normalizeStarterByFields(catalog?.domains, ['name', 'description', 'source', 'destination', 'cardinality'])
+  };
+}
+
+function normalizeStarterByFields(items = [], fields = []) {
+  return (Array.isArray(items) ? items : [])
+    .map(item => pickFields(item, fields))
+    .filter(item => Object.keys(item).length > 0);
+}
+
+function pickFields(item, fields) {
+  const result = {};
+  for (const field of fields) {
+    if (item?.[field] !== undefined && item[field] !== null && item[field] !== '') {
+      result[field] = item[field];
+    }
+  }
+  return result;
+}
+
+async function uploadRules(payload) {
   if (!config.Rules.AllowUpload) {
-    throw httpError(403, 'rules_upload_disabled', 'Rules upload is disabled by configuration.');
+    throw httpError(403, 'rules_local_file_disabled', 'Local rules file processing is disabled by configuration.');
   }
 
   const rules = normalizeRulesPayload(payload);
@@ -875,37 +1684,23 @@ async function uploadRules(payload, session) {
   if (!validation.valid) {
     return {
       saved: false,
-      validation
+      validation,
+      content: rules
     };
-  }
-
-  const save = payload?.save !== false && config.Rules.AllowSave;
-  if (!save) {
-    return {
-      saved: false,
-      validation
-    };
-  }
-
-  const rulesPath = resolveRepoPath(config.Rules.RulesFilePath);
-  await writeFile(rulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
-
-  let git = null;
-  if (config.Rules.AutoCommit) {
-    git = await commitRules(session);
   }
 
   return {
-    saved: true,
+    saved: false,
     path: config.Rules.RulesFilePath,
+    note: 'monitoring-ui-api does not write or commit conversion rules. Save the JSON through the browser and publish it to git outside the application.',
     validation,
-    git
+    content: rules
   };
 }
 
-async function fixRulesMapping(payload, session) {
-  if (!config.Rules.AllowUpload || !config.Rules.AllowSave) {
-    throw httpError(403, 'rules_save_disabled', 'Rules save is disabled by configuration.');
+async function fixRulesMapping(payload) {
+  if (!config.Rules.AllowUpload) {
+    throw httpError(403, 'rules_local_file_disabled', 'Local rules file processing is disabled by configuration.');
   }
 
   const operations = normalizeRulesFixOperations(payload?.operations);
@@ -923,7 +1718,8 @@ async function fixRulesMapping(payload, session) {
       saved: false,
       path: config.Rules.RulesFilePath,
       validation,
-      changes
+      changes,
+      content: rules
     };
   }
 
@@ -932,26 +1728,18 @@ async function fixRulesMapping(payload, session) {
       saved: false,
       path: config.Rules.RulesFilePath,
       validation,
-      changes
+      changes,
+      content: rules
     };
   }
 
-  const rulesPath = resolveRepoPath(config.Rules.RulesFilePath);
-  const backupPath = await backupRulesFile(rulesPath);
-  await writeFile(rulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
-
-  let git = null;
-  if (config.Rules.AutoCommit) {
-    git = await commitRules(session);
-  }
-
   return {
-    saved: true,
+    saved: false,
     path: config.Rules.RulesFilePath,
-    backupPath: relative(repositoryRoot, backupPath),
+    note: 'Rules were changed in memory only. Save the returned JSON through the browser and publish it to git outside monitoring-ui-api.',
     validation,
     changes,
-    git
+    content: rules
   };
 }
 
@@ -1093,47 +1881,10 @@ function sameNormalized(left, right) {
   return normalizeToken(left) === normalizeToken(right);
 }
 
-async function backupRulesFile(rulesPath) {
-  const backupDir = join(dirname(rulesPath), '.backup');
-  await mkdir(backupDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = join(backupDir, `${basename(rulesPath)}.${timestamp}.bak`);
-  await copyFile(rulesPath, backupPath);
-  return backupPath;
-}
-
-async function readRulesHistory() {
-  const result = await runGit(['log', '--oneline', '--', config.Rules.RulesFilePath]);
-  return {
-    available: result.exitCode === 0,
-    items: result.exitCode === 0
-      ? result.stdout.trim().split('\n').filter(Boolean).map(line => {
-        const [commit, ...message] = line.split(' ');
-        return { commit, message: message.join(' ') };
-      })
-      : [],
-    error: result.exitCode === 0 ? null : result.stderr
-  };
-}
-
-async function commitRules(session) {
-  const add = await runGit(['add', config.Rules.RulesFilePath]);
-  if (add.exitCode !== 0) {
-    return { committed: false, error: add.stderr };
-  }
-
-  const message = `${config.Rules.CommitMessage}\n\nUser: ${session.cmdbuild?.username ?? 'unknown'}\nTimestamp: ${new Date().toISOString()}`;
-  const commit = await runGit(['commit', '-m', message]);
-  return {
-    committed: commit.exitCode === 0,
-    stdout: commit.stdout,
-    stderr: commit.stderr
-  };
-}
-
 async function syncZabbixCatalog(session) {
-  const apiEndpoint = session.zabbix.apiEndpoint || config.Zabbix.ApiEndpoint;
-  const token = await resolveZabbixToken(apiEndpoint, session.zabbix);
+  const credentials = requireZabbixSessionCredentials(session);
+  const apiEndpoint = credentials.apiEndpoint || config.Zabbix.ApiEndpoint;
+  const token = await resolveZabbixToken(apiEndpoint, credentials);
   const hostGroups = await zabbixCall(apiEndpoint, token, 'hostgroup.get', {
     output: ['groupid', 'name']
   });
@@ -1194,8 +1945,9 @@ async function syncZabbixCatalog(session) {
 }
 
 async function syncCmdbuildCatalog(session) {
-  const baseUrl = withoutTrailingSlash(session.cmdbuild.baseUrl || config.Cmdbuild.BaseUrl);
-  const classesResult = await cmdbuildGet(baseUrl, '/classes', session.cmdbuild);
+  const credentials = requireCmdbuildSessionCredentials(session);
+  const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const classesResult = await cmdbuildGet(baseUrl, '/classes', credentials);
   const classes = normalizeCmdbuildList(classesResult).map(item => ({
     name: item.name ?? item._id ?? item.id,
     description: item.description ?? item.label ?? '',
@@ -1210,7 +1962,7 @@ async function syncCmdbuildCatalog(session) {
   const attributes = [];
   for (const cmdbClass of selectedClasses.slice(0, 250)) {
     try {
-      const attributesResult = await cmdbuildGet(baseUrl, `/classes/${encodeURIComponent(cmdbClass.name)}/attributes`, session.cmdbuild);
+      const attributesResult = await cmdbuildGet(baseUrl, `/classes/${encodeURIComponent(cmdbClass.name)}/attributes`, credentials);
       attributes.push({
         className: cmdbClass.name,
         items: normalizeCmdbuildList(attributesResult)
@@ -1227,7 +1979,7 @@ async function syncCmdbuildCatalog(session) {
   let lookups = [];
   if (config.Cmdbuild.Catalog.IncludeLookupValues) {
     try {
-      const lookupTypes = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/lookup_types', session.cmdbuild));
+      const lookupTypes = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/lookup_types', credentials));
       for (const lookup of lookupTypes.slice(0, 500)) {
         const lookupName = lookup.name ?? lookup._id ?? lookup.id;
         if (isBlank(lookupName)) {
@@ -1235,7 +1987,7 @@ async function syncCmdbuildCatalog(session) {
         }
 
         try {
-          const valuesResult = await cmdbuildGet(baseUrl, `/lookup_types/${encodeURIComponent(lookupName)}/values`, session.cmdbuild);
+          const valuesResult = await cmdbuildGet(baseUrl, `/lookup_types/${encodeURIComponent(lookupName)}/values`, credentials);
           lookups.push({
             ...lookup,
             name: lookup.name ?? lookupName,
@@ -1255,16 +2007,174 @@ async function syncCmdbuildCatalog(session) {
     }
   }
 
+  let domains = [];
+  try {
+    domains = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/domains', credentials))
+      .map(item => ({
+        name: item.name ?? item._id ?? item.id ?? '',
+        description: item.description ?? item.label ?? item._description ?? '',
+        source: item.source ?? item.sourceClass ?? item._sourceType ?? item.sourceType ?? null,
+        destination: item.destination ?? item.destinationClass ?? item._destinationType ?? item.destinationType
+          ?? item.target ?? item.targetClass ?? item._targetType ?? item.targetType ?? null,
+        cardinality: item.cardinality ?? item.type ?? '',
+        raw: item
+      }))
+      .filter(item => !isBlank(item.name) || !isBlank(item.source) || !isBlank(item.destination));
+  } catch {
+    domains = [];
+  }
+
   const catalog = {
     syncedAt: new Date().toISOString(),
     cmdbuildEndpoint: baseUrl,
+    maxTraversalDepth: cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth),
     classes: selectedClasses,
     attributes,
-    lookups
+    lookups,
+    domains
   };
   await writeCatalogCache(config.Cmdbuild.Catalog.CacheFilePath, catalog);
 
   return catalog;
+}
+
+async function readCmdbuildWebhooks(session) {
+  const credentials = requireCmdbuildSessionCredentials(session);
+  const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const result = await cmdbuildGet(baseUrl, '/etl/webhook/?detailed=true', credentials, {
+    'CMDBuild-View': 'admin'
+  });
+
+  return {
+    loadedAt: new Date().toISOString(),
+    cmdbuildEndpoint: baseUrl,
+    managedPrefix: managedCmdbuildWebhookPrefix,
+    items: normalizeCmdbuildList(result).map(normalizeCmdbuildWebhook).filter(item => item.code)
+  };
+}
+
+async function applyCmdbuildWebhookOperations(session, payload) {
+  const operations = Array.isArray(payload?.operations)
+    ? payload.operations.filter(operation => operation?.selected !== false)
+    : [];
+  if (operations.length === 0) {
+    throw httpError(400, 'empty_webhook_operations', 'No selected CMDBuild webhook operations were provided.');
+  }
+
+  const credentials = requireCmdbuildSessionCredentials(session);
+  const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const results = [];
+  for (const operation of operations) {
+    const action = String(operation?.action ?? '').trim().toLowerCase();
+    const desiredInput = isPlainObject(operation?.desired) ? operation.desired : {};
+    const current = normalizeCmdbuildWebhook(operation?.current ?? {});
+    const code = firstNonBlank(desiredInput.code, desiredInput._id, desiredInput.id, current.code, operation?.code);
+    if (!String(code).startsWith(managedCmdbuildWebhookPrefix)) {
+      throw httpError(400, 'unsafe_webhook_operation', `Webhook '${code}' is outside managed prefix '${managedCmdbuildWebhookPrefix}'.`);
+    }
+
+    if (action === 'create') {
+      const desired = normalizeCmdbuildWebhookPayload(desiredInput);
+      await cmdbuildRequest(baseUrl, '/etl/webhook/', credentials, {
+        method: 'POST',
+        body: desired,
+        headers: { 'CMDBuild-View': 'admin' }
+      });
+      results.push({ action, code, status: 'applied' });
+      continue;
+    }
+
+    if (action === 'update') {
+      const desired = normalizeCmdbuildWebhookPayload(desiredInput);
+      const id = encodeURIComponent(current._id || current.id || code);
+      await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
+        method: 'PUT',
+        body: desired,
+        headers: { 'CMDBuild-View': 'admin' }
+      });
+      results.push({ action, code, status: 'applied' });
+      continue;
+    }
+
+    if (action === 'delete') {
+      const id = encodeURIComponent(current._id || current.id || code);
+      await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
+        method: 'DELETE',
+        headers: { 'CMDBuild-View': 'admin' }
+      });
+      results.push({ action, code, status: 'applied' });
+      continue;
+    }
+
+    throw httpError(400, 'unsupported_webhook_operation', `Unsupported webhook operation '${action}'.`);
+  }
+
+  return {
+    appliedAt: new Date().toISOString(),
+    cmdbuildEndpoint: baseUrl,
+    count: results.length,
+    results
+  };
+}
+
+function normalizeCmdbuildWebhook(item = {}) {
+  const code = firstNonBlank(item.code, item._id, item.id, item.name);
+  return {
+    _id: firstNonBlank(item._id, item.id, code),
+    id: firstNonBlank(item.id, item._id, code),
+    code,
+    description: item.description ?? '',
+    event: item.event ?? '',
+    target: item.target ?? '',
+    method: String(item.method ?? 'post').toLowerCase(),
+    url: item.url ?? '',
+    headers: parseJsonObject(item.headers),
+    body: parseJsonObject(item.body),
+    language: item.language ?? '',
+    active: item.active !== false,
+    raw: item
+  };
+}
+
+function normalizeCmdbuildWebhookPayload(item = {}) {
+  const code = firstNonBlank(item.code, item._id, item.id, item.name);
+  if (isBlank(code)) {
+    throw httpError(400, 'invalid_webhook_payload', 'Webhook code is required.');
+  }
+
+  return {
+    code,
+    description: item.description ?? '',
+    event: item.event ?? '',
+    target: item.target ?? '',
+    method: String(item.method ?? 'post').toLowerCase(),
+    url: item.url ?? '',
+    headers: parseJsonObject(item.headers),
+    body: parseJsonObject(item.body),
+    language: item.language ?? '',
+    active: item.active !== false
+  };
+}
+
+function parseJsonObject(value) {
+  if (isPlainObject(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && !isBlank(value)) {
+    try {
+      const parsed = JSON.parse(value);
+      return isPlainObject(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function firstNonBlank(...values) {
+  return values.find(value => !isBlank(value)) ?? '';
 }
 
 async function resolveZabbixToken(apiEndpoint, credentials) {
@@ -1287,6 +2197,50 @@ async function resolveZabbixToken(apiEndpoint, credentials) {
   }
 
   return result.result;
+}
+
+function requireZabbixSessionCredentials(session) {
+  session.zabbix = {
+    ...(session.zabbix ?? {}),
+    apiEndpoint: session.zabbix?.apiEndpoint || config.Zabbix.ApiEndpoint || ''
+  };
+
+  const configuredToken = currentZabbixApiToken(session);
+  if (!isBlank(configuredToken)) {
+    session.zabbix.apiToken = configuredToken;
+    return session.zabbix;
+  }
+
+  if (!isBlank(session.zabbix.username) && !isBlank(session.zabbix.password)) {
+    return session.zabbix;
+  }
+
+  throw httpError(428, 'credentials_required', 'Zabbix credentials are required for this operation.', {
+    service: 'zabbix',
+    apiEndpoint: session.zabbix.apiEndpoint || config.Zabbix.ApiEndpoint
+  });
+}
+
+function requireCmdbuildSessionCredentials(session) {
+  session.cmdbuild = {
+    ...(session.cmdbuild ?? {}),
+    baseUrl: session.cmdbuild?.baseUrl || config.Cmdbuild.BaseUrl || ''
+  };
+
+  if (!isBlank(session.cmdbuild.username) && !isBlank(session.cmdbuild.password)) {
+    return session.cmdbuild;
+  }
+
+  throw httpError(428, 'credentials_required', 'CMDBuild credentials are required for this operation.', {
+    service: 'cmdbuild',
+    baseUrl: session.cmdbuild.baseUrl || config.Cmdbuild.BaseUrl
+  });
+}
+
+function currentZabbixApiToken(session) {
+  const serviceAccount = config.Zabbix.ServiceAccount ?? {};
+  return [config.Zabbix.ApiToken, config.Zabbix.apiToken, serviceAccount.ApiToken, serviceAccount.apiToken]
+    .find(value => !isBlank(value)) ?? '';
 }
 
 async function zabbixCall(apiEndpoint, token, method, params) {
@@ -1325,12 +2279,23 @@ async function zabbixRawCall(apiEndpoint, token, body) {
   return json;
 }
 
-async function cmdbuildGet(baseUrl, path, credentials) {
+async function cmdbuildGet(baseUrl, path, credentials, headers = {}) {
+  return cmdbuildRequest(baseUrl, path, credentials, { headers });
+}
+
+async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
+  const authorization = !isBlank(credentials.accessToken)
+    ? `Bearer ${credentials.accessToken}`
+    : `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`;
   const response = await fetch(`${baseUrl}${path}`, {
+    method: options.method ?? 'GET',
     headers: {
       accept: 'application/json',
-      authorization: `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
+      ...(options.body ? { 'content-type': 'application/json' } : {}),
+      ...(options.headers ?? {}),
+      authorization
     },
+    body: options.body ? JSON.stringify(options.body) : undefined,
     signal: AbortSignal.timeout(10000)
   });
 
@@ -1338,14 +2303,28 @@ async function cmdbuildGet(baseUrl, path, credentials) {
     throw httpError(502, 'cmdbuild_api_error', `CMDBuild returned HTTP ${response.status} for ${path}.`);
   }
 
-  return response.json();
+  if (response.status === 204) {
+    return null;
+  }
+
+  const text = await response.text();
+  if (isBlank(text)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 async function saveIdpSettings(payload) {
   const persisted = await readPersistedUiSettings();
+  const provider = normalizeIdpProvider(payload?.provider ?? configValue(config.Idp, 'Provider') ?? 'SAML2');
   const safePayload = {
     idp: {
-      provider: 'SAML2',
+      provider,
       enabled: Boolean(payload?.enabled),
       metadataUrl: payload?.metadataUrl ?? '',
       entityId: payload?.entityId ?? '',
@@ -1364,23 +2343,136 @@ async function saveIdpSettings(payload) {
       requireEncryptedAssertions: payload?.requireEncryptedAssertions ?? false,
       clockSkewSeconds: Number(payload?.clockSkewSeconds ?? configValue(config.Idp, 'ClockSkewSeconds') ?? 120),
       attributeMapping: payload?.attributeMapping ?? config.Idp.AttributeMapping,
-      roleMapping: payload?.roleMapping ?? config.Idp.RoleMapping,
+      roleMapping: normalizeRoleMappingPayload(payload?.roleMapping ?? config.Idp.RoleMapping),
+      oauth2: normalizeOauth2SettingsPayload(payload?.oauth2),
+      ldap: normalizeLdapSettingsPayload(payload?.ldap),
       savedAt: new Date().toISOString()
     }
   };
 
   Object.assign(persisted, safePayload);
   await writePersistedUiSettings(persisted);
-  Object.assign(config.Idp, safePayload.idp, { Enabled: safePayload.idp.enabled });
-  config.Auth.UseIdp = safePayload.idp.enabled;
+  applyIdpSettings(config, safePayload.idp);
 
   return publicIdpSettings();
+}
+
+function applyIdpSettings(targetConfig, idp = {}) {
+  const current = targetConfig.Idp ?? {};
+  const oauth2 = normalizeOauth2SettingsPayload(idp.oauth2 ?? idp.OAuth2 ?? {}, current.OAuth2 ?? current.oauth2 ?? {});
+  const ldap = normalizeLdapSettingsPayload(idp.ldap ?? idp.Ldap ?? {}, current.Ldap ?? current.ldap ?? {});
+  const provider = normalizeIdpProvider(idp.provider ?? idp.Provider ?? current.Provider ?? current.provider ?? 'SAML2');
+
+  targetConfig.Idp = {
+    ...current,
+    Provider: provider === 'oauth2' ? 'OAuth2' : provider === 'ldap' ? 'LDAP' : 'SAML2',
+    Enabled: Boolean(idp.enabled ?? idp.Enabled),
+    MetadataUrl: idp.metadataUrl ?? idp.MetadataUrl ?? current.MetadataUrl ?? current.metadataUrl ?? '',
+    EntityId: idp.entityId ?? idp.EntityId ?? current.EntityId ?? current.entityId ?? '',
+    SsoUrl: idp.ssoUrl ?? idp.SsoUrl ?? current.SsoUrl ?? current.ssoUrl ?? '',
+    SloUrl: idp.sloUrl ?? idp.SloUrl ?? current.SloUrl ?? current.sloUrl ?? '',
+    SloCallbackUrl: idp.sloCallbackUrl ?? idp.SloCallbackUrl ?? current.SloCallbackUrl ?? current.sloCallbackUrl ?? '',
+    IdpX509Certificate: idp.idpX509Certificate ?? idp.IdpX509Certificate ?? current.IdpX509Certificate ?? current.idpX509Certificate ?? '',
+    SpEntityId: idp.spEntityId ?? idp.SpEntityId ?? current.SpEntityId ?? current.spEntityId ?? '',
+    AcsUrl: idp.acsUrl ?? idp.AcsUrl ?? current.AcsUrl ?? current.acsUrl ?? '',
+    SpCertificate: idp.spCertificate ?? idp.SpCertificate ?? current.SpCertificate ?? current.spCertificate ?? '',
+    SpPrivateKey: idp.spPrivateKey ?? idp.SpPrivateKey ?? current.SpPrivateKey ?? current.spPrivateKey ?? '',
+    NameIdFormat: idp.nameIdFormat ?? idp.NameIdFormat ?? current.NameIdFormat ?? current.nameIdFormat ?? '',
+    AuthnRequestBinding: idp.authnRequestBinding ?? idp.AuthnRequestBinding ?? current.AuthnRequestBinding ?? current.authnRequestBinding ?? 'HTTP-Redirect',
+    RequireSignedAssertions: idp.requireSignedAssertions ?? idp.RequireSignedAssertions ?? current.RequireSignedAssertions ?? current.requireSignedAssertions ?? true,
+    RequireSignedResponses: idp.requireSignedResponses ?? idp.RequireSignedResponses ?? current.RequireSignedResponses ?? current.requireSignedResponses ?? false,
+    RequireEncryptedAssertions: idp.requireEncryptedAssertions ?? idp.RequireEncryptedAssertions ?? current.RequireEncryptedAssertions ?? current.requireEncryptedAssertions ?? false,
+    ClockSkewSeconds: Number(idp.clockSkewSeconds ?? idp.ClockSkewSeconds ?? current.ClockSkewSeconds ?? current.clockSkewSeconds ?? 120),
+    AttributeMapping: idp.attributeMapping ?? idp.AttributeMapping ?? current.AttributeMapping ?? current.attributeMapping ?? {},
+    RoleMapping: normalizeRoleMappingPayload(idp.roleMapping ?? idp.RoleMapping ?? current.RoleMapping ?? current.roleMapping ?? {}),
+    OAuth2: {
+      AuthorizationUrl: oauth2.authorizationUrl,
+      TokenUrl: oauth2.tokenUrl,
+      UserInfoUrl: oauth2.userInfoUrl,
+      ClientId: oauth2.clientId,
+      ClientSecret: oauth2.clientSecret,
+      RedirectUri: oauth2.redirectUri,
+      Scopes: oauth2.scopes,
+      LoginClaim: oauth2.loginClaim,
+      EmailClaim: oauth2.emailClaim,
+      DisplayNameClaim: oauth2.displayNameClaim,
+      GroupsClaim: oauth2.groupsClaim
+    },
+    Ldap: {
+      Protocol: ldap.protocol,
+      Host: ldap.host,
+      Port: ldap.port,
+      BaseDn: ldap.baseDn,
+      BindDn: ldap.bindDn,
+      BindPassword: ldap.bindPassword,
+      UserDnTemplate: ldap.userDnTemplate,
+      UserSearchBase: ldap.userSearchBase,
+      UserFilter: ldap.userFilter,
+      GroupSearchBase: ldap.groupSearchBase,
+      GroupFilter: ldap.groupFilter,
+      GroupNameAttribute: ldap.groupNameAttribute,
+      LoginAttribute: ldap.loginAttribute,
+      EmailAttribute: ldap.emailAttribute,
+      DisplayNameAttribute: ldap.displayNameAttribute,
+      GroupsAttribute: ldap.groupsAttribute,
+      TlsRejectUnauthorized: ldap.tlsRejectUnauthorized
+    }
+  };
+  targetConfig.Auth.UseIdp = targetConfig.Idp.Enabled;
+}
+
+function normalizeOauth2SettingsPayload(payload = {}, existingSettings = null) {
+  const existing = existingSettings ?? config.Idp.OAuth2 ?? config.Idp.oauth2 ?? {};
+  return {
+    authorizationUrl: payload.authorizationUrl ?? existing.AuthorizationUrl ?? existing.authorizationUrl ?? '',
+    tokenUrl: payload.tokenUrl ?? existing.TokenUrl ?? existing.tokenUrl ?? '',
+    userInfoUrl: payload.userInfoUrl ?? existing.UserInfoUrl ?? existing.userInfoUrl ?? '',
+    clientId: payload.clientId ?? existing.ClientId ?? existing.clientId ?? '',
+    clientSecret: isBlank(payload.clientSecret)
+      ? existing.ClientSecret ?? existing.clientSecret ?? ''
+      : payload.clientSecret,
+    redirectUri: payload.redirectUri ?? existing.RedirectUri ?? existing.redirectUri ?? 'http://localhost:5090/auth/oauth2/callback',
+    scopes: payload.scopes ?? existing.Scopes ?? existing.scopes ?? 'openid profile email',
+    loginClaim: payload.loginClaim ?? existing.LoginClaim ?? existing.loginClaim ?? 'preferred_username',
+    emailClaim: payload.emailClaim ?? existing.EmailClaim ?? existing.emailClaim ?? 'email',
+    displayNameClaim: payload.displayNameClaim ?? existing.DisplayNameClaim ?? existing.displayNameClaim ?? 'name',
+    groupsClaim: payload.groupsClaim ?? existing.GroupsClaim ?? existing.groupsClaim ?? 'groups'
+  };
+}
+
+function normalizeLdapSettingsPayload(payload = {}, existingSettings = null) {
+  const existing = existingSettings ?? config.Idp.Ldap ?? config.Idp.ldap ?? {};
+  const protocol = normalizeLdapProtocol(payload.protocol ?? existing.Protocol ?? existing.protocol ?? 'ldap');
+  const defaultPort = protocol === 'ldaps' ? 636 : 389;
+  const port = Number(payload.port ?? existing.Port ?? existing.port ?? defaultPort);
+  return {
+    protocol,
+    host: payload.host ?? existing.Host ?? existing.host ?? '',
+    port: Number.isFinite(port) && port > 0 ? port : defaultPort,
+    baseDn: payload.baseDn ?? existing.BaseDn ?? existing.baseDn ?? '',
+    bindDn: payload.bindDn ?? existing.BindDn ?? existing.bindDn ?? '',
+    bindPassword: isBlank(payload.bindPassword)
+      ? existing.BindPassword ?? existing.bindPassword ?? ''
+      : payload.bindPassword,
+    userDnTemplate: payload.userDnTemplate ?? existing.UserDnTemplate ?? existing.userDnTemplate ?? '',
+    userSearchBase: payload.userSearchBase ?? existing.UserSearchBase ?? existing.userSearchBase ?? '',
+    userFilter: payload.userFilter ?? existing.UserFilter ?? existing.userFilter ?? '(|(sAMAccountName={login})(userPrincipalName={login})(uid={login}))',
+    groupSearchBase: payload.groupSearchBase ?? existing.GroupSearchBase ?? existing.groupSearchBase ?? '',
+    groupFilter: payload.groupFilter ?? existing.GroupFilter ?? existing.groupFilter ?? '(|(member={dn})(memberUid={login}))',
+    groupNameAttribute: payload.groupNameAttribute ?? existing.GroupNameAttribute ?? existing.groupNameAttribute ?? 'cn',
+    loginAttribute: payload.loginAttribute ?? existing.LoginAttribute ?? existing.loginAttribute ?? 'sAMAccountName',
+    emailAttribute: payload.emailAttribute ?? existing.EmailAttribute ?? existing.emailAttribute ?? 'mail',
+    displayNameAttribute: payload.displayNameAttribute ?? existing.DisplayNameAttribute ?? existing.displayNameAttribute ?? 'displayName',
+    groupsAttribute: payload.groupsAttribute ?? existing.GroupsAttribute ?? existing.groupsAttribute ?? 'memberOf',
+    tlsRejectUnauthorized: payload.tlsRejectUnauthorized !== false
+  };
 }
 
 async function saveRuntimeSettings(payload) {
   const persisted = await readPersistedUiSettings();
   const runtime = normalizeRuntimeSettingsPayload(payload);
 
+  delete persisted.auth;
   Object.assign(persisted, runtime);
   await writePersistedUiSettings(persisted);
   applyRuntimeSettings(config, runtime);
@@ -1389,41 +2481,24 @@ async function saveRuntimeSettings(payload) {
 }
 
 function normalizeRuntimeSettingsPayload(payload = {}) {
-  const localDefaults = payload.auth?.localLoginDefaults ?? {};
   const cmdbuild = payload.cmdbuild ?? {};
   const zabbix = payload.zabbix ?? {};
-  const serviceAccount = {
-    cmdbuild: cmdbuild.serviceAccount ?? {},
-    zabbix: zabbix.serviceAccount ?? {}
-  };
+  const rules = payload.rules ?? {};
+  const currentMaxTraversalDepth = cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth);
 
   return {
-    auth: {
-      localLoginDefaults: {
-        enabled: Boolean(localDefaults.enabled),
-        cmdbuildBaseUrl: localDefaults.cmdbuildBaseUrl ?? cmdbuild.baseUrl ?? '',
-        cmdbuildUsername: localDefaults.cmdbuildUsername ?? '',
-        cmdbuildPassword: localDefaults.cmdbuildPassword ?? '',
-        zabbixApiEndpoint: localDefaults.zabbixApiEndpoint ?? zabbix.apiEndpoint ?? '',
-        zabbixUsername: localDefaults.zabbixUsername ?? '',
-        zabbixPassword: localDefaults.zabbixPassword ?? '',
-        zabbixApiToken: localDefaults.zabbixApiToken ?? ''
-      }
-    },
     cmdbuild: {
       baseUrl: cmdbuild.baseUrl ?? '',
-      serviceAccount: {
-        username: serviceAccount.cmdbuild.username ?? '',
-        password: serviceAccount.cmdbuild.password ?? ''
-      }
+      maxTraversalDepth: cmdbuildTraversalMaxDepth(cmdbuild.maxTraversalDepth ?? currentMaxTraversalDepth)
     },
     zabbix: {
       apiEndpoint: zabbix.apiEndpoint ?? '',
-      serviceAccount: {
-        user: serviceAccount.zabbix.user ?? '',
-        password: serviceAccount.zabbix.password ?? '',
-        apiToken: serviceAccount.zabbix.apiToken ?? ''
-      }
+      apiToken: zabbix.apiToken ?? zabbix.serviceAccount?.apiToken ?? ''
+    },
+    rules: {
+      rulesFilePath: stringOrDefault(rules.rulesFilePath, config.Rules?.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json'),
+      readFromGit: Boolean(rules.readFromGit),
+      repositoryUrl: rules.repositoryUrl ?? ''
     },
     eventBrowser: {
       enabled: Boolean(payload.eventBrowser?.enabled),
@@ -1442,37 +2517,34 @@ function normalizeRuntimeSettingsPayload(payload = {}) {
 }
 
 function applyRuntimeSettings(target, persisted = {}) {
-  if (persisted.auth?.localLoginDefaults) {
-    const defaults = persisted.auth.localLoginDefaults;
-    target.Auth.LocalLoginDefaults = {
-      Enabled: Boolean(defaults.enabled),
-      CmdbuildBaseUrl: defaults.cmdbuildBaseUrl ?? '',
-      CmdbuildUsername: defaults.cmdbuildUsername ?? '',
-      CmdbuildPassword: defaults.cmdbuildPassword ?? '',
-      ZabbixApiEndpoint: defaults.zabbixApiEndpoint ?? '',
-      ZabbixUsername: defaults.zabbixUsername ?? '',
-      ZabbixPassword: defaults.zabbixPassword ?? '',
-      ZabbixApiToken: defaults.zabbixApiToken ?? ''
-    };
-  }
-
   if (persisted.cmdbuild) {
+    target.Cmdbuild ??= {};
+    target.Cmdbuild.Catalog ??= {};
     target.Cmdbuild.BaseUrl = persisted.cmdbuild.baseUrl ?? target.Cmdbuild.BaseUrl;
-    target.Cmdbuild.ServiceAccount = {
-      ...(target.Cmdbuild.ServiceAccount ?? {}),
-      Username: persisted.cmdbuild.serviceAccount?.username ?? target.Cmdbuild.ServiceAccount?.Username ?? '',
-      Password: persisted.cmdbuild.serviceAccount?.password ?? target.Cmdbuild.ServiceAccount?.Password ?? ''
-    };
+    target.Cmdbuild.Catalog.MaxTraversalDepth = cmdbuildTraversalMaxDepth(
+      persisted.cmdbuild.maxTraversalDepth ?? target.Cmdbuild.Catalog.MaxTraversalDepth);
+    delete target.Cmdbuild.UseIdp;
+    delete target.Cmdbuild.ServiceAccount;
   }
 
   if (persisted.zabbix) {
     target.Zabbix.ApiEndpoint = persisted.zabbix.apiEndpoint ?? target.Zabbix.ApiEndpoint;
-    target.Zabbix.ServiceAccount = {
-      ...(target.Zabbix.ServiceAccount ?? {}),
-      User: persisted.zabbix.serviceAccount?.user ?? target.Zabbix.ServiceAccount?.User ?? '',
-      Password: persisted.zabbix.serviceAccount?.password ?? target.Zabbix.ServiceAccount?.Password ?? '',
-      ApiToken: persisted.zabbix.serviceAccount?.apiToken ?? target.Zabbix.ServiceAccount?.ApiToken ?? ''
-    };
+    target.Zabbix.ApiToken = persisted.zabbix.apiToken
+      ?? persisted.zabbix.serviceAccount?.apiToken
+      ?? target.Zabbix.ApiToken
+      ?? target.Zabbix.ServiceAccount?.ApiToken
+      ?? '';
+    delete target.Zabbix.UseIdp;
+    delete target.Zabbix.ServiceAccount;
+  }
+
+  if (persisted.rules) {
+    target.Rules ??= {};
+    target.Rules.RulesFilePath = stringOrDefault(
+      persisted.rules.rulesFilePath,
+      target.Rules.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json');
+    target.Rules.ReadFromGit = Boolean(persisted.rules.readFromGit);
+    target.Rules.RepositoryUrl = persisted.rules.repositoryUrl ?? target.Rules.RepositoryUrl ?? '';
   }
 
   if (persisted.eventBrowser) {
@@ -1514,11 +2586,9 @@ async function writePersistedUiSettings(settings) {
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
 }
 
-function createSamlSession(profile) {
-  const identity = samlIdentityFromProfile(profile);
+async function createSamlSession(profile) {
+  const identity = await enrichIdentityWithLdapGroups(samlIdentityFromProfile(profile));
   const roles = rolesFromSamlGroups(identity.groups);
-  const cmdbuildServiceAccount = config.Cmdbuild.ServiceAccount ?? {};
-  const zabbixServiceAccount = config.Zabbix.ServiceAccount ?? {};
   const session = {
     id: randomUUID(),
     authMethod: 'saml2',
@@ -1533,20 +2603,127 @@ function createSamlSession(profile) {
       sessionIndex: profile.sessionIndex,
       profile
     },
-    cmdbuild: {
-      baseUrl: config.Cmdbuild.BaseUrl,
-      username: cmdbuildServiceAccount.Username ?? cmdbuildServiceAccount.username ?? '',
-      password: cmdbuildServiceAccount.Password ?? cmdbuildServiceAccount.password ?? ''
-    },
-    zabbix: {
-      apiEndpoint: config.Zabbix.ApiEndpoint,
-      username: zabbixServiceAccount.User ?? zabbixServiceAccount.user ?? '',
-      password: zabbixServiceAccount.Password ?? zabbixServiceAccount.password ?? '',
-      apiToken: zabbixServiceAccount.ApiToken ?? zabbixServiceAccount.apiToken ?? ''
-    }
+    cmdbuild: buildLocalCmdbuildSessionCredentials(),
+    zabbix: buildLocalZabbixSessionCredentials()
   };
 
   return session;
+}
+
+async function createOauth2Session(claims, tokenSet) {
+  const settings = resolveOauth2Settings();
+  const identity = {
+    login: firstClaimValue(claims, [settings.loginClaim, 'preferred_username', 'upn', 'email', 'sub']) ?? '',
+    email: firstClaimValue(claims, [settings.emailClaim, 'email', 'mail']) ?? '',
+    displayName: firstClaimValue(claims, [settings.displayNameClaim, 'name', 'displayName', 'cn']) ?? '',
+    groups: normalizeStringArray(firstClaimRawValue(claims, [settings.groupsClaim, 'groups', 'roles', 'memberOf']))
+  };
+  identity.displayName ||= identity.login;
+  const identityWithGroups = await enrichIdentityWithLdapGroups(identity);
+
+  return {
+    id: randomUUID(),
+    authMethod: 'oauth2',
+    createdAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
+    roles: rolesFromSamlGroups(identityWithGroups.groups),
+    identity: identityWithGroups,
+    oauth2: {
+      accessToken: tokenSet.access_token ?? '',
+      refreshToken: tokenSet.refresh_token ?? '',
+      tokenType: tokenSet.token_type ?? 'Bearer',
+      expiresAt: tokenSet.expires_in ? new Date(Date.now() + Number(tokenSet.expires_in) * 1000).toISOString() : ''
+    },
+    cmdbuild: buildLocalCmdbuildSessionCredentials(),
+    zabbix: buildLocalZabbixSessionCredentials()
+  };
+}
+
+async function loginWithLdap(payload) {
+  const username = String(payload?.username ?? '').trim();
+  const password = String(payload?.password ?? '');
+  if (isBlank(username) || isBlank(password)) {
+    throw httpError(400, 'missing_ldap_credentials', 'AD/LDAP username and password are required.');
+  }
+
+  const identity = await authenticateLdapUser(username, password);
+  return {
+    id: randomUUID(),
+    authMethod: 'ldap',
+    createdAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
+    roles: rolesFromSamlGroups(identity.groups),
+    identity,
+    cmdbuild: buildLocalCmdbuildSessionCredentials(),
+    zabbix: buildLocalZabbixSessionCredentials()
+  };
+}
+
+async function enrichIdentityWithLdapGroups(identity) {
+  const login = String(identity?.login ?? '').trim();
+  if (isBlank(login)) {
+    return identity;
+  }
+
+  const settings = normalizeLdapSettingsPayload(config.Idp.Ldap ?? config.Idp.ldap ?? {});
+  if (!isLdapGroupLookupConfigured(settings)) {
+    return identity;
+  }
+
+  const groups = await readLdapGroupsForIdentity(login, settings);
+  return {
+    ...identity,
+    groups
+  };
+}
+
+function isLdapGroupLookupConfigured(settings) {
+  return !isBlank(settings.host)
+    && !isBlank(settings.userSearchBase || settings.baseDn)
+    && !isBlank(settings.groupSearchBase || settings.baseDn)
+    && !isBlank(settings.bindDn)
+    && !isBlank(settings.bindPassword);
+}
+
+async function readLdapGroupsForIdentity(username, settings) {
+  const client = new LdapClient({
+    url: `${settings.protocol}://${settings.host}:${settings.port}`,
+    timeout: 10000,
+    connectTimeout: 10000,
+    tlsOptions: {
+      rejectUnauthorized: settings.tlsRejectUnauthorized
+    }
+  });
+
+  try {
+    await client.bind(settings.bindDn, settings.bindPassword);
+    const userEntry = await findLdapUser(client, settings, username);
+    const userDn = ldapEntryDn(userEntry) || renderTemplate(settings.userDnTemplate, { login: username });
+    return await readLdapGroups(client, settings, userEntry, username, userDn);
+  } finally {
+    try {
+      await client.unbind();
+    } catch {
+      // ignore LDAP disconnect errors
+    }
+  }
+}
+
+function buildLocalCmdbuildSessionCredentials() {
+  return {
+    baseUrl: config.Cmdbuild.BaseUrl ?? '',
+    username: '',
+    password: ''
+  };
+}
+
+function buildLocalZabbixSessionCredentials() {
+  return {
+    apiEndpoint: config.Zabbix.ApiEndpoint ?? '',
+    username: '',
+    password: '',
+    apiToken: config.Zabbix.ApiToken ?? config.Zabbix.apiToken ?? config.Zabbix.ServiceAccount?.ApiToken ?? config.Zabbix.ServiceAccount?.apiToken ?? ''
+  };
 }
 
 function samlIdentityFromProfile(profile) {
@@ -1590,21 +2767,185 @@ function samlIdentityFromProfile(profile) {
 
 function rolesFromSamlGroups(groups) {
   const normalizedGroups = new Set(groups.map(group => group.toLowerCase()));
-  const roleMapping = config.Idp.RoleMapping ?? config.Idp.roleMapping ?? {};
+  const roleMapping = normalizeRoleMappingPayload(config.Idp.RoleMapping ?? config.Idp.roleMapping ?? {});
   const roles = new Set();
   for (const [role, expectedGroups] of Object.entries(roleMapping)) {
     for (const expectedGroup of normalizeStringArray(expectedGroups)) {
       if (normalizedGroups.has(expectedGroup.toLowerCase())) {
-        roles.add(role.toLowerCase());
+        roles.add(normalizeRoleKey(role));
       }
     }
   }
 
   if (roles.size === 0) {
-    roles.add('readonly');
+    roles.add('viewer');
   }
 
   return [...roles].sort();
+}
+
+async function exchangeOauth2Code(code) {
+  const settings = resolveOauth2Settings();
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: settings.redirectUri,
+    client_id: settings.clientId
+  });
+  if (!isBlank(settings.clientSecret)) {
+    body.set('client_secret', settings.clientSecret);
+  }
+
+  const response = await fetch(settings.tokenUrl, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      accept: 'application/json'
+    },
+    body,
+    signal: AbortSignal.timeout(10000)
+  });
+  const payload = await safeJson(response);
+  if (!response.ok || !payload?.access_token) {
+    throw httpError(502, 'oauth2_token_error', payload?.error_description || payload?.error || `OAuth2 token endpoint returned HTTP ${response.status}.`);
+  }
+
+  return payload;
+}
+
+async function readOauth2UserInfo(tokenSet) {
+  const settings = resolveOauth2Settings();
+  if (isBlank(settings.userInfoUrl)) {
+    return decodeJwtPayload(tokenSet.id_token) ?? {};
+  }
+
+  const response = await fetch(settings.userInfoUrl, {
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${tokenSet.access_token}`
+    },
+    signal: AbortSignal.timeout(10000)
+  });
+  const payload = await safeJson(response);
+  if (!response.ok || !payload) {
+    throw httpError(502, 'oauth2_userinfo_error', payload?.error_description || payload?.error || `OAuth2 userinfo endpoint returned HTTP ${response.status}.`);
+  }
+
+  return payload;
+}
+
+async function authenticateLdapUser(username, password) {
+  const settings = resolveLdapSettings();
+  const client = new LdapClient({
+    url: `${settings.protocol}://${settings.host}:${settings.port}`,
+    timeout: 10000,
+    connectTimeout: 10000,
+    tlsOptions: {
+      rejectUnauthorized: settings.tlsRejectUnauthorized
+    }
+  });
+
+  try {
+    const serviceBound = !isBlank(settings.bindDn) && !isBlank(settings.bindPassword);
+    if (serviceBound) {
+      await client.bind(settings.bindDn, settings.bindPassword);
+    }
+
+    const userEntry = serviceBound
+      ? await findLdapUser(client, settings, username)
+      : await bindAndFindUserWithoutServiceAccount(client, settings, username, password);
+    const userDn = ldapEntryDn(userEntry) || renderTemplate(settings.userDnTemplate, { login: username });
+
+    if (serviceBound) {
+      await client.bind(userDn, password);
+      await client.bind(settings.bindDn, settings.bindPassword);
+    }
+
+    const groups = await readLdapGroups(client, settings, userEntry, username, userDn);
+    return {
+      login: ldapFirstValue(userEntry[settings.loginAttribute]) || username,
+      email: ldapFirstValue(userEntry[settings.emailAttribute]) || '',
+      displayName: ldapFirstValue(userEntry[settings.displayNameAttribute]) || username,
+      groups
+    };
+  } finally {
+    try {
+      await client.unbind();
+    } catch {
+      // ignore LDAP disconnect errors
+    }
+  }
+}
+
+async function bindAndFindUserWithoutServiceAccount(client, settings, username, password) {
+  if (isBlank(settings.userDnTemplate)) {
+    throw httpError(400, 'ldap_bind_dn_required', 'LDAP bindDn/bindPassword or userDnTemplate is required.');
+  }
+
+  const userDn = renderTemplate(settings.userDnTemplate, { login: username });
+  await client.bind(userDn, password);
+  return await findLdapUser(client, settings, username, userDn);
+}
+
+async function findLdapUser(client, settings, username, knownDn = '') {
+  const searchBase = settings.userSearchBase || settings.baseDn;
+  if (isBlank(searchBase)) {
+    throw httpError(400, 'ldap_base_dn_required', 'LDAP base DN is required.');
+  }
+
+  const filter = renderTemplate(settings.userFilter, {
+    login: ldapEscape(username),
+    dn: ldapEscape(knownDn)
+  });
+  const result = await client.search(searchBase, {
+    scope: 'sub',
+    filter,
+    attributes: [
+      settings.loginAttribute,
+      settings.emailAttribute,
+      settings.displayNameAttribute,
+      settings.groupsAttribute,
+      'dn',
+      'distinguishedName',
+      'memberOf',
+      'cn'
+    ]
+  });
+  const user = result.searchEntries?.[0];
+  if (!user) {
+    throw httpError(401, 'ldap_user_not_found', 'LDAP user was not found.');
+  }
+
+  return user;
+}
+
+async function readLdapGroups(client, settings, userEntry, username, userDn) {
+  const directGroups = normalizeStringArray(userEntry[settings.groupsAttribute] ?? userEntry.memberOf);
+  const searchBase = settings.groupSearchBase || settings.baseDn;
+  if (isBlank(searchBase) || isBlank(settings.groupFilter)) {
+    return directGroups;
+  }
+
+  const filter = renderTemplate(settings.groupFilter, {
+    login: ldapEscape(username),
+    dn: ldapEscape(userDn)
+  });
+  const result = await client.search(searchBase, {
+    scope: 'sub',
+    filter,
+    attributes: [settings.groupNameAttribute, 'cn', 'distinguishedName']
+  });
+
+  const searchGroups = (result.searchEntries ?? [])
+    .flatMap(entry => [
+      ldapFirstValue(entry[settings.groupNameAttribute]),
+      ldapFirstValue(entry.cn),
+      ldapFirstValue(entry.distinguishedName),
+      ldapEntryDn(entry)
+    ])
+    .filter(Boolean);
+
+  return [...new Set([...directGroups, ...searchGroups])];
 }
 
 async function createSamlClient() {
@@ -1774,8 +3115,10 @@ async function extractIdpMetadata(xml) {
 }
 
 function publicIdpSettings() {
+  const oauth2 = normalizeOauth2SettingsPayload(config.Idp.OAuth2 ?? config.Idp.oauth2 ?? {});
+  const ldap = normalizeLdapSettingsPayload(config.Idp.Ldap ?? config.Idp.ldap ?? {});
   return {
-    provider: 'SAML2',
+    provider: idpProvider(),
     enabled: isIdpEnabled(),
     metadataUrl: configValue(config.Idp, 'MetadataUrl'),
     entityId: configValue(config.Idp, 'EntityId'),
@@ -1785,7 +3128,7 @@ function publicIdpSettings() {
     acsUrl: configValue(config.Idp, 'AcsUrl'),
     sloCallbackUrl: configValue(config.Idp, 'SloCallbackUrl'),
     metadataRoute: '/auth/saml2/metadata',
-    loginRoute: '/auth/saml2/login',
+    loginRoute: idpLoginRoute(),
     logoutRoute: '/auth/saml2/logout',
     nameIdFormat: configValue(config.Idp, 'NameIdFormat'),
     authnRequestBinding: configValue(config.Idp, 'AuthnRequestBinding'),
@@ -1794,73 +3137,84 @@ function publicIdpSettings() {
     requireEncryptedAssertions: Boolean(config.Idp.RequireEncryptedAssertions ?? config.Idp.requireEncryptedAssertions),
     clockSkewSeconds: Number(config.Idp.ClockSkewSeconds ?? config.Idp.clockSkewSeconds ?? 120),
     attributeMapping: config.Idp.AttributeMapping || config.Idp.attributeMapping || {},
-    roleMapping: config.Idp.RoleMapping || config.Idp.roleMapping || {},
+    roleMapping: normalizeRoleMappingPayload(config.Idp.RoleMapping || config.Idp.roleMapping || {}),
+    oauth2: {
+      ...oauth2,
+      clientSecret: ''
+    },
+    ldap: {
+      ...ldap,
+      bindPassword: ''
+    },
     secretsConfigured: {
       idpX509Certificate: !isBlank(configValue(config.Idp, 'IdpX509Certificate') || configValue(config.Idp, 'IdpX509CertificatePath')),
       spCertificate: !isBlank(configValue(config.Idp, 'SpCertificate') || configValue(config.Idp, 'SpCertificatePath')),
-      spPrivateKey: !isBlank(configValue(config.Idp, 'SpPrivateKey') || configValue(config.Idp, 'SpPrivateKeyPath'))
+      spPrivateKey: !isBlank(configValue(config.Idp, 'SpPrivateKey') || configValue(config.Idp, 'SpPrivateKeyPath')),
+      oauth2ClientSecret: !isBlank(oauth2.clientSecret),
+      ldapBindPassword: !isBlank(ldap.bindPassword)
     }
   };
 }
 
-function publicLocalLoginDefaults() {
-  const defaults = config.Auth.LocalLoginDefaults ?? {};
-  if (!defaults.Enabled) {
-    return {
-      enabled: false
-    };
+function publicRoles() {
+  return Object.values(roles).map(role => ({
+    key: role.key,
+    label: role.label,
+    views: role.views
+  }));
+}
+
+function publicUsersFilePath() {
+  return relative(serviceRoot, resolveUsersFile(config)) || basename(resolveUsersFile(config));
+}
+
+function publicStoredUser(user) {
+  const role = roles[normalizeRoleKey(user.role)] ?? roles.viewer;
+  return {
+    username: user.username,
+    displayName: user.displayName,
+    role: role.key,
+    roleLabel: role.label,
+    mustChangePassword: Boolean(user.mustChangePassword),
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt
+  };
+}
+
+function normalizeRoleKey(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (roles[normalized]) {
+    return normalized;
   }
 
-  return {
-    enabled: true,
-    cmdbuild: {
-      baseUrl: defaults.CmdbuildBaseUrl ?? '',
-      username: defaults.CmdbuildUsername ?? '',
-      password: defaults.CmdbuildPassword ?? ''
-    },
-    zabbix: {
-      apiEndpoint: defaults.ZabbixApiEndpoint ?? '',
-      username: defaults.ZabbixUsername ?? '',
-      password: defaults.ZabbixPassword ?? '',
-      apiToken: defaults.ZabbixApiToken ?? ''
+  for (const role of Object.values(roles)) {
+    if (role.legacy.includes(normalized)) {
+      return role.key;
     }
-  };
+  }
+
+  return 'viewer';
 }
 
 function publicRuntimeSettings() {
-  const cmdbuildServiceAccount = config.Cmdbuild.ServiceAccount ?? {};
-  const zabbixServiceAccount = config.Zabbix.ServiceAccount ?? {};
-  const localDefaults = config.Auth.LocalLoginDefaults ?? {};
   const eventBrowser = config.EventBrowser ?? {};
+  const rules = config.Rules ?? {};
 
   return {
     filePath: config.UiSettings?.FilePath ?? 'state/ui-settings.json',
-    auth: {
-      localLoginDefaults: {
-        enabled: Boolean(localDefaults.Enabled),
-        cmdbuildBaseUrl: localDefaults.CmdbuildBaseUrl ?? '',
-        cmdbuildUsername: localDefaults.CmdbuildUsername ?? '',
-        cmdbuildPassword: localDefaults.CmdbuildPassword ?? '',
-        zabbixApiEndpoint: localDefaults.ZabbixApiEndpoint ?? '',
-        zabbixUsername: localDefaults.ZabbixUsername ?? '',
-        zabbixPassword: localDefaults.ZabbixPassword ?? '',
-        zabbixApiToken: localDefaults.ZabbixApiToken ?? ''
-      }
-    },
+    usersFilePath: publicUsersFilePath(),
     cmdbuild: {
       baseUrl: config.Cmdbuild.BaseUrl ?? '',
-      serviceAccount: {
-        username: cmdbuildServiceAccount.Username ?? cmdbuildServiceAccount.username ?? '',
-        password: cmdbuildServiceAccount.Password ?? cmdbuildServiceAccount.password ?? ''
-      }
+      maxTraversalDepth: cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth)
     },
     zabbix: {
       apiEndpoint: config.Zabbix.ApiEndpoint ?? '',
-      serviceAccount: {
-        user: zabbixServiceAccount.User ?? zabbixServiceAccount.user ?? '',
-        password: zabbixServiceAccount.Password ?? zabbixServiceAccount.password ?? '',
-        apiToken: zabbixServiceAccount.ApiToken ?? zabbixServiceAccount.apiToken ?? ''
-      }
+      apiToken: currentZabbixApiToken(null)
+    },
+    rules: {
+      rulesFilePath: rules.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json',
+      readFromGit: Boolean(rules.ReadFromGit),
+      repositoryUrl: rules.RepositoryUrl ?? ''
     },
     eventBrowser: {
       enabled: Boolean(eventBrowser.Enabled),
@@ -2494,7 +3848,9 @@ function getSession(request) {
 }
 
 function requireRole(session, response, allowedRoles) {
-  if (!allowedRoles.some(role => session.roles.includes(role))) {
+  const normalizedAllowed = allowedRoles.map(normalizeRoleKey);
+  const normalizedSessionRoles = (session.roles ?? []).map(normalizeRoleKey);
+  if (!normalizedAllowed.some(role => normalizedSessionRoles.includes(role))) {
     sendJson(response, 403, {
       error: 'forbidden'
     });
@@ -2502,9 +3858,14 @@ function requireRole(session, response, allowedRoles) {
 }
 
 function publicUser(session) {
+  const primaryRole = normalizeRoleKey(session.roles?.[0]);
+  const role = roles[primaryRole] ?? roles.viewer;
   return {
     authMethod: session.authMethod ?? 'local',
-    roles: session.roles,
+    role: role.key,
+    roleLabel: role.label,
+    roles: (session.roles ?? []).map(normalizeRoleKey),
+    passwordChangeRequired: Boolean(session.passwordChangeRequired),
     createdAt: session.createdAt,
     identity: session.identity ? {
       login: session.identity.login,
@@ -2513,13 +3874,14 @@ function publicUser(session) {
       groups: session.identity.groups
     } : null,
     cmdbuild: {
-      baseUrl: session.cmdbuild.baseUrl,
-      username: session.cmdbuild.username
+      baseUrl: session.cmdbuild?.baseUrl ?? config.Cmdbuild.BaseUrl ?? '',
+      username: session.cmdbuild?.username ?? '',
+      credentialsConfigured: !isBlank(session.cmdbuild?.username) && !isBlank(session.cmdbuild?.password)
     },
     zabbix: {
-      apiEndpoint: session.zabbix.apiEndpoint,
-      username: session.zabbix.username,
-      apiTokenConfigured: !isBlank(session.zabbix.apiToken)
+      apiEndpoint: session.zabbix?.apiEndpoint ?? config.Zabbix.ApiEndpoint ?? '',
+      username: session.zabbix?.username ?? '',
+      apiTokenConfigured: !isBlank(currentZabbixApiToken(session))
     }
   };
 }
@@ -2601,6 +3963,7 @@ function readCatalogCollection(catalog, name) {
     'tls-psk-modes': 'tlsPskModes',
     'value-maps': 'valueMaps',
     classes: 'classes',
+    domains: 'domains',
     lookups: 'lookups',
     attributes: 'attributes'
   };
@@ -2840,25 +4203,6 @@ function compileRuleRegex(pattern) {
   return new RegExp(source, flags);
 }
 
-function runGit(args) {
-  return new Promise(resolvePromise => {
-    const child = spawn(config.Rules.GitExecutablePath, ['-C', repositoryRoot, ...args], {
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    const stdout = [];
-    const stderr = [];
-    child.stdout.on('data', chunk => stdout.push(chunk));
-    child.stderr.on('data', chunk => stderr.push(chunk));
-    child.on('close', exitCode => {
-      resolvePromise({
-        exitCode,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8')
-      });
-    });
-  });
-}
-
 function sendJson(response, statusCode, payload, headers = {}) {
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
@@ -2885,10 +4229,13 @@ async function safeJson(response) {
   }
 }
 
-function httpError(statusCode, code, message) {
+function httpError(statusCode, code, message, details = null) {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
+  if (details) {
+    error.details = details;
+  }
   return error;
 }
 
@@ -2961,6 +4308,12 @@ function resolveUiSettingsFile(target) {
   return resolve(serviceRoot, target.UiSettings?.FilePath ?? 'state/ui-settings.json');
 }
 
+function resolveUsersFile(target) {
+  const settingsPath = target.UiSettings?.FilePath ?? 'state/ui-settings.json';
+  const usersPath = target.Auth?.UsersFilePath ?? join(dirname(settingsPath), 'users.json');
+  return resolve(serviceRoot, usersPath);
+}
+
 function trimTrailingSlash(path) {
   return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
 }
@@ -2979,6 +4332,81 @@ function isBlank(value) {
 
 function isIdpEnabled() {
   return Boolean(config.Auth.UseIdp || config.Idp.Enabled || config.Idp.enabled);
+}
+
+function idpProvider() {
+  return normalizeIdpProvider(config.Idp.Provider ?? config.Idp.provider ?? 'SAML2');
+}
+
+function normalizeIdpProvider(value) {
+  const normalized = String(value ?? 'SAML2').trim().toLowerCase();
+  if (['oauth2', 'oauth', 'oidc', 'openidconnect'].includes(normalized)) {
+    return 'oauth2';
+  }
+  if (['ldap', 'ldaps', 'msad', 'ad', 'active-directory', 'activedirectory'].includes(normalized)) {
+    return 'ldap';
+  }
+  return 'saml2';
+}
+
+function idpLoginRoute() {
+  return {
+    saml2: '/auth/saml2/login',
+    oauth2: '/auth/oauth2/login',
+    ldap: '/api/auth/login'
+  }[idpProvider()] ?? '/auth/saml2/login';
+}
+
+function assertIdpProvider(provider) {
+  if (idpProvider() !== provider) {
+    throw httpError(409, 'idp_provider_mismatch', `Configured IdP provider is ${idpProvider()}.`);
+  }
+}
+
+function assertOauth2Enabled() {
+  if (!isIdpEnabled()) {
+    throw httpError(409, 'idp_disabled', 'IdP mode is disabled.');
+  }
+  assertIdpProvider('oauth2');
+  const settings = resolveOauth2Settings();
+  for (const [field, value] of Object.entries({
+    authorizationUrl: settings.authorizationUrl,
+    tokenUrl: settings.tokenUrl,
+    clientId: settings.clientId,
+    redirectUri: settings.redirectUri
+  })) {
+    if (isBlank(value)) {
+      throw httpError(500, 'oauth2_not_configured', `OAuth2 ${field} is not configured.`);
+    }
+  }
+}
+
+function resolveOauth2Settings() {
+  return normalizeOauth2SettingsPayload(config.Idp.OAuth2 ?? config.Idp.oauth2 ?? {});
+}
+
+function resolveLdapSettings() {
+  const settings = normalizeLdapSettingsPayload(config.Idp.Ldap ?? config.Idp.ldap ?? {});
+  if (isBlank(settings.host)) {
+    throw httpError(500, 'ldap_not_configured', 'LDAP host is not configured.');
+  }
+  if (isBlank(settings.baseDn) && isBlank(settings.userDnTemplate)) {
+    throw httpError(500, 'ldap_not_configured', 'LDAP baseDn or userDnTemplate is not configured.');
+  }
+
+  return settings;
+}
+
+function normalizeLdapProtocol(value) {
+  return String(value ?? 'ldap').trim().toLowerCase() === 'ldaps' ? 'ldaps' : 'ldap';
+}
+
+function normalizeRoleMappingPayload(value = {}) {
+  return {
+    admin: normalizeStringArray(value.admin ?? value.Admin ?? value.administrator ?? value.Administrator),
+    editor: normalizeStringArray(value.editor ?? value.Editor ?? value.operator ?? value.Operator),
+    viewer: normalizeStringArray(value.viewer ?? value.Viewer ?? value.readonly ?? value.Readonly)
+  };
 }
 
 function configValue(section, pascalName) {
@@ -3058,6 +4486,74 @@ function normalizeStringArray(value) {
     .split(/[;,]/)
     .map(item => item.trim())
     .filter(item => item.length > 0);
+}
+
+function firstClaimValue(claims, names) {
+  for (const name of names.filter(Boolean)) {
+    const value = claims?.[name];
+    if (!isBlank(value)) {
+      return Array.isArray(value) ? value[0] : value;
+    }
+  }
+
+  return null;
+}
+
+function firstClaimRawValue(claims, names) {
+  for (const name of names.filter(Boolean)) {
+    const value = claims?.[name];
+    if (!isBlank(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function decodeJwtPayload(token) {
+  if (isBlank(token)) {
+    return null;
+  }
+
+  try {
+    const [, payload] = String(token).split('.');
+    return JSON.parse(Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function renderTemplate(template, values) {
+  return String(template ?? '').replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => values[key] ?? '');
+}
+
+function ldapEscape(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\5c')
+    .replace(/\*/g, '\\2a')
+    .replace(/\(/g, '\\28')
+    .replace(/\)/g, '\\29')
+    .replace(/\0/g, '\\00');
+}
+
+function ldapFirstValue(value) {
+  if (Array.isArray(value)) {
+    return value[0] ?? '';
+  }
+  return value ?? '';
+}
+
+function ldapEntryDn(entry) {
+  return ldapFirstValue(entry?.dn) || ldapFirstValue(entry?.distinguishedName) || ldapFirstValue(entry?.objectName);
+}
+
+function pruneOauthStates() {
+  const maxAgeMs = 10 * 60 * 1000;
+  for (const [state, record] of oauthStates.entries()) {
+    if (Date.now() - record.createdAt > maxAgeMs) {
+      oauthStates.delete(state);
+    }
+  }
 }
 
 function findXmlNode(node, wantedName) {
@@ -3152,6 +4648,14 @@ function clampInt(value, fallback, min, max) {
   }
 
   return Math.min(max, Math.max(min, Math.trunc(number)));
+}
+
+function stringOrDefault(value, fallback) {
+  return isBlank(value) ? fallback : String(value).trim();
+}
+
+function cmdbuildTraversalMaxDepth(value) {
+  return clampInt(value, 2, 2, 5);
 }
 
 function sleep(ms) {

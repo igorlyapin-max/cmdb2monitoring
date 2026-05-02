@@ -13,7 +13,7 @@
 | Docker host | Kafka | host `localhost:9092`, docker network `kafka:29092` |
 | Docker host | CMDBuild | `http://localhost:8090/cmdbuild` |
 | Docker host | Zabbix | UI `http://localhost:8081`, API `/api_jsonrpc.php` |
-| External/Future | SAML2 IdP | `Idp:MetadataUrl`, `Idp:SsoUrl`, `Idp:SloUrl` |
+| External/Future | IdP / MS AD | SAML2/OAuth2 over HTTPS `:443`, LDAP `:389` или LDAPS `:636` |
 | Future | ELK | Endpoint будет задан через `ElkLogging` |
 
 ## Совместимость Dev-контура
@@ -43,7 +43,7 @@
 | Kafka cluster | Topics без `.dev` или с суффиксом контура | Kafka bootstrap `:9092` или TLS/SASL listener `:9093` |
 | CMDBuild test | CMDBuild UI/API | HTTP/HTTPS `:8090` или ingress `:443` |
 | Zabbix test | Zabbix UI/API | HTTP/HTTPS `:8081` или ingress `:443`, API `/api_jsonrpc.php` |
-| IdP test | SAML2 IdP | HTTPS `:443` |
+| IdP test | SAML2/OAuth2 IdP или MS AD LDAP/LDAPS | HTTPS `:443`, LDAP `:389`, LDAPS `:636` |
 | ELK test | Log storage | HTTPS `:9200` или Kafka shipper по `:9092/:9093` |
 
 ### Бизнес Тест
@@ -54,7 +54,7 @@
 | Kafka cluster | Business-test topics | Kafka `:9092` plaintext только при явном разрешении, иначе TLS/SASL `:9093` |
 | CMDBuild business-test | Источник карточек | HTTP/HTTPS endpoint CMDBuild `:8090/:443` |
 | Zabbix business-test | Целевая система мониторинга | HTTP/HTTPS API `:8081/:443` |
-| IdP business-test | Единая авторизация | HTTPS `:443` |
+| IdP business-test | Единая авторизация / MS AD | HTTPS `:443`, LDAP `:389`, LDAPS `:636` |
 | ELK business-test | Централизованные логи | HTTPS `:9200` |
 
 ### Продуктив
@@ -65,7 +65,7 @@
 | Production Kafka | Production topics | Только защищенные listeners, обычно TLS/SASL `:9093`; конкретный порт задается конфигом Kafka |
 | Production CMDBuild | Webhook source и catalog API | HTTPS `:443` |
 | Production Zabbix | JSON-RPC API | HTTPS `:443` |
-| Production IdP | SAML2 | HTTPS `:443` |
+| Production IdP / MS AD | SAML2/OAuth2 или LDAP/LDAPS | HTTPS `:443`, LDAP `:389`, LDAPS `:636` |
 | Production ELK | Log storage | HTTPS `:9200` или утвержденный порт лог-шиппера |
 
 ## Общие требования для Test/Prod
@@ -75,10 +75,13 @@
 - secrets через переменные окружения или secret storage;
 - внешний процесс создания Kafka topics;
 - отдельные service accounts для CMDBuild webhook, Kafka и Zabbix API;
-- отдельная CMDBuild service account для `cmdbkafka2zabbix` lookup/reference resolver, если rules используют `source.fields[].cmdbPath`;
-- отдельные service accounts для `monitoring-ui-api` при IdP-режиме;
-- публичный URL `monitoring-ui-api` должен совпадать с SAML2 `AcsUrl` и `SloCallbackUrl`;
-- IdP должен знать SP metadata из `/auth/saml2/metadata`;
+- отдельная CMDBuild service account для `cmdbkafka2zabbix` lookup/reference/domain resolver, если rules используют `source.fields[].cmdbPath`;
+- для `monitoring-ui-api` операторы вводят CMDBuild credentials на сессию; для catalog sync достаточно read-only metadata/card/relation прав, а для применения `Настройка webhooks` нужны read и create/update/delete или эквивалентные modify-права на CMDBuild ETL/webhook records `/etl/webhook/`;
+- Bearer token для `cmdbkafka2zabbix` rules reload endpoint задается как secret/env и совпадает с `monitoring-ui-api` `Services:HealthEndpoints[].RulesReloadToken`;
+- для `monitoring-ui-api` не задаются постоянные CMDBuild/Zabbix login/password; при необходимости оператор вводит их на сессию, либо задается read-only `ZABBIX_API_TOKEN`;
+- публичный URL `monitoring-ui-api` должен совпадать с SAML2 `AcsUrl`/`SloCallbackUrl` и OAuth2 `RedirectUri`, если включены эти провайдеры;
+- IdP должен знать SP metadata из `/auth/saml2/metadata` для SAML2 или OAuth2 client redirect URI для OAuth2/OIDC;
+- при режиме `MS AD` и при IdP-роли через AD-группы должна быть сетевая связность от `monitoring-ui-api` к domain controllers по `:389` или `:636`; bind DN/password задаются через secret/env или меню `Авторизация`;
 - выделенный ELK endpoint.
 
 ## Сетевая связность
@@ -87,14 +90,15 @@
 | --- | --- | --- |
 | CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild` через `http://192.168.202.100:5080` в dev |
 | Browser | monitoring-ui-api `:5090` | HTTP |
-| monitoring-ui-api `:5090` | IdP SAML2 `:443/:80` | HTTP Redirect/POST |
+| monitoring-ui-api `:5090` | IdP/MS AD `:443/:80/:636/:389` | SAML2 Redirect/POST, OAuth2 Authorization Code, LDAP bind/search |
 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP |
 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC |
 | monitoring-ui-api `:5090` | .NET services health endpoints `:5080/:5081/:5082` | HTTP |
+| monitoring-ui-api `:5090` | cmdbkafka2zabbix `:5081` | HTTP POST `/admin/reload-rules` с Bearer token |
 | monitoring-ui-api | Kafka `localhost:9092` / `kafka:29092` | Kafka protocol, read-only Events |
 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | Kafka protocol |
 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | Kafka protocol |
-| cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP для lookup/reference resolver по `cmdbPath` |
+| cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP для lookup/reference/domain resolver по `cmdbPath` |
 | cmdbkafka2zabbix | Git repository/working copy | local FS или git |
 | zabbixrequests2api `:5082` | Kafka `:9092` | Kafka protocol |
 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP JSON-RPC |

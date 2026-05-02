@@ -6,9 +6,15 @@ public sealed class ConversionRulesOptions
 
     public string RepositoryPath { get; init; } = string.Empty;
 
+    public bool ReadFromGit { get; init; }
+
+    public string RepositoryUrl { get; init; } = string.Empty;
+
     public string RulesFilePath { get; init; } = string.Empty;
 
     public bool PullOnStartup { get; init; }
+
+    public bool PullOnReload { get; init; }
 
     public string GitExecutablePath { get; init; } = "git";
 

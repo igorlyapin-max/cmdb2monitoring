@@ -1,6 +1,6 @@
 # cmdb2monitoring
 
-Current release version: `0.4.0`.
+Current release version: `0.5.0`.
 
 Local .NET development environment is installed in `.dotnet`.
 The repository wrapper also keeps .NET CLI state and NuGet packages inside this workspace, which makes it work without a global SDK installation.
@@ -19,7 +19,7 @@ Run .NET commands through the repository wrapper:
 - `cmdbwebhooks2kafka`: receives CMDBuild webhook payloads on `POST /webhooks/cmdbuild` and publishes normalized events to Kafka.
 - `cmdbkafka2zabbix`: reads CMDB events from Kafka, applies JSON/T4 conversion rules including `hostProfiles[]`, and publishes one or more Zabbix JSON-RPC requests.
 - `zabbixrequests2api`: reads Zabbix JSON-RPC requests from Kafka, validates them, calls Zabbix API, and publishes responses.
-- `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, Events Kafka browser, rules upload/dry-run, Conversion Rules Management edit/delete, SAML2 IdP login/settings, and CMDBuild/Zabbix catalog sync.
+- `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, Events Kafka browser, rules validate/dry-run/browser save-as, Conversion Rules Management edit/delete, SAML2/OAuth2/MS AD authorization settings, and CMDBuild/Zabbix catalog sync.
 
 Dev HTTP ports:
 
@@ -55,10 +55,14 @@ dotnet --info
 ## Documentation
 
 - `CHANGELOG.md`: release history and version notes.
-- `PROJECT_DOCUMENTATION.md`: full project operations and configuration guide.
-- `TZ_cmdb2monitoring.txt`: project technical specification.
+- `PROJECT_DOCUMENTATION.md` / `PROJECT_DOCUMENTATION.en.md`: full project operations and configuration guide.
+- `TZ_cmdb2monitoring.txt` / `TZ_cmdb2monitoring.en.txt`: project technical specification.
+- `TEST_PLAN_MAPPING_EDITOR.md` / `TEST_PLAN_MAPPING_EDITOR.en.md`: conversion rules editor and demo E2E test plan.
+- `must.md` / `must.en.md`: mandatory development agreements.
 - `aa/`: architecture artifacts, AsyncAPI/OpenAPI, maps, diagrams, and configuration documentation.
 - `aa/configuration-files.md`: what to configure in each microservice and when.
+
+Architecture artifacts under `aa/` are not translated by default. Non-architecture documentation changes must update the English companion file in the same change.
 
 ## Checks
 

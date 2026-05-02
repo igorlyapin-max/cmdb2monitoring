@@ -10,6 +10,7 @@
 - Frontend/BFF допускается на Node.js, если он не обращается из браузера напрямую к Kafka/CMDBuild/Zabbix.
 - Все настройки выносятся в конфигурационные файлы и env overrides. Не хардкодить адреса, topics, credentials, токены, пути state-файлов, endpoints.
 - В архитектурных артефактах и документации каждый сетевой поток должен указывать порт, если порт известен.
+- При изменении неархитектурной документации обновлять и английскую версию рядом с русской. Для текущих документов это `PROJECT_DOCUMENTATION.en.md`, `TZ_cmdb2monitoring.en.txt`, `TEST_PLAN_MAPPING_EDITOR.en.md` и `must.en.md`. Архитектурные артефакты `aa/` переводятся только по отдельному требованию.
 - Kafka topics создаются внешней инфраструктурой. Код микросервисов не должен создавать topics при старте.
 - Логи проектируются под ELK. Пока ELK отсутствует, structured JSON logs пишутся в Kafka log topics.
 - Runtime state хранится в `state/*.json` и не попадает в git.
@@ -71,6 +72,7 @@
   - template groups.
 - Zabbix templates не являются JSON-файлами проекта. В JSON передаются только ссылки `templateid` на существующие шаблоны Zabbix.
 - Если в Zabbix payload передается объект `inventory`, `inventory_mode` не должен быть `-1`, потому что `-1` отключает inventory и Zabbix отклоняет inventory fields.
+- При `host.update` поля `groups[]`, `templates[]`, `tags[]`, `macros[]` и `inventory` должны сохранять внешние значения Zabbix, если rules их явно не заменяют; `interfaces[]` остаются authoritative и задаются rules.
 
 ## Rules и T4
 

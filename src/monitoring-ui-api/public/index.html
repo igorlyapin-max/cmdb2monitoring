@@ -12,7 +12,10 @@
         <span class="brand-mark">C2M</span>
         <span>cmdb2monitoring</span>
       </div>
-      <div class="session" id="sessionSummary"></div>
+      <div class="session">
+        <span id="sessionSummary"></span>
+        <button id="changePasswordOpen" class="link-button hidden" type="button" data-i18n="account.changePassword">Сменить пароль</button>
+      </div>
     </header>
 
     <main>
@@ -33,32 +36,12 @@
           </div>
           <div id="localCredentials" class="form-grid">
             <label>
-              <span>CMDBuild URL</span>
-              <input name="cmdbuildBaseUrl" autocomplete="url">
+              <span data-i18n="login.username">Пользователь</span>
+              <input name="username" autocomplete="username" required>
             </label>
             <label>
-              <span data-i18n="login.cmdbuildLogin">CMDBuild login</span>
-              <input name="cmdbuildUsername" autocomplete="username" required>
-            </label>
-            <label>
-              <span data-i18n="login.cmdbuildPassword">CMDBuild password</span>
-              <input name="cmdbuildPassword" type="password" autocomplete="current-password" required>
-            </label>
-            <label>
-              <span>Zabbix API</span>
-              <input name="zabbixApiEndpoint" autocomplete="url">
-            </label>
-            <label>
-              <span data-i18n="login.zabbixLogin">Zabbix login</span>
-              <input name="zabbixUsername" autocomplete="username">
-            </label>
-            <label>
-              <span data-i18n="login.zabbixPassword">Zabbix password</span>
-              <input name="zabbixPassword" type="password" autocomplete="current-password">
-            </label>
-            <label>
-              <span>Zabbix API token</span>
-              <input name="zabbixApiToken" type="password" autocomplete="off">
+              <span data-i18n="login.password">Пароль</span>
+              <input name="password" type="password" autocomplete="current-password" required>
             </label>
           </div>
           <div id="localLoginActions" class="actions">
@@ -68,6 +51,88 @@
         </form>
       </section>
 
+      <section id="passwordDialog" class="modal-shell hidden" role="dialog" aria-modal="true" aria-labelledby="passwordDialogTitle">
+        <form id="passwordForm" class="modal-panel">
+          <h2 id="passwordDialogTitle" data-i18n="account.changePassword">Сменить пароль</h2>
+          <div class="form-grid">
+            <label>
+              <span data-i18n="account.currentPassword">Текущий пароль</span>
+              <input name="currentPassword" type="password" autocomplete="current-password" required>
+            </label>
+            <label>
+              <span data-i18n="account.newPassword">Новый пароль</span>
+              <input name="newPassword" type="password" autocomplete="new-password" required>
+            </label>
+            <label>
+              <span data-i18n="account.confirmPassword">Повтор нового пароля</span>
+              <input name="confirmPassword" type="password" autocomplete="new-password" required>
+            </label>
+          </div>
+          <p id="passwordError" class="error-line"></p>
+          <div class="actions">
+            <button type="submit" data-i18n="account.savePassword">Сохранить пароль</button>
+            <button id="passwordCancel" type="button" data-i18n="common.close">Закрыть</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="credentialsDialog" class="modal-shell hidden" role="dialog" aria-modal="true" aria-labelledby="credentialsDialogTitle">
+        <form id="credentialsForm" class="modal-panel">
+          <h2 id="credentialsDialogTitle" data-i18n="credentials.title">Нужны учетные данные</h2>
+          <input name="service" type="hidden">
+          <div class="form-grid">
+            <label id="credentialsBaseUrlRow">
+              <span data-i18n="credentials.baseUrl">CMDBuild URL</span>
+              <input name="baseUrl" autocomplete="url">
+            </label>
+            <label id="credentialsApiEndpointRow">
+              <span data-i18n="credentials.apiEndpoint">Zabbix API</span>
+              <input name="apiEndpoint" autocomplete="url">
+            </label>
+            <label>
+              <span data-i18n="credentials.username">Логин</span>
+              <input name="username" autocomplete="username" required>
+            </label>
+            <label>
+              <span data-i18n="credentials.password">Пароль</span>
+              <input name="password" type="password" autocomplete="current-password" required>
+            </label>
+          </div>
+          <p id="credentialsError" class="error-line"></p>
+          <div class="actions">
+            <button type="submit" data-i18n="credentials.save">Запомнить на сессию</button>
+            <button id="credentialsCancel" type="button" data-i18n="common.close">Закрыть</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="validationRuleDialog" class="modal-shell hidden" role="dialog" aria-modal="true" aria-labelledby="validationRuleDialogTitle">
+        <div class="modal-panel">
+          <h2 id="validationRuleDialogTitle" data-i18n="validation.review.title">Проверка удаления правила</h2>
+          <p id="validationRuleDialogText" class="modal-text"></p>
+          <textarea id="validationRuleJson" class="validation-rule-json" spellcheck="false"></textarea>
+          <p id="validationRuleDialogError" class="error-line"></p>
+          <div class="actions">
+            <button id="validationRuleApplyEdit" type="button" data-i18n="validation.review.applyEdit">Сохранить правку</button>
+            <button id="validationRuleDeleteAnyway" class="danger" type="button" data-i18n="validation.review.deleteAnyway">Удалить все равно</button>
+            <button id="validationRuleCancel" class="secondary" type="button" data-i18n="validation.review.cancel">Отказаться</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="webhookEditDialog" class="modal-shell hidden" role="dialog" aria-modal="true" aria-labelledby="webhookEditDialogTitle">
+        <div class="modal-panel">
+          <h2 id="webhookEditDialogTitle" data-i18n="webhooks.editTitle">Редактирование webhook</h2>
+          <p id="webhookEditHelp" class="modal-text" data-i18n="webhooks.editHelp">Измените JSON конкретного webhook. Для строки текущего CMDB webhook будет создана update-операция в плане; загрузка в CMDB выполняется только кнопкой "Загрузить в CMDB".</p>
+          <textarea id="webhookEditJson" class="validation-rule-json" spellcheck="false"></textarea>
+          <p id="webhookEditError" class="error-line"></p>
+          <div class="actions">
+            <button id="webhookEditApply" type="button" data-i18n="webhooks.saveEdit">Сохранить правку</button>
+            <button id="webhookEditCancel" class="secondary" type="button" data-i18n="common.close">Закрыть</button>
+          </div>
+        </div>
+      </section>
+
       <section id="appView" class="app-shell hidden">
         <nav class="side-nav" aria-label="Разделы">
           <button class="nav-item active" data-view="dashboard" data-i18n="nav.dashboard">Dashboard</button>
@@ -75,9 +140,11 @@
           <button class="nav-item" data-view="rules" data-i18n="nav.rules">Rules</button>
           <button class="nav-item" data-view="mapping" data-i18n="nav.mapping">Управление правилами конвертации</button>
           <button class="nav-item" data-view="validateMapping" data-i18n="nav.validateMapping">Логический контроль правил конвертации</button>
+          <button class="nav-item" data-view="webhooks" data-i18n="nav.webhooks">Настройка webhooks</button>
           <button class="nav-item" data-view="zabbix" data-i18n="nav.zabbix">Zabbix Catalog</button>
           <button class="nav-item" data-view="cmdbuild" data-i18n="nav.cmdbuild">CMDBuild Catalog</button>
-          <button class="nav-item" data-view="settings" data-i18n="nav.settings">Settings</button>
+          <button class="nav-item" data-view="authSettings" data-i18n="nav.authSettings">Authorization</button>
+          <button class="nav-item" data-view="runtimeSettings" data-i18n="nav.runtimeSettings">Runtime settings</button>
           <button class="nav-item" data-view="about" data-i18n="nav.about">About</button>
           <button class="nav-item" data-view="help" data-i18n="nav.help">Help</button>
           <button class="nav-item danger" id="logoutButton" type="button" data-i18n="nav.logout">Logout</button>
@@ -87,7 +154,7 @@
           <section class="view active" id="dashboard">
             <div class="view-header">
               <h1 data-i18n="nav.dashboard">Dashboard</h1>
-              <button id="refreshDashboard" type="button">Refresh</button>
+              <button id="refreshDashboard" type="button" data-i18n="common.refresh">Refresh</button>
             </div>
             <div class="metrics-grid" id="healthGrid"></div>
           </section>
@@ -98,7 +165,7 @@
               <div class="actions">
                 <select id="eventsTopic"></select>
                 <input id="eventsMaxMessages" type="number" min="1" max="500" value="5">
-                <button id="refreshEvents" type="button">Refresh</button>
+                <button id="refreshEvents" type="button" data-i18n="common.refresh">Refresh</button>
               </div>
             </div>
             <div class="surface topic-list">
@@ -133,8 +200,9 @@
             <div class="view-header">
               <h1 data-i18n="nav.rules">Rules</h1>
               <div class="actions">
-                <button id="loadRules" type="button">Load</button>
-                <button id="validateRules" type="button">Validate</button>
+                <button id="loadRules" type="button" data-i18n="common.load">Load</button>
+                <button id="validateRules" type="button" data-i18n="common.validate">Validate</button>
+                <button id="createEmptyRules" class="secondary" type="button" data-i18n="rules.createEmpty">Создать пустой</button>
               </div>
             </div>
             <div class="split-layout">
@@ -144,15 +212,15 @@
                 <pre id="rulesPreview" class="code-block"></pre>
               </div>
               <div class="surface">
-                <h2>Upload / Dry-run</h2>
+                <h2>Local file / Dry-run</h2>
                 <label class="file-picker">
                   <span>Rules JSON</span>
                   <input id="rulesFile" type="file" accept="application/json,.json">
                 </label>
                 <textarea id="dryRunPayload" spellcheck="false"></textarea>
                 <div class="actions">
-                  <button id="dryRunRules" type="button">Dry-run</button>
-                  <button id="uploadRules" type="button">Upload</button>
+                  <button id="dryRunRules" type="button" data-i18n="common.dryRun">Dry-run</button>
+                  <button id="saveRulesAs" type="button" data-i18n="common.saveFileAs">Save file as</button>
                 </div>
                 <pre id="rulesResult" class="code-block"></pre>
               </div>
@@ -165,48 +233,61 @@
                 <h1 data-i18n="nav.mapping">Управление правилами конвертации</h1>
                 <div class="mapping-mode-controls">
                   <label class="mapping-mode-field" for="mappingMode">
-                    <span>Режим</span>
+                    <span data-i18n="mapping.mode">Режим</span>
                     <select id="mappingMode">
-                      <option value="view">Режим просмотра</option>
-                      <option value="edit">Режим редактирования</option>
+                      <option value="view" data-i18n="mapping.modeView">Режим просмотра</option>
+                      <option value="edit" data-i18n="mapping.modeEdit">Режим редактирования</option>
                     </select>
                   </label>
                 </div>
               </div>
               <div class="actions">
-                <button id="mappingUndo" class="secondary" type="button" disabled>Undo</button>
-                <button id="mappingRedo" class="secondary" type="button" disabled>Redo</button>
-                <button id="mappingSaveAs" class="secondary" type="button" disabled>Save file as</button>
-                <button id="loadMapping" type="button">Load</button>
+                <button id="mappingUndo" class="secondary" type="button" disabled data-i18n="common.undo">Отменить</button>
+                <button id="mappingRedo" class="secondary" type="button" disabled data-i18n="common.redo">Вернуть</button>
+                <button id="mappingSaveAs" class="secondary" type="button" disabled data-i18n="common.saveFileAs">Сохранить файл как</button>
+                <button id="loadMapping" type="button" data-i18n="common.load">Загрузить</button>
               </div>
             </div>
             <div id="mappingEditor" class="mapping-editor surface hidden">
               <div class="mapping-editor-toolbar">
                 <label>
-                  <span>Действие</span>
+                  <span data-i18n="mapping.action">Действие</span>
                   <select id="mappingEditAction">
-                    <option value="add">Добавление правила</option>
-                    <option value="delete">Удаление правила</option>
+                    <option value="add" data-i18n="mapping.actionAdd">Добавление правила</option>
+                    <option value="modify" data-i18n="mapping.actionModify">Модификация правила</option>
+                    <option value="delete" data-i18n="mapping.actionDelete">Удаление правил и классов</option>
                   </select>
                 </label>
               </div>
               <div id="mappingAddPanel" class="mapping-editor-panel">
                 <div class="mapping-editor-grid">
-                  <label><span>CMDBuild class</span><select id="mappingEditClass"></select></label>
-                  <label><span>Class attribute field</span><select id="mappingEditField"></select></label>
-                  <label><span>Conversion structure</span><select id="mappingEditTargetType"></select></label>
-                  <label><span>Zabbix object / payload</span><select id="mappingEditZabbixObject"></select></label>
-                  <label><span>Priority</span><input id="mappingEditPriority" type="number" min="1" step="1" value="100"></label>
-                  <label><span>Regex</span><input id="mappingEditRegex" type="text" value="(?i).*"></label>
-                  <label class="wide-field"><span>Rule name</span><input id="mappingEditRuleName" type="text" placeholder="auto-generated"></label>
-                  <button id="mappingAddRule" type="button">Add conversion rule</button>
+                  <label id="mappingModifyRuleField" class="wide-field hidden"><span data-i18n="mapping.modifyRule">Правило для изменения</span><select id="mappingModifyRule"></select></label>
+                  <label><span data-i18n="mapping.cmdbClass">Класс CMDBuild</span><select id="mappingEditClass"></select></label>
+                  <label><span data-i18n="mapping.classField">Атрибут класса</span><select id="mappingEditField"></select></label>
+                  <label><span data-i18n="mapping.structure">Структура конвертации</span><select id="mappingEditTargetType"></select></label>
+                  <label><span data-i18n="mapping.zabbixTarget">Объект/payload Zabbix</span><select id="mappingEditZabbixObject"></select></label>
+                  <label><span data-i18n="mapping.priority">Приоритет</span><input id="mappingEditPriority" type="number" min="1" step="1" value="100"></label>
+                  <label><span data-i18n="mapping.regex">Regex</span><input id="mappingEditRegex" type="text" value="(?i).*"></label>
+                  <label class="wide-field"><span data-i18n="mapping.ruleName">Имя правила</span><input id="mappingEditRuleName" type="text" placeholder="автоматически" data-i18n-placeholder="mapping.ruleNameAuto"></label>
+                  <button id="mappingResetForm" class="secondary" type="button" data-i18n="mapping.resetFields">Сбросить поля</button>
+                  <button id="mappingAddRule" type="button" data-i18n="mapping.addRule">Добавить правило конвертации</button>
+                  <p id="mappingEditorFormState" class="mapping-editor-form-state wide-field"></p>
+                  <p class="mapping-reference-warning wide-field" data-i18n="mapping.referenceWarning">Внимание: при пользовании итеративными запросами атрибутов через reference/domain типы, в случае отсутствия модификации самой карточки объекта, модификация атрибутов reference или связанных domain-карточек не приведет к изменениям на мониторинге.</p>
                 </div>
               </div>
               <div id="mappingDeletePanel" class="mapping-editor-panel mapping-delete-panel hidden">
                 <div class="mapping-delete-actions">
-                  <button id="mappingDeleteSelectAll" class="secondary" type="button">Select all</button>
-                  <button id="mappingDeleteClear" class="secondary" type="button">Clear</button>
-                  <button id="mappingDeleteSelected" class="danger" type="button" disabled>Delete selected rules</button>
+                  <label class="mapping-delete-view-field">
+                    <span data-i18n="mapping.grouping">Группировка</span>
+                    <select id="mappingDeleteView">
+                      <option value="cmdbuild" data-i18n="mapping.deleteTreeCmdbuild">Дерево CMDBuild</option>
+                      <option value="zabbix" data-i18n="mapping.deleteTreeZabbix">Дерево Zabbix</option>
+                      <option value="rules" data-i18n="mapping.deleteTreeRules">Дерево правил</option>
+                    </select>
+                  </label>
+                  <button id="mappingDeleteSelectAll" class="secondary" type="button" data-i18n="common.selectAll">Выбрать все</button>
+                  <button id="mappingDeleteClear" class="secondary" type="button" data-i18n="common.clear">Очистить</button>
+                  <button id="mappingDeleteSelected" class="danger" type="button" disabled data-i18n="mapping.deleteSelectedRules">Удалить выбранные правила</button>
                 </div>
                 <div id="mappingDeleteRules" class="mapping-delete-list"></div>
               </div>
@@ -235,34 +316,43 @@
             <div class="view-header">
               <h1 data-i18n="nav.validateMapping">Логический контроль правил конвертации</h1>
               <div class="actions">
-                <button id="loadValidateMapping" type="button">Load</button>
+                <button id="validateMappingUndo" class="secondary" type="button" disabled data-i18n="common.undo">Отменить</button>
+                <button id="validateMappingRedo" class="secondary" type="button" disabled data-i18n="common.redo">Вернуть</button>
+                <button id="validateMappingSaveAs" class="secondary" type="button" disabled data-i18n="common.saveFileAs">Сохранить файл как</button>
+                <button id="loadValidateMapping" type="button" data-i18n="common.load">Load</button>
               </div>
             </div>
             <div id="validateMappingSummary" class="surface validation-summary"></div>
             <div class="validation-post-actions">
-              <button id="deleteValidateMappingSelected" class="danger" type="button" disabled>Delete</button>
+              <button id="deleteValidateMappingSelected" class="danger" type="button" disabled data-i18n="common.delete">Delete</button>
             </div>
             <div class="mapping-grid validation-grid">
               <div class="mapping-column surface" data-validation-column="cmdbuild">
                 <div class="validation-column-header">
                   <h2>CMDBuild</h2>
                   <div class="validation-column-actions">
-                    <button class="secondary" type="button" data-validation-select="cmdbuild">Select all</button>
-                    <button class="secondary" type="button" data-validation-clear="cmdbuild">Clear</button>
+                    <button class="secondary" type="button" data-validation-select="cmdbuild" data-i18n="common.selectAll">Select all</button>
+                    <button class="secondary" type="button" data-validation-clear="cmdbuild" data-i18n="common.clear">Clear</button>
                   </div>
                 </div>
                 <div id="validateMappingCmdbuild" class="mapping-tree"></div>
               </div>
-              <div class="mapping-column surface">
-                <h2>Conversion Rules</h2>
+              <div class="mapping-column surface" data-validation-column="rules">
+                <div class="validation-column-header">
+                  <h2>Conversion Rules</h2>
+                  <div class="validation-column-actions">
+                    <button class="secondary" type="button" data-validation-select="rules" data-i18n="common.selectAll">Select all</button>
+                    <button class="secondary" type="button" data-validation-clear="rules" data-i18n="common.clear">Clear</button>
+                  </div>
+                </div>
                 <div id="validateMappingRules" class="mapping-tree"></div>
               </div>
               <div class="mapping-column surface" data-validation-column="zabbix">
                 <div class="validation-column-header">
                   <h2>Zabbix</h2>
                   <div class="validation-column-actions">
-                    <button class="secondary" type="button" data-validation-select="zabbix">Select all</button>
-                    <button class="secondary" type="button" data-validation-clear="zabbix">Clear</button>
+                    <button class="secondary" type="button" data-validation-select="zabbix" data-i18n="common.selectAll">Select all</button>
+                    <button class="secondary" type="button" data-validation-clear="zabbix" data-i18n="common.clear">Clear</button>
                   </div>
                 </div>
                 <div id="validateMappingZabbix" class="mapping-tree"></div>
@@ -270,12 +360,58 @@
             </div>
           </section>
 
+          <section class="view" id="webhooks">
+            <div class="view-header">
+              <h1 data-i18n="nav.webhooks">Настройка webhooks</h1>
+              <div class="actions">
+                <button id="webhooksUndo" class="secondary" type="button" disabled data-i18n="common.undo">Отменить</button>
+                <button id="webhooksRedo" class="secondary" type="button" disabled data-i18n="common.redo">Вернуть</button>
+                <button id="webhooksAnalyze" class="secondary" type="button" data-i18n="webhooks.analyze">Проанализировать rules</button>
+                <button id="webhooksLoadCmdb" type="button" data-i18n="webhooks.loadFromCmdb">Загрузить из CMDB</button>
+                <button id="webhooksSaveAs" class="secondary" type="button" disabled data-i18n="common.saveFileAs">Сохранить файл как</button>
+                <button id="webhooksApplyCmdb" class="danger" type="button" disabled data-i18n="webhooks.applyToCmdb">Загрузить в CMDB</button>
+              </div>
+            </div>
+            <div id="webhooksSummary" class="surface validation-summary"></div>
+            <div class="webhooks-layout">
+              <div class="surface">
+                <div class="webhooks-section-header">
+                  <h2 data-i18n="webhooks.operations">Операции</h2>
+                  <div class="actions">
+                    <button id="webhooksSelectAll" class="secondary" type="button" disabled data-i18n="common.selectAll">Выбрать все</button>
+                    <button id="webhooksClear" class="secondary" type="button" disabled data-i18n="common.clear">Очистить</button>
+                  </div>
+                </div>
+                <table class="webhooks-table">
+                  <thead>
+                    <tr>
+                      <th data-i18n="webhooks.selected">Выбрано</th>
+                      <th data-i18n="webhooks.action">Действие</th>
+                      <th data-i18n="webhooks.code">Code</th>
+                      <th data-i18n="webhooks.target">Класс</th>
+                      <th data-i18n="webhooks.event">Событие</th>
+                      <th data-i18n="webhooks.reason">Причина</th>
+                      <th data-i18n="webhooks.payload">Payload</th>
+                      <th data-i18n="webhooks.edit">Редактировать</th>
+                    </tr>
+                  </thead>
+                  <tbody id="webhooksOperationsTable"></tbody>
+                </table>
+                <div class="webhooks-details-panel">
+                  <h2 data-i18n="webhooks.details">Детали</h2>
+                  <div id="webhooksDetails" class="code-block webhook-details-block"></div>
+                </div>
+              </div>
+            </div>
+            <p id="webhooksStatus" class="mapping-editor-status"></p>
+          </section>
+
           <section class="view" id="zabbix">
             <div class="view-header">
               <h1 data-i18n="nav.zabbix">Zabbix Catalog</h1>
               <div class="actions">
-                <button id="syncZabbix" type="button">Sync</button>
-                <button id="loadZabbix" type="button">Load</button>
+                <button id="syncZabbix" type="button" data-i18n="common.sync">Sync</button>
+                <button id="loadZabbix" type="button" data-i18n="common.load">Load</button>
               </div>
             </div>
             <div class="zabbix-catalog-layout">
@@ -291,8 +427,8 @@
             <div class="view-header">
               <h1 data-i18n="nav.cmdbuild">CMDBuild Catalog</h1>
               <div class="actions">
-                <button id="syncCmdbuild" type="button">Sync</button>
-                <button id="loadCmdbuild" type="button">Load</button>
+                <button id="syncCmdbuild" type="button" data-i18n="common.sync">Sync</button>
+                <button id="loadCmdbuild" type="button" data-i18n="common.load">Load</button>
               </div>
             </div>
             <div class="split-layout">
@@ -310,40 +446,48 @@
                   <tbody id="cmdbAttributes"></tbody>
                 </table>
               </div>
+              <div class="surface">
+                <h2>Domains</h2>
+                <table>
+                  <thead><tr><th>Name</th><th>Source</th><th>Destination</th></tr></thead>
+                  <tbody id="cmdbDomains"></tbody>
+                </table>
+              </div>
             </div>
           </section>
 
-          <section class="view" id="settings">
+          <section class="view" id="runtimeSettings">
             <div class="view-header">
-              <h1 data-i18n="nav.settings">Settings</h1>
+              <h1 data-i18n="nav.runtimeSettings">Runtime settings</h1>
               <div class="actions">
-                <button id="loadSettings" type="button">Load</button>
-                <button id="saveRuntimeSettings" type="button">Save runtime</button>
-                <button id="saveIdp" type="button">Save IdP</button>
+                <button id="loadRuntimeSettings" type="button" data-i18n="common.load">Load</button>
+                <button id="saveRuntimeSettings" type="button" data-i18n="settings.saveRuntime">Save runtime</button>
               </div>
             </div>
             <form id="runtimeSettingsForm" class="surface settings-stack">
-              <h2>Environment</h2>
+              <h2 data-i18n="settings.runtimeConnections">Runtime-настройки подключений</h2>
               <div class="settings-grid">
-                <label><span>Settings file</span><input name="filePath" readonly></label>
-                <label class="check-row">
-                  <input name="localDefaultsEnabled" type="checkbox">
-                  <span>Prefill login form</span>
-                </label>
-                <label><span>CMDBuild URL</span><input name="cmdbuildBaseUrl"></label>
-                <label><span>CMDBuild service login</span><input name="cmdbuildServiceUsername"></label>
-                <label><span>CMDBuild service password</span><input name="cmdbuildServicePassword" type="password"></label>
-                <label><span>Login form CMDBuild login</span><input name="cmdbuildDefaultUsername"></label>
-                <label><span>Login form CMDBuild password</span><input name="cmdbuildDefaultPassword" type="password"></label>
-                <label><span>Zabbix API</span><input name="zabbixApiEndpoint"></label>
-                <label><span>Zabbix service login</span><input name="zabbixServiceUser"></label>
-                <label><span>Zabbix service password</span><input name="zabbixServicePassword" type="password"></label>
-                <label><span>Zabbix service token</span><input name="zabbixServiceApiToken" type="password"></label>
-                <label><span>Login form Zabbix login</span><input name="zabbixDefaultUsername"></label>
-                <label><span>Login form Zabbix password</span><input name="zabbixDefaultPassword" type="password"></label>
-                <label><span>Login form Zabbix token</span><input name="zabbixDefaultApiToken" type="password"></label>
+                <label><span data-i18n="settings.settingsFile">Файл настроек</span><input name="filePath" readonly></label>
+                <label><span data-i18n="settings.usersFile">Файл пользователей</span><input name="usersFilePath" readonly></label>
+                <label><span data-i18n="settings.cmdbuildUrl">CMDBuild URL</span><input name="cmdbuildBaseUrl"></label>
+                <label><span data-i18n="settings.maxTraversalDepth">Максимальная глубина рекурсии domains&reference&lookups</span><input name="cmdbuildMaxTraversalDepth" type="number" min="2" max="5"></label>
+                <p class="settings-note wide-field" data-i18n="settings.maxTraversalDepthNote">Изменение заработает только после logout и пересинхронизации CMDBuild catalog.</p>
+                <label><span data-i18n="settings.zabbixApi">Zabbix API</span><input name="zabbixApiEndpoint"></label>
+                <label><span data-i18n="settings.zabbixApiKey">Zabbix API key</span><input name="zabbixApiToken" type="password"></label>
               </div>
-              <h2>Kafka events</h2>
+              <h2 data-i18n="settings.rulesStorage">Файл правил конвертации</h2>
+              <div class="settings-grid">
+                <label><span data-i18n="settings.rulesFilePath">Путь к файлу правил</span><input name="rulesFilePath" placeholder="rules/cmdbuild-to-zabbix-host-create.json" data-i18n-placeholder="settings.rulesFilePathPlaceholder"></label>
+                <label class="check-row">
+                  <input name="rulesReadFromGit" type="checkbox">
+                  <span data-i18n="settings.rulesReadFromGit">Читать из git</span>
+                </label>
+                <label class="wide-field"><span data-i18n="settings.rulesRepositoryUrl">Git repository URL</span><input name="rulesRepositoryUrl" placeholder="https://git.example.org/cmdb2monitoring/conversion-rules.git" data-i18n-placeholder="settings.rulesRepositoryUrlPlaceholder"></label>
+                <p id="rulesReadModeNote" class="settings-note wide-field">Для нашей тестовой системы: читать с диска, файл rules/cmdbuild-to-zabbix-host-create.json.</p>
+                <p class="settings-note wide-field" data-i18n="settings.rulesGitFileNote">При включении git внутри repository ожидается файл правил по пути, указанному выше.</p>
+                <p class="settings-note wide-field" data-i18n="settings.rulesStorageNote">UI сохраняет rules через браузер; публикация в git выполняется оператором вне приложения.</p>
+              </div>
+              <h2 data-i18n="settings.kafkaEvents">Kafka Events</h2>
               <div class="settings-grid">
                 <label class="check-row">
                   <input name="eventsEnabled" type="checkbox">
@@ -383,31 +527,152 @@
                 <textarea name="eventsTopics" spellcheck="false"></textarea>
               </label>
             </form>
-            <form id="idpForm" class="surface settings-grid">
-              <label class="check-row">
-                <input name="enabled" type="checkbox">
-                <span>Use IdP</span>
+          </section>
+
+          <section class="view" id="authSettings">
+            <div class="view-header">
+              <h1 data-i18n="nav.authSettings">Authorization</h1>
+              <div class="actions">
+                <button id="loadAuthSettings" type="button" data-i18n="common.load">Load</button>
+                <button id="saveIdp" type="button" data-i18n="settings.saveAuth">Save authorization</button>
+              </div>
+            </div>
+            <form id="idpForm" class="surface settings-stack">
+              <h2 data-i18n="settings.authModeTitle">Режим авторизации</h2>
+              <div class="settings-grid">
+                <label>
+                  <span data-i18n="settings.authMode">Режим авторизации</span>
+                  <select name="authMode">
+                    <option value="local" data-i18n="settings.authModeLocal">Локальная</option>
+                    <option value="msad" data-i18n="settings.authModeMsad">MS AD</option>
+                    <option value="idp" data-i18n="settings.authModeIdp">IdP</option>
+                  </select>
+                </label>
+              <label id="idpProviderRow">
+                <span data-i18n="settings.idpProvider">IdP protocol</span>
+                <select name="provider">
+                  <option value="saml2">SAML2</option>
+                  <option value="oauth2">OAuth2/OIDC</option>
+                </select>
               </label>
-              <label><span>Metadata URL</span><input name="metadataUrl"></label>
-              <label><span>Entity ID</span><input name="entityId"></label>
-              <label><span>SSO URL</span><input name="ssoUrl"></label>
-              <label><span>SLO URL</span><input name="sloUrl"></label>
-              <label><span>SP Entity ID</span><input name="spEntityId"></label>
-              <label><span>ACS URL</span><input name="acsUrl"></label>
-              <label><span>SLO callback URL</span><input name="sloCallbackUrl"></label>
-              <label><span>NameID format</span><input name="nameIdFormat"></label>
-              <label><span>Authn binding</span><input name="authnRequestBinding"></label>
-              <label class="check-row">
-                <input name="requireSignedResponses" type="checkbox">
-                <span>Require signed responses</span>
-              </label>
-              <label class="check-row">
-                <input name="requireSignedAssertions" type="checkbox">
-                <span>Require signed assertions</span>
-              </label>
-              <label><span>IdP X509 certificate</span><textarea name="idpX509Certificate"></textarea></label>
-              <label><span>SP certificate</span><textarea name="spCertificate"></textarea></label>
-              <label><span>SP private key</span><textarea name="spPrivateKey"></textarea></label>
+              </div>
+              <fieldset id="samlSettingsBlock" class="settings-stack idp-provider-block">
+                <legend>SAML2</legend>
+                <div class="settings-grid">
+                  <label><span>Metadata URL</span><input name="metadataUrl"></label>
+                  <label><span>Entity ID</span><input name="entityId"></label>
+                  <label><span>SSO URL</span><input name="ssoUrl"></label>
+                  <label><span>SLO URL</span><input name="sloUrl"></label>
+                  <label><span>SP Entity ID</span><input name="spEntityId"></label>
+                  <label><span>ACS URL</span><input name="acsUrl"></label>
+                  <label><span>SLO callback URL</span><input name="sloCallbackUrl"></label>
+                  <label><span>NameID format</span><input name="nameIdFormat"></label>
+                  <label><span>Authn binding</span><input name="authnRequestBinding"></label>
+                  <label class="check-row">
+                    <input name="requireSignedResponses" type="checkbox">
+                    <span>Require signed responses</span>
+                  </label>
+                  <label class="check-row">
+                    <input name="requireSignedAssertions" type="checkbox">
+                    <span>Require signed assertions</span>
+                  </label>
+                  <label><span>IdP X509 certificate</span><textarea name="idpX509Certificate"></textarea></label>
+                  <label><span>SP certificate</span><textarea name="spCertificate"></textarea></label>
+                  <label><span>SP private key</span><textarea name="spPrivateKey"></textarea></label>
+                </div>
+              </fieldset>
+              <fieldset id="oauth2SettingsBlock" class="settings-stack idp-provider-block">
+                <legend>OAuth2/OIDC</legend>
+                <div class="settings-grid">
+                  <label><span>Authorization URL</span><input name="oauth2AuthorizationUrl"></label>
+                  <label><span>Token URL</span><input name="oauth2TokenUrl"></label>
+                  <label><span>UserInfo URL</span><input name="oauth2UserInfoUrl"></label>
+                  <label><span>Client ID</span><input name="oauth2ClientId"></label>
+                  <label><span>Client secret</span><input name="oauth2ClientSecret" type="password"></label>
+                  <label><span>Redirect URI</span><input name="oauth2RedirectUri"></label>
+                  <label><span>Scopes</span><input name="oauth2Scopes"></label>
+                  <label><span>Login claim</span><input name="oauth2LoginClaim"></label>
+                  <label><span>Email claim</span><input name="oauth2EmailClaim"></label>
+                  <label><span>Display name claim</span><input name="oauth2DisplayNameClaim"></label>
+                  <label><span>Groups claim</span><input name="oauth2GroupsClaim"></label>
+                </div>
+              </fieldset>
+              <fieldset id="ldapSettingsBlock" class="settings-stack idp-provider-block">
+                <legend>MS AD / LDAP / LDAPS</legend>
+                <div class="settings-grid">
+                  <label>
+                    <span>Protocol</span>
+                    <select name="ldapProtocol">
+                      <option value="ldap">LDAP</option>
+                      <option value="ldaps">LDAPS</option>
+                    </select>
+                  </label>
+                  <label><span>Host</span><input name="ldapHost"></label>
+                  <label><span>Port</span><input name="ldapPort" type="number" min="1" max="65535"></label>
+                  <label><span>Base DN</span><input name="ldapBaseDn"></label>
+                  <label><span>Bind DN</span><input name="ldapBindDn"></label>
+                  <label><span>Bind password</span><input name="ldapBindPassword" type="password"></label>
+                  <label><span>User DN template</span><input name="ldapUserDnTemplate" placeholder="CN={login},OU=Users,DC=example,DC=local"></label>
+                  <label><span>User search base</span><input name="ldapUserSearchBase"></label>
+                  <label><span>User filter</span><input name="ldapUserFilter"></label>
+                  <label><span>Group search base</span><input name="ldapGroupSearchBase"></label>
+                  <label><span>Group filter</span><input name="ldapGroupFilter"></label>
+                  <label><span>Group name attribute</span><input name="ldapGroupNameAttribute"></label>
+                  <label><span>Login attribute</span><input name="ldapLoginAttribute"></label>
+                  <label><span>Email attribute</span><input name="ldapEmailAttribute"></label>
+                  <label><span>Display name attribute</span><input name="ldapDisplayNameAttribute"></label>
+                  <label><span>Groups attribute</span><input name="ldapGroupsAttribute"></label>
+                  <label class="check-row">
+                    <input name="ldapTlsRejectUnauthorized" type="checkbox">
+                    <span>Reject unauthorized TLS</span>
+                  </label>
+                </div>
+              </fieldset>
+              <div id="roleMappingBlock" class="settings-stack">
+                <h2 data-i18n="settings.roleMapping">Role to groups mapping</h2>
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="settings.roleColumn">Роль</th>
+                      <th data-i18n="settings.groupsColumn">Группы IdP / AD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Администрирование</td><td><input name="roleAdminGroups"></td></tr>
+                    <tr><td>Редактирование правил</td><td><input name="roleEditorGroups"></td></tr>
+                    <tr><td>Просмотр</td><td><input name="roleViewerGroups"></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </form>
+            <form id="userAdminForm" class="surface settings-stack">
+              <h2 data-i18n="settings.users">Локальные пользователи и роли</h2>
+              <div class="settings-grid">
+                <label class="check-row">
+                  <input name="localUsersActive" type="checkbox" disabled checked>
+                  <span data-i18n="settings.localUsersActive">Локальные пользователи активны</span>
+                </label>
+                <label><span data-i18n="settings.resetUser">Пользователь</span><select name="username"></select></label>
+                <label><span data-i18n="settings.resetPassword">Новый пароль</span><input name="newPassword" type="password" autocomplete="new-password"></label>
+                <label class="check-row">
+                  <input name="mustChangePassword" type="checkbox" checked>
+                  <span data-i18n="settings.mustChangePassword">Потребовать смену при входе</span>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="loadUsers" type="button" data-i18n="settings.loadUsers">Загрузить пользователей</button>
+                <button id="resetUserPassword" type="button" data-i18n="settings.resetUserPassword">Сбросить пароль</button>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th data-i18n="settings.userColumn">Пользователь</th>
+                    <th data-i18n="settings.roleColumn">Роль</th>
+                    <th data-i18n="settings.mustChangeColumn">Смена пароля</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTable"></tbody>
+              </table>
             </form>
           </section>
 
@@ -416,7 +681,8 @@
               <h1 data-i18n="about.title">About</h1>
             </div>
             <div class="surface about-panel">
-              <p data-i18n="about.text">Наговорено при помощи вайбкодинга Игорем Ляпиным в 2026. Igor.Lyapin(*)gmail.com. Для свободного использования.</p>
+              <p data-i18n="about.text">Спроектировано и овеществлено Игорем Ляпиным email:igor.lyapin@gmail.com 2026
+Под лицензией GNU GPLv3.</p>
             </div>
           </section>
 
@@ -429,7 +695,7 @@
                 <h2 data-i18n="help.general.title">Общий принцип</h2>
                 <ul>
                   <li data-i18n="help.general.1">Браузер работает только с monitoring-ui-api; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.</li>
-                  <li data-i18n="help.general.2">Все адреса, учетные данные, Kafka topics, IdP/SAML2 и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Settings.</li>
+                  <li data-i18n="help.general.2">Адреса, Zabbix API key, Kafka topics и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Runtime-настройки. Авторизация настраивается отдельно: локальная, MS AD или IdP с группами AD для ролей.</li>
                   <li data-i18n="help.general.3">Всплывающие подсказки показываются при наведении или фокусе на элементе интерфейса.</li>
                 </ul>
               </div>
@@ -447,7 +713,8 @@
                   <li data-i18n="help.rules.1">Load загружает текущий JSON правил конвертации.</li>
                   <li data-i18n="help.rules.2">Validate проверяет структуру правил на backend.</li>
                   <li data-i18n="help.rules.3">Dry-run применяет правила к тестовому CMDBuild payload без сохранения.</li>
-                  <li data-i18n="help.rules.4">Upload сохраняет новый JSON правил на backend после проверки.</li>
+                  <li data-i18n="help.rules.4">Save file as сохраняет JSON правил через браузер; backend rules-файл и git не изменяются.</li>
+                  <li data-i18n="help.rules.5">Создать пустой формирует production starter из текущего окружения: endpoints/topics и справочники CMDBuild/Zabbix берутся из runtime config и catalog cache, routes остаются publish=false до осознанного включения. Если CMDBuild или Zabbix cache пустой, backend возвращает ошибку и предлагает сначала синхронизировать каталог.</li>
                 </ul>
               </div>
               <div class="surface">
@@ -456,17 +723,20 @@
                   <li data-i18n="help.mapping.1">Страница показывает цепочку CMDBuild -> Conversion Rules -> Zabbix.</li>
                   <li data-i18n="help.mapping.2">Режим просмотра показывает выбранную цепочку и скрывает лишние атрибуты классов, другие rule-подблоки и несвязанные элементы списков Zabbix.</li>
                   <li data-i18n="help.mapping.3">Снять выделение доступно в режиме просмотра и возвращает обычный обзор без подсветки цепочки.</li>
-                  <li data-i18n="help.mapping.4">Режим редактирования меняет draft JSON текущей сессии: можно выбрать CMDBuild class/class attribute field, структуру конвертации, Zabbix object/payload, priority и regex.</li>
-                  <li data-i18n="help.mapping.5">Действие Удаление правила показывает rules текущего draft JSON, удаляет отмеченные правила после подтверждения и оставляет classes/class attribute fields на месте.</li>
-                  <li data-i18n="help.mapping.6">Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
-                  <li data-i18n="help.mapping.7">Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.</li>
-                  <li data-i18n="help.mapping.8">Повторное нажатие на выбранный элемент снимает выделение.</li>
-                  <li data-i18n="help.mapping.9">Interface address rules выбирают, чем заполнить Zabbix interface: ipAddress дает useip=1, dnsName дает useip=0.</li>
-                  <li data-i18n="help.mapping.10">Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.</li>
-                  <li data-i18n="help.mapping.11">Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.</li>
-                  <li data-i18n="help.mapping.12">Для Server webhook keys interface/interface2/profile/profile2 связаны с реальными CMDBuild attributes iLo/iLo2/mgmt/mgmt2 через cmdbAttribute; это нужно для раздела управления правилами конвертации и Body, но не добавляет старые alias в обработку payload.</li>
-                  <li data-i18n="help.mapping.13">Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.</li>
-                  <li data-i18n="help.mapping.14">Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
+                  <li data-i18n="help.mapping.4">Режим редактирования скрывает нижний просмотр и меняет draft JSON текущей сессии: можно начать с любого узла формы, а зависимые поля фильтруются и подсвечиваются.</li>
+                  <li data-i18n="help.mapping.5">Действие Модификация правила начинается без автоматически выбранного rule: можно начать с rule, class, field или conversion structure. Связанные списки фильтруются, единственный найденный rule выбирается автоматически, а Сбросить поля возвращает форму к пустым фильтрам. Target, отсутствующий в Zabbix catalog, считается неконсистентным и блокирует сохранение.</li>
+                  <li data-i18n="help.mapping.6">Действие Удаление правил и классов показывает rules текущего draft JSON деревом по CMDBuild, Zabbix или коллекциям правил. Можно отметить весь класс, атрибут CMDBuild, Zabbix payload field, Zabbix object group или отдельное rule; source classes/class attribute fields очищаются через логический контроль правил конвертации.</li>
+                  <li data-i18n="help.mapping.7">Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
+                  <li data-i18n="help.mapping.8">Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.</li>
+                  <li data-i18n="help.mapping.9">Повторное нажатие на выбранный элемент снимает выделение.</li>
+                  <li data-i18n="help.mapping.10">Interface address rules выбирают, чем заполнить Zabbix interface: ipAddress дает useip=1, dnsName дает useip=0.</li>
+                  <li data-i18n="help.mapping.11">Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.</li>
+                  <li data-i18n="help.mapping.12">Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.</li>
+                  <li data-i18n="help.mapping.13">Source keys webhook могут отличаться от имен CMDBuild attributes; связь задается через cmdbAttribute или cmdbPath и не добавляет скрытые alias в обработку payload.</li>
+                  <li data-i18n="help.mapping.14">Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.</li>
+                  <li data-i18n="help.mapping.15">Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
+                  <li data-i18n="help.mapping.16">Domain path вида Класс.{domain:СвязанныйКласс}.Атрибут читает связанные карточки через CMDBuild relations; поля, которые могут вернуть несколько значений, недоступны для скалярных Zabbix structures.</li>
+                  <li data-i18n="help.mapping.17">monitoringSuppressionRules используется, когда атрибуты экземпляра означают осознанный отказ от постановки на мониторинг; create/update пропускаются, delete не блокируется.</li>
                 </ul>
               </div>
               <div class="surface">
@@ -479,12 +749,26 @@
                 </ul>
               </div>
               <div class="surface">
+                <h2 data-i18n="help.webhooks.title">Настройка webhooks</h2>
+                <ul>
+                  <li data-i18n="help.webhooks.1">Страница доступна ролям Редактирование правил и Администрирование.</li>
+                  <li data-i18n="help.webhooks.2">Загрузить из CMDB читает текущие CMDBuild webhooks через backend; браузер не подключается к CMDBuild напрямую.</li>
+                  <li data-i18n="help.webhooks.3">Проанализировать rules строит желаемые webhooks по текущим conversion rules: новые предлагаются к созданию, отличающиеся к изменению, управляемые лишние к удалению.</li>
+                  <li data-i18n="help.webhooks.4">Сохранить файл как выгружает только JSON-план через браузер и не меняет CMDBuild, backend rules-файл или git.</li>
+                  <li data-i18n="help.webhooks.5">Загрузить в CMDB применяет только выбранные операции и действительно меняет webhooks в управляемой системе.</li>
+                  <li data-i18n="help.webhooks.6">Пользоваться этим пунктом не обязательно: webhooks можно настроить вручную в CMDBuild или использовать webhook-файлы, которые сохраняются вместе с файлом правил конвертации.</li>
+                  <li data-i18n="help.webhooks.7">Undo/Redo отменяют только выбор операций в текущем плане и не откатывают уже выполненную загрузку конфигурации в CMDBuild.</li>
+                  <li data-i18n="help.webhooks.8">В таблице можно раскрыть payload каждой строки: зеленым показано добавление, красным удаление, черным актуальное значение. Нажатие на значение в столбце "Действие" открывает детали под этой строкой, а общий блок деталей находится под таблицей и использует ту же подсветку. Редактировать меняет JSON конкретного webhook в текущем плане.</li>
+                </ul>
+              </div>
+              <div class="surface">
                 <h2 data-i18n="help.catalogs.title">Каталоги и настройки</h2>
                 <ul>
                   <li data-i18n="help.catalogs.1">Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.</li>
                   <li data-i18n="help.catalogs.2">CMDBuild Catalog загружает классы, атрибуты и lookup-значения.</li>
-                  <li data-i18n="help.catalogs.3">Settings сохраняет runtime-настройки подключений, Events Kafka browser и IdP/SAML2.</li>
+                  <li data-i18n="help.catalogs.3">Runtime-настройки сохраняют подключения и Events Kafka browser; Авторизация сохраняет локальный режим, MS AD, IdP/SAML2/OAuth2 и привязку AD-групп к ролям.</li>
                   <li data-i18n="help.catalogs.4">Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.</li>
+                  <li data-i18n="help.catalogs.5">Для тестовой системы rules читаются с диска из rules/cmdbuild-to-zabbix-host-create.json; если включено чтение из git, этот файл ожидается внутри repository по тому же пути.</li>
                 </ul>
               </div>
             </div>

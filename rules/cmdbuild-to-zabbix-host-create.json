@@ -1,7 +1,8 @@
 {
   "schemaVersion": "0.1",
-  "name": "cmdbuild-computer-to-zabbix-host-lifecycle",
-  "description": "Conversion rules for CMDBuild Computer-derived webhook events into Zabbix JSON-RPC payloads.",
+  "rulesVersion": "2026.05.02-c2m-test",
+  "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
+  "description": "Clean demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
     "topic": "cmdbuild.webhooks.dev",
     "supportedEvents": [
@@ -13,11 +14,7 @@
       "create"
     ],
     "entityClasses": [
-      "Computer",
-      "Notebook",
-      "PC",
-      "Server",
-      "tk"
+      "C2MTestCI"
     ],
     "fields": {
       "entityId": {
@@ -36,34 +33,9 @@
         "source": "ip_address",
         "sources": [
           "ip_address",
-          "ip",
-          "IPAddress",
-          "ipAddress"
+          "PrimaryIp"
         ],
-        "required": false,
-        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
-      },
-      "profileIpAddress": {
-        "source": "profile",
-        "cmdbAttribute": "mgmt",
-        "required": false,
-        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
-      },
-      "profile2IpAddress": {
-        "source": "profile2",
-        "cmdbAttribute": "mgmt2",
-        "required": false,
-        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
-      },
-      "interfaceIpAddress": {
-        "source": "interface",
-        "cmdbAttribute": "iLo",
-        "required": false,
-        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
-      },
-      "interface2IpAddress": {
-        "source": "interface2",
-        "cmdbAttribute": "iLo2",
+        "cmdbAttribute": "PrimaryIp",
         "required": false,
         "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
       },
@@ -71,48 +43,124 @@
         "source": "dns_name",
         "sources": [
           "dns_name",
-          "fqdn",
-          "host_dns",
-          "hostname",
-          "dnsName"
+          "DnsName"
         ],
-        "required": false,
-        "validationRegex": "^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
-      },
-      "profileDnsName": {
-        "source": "profile_dns",
+        "cmdbAttribute": "DnsName",
         "required": false,
         "validationRegex": "^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
       },
       "description": {
         "source": "description",
+        "sources": [
+          "description",
+          "Description"
+        ],
         "required": false
       },
-      "os": {
-        "source": "OS",
+      "lifecycleState": {
+        "source": "LifecycleState",
+        "cmdbAttribute": "LifecycleState",
         "type": "lookup",
-        "cmdbPath": "OS",
-        "lookupType": "OS",
+        "cmdbPath": "C2MTestCI.LifecycleState",
         "resolve": {
-          "mode": "lookup",
-          "lookupType": "OS",
+          "mode": "cmdbPath",
+          "leafType": "lookup",
           "valueMode": "code"
         },
-        "required": false,
-        "validationRegex": "(?i)^(windows|windows server|linux|vmware|105130|105152|105146|105161)$"
+        "required": false
       },
-      "zabbixTag": {
-        "source": "zabbixTag",
+      "monitoringPolicy": {
+        "source": "MonitoringPolicy",
+        "cmdbAttribute": "MonitoringPolicy",
         "type": "lookup",
-        "cmdbPath": "zabbixTag",
-        "lookupType": "zabbixTag",
+        "cmdbPath": "C2MTestCI.MonitoringPolicy",
         "resolve": {
-          "mode": "lookup",
-          "lookupType": "zabbixTag",
+          "mode": "cmdbPath",
+          "leafType": "lookup",
           "valueMode": "code"
         },
+        "required": false
+      },
+      "c2mExtraInterface1Ip": {
+        "source": "ExtraInterface1Ip",
+        "cmdbAttribute": "ExtraInterface1Ip",
         "required": false,
-        "validationRegex": "(?i)^(tag[1-3]|106857|106852|106850)$"
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "c2mExtraInterface2Ip": {
+        "source": "ExtraInterface2Ip",
+        "cmdbAttribute": "ExtraInterface2Ip",
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "c2mSeparateProfile1Ip": {
+        "source": "SeparateProfile1Ip",
+        "cmdbAttribute": "SeparateProfile1Ip",
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "c2mSeparateProfile2Ip": {
+        "source": "SeparateProfile2Ip",
+        "cmdbAttribute": "SeparateProfile2Ip",
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "c2mAddressRefIp": {
+        "source": "AddressRef",
+        "cmdbAttribute": "AddressRef",
+        "cmdbPath": "C2MTestCI.AddressRef.AddressValue",
+        "resolve": {
+          "mode": "cmdbPath",
+          "maxDepth": 2
+        },
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "c2mDeepReferenceIp": {
+        "source": "Reference1",
+        "cmdbAttribute": "Reference1",
+        "cmdbPath": "C2MTestCI.Reference1.Reference2.LeafIp",
+        "resolve": {
+          "mode": "cmdbPath",
+          "maxDepth": 2
+        },
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "c2mDeepReferenceLookup": {
+        "source": "Reference1",
+        "cmdbAttribute": "Reference1",
+        "cmdbPath": "C2MTestCI.Reference1.Reference2.LeafLookup",
+        "resolve": {
+          "mode": "cmdbPath",
+          "leafType": "lookup",
+          "valueMode": "code",
+          "maxDepth": 2
+        },
+        "required": false
+      },
+      "c2mDomainAddressFirstIp": {
+        "source": "__domainResolver",
+        "cmdbPath": "C2MTestCI.{domain:C2MTestAddress}.AddressValue",
+        "resolve": {
+          "mode": "cmdbPath",
+          "collectionMode": "first",
+          "maxDepth": 2
+        },
+        "required": false,
+        "validationRegex": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+      },
+      "c2mDomainAddressState": {
+        "source": "__domainResolver",
+        "cmdbPath": "C2MTestCI.{domain:C2MTestAddress}.AddressState",
+        "resolve": {
+          "mode": "cmdbPath",
+          "leafType": "lookup",
+          "valueMode": "code",
+          "collectionMode": "first",
+          "maxDepth": 2
+        },
+        "required": false
       }
     }
   },
@@ -223,6 +271,38 @@
       }
     ]
   },
+  "catalog": {
+    "hostGroups": [],
+    "templates": [],
+    "templateGroups": [],
+    "proxies": [],
+    "proxyGroups": [],
+    "globalMacros": [],
+    "hostMacros": [],
+    "inventoryFields": [],
+    "interfaceProfiles": [],
+    "hostStatuses": [
+      {
+        "name": "monitored",
+        "status": 0
+      },
+      {
+        "name": "disabled",
+        "status": 1
+      }
+    ],
+    "tlsPskModes": [],
+    "maintenances": [],
+    "valueMaps": [],
+    "cmdbuild": {
+      "classes": [],
+      "attributes": [],
+      "lookups": [],
+      "domains": []
+    },
+    "generatedAt": "2026-05-02T00:00:00.000Z",
+    "source": "production-empty starter with dev runtime defaults"
+  },
   "defaults": {
     "host": {
       "status": 0,
@@ -283,14 +363,7 @@
           "community": "{$SNMP_COMMUNITY}"
         }
       },
-      "ipmi": {
-        "type": 3,
-        "main": 1,
-        "useip": 1,
-        "dns": "",
-        "port": "623"
-      },
-      "interface": {
+      "c2mSnmpMain": {
         "type": 2,
         "main": 1,
         "useip": 1,
@@ -302,7 +375,7 @@
           "community": "{$SNMP_COMMUNITY}"
         }
       },
-      "interface2": {
+      "c2mSnmpSecondary": {
         "type": 2,
         "main": 0,
         "useip": 1,
@@ -313,13 +386,6 @@
           "bulk": 1,
           "community": "{$SNMP_COMMUNITY}"
         }
-      },
-      "jmx": {
-        "type": 4,
-        "main": 1,
-        "useip": 1,
-        "dns": "",
-        "port": "12345"
       }
     },
     "hostStatus": {
@@ -339,10 +405,6 @@
       }
     ],
     "inventoryFields": [
-      {
-        "field": "os",
-        "valueTemplate": "<#= Model.OperatingSystem #>"
-      },
       {
         "field": "asset_tag",
         "valueTemplate": "<#= Model.EntityId #>"
@@ -435,12 +497,53 @@
       "publish": true
     }
   ],
+  "monitoringSuppressionRules": [
+    {
+      "name": "object-policy-do-not-monitor",
+      "priority": 10,
+      "reason": "object_policy_do_not_monitor",
+      "when": {
+        "allRegex": [
+          {
+            "field": "eventType",
+            "pattern": "(?i)^(create|update)$"
+          },
+          {
+            "field": "monitoringPolicy",
+            "pattern": "(?i)^(do_not_monitor|dont_monitor|do not monitor|not_monitored|false|0)$"
+          }
+        ]
+      }
+    },
+    {
+      "name": "lifecycle-do-not-monitor",
+      "priority": 20,
+      "reason": "lifecycle_do_not_monitor",
+      "when": {
+        "allRegex": [
+          {
+            "field": "eventType",
+            "pattern": "(?i)^(create|update)$"
+          },
+          {
+            "field": "lifecycleState",
+            "pattern": "(?i)^(do_not_monitor|retired|decommissioned|archived)$"
+          }
+        ]
+      }
+    }
+  ],
   "hostProfiles": [
     {
       "name": "main",
       "priority": 10,
       "when": {
-        "always": true
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^C2MTestCI$"
+          }
+        ]
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -467,41 +570,105 @@
           }
         },
         {
-          "name": "interface-snmp-ip",
+          "name": "c2m-extra1-snmp-ip",
           "priority": 30,
-          "interfaceProfileRef": "interface",
+          "interfaceProfileRef": "c2mSnmpMain",
           "mode": "ip",
-          "valueField": "interfaceIpAddress",
+          "valueField": "c2mExtraInterface1Ip",
           "when": {
-            "fieldExists": "interfaceIpAddress"
+            "fieldExists": "c2mExtraInterface1Ip",
+            "allRegex": [
+              {
+                "field": "className",
+                "pattern": "(?i)^C2MTestCI$"
+              }
+            ]
           }
         },
         {
-          "name": "interface2-snmp-ip",
+          "name": "c2m-extra2-snmp-ip",
           "priority": 40,
-          "interfaceProfileRef": "interface2",
+          "interfaceProfileRef": "c2mSnmpSecondary",
           "mode": "ip",
-          "valueField": "interface2IpAddress",
+          "valueField": "c2mExtraInterface2Ip",
           "when": {
-            "fieldExists": "interface2IpAddress"
+            "fieldExists": "c2mExtraInterface2Ip",
+            "allRegex": [
+              {
+                "field": "className",
+                "pattern": "(?i)^C2MTestCI$"
+              }
+            ]
+          }
+        },
+        {
+          "name": "c2m-address-ref-snmp-ip",
+          "priority": 50,
+          "interfaceProfileRef": "c2mSnmpMain",
+          "mode": "ip",
+          "valueField": "c2mAddressRefIp",
+          "when": {
+            "fieldExists": "c2mAddressRefIp",
+            "allRegex": [
+              {
+                "field": "className",
+                "pattern": "(?i)^C2MTestCI$"
+              }
+            ]
+          }
+        },
+        {
+          "name": "c2m-deep-reference-snmp-ip",
+          "priority": 60,
+          "interfaceProfileRef": "c2mSnmpMain",
+          "mode": "ip",
+          "valueField": "c2mDeepReferenceIp",
+          "when": {
+            "fieldExists": "c2mDeepReferenceIp",
+            "allRegex": [
+              {
+                "field": "className",
+                "pattern": "(?i)^C2MTestCI$"
+              }
+            ]
+          }
+        },
+        {
+          "name": "c2m-domain-address-snmp-ip",
+          "priority": 70,
+          "interfaceProfileRef": "c2mSnmpMain",
+          "mode": "ip",
+          "valueField": "c2mDomainAddressFirstIp",
+          "when": {
+            "fieldExists": "c2mDomainAddressFirstIp",
+            "allRegex": [
+              {
+                "field": "className",
+                "pattern": "(?i)^C2MTestCI$"
+              },
+              {
+                "field": "c2mDomainAddressState",
+                "pattern": "(?i)^active$"
+              }
+            ]
           }
         }
       ]
     },
     {
-      "name": "profile",
+      "name": "separate-profile-1",
       "priority": 20,
       "createOnUpdateWhenMissing": true,
       "when": {
         "allRegex": [
           {
             "field": "className",
-            "pattern": "(?i)^server$"
+            "pattern": "(?i)^C2MTestCI$"
           }
         ],
         "anyRegex": [
           {
-            "field": "profileIpAddress",
+            "field": "c2mSeparateProfile1Ip",
             "pattern": ".+"
           },
           {
@@ -510,35 +677,35 @@
           }
         ]
       },
-      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-profile",
-      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> profile",
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-separate-profile-1",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> separate profile 1",
       "interfaces": [
         {
-          "name": "profile-host-snmp-ip",
+          "name": "separate-profile-1-snmp-ip",
           "priority": 10,
           "interfaceProfileRef": "snmp",
           "mode": "ip",
-          "valueField": "profileIpAddress",
+          "valueField": "c2mSeparateProfile1Ip",
           "when": {
-            "fieldExists": "profileIpAddress"
+            "fieldExists": "c2mSeparateProfile1Ip"
           }
         }
       ]
     },
     {
-      "name": "profile2",
+      "name": "separate-profile-2",
       "priority": 30,
       "createOnUpdateWhenMissing": true,
       "when": {
         "allRegex": [
           {
             "field": "className",
-            "pattern": "(?i)^server$"
+            "pattern": "(?i)^C2MTestCI$"
           }
         ],
         "anyRegex": [
           {
-            "field": "profile2IpAddress",
+            "field": "c2mSeparateProfile2Ip",
             "pattern": ".+"
           },
           {
@@ -547,17 +714,17 @@
           }
         ]
       },
-      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-profile2",
-      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> profile2",
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-separate-profile-2",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> separate profile 2",
       "interfaces": [
         {
-          "name": "profile2-host-snmp-ip",
+          "name": "separate-profile-2-snmp-ip",
           "priority": 10,
           "interfaceProfileRef": "snmp",
           "mode": "ip",
-          "valueField": "profile2IpAddress",
+          "valueField": "c2mSeparateProfile2Ip",
           "when": {
-            "fieldExists": "profile2IpAddress"
+            "fieldExists": "c2mSeparateProfile2Ip"
           }
         }
       ]
@@ -578,131 +745,13 @@
   },
   "groupSelectionRules": [
     {
-      "name": "additional-profile-hosts",
-      "priority": 5,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^(profile|profile2)$"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Discovered hosts",
-          "groupid": "5"
-        }
-      ]
-    },
-    {
-      "name": "databases",
+      "name": "separate-profile-hosts",
       "priority": 10,
       "when": {
         "anyRegex": [
           {
-            "field": "className",
-            "pattern": "(?i)(database|db)"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\b(db|database|postgres|postgresql|mysql|mssql|oracle)\\b"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Databases",
-          "groupid": "20"
-        }
-      ]
-    },
-    {
-      "name": "applications",
-      "priority": 20,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)(application|app)"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\b(app|application|service)\\b"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Applications",
-          "groupid": "19"
-        }
-      ]
-    },
-    {
-      "name": "hypervisors",
-      "priority": 30,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)(hypervisor|esxi|vmware|kvm)"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\b(hypervisor|esxi|vmware|kvm)\\b"
-          },
-          {
-            "field": "os",
-            "pattern": "(?i)^(vmware|105161)$"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Hypervisors",
-          "groupid": "7"
-        }
-      ]
-    },
-    {
-      "name": "virtual-machines",
-      "priority": 40,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)(virtual|vm)"
-          },
-          {
-            "field": "code",
-            "pattern": "(?i)^vm[-_.]"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\b(vm|virtual machine|virtual)\\b"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Virtual machines",
-          "groupid": "6"
-        }
-      ]
-    },
-    {
-      "name": "network-devices",
-      "priority": 50,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)(network|switch|router)"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\b(snmp|switch|router|network)\\b"
+            "field": "hostProfile",
+            "pattern": "(?i)^(separate-profile-1|separate-profile-2)$"
           }
         ]
       },
@@ -710,86 +759,6 @@
         {
           "name": "Discovered hosts",
           "groupid": "5"
-        }
-      ]
-    },
-    {
-      "name": "linux-os",
-      "priority": 55,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(linux|105146)$"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Linux servers",
-          "groupid": "2"
-        }
-      ]
-    },
-    {
-      "name": "windows-os",
-      "priority": 56,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(windows|windows server|105130|105152)$"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Discovered hosts",
-          "groupid": "5"
-        }
-      ]
-    },
-    {
-      "name": "workstations",
-      "priority": 60,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^(notebook|pc)$"
-          },
-          {
-            "field": "code",
-            "pattern": "(?i)^(nb|pc)[-_.]"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Discovered hosts",
-          "groupid": "5"
-        }
-      ]
-    },
-    {
-      "name": "linux-servers",
-      "priority": 70,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(linux|105146)$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\blinux\\b"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Linux servers",
-          "groupid": "2"
         }
       ]
     },
@@ -805,135 +774,13 @@
   ],
   "templateSelectionRules": [
     {
-      "name": "network-snmp",
+      "name": "c2m-main-extra-snmp",
       "priority": 10,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)(network|switch|router)"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\b(snmp|switch|router|network)\\b"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Network Generic Device by SNMP",
-          "templateid": "10226"
-        }
-      ]
-    },
-    {
-      "name": "generic-snmp",
-      "priority": 20,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "description",
-            "pattern": "(?i)\\bsnmp\\b"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Generic by SNMP",
-          "templateid": "10563"
-        }
-      ]
-    },
-    {
-      "name": "linux-agent",
-      "priority": 25,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(linux|105146)$"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Linux by Zabbix agent",
-          "templateid": "10001"
-        }
-      ]
-    },
-    {
-      "name": "vmware-agent",
-      "priority": 26,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(vmware|105161)$"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Zabbix agent",
-          "templateid": "10561"
-        }
-      ]
-    },
-    {
-      "name": "windows-agent",
-      "priority": 30,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)windows"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\b(win|windows)\\b"
-          },
-          {
-            "field": "os",
-            "pattern": "(?i)^(windows|windows server|105130|105152)$"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Windows by Zabbix agent",
-          "templateid": "10081"
-        }
-      ]
-    },
-    {
-      "name": "server-main-additional-interfaces",
-      "priority": 39,
       "when": {
         "allRegex": [
           {
             "field": "className",
-            "pattern": "(?i)^server$"
+            "pattern": "(?i)^C2MTestCI$"
           },
           {
             "field": "hostProfile",
@@ -942,11 +789,19 @@
         ],
         "anyRegex": [
           {
-            "field": "interfaceIpAddress",
+            "field": "c2mExtraInterface1Ip",
             "pattern": ".+"
           },
           {
-            "field": "interface2IpAddress",
+            "field": "c2mExtraInterface2Ip",
+            "pattern": ".+"
+          },
+          {
+            "field": "c2mAddressRefIp",
+            "pattern": ".+"
+          },
+          {
+            "field": "c2mDeepReferenceIp",
             "pattern": ".+"
           }
         ]
@@ -963,13 +818,47 @@
       ]
     },
     {
-      "name": "additional-profile-snmp",
-      "priority": 40,
+      "name": "c2m-main-domain-snmp",
+      "priority": 15,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^C2MTestCI$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^main$"
+          },
+          {
+            "field": "c2mDomainAddressFirstIp",
+            "pattern": ".+"
+          },
+          {
+            "field": "c2mDomainAddressState",
+            "pattern": "(?i)^active$"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "HP iLO by SNMP",
+          "templateid": "10256"
+        }
+      ]
+    },
+    {
+      "name": "separate-profile-snmp",
+      "priority": 20,
       "when": {
         "anyRegex": [
           {
             "field": "hostProfile",
-            "pattern": "(?i)^(profile|profile2)$"
+            "pattern": "(?i)^(separate-profile-1|separate-profile-2)$"
           }
         ]
       },
@@ -1047,23 +936,6 @@
   ],
   "interfaceSelectionRules": [
     {
-      "name": "snmp-interface",
-      "priority": 10,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)(network|switch|router)"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i)\\bsnmp\\b"
-          }
-        ]
-      },
-      "interfaceRef": "snmpInterface"
-    },
-    {
       "name": "default-agent-interface",
       "priority": 1000,
       "fallback": true,
@@ -1129,182 +1001,92 @@
       ]
     },
     {
-      "name": "workstation-kind",
+      "name": "host-profile-main",
       "priority": 40,
       "when": {
         "anyRegex": [
           {
-            "field": "className",
-            "pattern": "(?i)^(notebook|pc)$"
+            "field": "hostProfile",
+            "pattern": "(?i)^main$"
           }
         ]
       },
       "tags": [
         {
-          "tag": "asset.kind",
-          "value": "workstation"
+          "tag": "cmdb.hostProfile",
+          "value": "main"
         }
       ]
     },
     {
-      "name": "os-windows",
+      "name": "host-profile-separate-1",
+      "priority": 41,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^separate-profile-1$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.hostProfile",
+          "value": "separate-profile-1"
+        }
+      ]
+    },
+    {
+      "name": "host-profile-separate-2",
+      "priority": 42,
+      "when": {
+        "anyRegex": [
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^separate-profile-2$"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.hostProfile",
+          "value": "separate-profile-2"
+        }
+      ]
+    },
+    {
+      "name": "c2m-business-hours",
       "priority": 50,
       "when": {
         "anyRegex": [
           {
-            "field": "os",
-            "pattern": "(?i)^(windows|105130)$"
+            "field": "monitoringPolicy",
+            "pattern": "(?i)^monitor_business_hours$"
           }
         ]
       },
       "tags": [
         {
-          "tag": "cmdb.os",
-          "value": "Windows"
+          "tag": "monitoring.policy",
+          "value": "business_hours_08_18"
         }
       ]
     },
     {
-      "name": "os-linux",
-      "priority": 51,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(linux|105146)$"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.os",
-          "value": "Linux"
-        }
-      ]
-    },
-    {
-      "name": "os-vmware",
-      "priority": 52,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(vmware|105161)$"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.os",
-          "value": "vmware"
-        }
-      ]
-    },
-    {
-      "name": "os-windows-server",
-      "priority": 53,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "os",
-            "pattern": "(?i)^(windows server|105152)$"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.os",
-          "value": "Windows server"
-        }
-      ]
-    },
-    {
-      "name": "zabbix-tag-1",
+      "name": "c2m-deep-reference-lookup",
       "priority": 60,
       "when": {
         "anyRegex": [
           {
-            "field": "zabbixTag",
-            "pattern": "(?i)^(tag1|106857)$"
+            "field": "c2mDeepReferenceLookup",
+            "pattern": ".+"
           }
         ]
       },
       "tags": [
         {
-          "tag": "cmdb.zabbixTag",
-          "value": "tag1"
-        }
-      ]
-    },
-    {
-      "name": "zabbix-tag-2",
-      "priority": 61,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "zabbixTag",
-            "pattern": "(?i)^(tag2|106852)$"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.zabbixTag",
-          "value": "tag2"
-        }
-      ]
-    },
-    {
-      "name": "zabbix-tag-3",
-      "priority": 62,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "zabbixTag",
-            "pattern": "(?i)^(tag3|106850)$"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.zabbixTag",
-          "value": "tag3"
-        }
-      ]
-    },
-    {
-      "name": "host-profile-profile",
-      "priority": 70,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^profile$"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.hostProfile",
-          "value": "profile"
-        }
-      ]
-    },
-    {
-      "name": "host-profile-profile2",
-      "priority": 71,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^profile2$"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.hostProfile",
-          "value": "profile2"
+          "tag": "cmdb.deepReference.lookup",
+          "valueTemplate": "<#= Model.Field(\"c2mDeepReferenceLookup\") #>"
         }
       ]
     },
@@ -1318,6 +1100,98 @@
       "tagsRef": "defaults.tags"
     }
   ],
+  "hostMacroSelectionRules": [
+    {
+      "name": "c2m-demo-code-macro",
+      "priority": 10,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^C2MTestCI$"
+          }
+        ]
+      },
+      "hostMacros": [
+        {
+          "macro": "{$C2M_DEMO_CODE}",
+          "valueTemplate": "<#= Model.Code #>",
+          "description": "Demo CMDBuild object code"
+        }
+      ]
+    }
+  ],
+  "inventorySelectionRules": [
+    {
+      "name": "c2m-demo-code-inventory-alias",
+      "priority": 10,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^C2MTestCI$"
+          }
+        ]
+      },
+      "inventoryFields": [
+        {
+          "field": "alias",
+          "valueTemplate": "<#= Model.Code #>"
+        }
+      ]
+    }
+  ],
+  "hostStatusSelectionRules": [
+    {
+      "name": "c2m-demo-disabled-host",
+      "priority": 10,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^C2MTestCI$"
+          },
+          {
+            "field": "code",
+            "pattern": "(?i)^C2M-DEMO-012-DISABLED-STATUS$"
+          }
+        ]
+      },
+      "hostStatus": {
+        "name": "disabled",
+        "status": 1
+      }
+    }
+  ],
+  "tlsPskSelectionRules": [
+    {
+      "name": "c2m-demo-tls-psk",
+      "priority": 10,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^C2MTestCI$"
+          },
+          {
+            "field": "code",
+            "pattern": "(?i)^C2M-DEMO-004-DEEP-REFERENCE$"
+          }
+        ]
+      },
+      "tlsPsk": {
+        "name": "demo-psk",
+        "tls_connect": 2,
+        "tls_accept": 2,
+        "tls_psk_identity": "c2m-demo-psk",
+        "tls_psk": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  ],
+  "proxySelectionRules": [],
+  "proxyGroupSelectionRules": [],
+  "maintenanceSelectionRules": [],
+  "valueMapSelectionRules": [],
   "t4Templates": {
     "engine": "Mono.TextTemplating",
     "modelParameter": "Model",
@@ -1666,86 +1540,17 @@
       "  \"params\": {",
       "    \"output\": [\"hostid\", \"host\", \"name\"],",
       "    \"selectInterfaces\": [\"interfaceid\", \"type\", \"main\", \"useip\", \"ip\", \"dns\", \"port\"],",
+      "    \"selectGroups\": [\"groupid\", \"name\"],",
       "    \"selectParentTemplates\": [\"templateid\"],",
+      "    \"selectTags\": [\"tag\", \"value\"],",
+      "    \"selectMacros\": [\"hostmacroid\", \"macro\", \"value\", \"description\", \"type\"],",
+      "    \"selectInventory\": \"extend\",",
       "    \"filter\": {",
       "      \"host\": [\"<#= Model.Host #>\"]",
       "    }",
       "  },",
       "  \"id\": <#= Model.RequestId #>",
       "}"
-    ]
-  },
-  "exampleInput": {
-    "source": "cmdbuild",
-    "eventType": "create",
-    "className": "Notebook",
-    "id": "97805",
-    "code": "NB-97805",
-    "ip_address": "192.168.1.1",
-    "profile": "192.168.1.101",
-    "dns_name": "nb-97805.example.local",
-    "profile_dns": "nb-97805-profile.example.local",
-    "description": "Office notebook",
-    "os": "Linux",
-    "zabbixTag": "tag2"
-  },
-  "exampleHostCreateParams": {
-    "host": "cmdb-notebook-nb-97805",
-    "name": "Notebook NB-97805",
-    "status": 0,
-    "inventory_mode": 0,
-    "interfaces": [
-      {
-        "type": 1,
-        "main": 1,
-        "useip": 1,
-        "ip": "192.168.1.1",
-        "dns": "",
-        "port": "10050"
-      },
-      {
-        "type": 2,
-        "main": 1,
-        "useip": 1,
-        "ip": "192.168.1.101",
-        "dns": "",
-        "port": "161"
-      }
-    ],
-    "groups": [
-      {
-        "groupid": "2"
-      }
-    ],
-    "templates": [
-      {
-        "templateid": "10564"
-      },
-      {
-        "templateid": "10001"
-      }
-    ],
-    "tags": [
-      {
-        "tag": "source",
-        "value": "cmdbuild"
-      },
-      {
-        "tag": "cmdb.class",
-        "value": "Notebook"
-      },
-      {
-        "tag": "cmdb.id",
-        "value": "97805"
-      },
-      {
-        "tag": "cmdb.os",
-        "value": "Linux"
-      },
-      {
-        "tag": "cmdb.zabbixTag",
-        "value": "tag2"
-      }
     ]
   }
 }

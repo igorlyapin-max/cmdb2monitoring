@@ -4,10 +4,10 @@ info:
   version: 0.4.0
   description: >
     Backend-for-frontend API for dashboard, server-side sessions, Kafka event
-    browsing, rules validation, dry-run, upload, runtime settings, IdP settings,
+    browsing, rules validation, dry-run, browser save-as, runtime settings, authorization settings,
     CMDBuild/Zabbix catalog synchronization, conversion rules management,
-    and logical control of conversion rules. Interface language is a browser
-    cookie concern and does not change API contracts.
+    logical control of conversion rules, and CMDBuild webhook planning/apply.
+    Interface language is a browser cookie concern and does not change API contracts.
 servers:
   - url: http://localhost:5090
 security:
@@ -26,7 +26,7 @@ paths:
                 $ref: "#/components/schemas/HealthResponse"
   /api/auth/status:
     get:
-      summary: Read current authentication status and IdP public settings
+      summary: Read current authentication status and authorization public settings
       security: []
       responses:
         "200":
@@ -37,7 +37,7 @@ paths:
                 $ref: "#/components/schemas/AuthStatus"
   /api/auth/login:
     post:
-      summary: Create local server-side session when IdP mode is disabled
+      summary: Create local session, or LDAP/LDAPS session when IdP provider is LDAP
       security: []
       requestBody:
         required: true
@@ -64,6 +64,34 @@ paths:
       responses:
         "200":
           description: Session destroyed.
+  /api/auth/session-credentials:
+    post:
+      summary: Store CMDBuild/Zabbix credentials in the current server-side session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCredentialsRequest"
+      responses:
+        "200":
+          description: Session credentials accepted.
+        "428":
+          $ref: "#/components/responses/Error"
+  /api/auth/change-password:
+    post:
+      summary: Change password for current local user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed.
+        "400":
+          $ref: "#/components/responses/Error"
   /auth/saml2/metadata:
     get:
       summary: Read SAML2 service provider metadata
@@ -136,6 +164,57 @@ paths:
             Location:
               schema:
                 type: string
+  /auth/oauth2/login:
+    get:
+      summary: Start OAuth2/OIDC authorization code login
+      security: []
+      parameters:
+        - name: returnUrl
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to configured authorization endpoint.
+          headers:
+            Location:
+              schema:
+                type: string
+        "409":
+          $ref: "#/components/responses/Error"
+  /auth/oauth2/callback:
+    get:
+      summary: Consume OAuth2/OIDC callback and create server-side session
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Session created, browser redirected to returnUrl or root.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Error"
   /api/services/health:
     get:
       summary: Read configured microservice health endpoints
@@ -146,6 +225,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ServiceHealthList"
+  /api/services/{serviceName}/reload-rules:
+    post:
+      summary: Ask a configured microservice to reload conversion rules
+      parameters:
+        - name: serviceName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reload signal accepted by the target service.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "403":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
   /api/events:
     get:
       summary: Read recent integration events
@@ -217,9 +317,39 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/rules/starter:
+    post:
+      summary: Generate an empty production starter rules document
+      description: >
+        Generates a no-op rules document in memory. The document keeps routes
+        disabled with publish=false, copies reusable T4 templates, and fills
+        endpoints, Kafka topic hints, CMDBuild metadata, and Zabbix reference
+        catalogs from the current runtime configuration and catalog caches.
+        The call fails when CMDBuild or Zabbix catalog cache is missing or empty.
+      responses:
+        "200":
+          description: Generated starter rules document and validation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "409":
+          description: CMDBuild or Zabbix catalog cache is not loaded.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /api/rules/upload:
     post:
-      summary: Validate and optionally save conversion rules
+      deprecated: true
+      summary: Validate conversion rules and return normalized JSON without backend save
+      description: >
+        Kept for compatibility with older clients. monitoring-ui-api does not
+        write active rules files and does not commit or push to git; operators
+        save JSON through the browser and publish it to the rules repository
+        outside the application.
       requestBody:
         required: true
         content:
@@ -228,7 +358,7 @@ paths:
               $ref: "#/components/schemas/RulesPayload"
       responses:
         "200":
-          description: Upload result.
+          description: Validation result and normalized rules content.
           content:
             application/json:
               schema:
@@ -237,7 +367,10 @@ paths:
   /api/rules/fix-mapping:
     post:
       summary: Validate and repair selected conversion rules logical control issues
-      description: Admin-only helper used by Logical Control of Conversion Rules.
+      description: >
+        Helper used by Logical Control of Conversion Rules. It returns repaired
+        rules content in memory; the browser saves the JSON file and the backend
+        active rules file is not changed.
       requestBody:
         required: true
         content:
@@ -255,10 +388,10 @@ paths:
                 additionalProperties: true
   /api/rules/history:
     get:
-      summary: Read configured rules file git history
+      summary: Disabled; git history is managed outside monitoring-ui-api
       responses:
-        "200":
-          description: Commit list.
+        "410":
+          description: Git history is managed outside monitoring-ui-api.
           content:
             application/json:
               schema:
@@ -346,10 +479,11 @@ paths:
                 additionalProperties: true
   /api/cmdbuild/catalog/sync:
     post:
-      summary: Synchronize CMDBuild classes, class attributes, lookup types, and lookup values
+      summary: Synchronize CMDBuild classes, class attributes, domains, lookup types, and lookup values
       description: >
         Lookup values are included when `Cmdbuild:Catalog:IncludeLookupValues`
-        is enabled. The cache is used by Conversion Rules Management and
+        is enabled. Domains are cached for `Class.{domain:TargetClass}.Attribute`
+        mapping paths. The cache is used by Conversion Rules Management and
         dry-run lookup resolution.
       responses:
         "200":
@@ -372,19 +506,60 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-  /api/settings/idp:
+  /api/cmdbuild/webhooks:
     get:
-      summary: Read IdP/SAML2 settings with secrets redacted
+      summary: Read CMDBuild webhooks for Webhook Setup
+      description: >
+        Requires an editor or admin session and CMDBuild session credentials.
+        Reads `/etl/webhook/?detailed=true` from CMDBuild and returns normalized
+        webhook objects. Browser clients do not connect to CMDBuild directly.
       responses:
         "200":
-          description: IdP settings.
+          description: CMDBuild webhook list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbuildWebhookList"
+        "428":
+          $ref: "#/components/responses/Error"
+  /api/cmdbuild/webhooks/apply:
+    post:
+      summary: Apply selected CMDBuild webhook operations
+      description: >
+        Applies create/update/delete operations selected on the Webhook Setup
+        page. The backend restricts operations to the managed
+        `cmdbwebhooks2kafka-` prefix so unrelated CMDBuild webhooks are not
+        changed by this workflow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CmdbuildWebhookApplyRequest"
+      responses:
+        "200":
+          description: Operations applied in CMDBuild.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbuildWebhookApplyResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
+  /api/settings/idp:
+    get:
+      summary: Read authorization settings with SAML2/OAuth2 and MS AD LDAP secrets redacted
+      responses:
+        "200":
+          description: Authorization settings.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
     put:
-      summary: Save IdP/SAML2 settings
+      summary: Save authorization mode, SAML2/OAuth2/MS AD LDAP settings, and role-to-group mapping
       requestBody:
         required: true
         content:
@@ -402,7 +577,7 @@ paths:
                 additionalProperties: true
   /api/settings/runtime:
     get:
-      summary: Read runtime settings shown on Settings page
+      summary: Read runtime settings shown on Runtime settings page
       responses:
         "200":
           description: Runtime settings merged from config and persisted UI settings.
@@ -455,6 +630,7 @@ components:
           - value-maps
           - classes
           - attributes
+          - domains
           - lookups
   responses:
     Error:
@@ -494,33 +670,46 @@ components:
           additionalProperties: true
     LoginRequest:
       type: object
+      required:
+        - username
+        - password
       properties:
-        cmdbuild:
-          type: object
-          required:
-            - username
-            - password
-          properties:
-            baseUrl:
-              type: string
-            username:
-              type: string
-            password:
-              type: string
-              format: password
-        zabbix:
-          type: object
-          properties:
-            apiEndpoint:
-              type: string
-            username:
-              type: string
-            password:
-              type: string
-              format: password
-            apiToken:
-              type: string
-              format: password
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    SessionCredentialsRequest:
+      type: object
+      required:
+        - service
+        - username
+        - password
+      properties:
+        service:
+          type: string
+          enum: [cmdbuild, zabbix]
+        baseUrl:
+          type: string
+        apiEndpoint:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    ChangePasswordRequest:
+      type: object
+      required:
+        - currentPassword
+        - newPassword
+      properties:
+        currentPassword:
+          type: string
+          format: password
+        newPassword:
+          type: string
+          format: password
     ServiceHealthList:
       type: object
       required:
@@ -560,18 +749,119 @@ components:
       properties:
         filePath:
           type: string
-        auth:
-          type: object
-          additionalProperties: true
         cmdbuild:
           type: object
-          additionalProperties: true
+          properties:
+            baseUrl:
+              type: string
+            maxTraversalDepth:
+              type: integer
+              minimum: 2
+              maximum: 5
+              default: 2
+              description: Max recursion depth for CMDBuild domain/reference/lookup traversal. Takes effect after logout and CMDBuild catalog resync.
         zabbix:
           type: object
-          additionalProperties: true
+          properties:
+            apiEndpoint:
+              type: string
+            apiToken:
+              type: string
+              format: password
         eventBrowser:
           type: object
           additionalProperties: true
+    CmdbuildWebhookList:
+      type: object
+      required:
+        - loadedAt
+        - cmdbuildEndpoint
+        - managedPrefix
+        - items
+      properties:
+        loadedAt:
+          type: string
+          format: date-time
+        cmdbuildEndpoint:
+          type: string
+        managedPrefix:
+          type: string
+          example: cmdbwebhooks2kafka-
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CmdbuildWebhook"
+    CmdbuildWebhook:
+      type: object
+      properties:
+        _id:
+          type: string
+        code:
+          type: string
+        description:
+          type: string
+        event:
+          type: string
+          example: card_update_after
+        target:
+          type: string
+        method:
+          type: string
+          example: post
+        url:
+          type: string
+        headers:
+          type: object
+          additionalProperties: true
+        body:
+          type: object
+          additionalProperties: true
+        language:
+          type: string
+        active:
+          type: boolean
+    CmdbuildWebhookApplyRequest:
+      type: object
+      required:
+        - operations
+      properties:
+        operations:
+          type: array
+          items:
+            type: object
+            required:
+              - action
+            properties:
+              action:
+                type: string
+                enum: [create, update, delete]
+              selected:
+                type: boolean
+              code:
+                type: string
+              current:
+                $ref: "#/components/schemas/CmdbuildWebhook"
+              desired:
+                $ref: "#/components/schemas/CmdbuildWebhook"
+    CmdbuildWebhookApplyResponse:
+      type: object
+      required:
+        - appliedAt
+        - count
+        - results
+      properties:
+        appliedAt:
+          type: string
+          format: date-time
+        cmdbuildEndpoint:
+          type: string
+        count:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
     RulesDocument:
       type: object
       properties:
@@ -581,6 +871,8 @@ components:
           type: string
         schemaVersion:
           type: string
+        rulesVersion:
+          type: string
         name:
           type: string
         validation:
@@ -589,7 +881,7 @@ components:
           type: object
           description: >
             Conversion rules JSON. Source fields can include `cmdbPath`,
-            `type`, `lookupType`, and `resolve` metadata for reference/lookup
+            `type`, `lookupType`, and `resolve` metadata for reference/lookup/domain
             leaf resolution while webhook payload remains flat.
           additionalProperties: true
     RulesPayload:
@@ -605,6 +897,8 @@ components:
           additionalProperties: true
         save:
           type: boolean
+          deprecated: true
+          description: Ignored. Rules are not saved on the backend by monitoring-ui-api.
     RulesDryRunRequest:
       type: object
       required:

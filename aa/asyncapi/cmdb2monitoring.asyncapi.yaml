@@ -4,7 +4,7 @@ info:
   version: '0.4.0'
   description: >
     AsyncAPI для Kafka-потоков проекта cmdb2monitoring. CMDBuild webhook payload
-    остается плоским; reference/lookup leaf-значения поднимаются downstream по
+    остается плоским; reference/lookup/domain leaf-значения поднимаются downstream по
     `source.fields[].cmdbPath` из rules.
 defaultContentType: application/json
 servers:
@@ -118,7 +118,7 @@ components:
           required: [source, eventType, cmdbuildEvent, className, id, code]
           additionalProperties: true
           description: >
-            Плоский payload webhook. Для reference/lookup source fields значение
+            Плоский payload webhook. Для reference/lookup/domain source fields значение
             может быть numeric id; путь leaf хранится в rules metadata, а не в
             Kafka message.
           properties:
@@ -224,11 +224,12 @@ components:
           description: Не использовать -1, если передается объект inventory.
         interfaces:
           type: array
-          description: Один или несколько Zabbix interfaces[] для одного host.
+          description: Один или несколько Zabbix interfaces[] для одного host. В host.update authoritative по rules; writer переносит существующие interfaceid.
           items:
             type: object
         groups:
           type: array
+          description: В host.update объединяются с текущими host groups по groupid.
           items:
             type: object
             properties:
@@ -236,6 +237,7 @@ components:
                 type: string
         templates:
           type: array
+          description: В host.update объединяются с текущими linked templates по templateid; templates_clear задает явное удаление конфликтов.
           items:
             type: object
             properties:
@@ -243,6 +245,7 @@ components:
                 type: string
         tags:
           type: array
+          description: В host.update объединяются с текущими tags по tag.
           items:
             type: object
             properties:
@@ -252,6 +255,7 @@ components:
                 type: string
         macros:
           type: array
+          description: В host.update объединяются с текущими host macros по macro.
           items:
             type: object
             properties:
@@ -263,6 +267,7 @@ components:
                 type: string
         inventory:
           type: object
+          description: В host.update объединяется с текущим inventory по имени поля.
           additionalProperties:
             type: string
         proxyid:

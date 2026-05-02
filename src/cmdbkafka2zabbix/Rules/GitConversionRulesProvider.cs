@@ -16,18 +16,48 @@ public sealed class GitConversionRulesProvider(
     private readonly SemaphoreSlim reloadLock = new(1, 1);
     private ConversionRulesDocument? cachedRules;
     private DateTimeOffset? cachedLastWriteTime;
+    private string? cachedLocation;
+    private string? cachedVersion;
     private bool startupPullAttempted;
 
     public async Task<ConversionRulesDocument> GetRulesAsync(CancellationToken cancellationToken)
+    {
+        return await LoadRulesAsync(forceReload: false, refreshStorage: false, cancellationToken);
+    }
+
+    public async Task<ConversionRulesReloadResult> ReloadAsync(CancellationToken cancellationToken)
+    {
+        var rules = await LoadRulesAsync(
+            forceReload: true,
+            refreshStorage: options.Value.ReadFromGit && options.Value.PullOnReload,
+            cancellationToken);
+        return new ConversionRulesReloadResult(
+            rules.Name,
+            rules.SchemaVersion,
+            rules.RulesVersion,
+            cachedLocation ?? ResolveRulesFilePath(),
+            cachedVersion,
+            options.Value.ReadFromGit && options.Value.PullOnReload,
+            DateTimeOffset.UtcNow);
+    }
+
+    private async Task<ConversionRulesDocument> LoadRulesAsync(
+        bool forceReload,
+        bool refreshStorage,
+        CancellationToken cancellationToken)
     {
         await reloadLock.WaitAsync(cancellationToken);
         try
         {
             await PullOnStartupAsync(cancellationToken);
+            if (refreshStorage)
+            {
+                await PullForReloadAsync(cancellationToken);
+            }
 
             var rulesFilePath = ResolveRulesFilePath();
             var lastWriteTime = File.GetLastWriteTimeUtc(rulesFilePath);
-            if (cachedRules is not null && cachedLastWriteTime == lastWriteTime)
+            if (!forceReload && cachedRules is not null && cachedLastWriteTime == lastWriteTime)
             {
                 return cachedRules;
             }
@@ -40,6 +70,8 @@ public sealed class GitConversionRulesProvider(
             cachedLastWriteTime = lastWriteTime;
 
             var commit = await TryReadGitCommitAsync(cancellationToken);
+            cachedLocation = rulesFilePath;
+            cachedVersion = commit;
             logger.LogInformation(
                 "Loaded conversion rules {RuleName} schema {SchemaVersion} from {RulesFilePath} at git commit {GitCommit}",
                 rules.Name,
@@ -57,16 +89,27 @@ public sealed class GitConversionRulesProvider(
 
     private async Task PullOnStartupAsync(CancellationToken cancellationToken)
     {
-        if (startupPullAttempted || !options.Value.PullOnStartup)
+        if (startupPullAttempted || !options.Value.ReadFromGit || !options.Value.PullOnStartup)
         {
             return;
         }
 
         startupPullAttempted = true;
+        LogGitRepository();
         var exitCode = await RunGitAsync("pull --ff-only", cancellationToken);
         if (exitCode != 0)
         {
             logger.LogWarning("Git pull for conversion rules finished with exit code {ExitCode}", exitCode);
+        }
+    }
+
+    private async Task PullForReloadAsync(CancellationToken cancellationToken)
+    {
+        LogGitRepository();
+        var exitCode = await RunGitAsync("pull --ff-only", cancellationToken);
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException($"Git pull for conversion rules failed with exit code {exitCode}.");
         }
     }
 
@@ -90,6 +133,11 @@ public sealed class GitConversionRulesProvider(
 
     private async Task<string?> TryReadGitCommitAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.ReadFromGit)
+        {
+            return null;
+        }
+
         try
         {
             var output = await RunGitForOutputAsync("rev-parse --short HEAD", cancellationToken);
@@ -151,6 +199,17 @@ public sealed class GitConversionRulesProvider(
         }
 
         return new ProcessResult(process.ExitCode, output);
+    }
+
+    private void LogGitRepository()
+    {
+        if (!string.IsNullOrWhiteSpace(options.Value.RepositoryUrl))
+        {
+            logger.LogInformation(
+                "Reading conversion rules from git repository {RepositoryUrl} at {RepositoryPath}",
+                options.Value.RepositoryUrl,
+                Path.GetFullPath(string.IsNullOrWhiteSpace(options.Value.RepositoryPath) ? "." : options.Value.RepositoryPath));
+        }
     }
 
     private sealed record ProcessResult(int ExitCode, string? Output);

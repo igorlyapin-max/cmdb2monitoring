@@ -4,25 +4,60 @@ const state = {
   runtimeSettings: null,
   mappingMode: 'view',
   mappingEditAction: 'add',
+  mappingDeleteView: 'cmdbuild',
   mappingDraftRules: null,
   mappingHistory: [],
   mappingHistoryIndex: -1,
   mappingCmdbuildCatalog: null,
   mappingZabbixCatalog: null,
   mappingEditorFieldOptions: new Map(),
+  mappingEditorFieldOptionStates: new Map(),
+  mappingEditorTargetOptionStates: new Map(),
   mappingLoaded: false,
   validateMappingLoaded: false,
+  validateMappingRules: null,
+  validateMappingHistory: [],
+  validateMappingHistoryIndex: -1,
+  validateMappingZabbixCatalog: null,
+  validateMappingCmdbuildCatalog: null,
+  validationRuleDialog: null,
+  webhooksLoaded: false,
+  webhooksCurrent: [],
+  webhooksOperations: [],
+  webhooksHistory: [],
+  webhooksHistoryIndex: -1,
+  webhooksCmdbuildCatalog: null,
+  webhooksSelectedIndex: -1,
+  webhooksExpandedRows: {
+    operations: {},
+    current: {}
+  },
+  webhooksDetailRow: {
+    kind: '',
+    index: -1
+  },
+  webhookEditDialog: null,
   language: 'ru',
   authenticated: false,
-  user: null
+  user: null,
+  users: [],
+  credentialPrompt: null
 };
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const languageCookieName = 'c2m_lang';
 const defaultEventMaxMessages = 5;
+const defaultConversionRulesFilePath = 'rules/cmdbuild-to-zabbix-host-create.json';
 const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
+const roleViews = {
+  viewer: ['dashboard', 'events'],
+  editor: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'about', 'help'],
+  admin: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'authSettings', 'runtimeSettings', 'about', 'help']
+};
+const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
+const defaultCmdbuildWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
 let helpShowTimer = null;
 let pendingHelpTarget = null;
 const zabbixCatalogSections = [
@@ -110,6 +145,16 @@ const zabbixCatalogSections = [
     headers: ['ID', 'Name', 'Mappings'],
     row: item => [item.valuemapid, item.name, String(item.mappings?.length ?? 0)]
   }
+];
+const mappingEditorFormControlSelectors = [
+  '#mappingModifyRule',
+  '#mappingEditClass',
+  '#mappingEditField',
+  '#mappingEditTargetType',
+  '#mappingEditZabbixObject',
+  '#mappingEditPriority',
+  '#mappingEditRegex',
+  '#mappingEditRuleName'
 ];
 const zabbixExtensionDefinitions = [
   {
@@ -229,30 +274,309 @@ const translations = {
     'login.title': 'Вход',
     'login.language': 'Язык интерфейса',
     'login.idp': 'Войти через IdP',
+    'login.username': 'Пользователь',
+    'login.password': 'Пароль',
     'login.cmdbuildLogin': 'CMDBuild логин',
     'login.cmdbuildPassword': 'CMDBuild пароль',
     'login.zabbixLogin': 'Zabbix логин',
     'login.zabbixPassword': 'Zabbix пароль',
     'login.submit': 'Войти',
+    'dashboard.reloadRules': 'Перечитать правила конвертации',
+    'account.changePassword': 'Сменить пароль',
+    'account.currentPassword': 'Текущий пароль',
+    'account.newPassword': 'Новый пароль',
+    'account.confirmPassword': 'Повтор нового пароля',
+    'account.savePassword': 'Сохранить пароль',
+    'credentials.title': 'Нужны учетные данные',
+    'credentials.baseUrl': 'CMDBuild URL',
+    'credentials.apiEndpoint': 'Zabbix API',
+    'credentials.username': 'Логин',
+    'credentials.password': 'Пароль',
+    'credentials.save': 'Запомнить на сессию',
+    'mapping.referenceWarning': 'Внимание: при пользовании итеративными запросами атрибутов через reference/domain типы, в случае отсутствия модификации самой карточки объекта, модификация атрибутов reference или связанных domain-карточек не приведет к изменениям на мониторинге.',
+    'mapping.loadingData': 'загрузка данных',
+    'mapping.loadingLightZabbix': 'Загрузка легкого Zabbix catalog',
+    'mapping.loadingLightZabbixMeta': 'CMDBuild и Conversion Rules уже доступны; полный Zabbix catalog не загружается в управление правилами конвертации',
+    'mapping.lazyLoadingMeta': 'данные раздела загружаются по требованию',
+    'mapping.loadErrorTitle': 'Ошибка загрузки управления правилами конвертации',
+    'mapping.loadErrorHelp': 'Ошибка показана здесь, чтобы не искать ее в console браузера.',
+    'validation.deleteFromRules': 'Удалить из правил',
+    'validation.deleteFromRulesHelp': 'Отметьте, чтобы удалить эту отсутствующую ссылку из JSON правил.',
+    'validation.confirmDeleteSelected': 'Удалить выбранные элементы из JSON правил ({count}) и сохранить исправленный файл через браузер? Backend rules-файл не изменится.',
+    'validation.review.title': 'Проверка удаления правила',
+    'validation.review.message': 'Правило "{name}" содержит одновременно консистентные и неконсистентные части. Проверьте JSON: можно сохранить правку, удалить правило целиком или отказаться.',
+    'validation.review.applyEdit': 'Сохранить правку',
+    'validation.review.deleteAnyway': 'Удалить все равно',
+    'validation.review.cancel': 'Отказаться',
+    'validation.review.invalidJson': 'JSON правила не разобран: {message}',
+    'validation.review.cancelled': 'Удаление правил отменено.',
+    'validation.review.noRules': 'Для выбранных расхождений не найдено rules, которые можно удалить целиком.',
+    'webhooks.analyze': 'Проанализировать rules',
+    'webhooks.loadFromCmdb': 'Загрузить из CMDB',
+    'webhooks.applyToCmdb': 'Загрузить в CMDB',
+    'webhooks.operations': 'Операции',
+    'webhooks.details': 'Детали',
+    'webhooks.selected': 'Выбрано',
+    'webhooks.action': 'Действие',
+    'webhooks.code': 'Code',
+    'webhooks.target': 'Класс',
+    'webhooks.event': 'Событие',
+    'webhooks.reason': 'Причина',
+    'webhooks.noOperations': 'Операций нет. Текущие webhooks соответствуют rules.',
+    'webhooks.noData': 'Загрузите webhooks из CMDB и выполните анализ rules.',
+    'webhooks.summary': 'CMDB webhooks: {current}. План операций: создать {create}, изменить {update}, удалить {delete}. Выбрано: {selected}.',
+    'webhooks.summaryEmpty': 'План операций пуст. Загружено CMDB webhooks: {current}.',
+    'webhooks.statusLoaded': 'Webhooks загружены из CMDB: {count}.',
+    'webhooks.statusAnalyzed': 'Анализ rules выполнен. Операций: {count}.',
+    'webhooks.statusSelectionChanged': 'Выбор операций изменен.',
+    'webhooks.statusApplied': 'Операции применены в CMDB: {count}.',
+    'webhooks.confirmApply': 'Применить выбранные операции к CMDBuild webhooks? Это изменит управляемую систему. Операций: {count}.',
+    'webhooks.confirmNoSelection': 'Выберите хотя бы одну операцию.',
+    'webhooks.reasonMissing': 'webhook отсутствует в CMDB',
+    'webhooks.reasonChanged': 'конфигурация отличается: {fields}',
+    'webhooks.reasonObsolete': 'управляемый webhook больше не нужен по rules',
+    'webhooks.actionCreate': 'Создать',
+    'webhooks.actionUpdate': 'Изменить',
+    'webhooks.actionDelete': 'Удалить',
+    'webhooks.actionCurrent': 'Текущий',
+    'webhooks.reasonCurrent': 'загружен из CMDB',
+    'webhooks.payload': 'Payload',
+    'webhooks.edit': 'Редактировать',
+    'webhooks.expandPayload': 'Раскрыть',
+    'webhooks.collapsePayload': 'Свернуть',
+    'webhooks.editTitle': 'Редактирование webhook',
+    'webhooks.editHelp': 'Измените JSON конкретного webhook. Для строки текущего CMDB webhook будет создана update-операция в плане; загрузка в CMDB выполняется только кнопкой "Загрузить в CMDB".',
+    'webhooks.saveEdit': 'Сохранить правку',
+    'webhooks.invalidJson': 'JSON webhook не разобран: {message}',
+    'webhooks.statusEdited': 'Webhook изменен в текущем плане.',
+    'webhooks.payloadEmpty': 'Payload пустой.',
+    'webhooks.payloadCurrent': 'актуальное',
+    'webhooks.payloadAdded': 'добавляется',
+    'webhooks.payloadDeleted': 'удаляется',
+    'webhooks.detailsHint': 'Нажмите значение в столбце "Действие", чтобы открыть детали под строкой; общий блок деталей находится под таблицей.',
+    'webhooks.currentDetailsHint': 'Загруженные из CMDB webhooks показаны ниже. Нажмите "Проанализировать rules", чтобы построить план операций.',
+    'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
     'nav.dashboard': 'Панель',
     'nav.events': 'События',
     'nav.rules': 'Правила',
     'nav.mapping': 'Управление правилами конвертации',
     'nav.validateMapping': 'Логический контроль правил конвертации',
+    'nav.webhooks': 'Настройка webhooks',
     'nav.zabbix': 'Каталог Zabbix',
     'nav.cmdbuild': 'Каталог CMDBuild',
     'nav.settings': 'Настройки',
+    'nav.authSettings': 'Авторизация',
+    'nav.runtimeSettings': 'Runtime-настройки',
     'nav.about': 'About',
     'nav.help': 'Справка',
     'nav.logout': 'Выйти',
+    'settings.runtimeConnections': 'Runtime-настройки подключений',
+    'settings.settingsFile': 'Файл настроек',
+    'settings.usersFile': 'Файл пользователей',
+    'settings.cmdbuildUrl': 'CMDBuild URL',
+    'settings.maxTraversalDepth': 'Максимальная глубина рекурсии domains&reference&lookups',
+    'settings.maxTraversalDepthNote': 'Изменение заработает только после logout и пересинхронизации CMDBuild catalog.',
+    'settings.zabbixApi': 'Zabbix API',
+    'settings.zabbixApiKey': 'Zabbix API key',
+    'settings.rulesStorage': 'Файл правил конвертации',
+    'settings.rulesFilePath': 'Путь к файлу правил',
+    'settings.rulesFilePathPlaceholder': 'rules/cmdbuild-to-zabbix-host-create.json',
+    'settings.rulesReadFromGit': 'Читать из git',
+    'settings.rulesRepositoryUrl': 'Git repository URL',
+    'settings.rulesRepositoryUrlPlaceholder': 'https://git.example.org/cmdb2monitoring/conversion-rules.git',
+    'settings.rulesReadModeDisk': 'Для нашей тестовой системы: читать с диска, файл {path}.',
+    'settings.rulesReadModeGit': 'Режим git: URL указывает на repository, внутри него ожидается файл {path}.',
+    'settings.rulesGitFileNote': 'При включении git внутри repository ожидается файл правил по пути, указанному выше.',
+    'settings.rulesStorageNote': 'UI сохраняет rules через браузер; публикация в git выполняется оператором вне приложения.',
+    'settings.kafkaEvents': 'Kafka Events',
+    'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
+    'settings.authModeTitle': 'Режим авторизации',
+    'settings.authMode': 'Режим авторизации',
+    'settings.authModeLocal': 'Локальная',
+    'settings.authModeMsad': 'MS AD',
+    'settings.authModeIdp': 'IdP',
+    'settings.saveAuth': 'Сохранить авторизацию',
+    'settings.saveRuntime': 'Сохранить runtime',
+    'settings.idpProvider': 'Протокол IdP',
+    'settings.roleMapping': 'Соответствие ролей группам',
+    'settings.groupsColumn': 'Группы IdP / AD',
+    'settings.users': 'Локальные пользователи и роли',
+    'settings.localUsersActive': 'Локальные пользователи активны',
+    'settings.resetUser': 'Пользователь',
+    'settings.resetPassword': 'Новый пароль',
+    'settings.mustChangePassword': 'Потребовать смену при входе',
+    'settings.loadUsers': 'Загрузить пользователей',
+    'settings.resetUserPassword': 'Сбросить пароль',
+    'settings.userColumn': 'Пользователь',
+    'settings.roleColumn': 'Роль',
+    'settings.mustChangeColumn': 'Смена пароля',
+    'toast.runtimeSaved': 'Runtime-настройки сохранены',
+    'toast.runtimeSavedResyncRequired': 'Runtime-настройки сохранены. Новая глубина заработает только после logout и пересинхронизации CMDBuild catalog.',
+    'toast.maxTraversalDepthChanged': 'Новая глубина заработает только после logout и пересинхронизации CMDBuild catalog.',
+    'toast.idpSaved': 'Настройки авторизации сохранены',
+    'toast.rulesReloaded': 'Правила конвертации перечитаны',
+    'toast.validationSelectMissing': 'Выберите отсутствующие элементы для удаления из правил',
+    'toast.rulesChangedSaveCancelled': 'Rules изменены в памяти, сохранение файла отменено',
+    'toast.rulesFileSaved': 'Файл rules сохранен: {name}',
+    'toast.rulesNotChanged': 'Rules не изменены',
+    'toast.rulesValidationFailed': 'Rules после правки не прошли проверку',
+    'toast.validationDraftChanged': 'Rules изменены в памяти. Используйте "Сохранить файл как", когда закончите правки.',
+    'rules.createEmpty': 'Создать пустой',
+    'toast.emptyRulesCreated': 'Пустой starter правил создан в окне загрузки',
+    'toast.emptyRulesFailed': 'Не удалось создать пустой starter правил',
     'about.title': 'About',
-    'about.text': 'Наговорено при помощи вайбкодинга Игорем Ляпиным в 2026. Igor.Lyapin(*)gmail.com. Для свободного использования.',
+    'about.text': 'Спроектировано и овеществлено Игорем Ляпиным email:igor.lyapin@gmail.com 2026\nПод лицензией GNU GPLv3.',
     'common.clearSelection': 'Снять выделение',
     'common.close': 'Закрыть',
+    'common.load': 'Загрузить',
+    'common.undo': 'Отменить',
+    'common.redo': 'Вернуть',
+    'common.saveFileAs': 'Сохранить файл как',
+    'common.selectAll': 'Выбрать все',
+    'common.clear': 'Очистить',
+    'common.refresh': 'Обновить',
+    'common.validate': 'Проверить',
+    'common.dryRun': 'Пробный запуск',
+    'common.sync': 'Синхронизировать',
+    'common.delete': 'Удалить',
+    'common.saveFileNamePrompt': 'Имя файла для сохранения {description}',
+    'common.loading': 'Загрузка',
+    'mapping.mode': 'Режим',
+    'mapping.modeView': 'Режим просмотра',
+    'mapping.modeEdit': 'Режим редактирования',
+    'mapping.action': 'Действие',
+    'mapping.actionAdd': 'Добавление правила',
+    'mapping.actionModify': 'Модификация правила',
+    'mapping.actionDelete': 'Удаление правил и классов',
+    'mapping.modifyRule': 'Правило для изменения',
+    'mapping.cmdbClass': 'Класс CMDBuild',
+    'mapping.classField': 'Атрибут класса',
+    'mapping.structure': 'Структура конвертации',
+    'mapping.zabbixTarget': 'Объект/payload Zabbix',
+    'mapping.priority': 'Приоритет',
+    'mapping.regex': 'Regex',
+    'mapping.ruleName': 'Имя правила',
+    'mapping.ruleNameAuto': 'автоматически',
+    'mapping.resetFields': 'Сбросить поля',
+    'mapping.addRule': 'Добавить правило конвертации',
+    'mapping.saveRuleChanges': 'Сохранить изменения правила',
+    'mapping.grouping': 'Группировка',
+    'mapping.deleteTreeCmdbuild': 'Дерево CMDBuild',
+    'mapping.deleteTreeZabbix': 'Дерево Zabbix',
+    'mapping.deleteTreeRules': 'Дерево правил',
+    'mapping.deleteSelectedRules': 'Удалить выбранные правила',
+    'mapping.delete.noRulesInDraft': 'В draft JSON нет правил, которые можно удалить через этот режим.',
+    'mapping.confirm.deleteRulesTitle': 'Удалить выбранные правила из draft JSON ({count})?',
+    'mapping.confirm.deleteRulesKeepSources': 'Классы и class attribute fields останутся в rules, чтобы не удалить источник, который может использоваться другими правилами.',
+    'mapping.confirm.deleteRulesUndo': 'Действие можно отменить через Undo.',
+    'mapping.confirm.saveIpDnsTitle': 'В rules найдены проблемы связи IP/DNS class attribute field с Zabbix interface structure.',
+    'mapping.confirm.saveIpDnsMore': '... еще {count}',
+    'mapping.confirm.saveAnyway': 'Сохранить файлы несмотря на ошибки?',
+    'mapping.status.modifyStart': 'Выберите правило для модификации или начните с класса, атрибута или структуры конвертации.',
+    'mapping.status.beforeSave': 'Перед сохранением проверьте логический контроль правил конвертации: для создания/обновления host должен приходить ipAddress или dnsName.',
+    'mapping.status.actionDelete': 'Выберите правила в дереве удаления: по CMDBuild class/attribute, Zabbix payload/object group или коллекциям правил. Классы и class attribute fields не удаляются автоматически.',
+    'mapping.status.actionModify': 'Начните с правила, класса, атрибута или структуры конвертации. Связанные списки будут сужаться автоматически.',
+    'mapping.status.actionAdd': 'Добавьте новое правило конвертации. После добавления будет сразу выполнена проверка IP/DNS для host binding.',
+    'mapping.status.defaultAction': 'Добавьте или измените правило конвертации.',
+    'mapping.status.autoSelected': 'Правило выбрано автоматически: {name}.',
+    'mapping.status.resetModify': 'Поля модификации сброшены. Начните с правила, класса, атрибута или структуры конвертации.',
+    'mapping.status.resetAdd': 'Поля формы очищены. Выберите leaf field и Zabbix target.',
+    'mapping.status.noModifyRule': 'Выберите правило для модификации.',
+    'mapping.status.ruleResetNeeded': 'Форма совпадает с выбранным правилом: измените поле или нажмите "Сбросить поля".',
+    'mapping.status.noRuleChanges': 'Изменений для сохранения нет: правило совпадает с текущим draft JSON.',
+    'mapping.status.canModify': 'Можно редактировать: цепочка однозначна, target совместим, изменения готовы к сохранению.',
+    'mapping.status.canAdd': 'Можно добавить правило: цепочка однозначна и target совместим.',
+    'mapping.status.undoDone': 'Отмена выполнена.',
+    'mapping.status.redoDone': 'Возврат выполнен.',
+    'mapping.status.loadMappingFirst': 'Сначала загрузите управление правилами конвертации.',
+    'mapping.status.selectRulesForDelete': 'Выберите хотя бы одно правило для удаления.',
+    'mapping.status.deletedRulesMissing': 'Выбранные правила уже не найдены в текущем draft JSON.',
+    'mapping.status.deletedRules': 'Удалено правил: {count}. Классы и class attribute fields не удалялись автоматически.',
+    'mapping.status.chooseCompatibleFieldAdd': 'Выберите совместимое CMDBuild field для нового правила.',
+    'mapping.status.chooseCompatibleFieldModify': 'Выберите совместимое CMDBuild field для изменения правила.',
+    'mapping.status.classFieldMissing': 'В классе "{className}" нет атрибута для "{field}". Добавьте атрибут в CMDBuild или выберите существующий class attribute field.',
+    'mapping.status.multiValueScalarNotAllowed': 'Поле "{field}" может вернуть несколько значений через CMDBuild domain path. Для скалярной Zabbix structure "{target}" выберите обычный scalar/reference leaf или настройте source field с resolve.collectionMode=first.',
+    'mapping.status.addedRule': 'Добавлено правило "{name}".',
+    'mapping.status.modifiedRule': 'Изменено правило "{name}".',
+    'mapping.status.modifyRuleMissing': 'Выбранное правило больше не найдено в draft JSON.',
+    'mapping.status.readyButStale': 'Можно редактировать, но {details}',
+    'mapping.status.ruleForModifySelected': 'Правило для модификации выбрано.',
+    'mapping.status.classSelected': 'Класс CMDBuild выбран.',
+    'mapping.status.noClassRestriction': 'Правило без ограничения по className.',
+    'mapping.status.leafSelected': 'Leaf/source field выбран.',
+    'mapping.status.structureCompatible': 'Conversion structure совместима с выбранным field.',
+    'mapping.status.targetSelected': 'Zabbix target выбран.',
+    'mapping.status.prioritySet': 'Priority задан.',
+    'mapping.status.regexSaved': 'Regex будет сохранен в rule condition.',
+    'mapping.status.ruleNameSetOrAuto': 'Rule name задан или будет сгенерирован автоматически.',
+    'mapping.status.modifyNeedsRule': 'Модификация начинается без выбранного rule; выберите rule явно.',
+    'mapping.status.selectConcreteClass': 'Выберите конкретный subclass вместо superclass/prototype class.',
+    'mapping.status.superclassNotAllowed': 'Superclass/prototype class нельзя использовать как class правила.',
+    'mapping.status.chooseLeafField': 'Выберите конечный leaf/source field.',
+    'mapping.status.fieldMissingInClass': 'Field "{field}" не найден в выбранном CMDBuild class/path.',
+    'mapping.status.fieldMultiValueIncompatible': 'Field "{field}" может вернуть несколько значений и несовместим с "{target}".',
+    'mapping.status.chooseStructureForField': 'Выберите structure, допускающую выбранный field, или выберите другой field.',
+    'mapping.status.fieldIncompatible': 'Field "{field}" несовместим с "{target}".',
+    'mapping.status.ipFieldForDnsTarget': 'Атрибут "{field}" выглядит как IP-адрес, поэтому его нельзя использовать для DNS interface (interfaces[].dns/useip=0). Выберите IP target или DNS/FQDN атрибут.',
+    'mapping.status.dnsFieldForIpTarget': 'Атрибут "{field}" выглядит как DNS/FQDN, поэтому его нельзя использовать для IP interface (interfaces[].ip/useip=1). Выберите DNS target или IP атрибут.',
+    'mapping.status.lookupFieldForInterfaceTarget': 'Lookup/reference value "{field}" нельзя напрямую использовать как адрес Zabbix interface. Выберите scalar IP/DNS leaf field или другую structure.',
+    'mapping.status.fieldStale': 'Field "{field}" загружен из rule, но не подтвержден текущим catalog/filter.',
+    'mapping.status.fieldStaleShort': 'Field "{field}" не подтвержден текущим catalog/filter.',
+    'mapping.status.chooseStructure': 'Выберите conversion structure.',
+    'mapping.status.chooseTarget': 'Выберите Zabbix object / payload.',
+    'mapping.status.targetMissing': 'Target загружен из rule, но не найден в Zabbix catalog/options.',
+    'mapping.status.targetMissingSummary': 'Zabbix target не найден в catalog/options: это неконсистентная вторая сторона цепочки.',
+    'mapping.status.targetStale': 'Target загружен из rule, но не подтвержден текущим Zabbix catalog/options.',
+    'mapping.status.targetStaleShort': 'Zabbix target не подтвержден текущим catalog/options.',
+    'mapping.status.priorityPositive': 'Priority должен быть положительным числом.',
+    'mapping.status.saveIpDnsInconsistent': 'Save file as: найдена неконсистентность IP/DNS binding. Изменений для webhook-файла: {count}.',
+    'mapping.status.saveReady': 'Save file as: rules JSON и webhook-файл будут сохранены. Изменений для webhook-файла: {count}.',
+    'mapping.status.saveCancelledFixIpDns': 'Сохранение отменено: сначала исправьте связь IP/DNS с Zabbix interface structure.',
+    'mapping.status.saveCancelled': 'Сохранение отменено.',
+    'mapping.status.rulesFileSavedWebhookNotSaved': 'Файл rules сохранен: {name}. Второй файл webhook bodies не сохранен.',
+    'mapping.status.filesSaved': 'Файлы сохранены: {rulesName}, {webhookName}.{warning}',
+    'mapping.status.saveWarnings': ' Есть предупреждения: {count}.',
+    'mapping.option.anyClass': 'Любой класс',
+    'mapping.option.chooseRule': 'Выберите правило для модификации',
+    'mapping.option.noRulesToModify': 'Нет правил, доступных для модификации',
+    'mapping.option.chooseClassFilter': 'Выберите класс CMDBuild или оставьте фильтр пустым',
+    'mapping.option.chooseFieldFilter': 'Выберите атрибут класса или оставьте фильтр пустым',
+    'mapping.option.chooseStructureFilter': 'Выберите структуру конвертации или оставьте фильтр пустым',
+    'mapping.option.chooseTargetFilter': 'Выберите объект/payload Zabbix или оставьте фильтр пустым',
+    'mapping.option.chooseLeaf': 'Выберите leaf/source field',
+    'mapping.option.chooseStructure': 'Выберите структуру конвертации',
+    'mapping.option.chooseTarget': 'Выберите объект/payload Zabbix',
+    'mapping.option.noCompatibleFields': 'Нет совместимых CMDBuild fields для {target}',
+    'mapping.option.noFields': 'Нет доступных CMDBuild fields',
+    'mapping.option.currentFieldMissing': 'Текущее поле rule: {field} / не подтверждено catalog',
+    'mapping.option.currentTargetMissing': 'Текущий target rule / отсутствует в Zabbix catalog',
+    'mapping.option.currentTargetMissingChooseNew': 'Текущий target rule отсутствует в Zabbix catalog: выберите новый target',
+    'mapping.option.currentFieldMissingMeta': 'Значение загружено из существующего rule, но не найдено в текущих совместимых CMDBuild fields.',
+    'mapping.option.currentTargetMissingMeta': 'Target загружен из существующего rule, но не найден в текущем Zabbix catalog/options. Поле оставлено пустым для выбора нового target.',
+    'mapping.option.chooseLeafMeta': 'Сохранение доступно после выбора конечного leaf/source field.',
+    'mapping.option.chooseStructureMeta': 'Сохранение доступно после выбора conversion structure.',
+    'mapping.option.chooseTargetMeta': 'Сохранение доступно после выбора совместимого Zabbix target.',
+    'mapping.option.modifyStartsWithoutRuleMeta': 'Модификация начинается без выбранного rule.',
+    'mapping.option.loadingZabbix': 'Загрузка Zabbix catalog...',
+    'mapping.option.loadError': 'Ошибка загрузки: {message}',
+    'mapping.option.ipAddress': 'IP-адрес -> interfaces[].ip / useip=1',
+    'mapping.option.dnsName': 'DNS-имя -> interfaces[].dns / useip=0',
+    'mapping.option.agentInterface': 'Agent interface',
+    'mapping.option.snmpInterface': 'SNMP interface',
+    'mapping.option.monitoringSuppression': 'Пропустить create/update при совпадении атрибута',
+    'mapping.option.profilePrefix': 'Профиль: {name}',
+    'mapping.option.newHostMacro': 'Новый host macro из class attribute field',
+    'mapping.option.inventoryFromField': 'Inventory field из class attribute field',
+    'mapping.target.hostGroups': 'Правило host group',
+    'mapping.target.templates': 'Правило template',
+    'mapping.target.tags': 'Правило tag',
+    'mapping.target.interfaceAddress': 'Правило адреса interface',
+    'mapping.target.interface': 'Правило interface',
+    'mapping.target.monitoringSuppression': 'Правило исключения из мониторинга',
     'session.notAuthenticated': 'не авторизован',
     'help.general.title': 'Общий принцип',
     'help.general.1': 'Браузер работает только с monitoring-ui-api; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.',
-    'help.general.2': 'Все адреса, учетные данные, Kafka topics, IdP/SAML2 и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Settings.',
+    'help.general.2': 'Адреса, Zabbix API key, Kafka topics и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Runtime-настройки. Авторизация настраивается отдельно: локальная, MS AD или IdP с группами AD для ролей.',
     'help.general.3': 'Всплывающие подсказки показываются при наведении или фокусе на элементе интерфейса.',
     'help.dashboard.title': 'Панель и события',
     'help.dashboard.1': 'Панель показывает доступность cmdbwebhooks2kafka, cmdbkafka2zabbix, zabbixrequests2api и самого BFF.',
@@ -262,64 +586,96 @@ const translations = {
     'help.rules.1': 'Load загружает текущий JSON правил конвертации.',
     'help.rules.2': 'Validate проверяет структуру правил на backend.',
     'help.rules.3': 'Dry-run применяет правила к тестовому CMDBuild payload без сохранения.',
-    'help.rules.4': 'Upload сохраняет новый JSON правил на backend после проверки.',
+    'help.rules.4': 'Save file as сохраняет JSON правил через браузер; backend rules-файл и git не изменяются.',
+    'help.rules.5': 'Создать пустой формирует production starter из текущего окружения: endpoints/topics и справочники CMDBuild/Zabbix берутся из runtime config и catalog cache, routes остаются publish=false до осознанного включения. Если CMDBuild или Zabbix cache пустой, backend возвращает ошибку и предлагает сначала синхронизировать каталог.',
     'help.mapping.title': 'Управление правилами конвертации',
     'help.mapping.1': 'Страница показывает цепочку CMDBuild -> Conversion Rules -> Zabbix.',
     'help.mapping.2': 'Режим просмотра показывает выбранную цепочку и скрывает лишние атрибуты классов, другие rule-подблоки и несвязанные элементы списков Zabbix.',
     'help.mapping.3': 'Снять выделение доступно в режиме просмотра и возвращает обычный обзор без подсветки цепочки.',
-    'help.mapping.4': 'Режим редактирования меняет draft JSON текущей сессии: можно выбрать CMDBuild class/class attribute field, структуру конвертации, Zabbix object/payload, priority и regex.',
-    'help.mapping.5': 'Действие Удаление правила показывает rules текущего draft JSON, удаляет отмеченные правила после подтверждения и оставляет classes/class attribute fields на месте.',
-    'help.mapping.6': 'Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.',
-    'help.mapping.7': 'Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.',
-    'help.mapping.8': 'Повторное нажатие на выбранный элемент снимает выделение.',
-    'help.mapping.9': 'Interface address rules выбирают, чем заполнить Zabbix interface: ipAddress дает useip=1, dnsName дает useip=0.',
-    'help.mapping.10': 'Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.',
-    'help.mapping.11': 'Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.',
-    'help.mapping.12': 'Для Server webhook keys interface/interface2/profile/profile2 связаны с реальными CMDBuild attributes iLo/iLo2/mgmt/mgmt2 через cmdbAttribute; это нужно для раздела управления правилами конвертации и Body, но не добавляет старые alias в обработку payload.',
-    'help.mapping.13': 'Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.',
-    'help.mapping.14': 'Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.',
+    'help.mapping.4': 'Режим редактирования скрывает нижний просмотр и меняет draft JSON текущей сессии: можно начать с любого узла формы, а зависимые поля фильтруются и подсвечиваются.',
+    'help.mapping.5': 'Действие Модификация правила начинается без автоматически выбранного rule: можно начать с rule, class, field или conversion structure. Связанные списки фильтруются, единственный найденный rule выбирается автоматически, а Сбросить поля возвращает форму к пустым фильтрам. Target, отсутствующий в Zabbix catalog, считается неконсистентным и блокирует сохранение.',
+    'help.mapping.6': 'Действие Удаление правил и классов показывает rules текущего draft JSON деревом по CMDBuild, Zabbix или коллекциям правил. Можно отметить весь класс, атрибут CMDBuild, Zabbix payload field, Zabbix object group или отдельное rule; source classes/class attribute fields очищаются через логический контроль правил конвертации.',
+    'help.mapping.7': 'Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.',
+    'help.mapping.8': 'Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.',
+    'help.mapping.9': 'Повторное нажатие на выбранный элемент снимает выделение.',
+    'help.mapping.10': 'Interface address rules выбирают, чем заполнить Zabbix interface: IP target пишет в interfaces[].ip/useip=1, DNS target пишет в interfaces[].dns/useip=0. Редактор блокирует явное использование IP-атрибута как DNS и DNS/FQDN-атрибута как IP.',
+    'help.mapping.11': 'Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.',
+    'help.mapping.12': 'Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.',
+    'help.mapping.13': 'Source keys webhook могут отличаться от имен CMDBuild attributes; связь задается через cmdbAttribute или cmdbPath и не добавляет скрытые alias в обработку payload.',
+    'help.mapping.14': 'Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.',
+    'help.mapping.15': 'Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.',
+    'help.mapping.16': 'Domain path вида Класс.{domain:СвязанныйКласс}.Атрибут читает связанные карточки через CMDBuild relations; поля, которые могут вернуть несколько значений, недоступны для скалярных Zabbix structures.',
+    'help.mapping.17': 'monitoringSuppressionRules используется, когда атрибуты экземпляра означают осознанный отказ от постановки на мониторинг; create/update пропускаются, delete не блокируется.',
     'help.validate.title': 'Логический контроль правил конвертации',
     'help.validate.1': 'Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.',
     'help.validate.2': 'Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.',
     'help.validate.3': 'Checkbox над отсутствующим элементом включает его в удаление из rules JSON.',
     'help.validate.4': 'Delete спрашивает подтверждение, сохраняет предыдущую версию и исправляет выбранные ссылки в правилах.',
+    'help.webhooks.title': 'Настройка webhooks',
+    'help.webhooks.1': 'Страница доступна ролям Редактирование правил и Администрирование.',
+    'help.webhooks.2': 'Загрузить из CMDB читает текущие CMDBuild webhooks через backend; браузер не подключается к CMDBuild напрямую.',
+    'help.webhooks.3': 'Проанализировать rules строит желаемые webhooks по текущим conversion rules: новые предлагаются к созданию, отличающиеся к изменению, управляемые лишние к удалению.',
+    'help.webhooks.4': 'Сохранить файл как выгружает только JSON-план через браузер и не меняет CMDBuild, backend rules-файл или git.',
+    'help.webhooks.5': 'Загрузить в CMDB применяет только выбранные операции и действительно меняет webhooks в управляемой системе.',
+    'help.webhooks.6': 'Пользоваться этим пунктом не обязательно: webhooks можно настроить вручную в CMDBuild или использовать webhook-файлы, которые сохраняются вместе с файлом правил конвертации.',
+    'help.webhooks.7': 'Undo/Redo отменяют только выбор операций в текущем плане и не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
+    'help.webhooks.8': 'В таблице можно раскрыть payload каждой строки: зеленым показано добавление, красным удаление, черным актуальное значение. Нажатие на значение в столбце "Действие" открывает детали под этой строкой, а общий блок деталей находится под таблицей и использует ту же подсветку. Редактировать меняет JSON конкретного webhook в текущем плане.',
     'help.catalogs.title': 'Каталоги и настройки',
     'help.catalogs.1': 'Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.',
-    'help.catalogs.2': 'CMDBuild Catalog загружает классы, атрибуты и lookup-значения.',
-    'help.catalogs.3': 'Settings сохраняет runtime-настройки подключений, Events Kafka browser и IdP/SAML2.',
+    'help.catalogs.2': 'CMDBuild Catalog загружает классы, атрибуты, domains и lookup-значения.',
+    'help.catalogs.3': 'Runtime-настройки сохраняют подключения и Events Kafka browser; Авторизация сохраняет локальный режим, MS AD, IdP/SAML2/OAuth2 и привязку AD-групп к ролям.',
     'help.catalogs.4': 'Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.',
+    'help.catalogs.5': 'Для тестовой системы rules читаются с диска из rules/cmdbuild-to-zabbix-host-create.json; если включено чтение из git, этот файл ожидается внутри repository по тому же пути.',
     'tooltip.brand': 'Название приложения cmdb2monitoring.',
     'tooltip.sessionSummary': 'Текущий пользователь и способ авторизации.',
-    'tooltip.idpLoginButton': 'Запускает вход через внешний IdP по SAML2.',
+    'tooltip.idpLoginButton': 'Запускает вход через выбранный внешний IdP.',
     'tooltip.logoutButton': 'Завершает текущую пользовательскую сессию.',
+    'tooltip.changePasswordOpen': 'Открывает смену пароля текущего локального пользователя.',
     'tooltip.refreshDashboard': 'Повторно проверяет доступность сервисов.',
     'tooltip.eventsMaxMessages': 'Количество последних сообщений Kafka, которое будет выведено снизу.',
     'tooltip.refreshEvents': 'Загружает список топиков и последние сообщения выбранного топика.',
     'tooltip.loadRules': 'Загружает текущий JSON правил конвертации.',
     'tooltip.validateRules': 'Проверяет JSON правил по серверной схеме.',
-    'tooltip.rulesFile': 'Выбор локального JSON-файла правил для проверки или загрузки.',
+    'tooltip.createEmptyRules': 'Создает чистый starter правил с базовым наполнением текущего окружения. Требует загруженные CMDBuild и Zabbix catalog cache; файл сохраняется только через браузер.',
+    'tooltip.rulesFile': 'Выбор локального JSON-файла правил для проверки, dry-run или сохранения через браузер.',
+    'tooltip.rulesFilePath': 'Для тестовой системы: rules/cmdbuild-to-zabbix-host-create.json. При чтении из git этот же путь ожидается внутри repository checkout.',
+    'tooltip.rulesReadFromGit': 'Переключает режим отображения storage: выключено - читать с диска; включено - читать из git working copy при соответствующей настройке converter-сервиса.',
+    'tooltip.rulesRepositoryUrl': 'URL repository с правилами. Внутри ожидается файл rules/cmdbuild-to-zabbix-host-create.json или путь, указанный в поле "Путь к файлу правил".',
     'tooltip.dryRunPayload': 'Тестовый CMDBuild payload для dry-run конвертации.',
     'tooltip.dryRunRules': 'Выполняет пробную конвертацию без сохранения правил.',
-    'tooltip.uploadRules': 'Сохраняет выбранный JSON правил на backend.',
+    'tooltip.saveRulesAs': 'Сохраняет текущий JSON правил через браузер. Backend rules-файл, git commit и git push не выполняются.',
     'tooltip.loadMapping': 'Загружает визуальную карту связей Zabbix, правил и CMDBuild.',
     'tooltip.mappingMode': 'Переключает управление правилами конвертации между просмотром и редактированием draft-правил текущей сессии.',
-    'tooltip.mappingEditAction': 'Переключает действие редактора: добавление нового conversion rule или удаление существующих rules из draft JSON.',
+    'tooltip.mappingEditAction': 'Переключает действие редактора: добавление, модификация или удаление rules из draft JSON.',
     'tooltip.mappingClearSelection': 'Снимает выделение цепочки и возвращает обычный обзор.',
     'tooltip.mappingUndo': 'Отменяет последнее изменение draft-правил текущей сессии.',
     'tooltip.mappingRedo': 'Возвращает отмененное изменение draft-правил.',
     'tooltip.mappingSaveAs': 'Сохраняет текущий draft JSON правил без отправки на backend. Вторым файлом формируются только webhook Body/DELETE-инструкции по добавленным и удаленным правилам текущей сессии.',
-    'tooltip.mappingAddRule': 'Добавляет выбранную conversion structure в draft JSON правил.',
+    'tooltip.mappingAddRule': 'Добавляет новое правило или сохраняет изменения выбранного правила в draft JSON.',
+    'tooltip.mappingResetForm': 'В режиме модификации очищает выбранное rule и фильтры; в режиме добавления очищает leaf field и target.',
     'tooltip.mappingDeleteSelectAll': 'Отмечает все rules в режиме удаления.',
     'tooltip.mappingDeleteClear': 'Снимает отметки со всех rules в режиме удаления.',
     'tooltip.mappingDeleteSelected': 'Удаляет отмеченные rules из draft JSON после подтверждения. Классы и class attribute fields остаются на месте.',
+    'tooltip.mappingDeleteView': 'Выбирает дерево удаления: по CMDBuild class/attribute, по Zabbix payload/object group или по коллекциям rules.',
     'tooltip.loadValidateMapping': 'Запускает логический контроль правил против текущих каталогов Zabbix и CMDBuild.',
+    'tooltip.webhooksUndo': 'Отменяет последнее изменение выбора операций webhooks в текущей сессии.',
+    'tooltip.webhooksRedo': 'Возвращает отмененное изменение выбора операций webhooks.',
+    'tooltip.webhooksAnalyze': 'Строит план CMDBuild webhooks по текущим conversion rules и загруженному каталогу CMDBuild.',
+    'tooltip.webhooksLoadCmdb': 'Загружает текущие CMDBuild webhooks из управляемой системы.',
+    'tooltip.webhooksSaveAs': 'Сохраняет JSON-план webhooks через браузер. CMDBuild, backend rules-файл и git не изменяются.',
+    'tooltip.webhooksApplyCmdb': 'Применяет выбранные операции create/update/delete к CMDBuild webhooks. Это изменяет управляемую систему.',
+    'tooltip.webhooksSelectAll': 'Выбирает все операции плана webhooks.',
+    'tooltip.webhooksClear': 'Снимает выбор со всех операций плана webhooks.',
     'tooltip.syncZabbix': 'Обновляет каталог Zabbix из API Zabbix.',
     'tooltip.loadZabbix': 'Загружает сохраненный каталог Zabbix.',
     'tooltip.syncCmdbuild': 'Обновляет каталог CMDBuild через API CMDBuild.',
     'tooltip.loadCmdbuild': 'Загружает сохраненный каталог CMDBuild.',
-    'tooltip.loadSettings': 'Загружает runtime-настройки из внешнего файла.',
+    'tooltip.loadRuntimeSettings': 'Загружает runtime-настройки из внешнего файла.',
+    'tooltip.loadAuthSettings': 'Загружает настройки авторизации и локальных пользователей.',
     'tooltip.saveRuntimeSettings': 'Сохраняет runtime-настройки во внешний файл.',
-    'tooltip.saveIdp': 'Сохраняет настройки IdP/SAML2.',
+    'tooltip.saveIdp': 'Сохраняет режим авторизации, IdP/MS AD параметры и соответствие ролей группам.',
+    'tooltip.loadUsers': 'Загружает список локальных пользователей и ролей.',
+    'tooltip.resetUserPassword': 'Сбрасывает пароль выбранного пользователя. Хэш сохраняется в файле пользователей.',
     'tooltip.helpPopoverClose': 'Закрывает открытую подсказку.',
     'tooltip.field': 'Поле "{label}". Значение используется соответствующим разделом интерфейса или сохраняется во внешний конфигурационный файл.',
     'tooltip.tableColumn': 'Колонка таблицы "{label}".'
@@ -328,30 +684,309 @@ const translations = {
     'login.title': 'Login',
     'login.language': 'Interface language',
     'login.idp': 'Sign in with IdP',
+    'login.username': 'User',
+    'login.password': 'Password',
     'login.cmdbuildLogin': 'CMDBuild login',
     'login.cmdbuildPassword': 'CMDBuild password',
     'login.zabbixLogin': 'Zabbix login',
     'login.zabbixPassword': 'Zabbix password',
     'login.submit': 'Login',
+    'dashboard.reloadRules': 'Reload conversion rules',
+    'account.changePassword': 'Change password',
+    'account.currentPassword': 'Current password',
+    'account.newPassword': 'New password',
+    'account.confirmPassword': 'Confirm new password',
+    'account.savePassword': 'Save password',
+    'credentials.title': 'Credentials required',
+    'credentials.baseUrl': 'CMDBuild URL',
+    'credentials.apiEndpoint': 'Zabbix API',
+    'credentials.username': 'Login',
+    'credentials.password': 'Password',
+    'credentials.save': 'Remember for session',
+    'mapping.referenceWarning': 'Warning: when iterative attribute requests use reference/domain types, changes in referenced attributes or related domain cards will not update monitoring unless the source object card itself is modified.',
+    'mapping.loadingData': 'loading data',
+    'mapping.loadingLightZabbix': 'Loading lightweight Zabbix catalog',
+    'mapping.loadingLightZabbixMeta': 'CMDBuild and Conversion Rules are already available; the full Zabbix catalog is not loaded in Conversion Rules Management',
+    'mapping.lazyLoadingMeta': 'section data is loaded on demand',
+    'mapping.loadErrorTitle': 'Conversion Rules Management load error',
+    'mapping.loadErrorHelp': 'The error is shown here so you do not have to look for it in the browser console.',
+    'validation.deleteFromRules': 'Remove from rules',
+    'validation.deleteFromRulesHelp': 'Check this to remove the missing reference from the rules JSON.',
+    'validation.confirmDeleteSelected': 'Remove selected items from rules JSON ({count}) and save the fixed file through the browser? The backend rules file will not change.',
+    'validation.review.title': 'Rule Deletion Review',
+    'validation.review.message': 'Rule "{name}" contains both consistent and inconsistent parts. Review the JSON: you can save an edit, delete the whole rule anyway, or cancel.',
+    'validation.review.applyEdit': 'Save edit',
+    'validation.review.deleteAnyway': 'Delete anyway',
+    'validation.review.cancel': 'Cancel',
+    'validation.review.invalidJson': 'Rule JSON could not be parsed: {message}',
+    'validation.review.cancelled': 'Rule deletion was cancelled.',
+    'validation.review.noRules': 'No rules that can be deleted whole were found for the selected mismatches.',
+    'webhooks.analyze': 'Analyze rules',
+    'webhooks.loadFromCmdb': 'Load from CMDB',
+    'webhooks.applyToCmdb': 'Load into CMDB',
+    'webhooks.operations': 'Operations',
+    'webhooks.details': 'Details',
+    'webhooks.selected': 'Selected',
+    'webhooks.action': 'Action',
+    'webhooks.code': 'Code',
+    'webhooks.target': 'Class',
+    'webhooks.event': 'Event',
+    'webhooks.reason': 'Reason',
+    'webhooks.noOperations': 'No operations. Current webhooks match the rules.',
+    'webhooks.noData': 'Load webhooks from CMDB and analyze rules.',
+    'webhooks.summary': 'CMDB webhooks: {current}. Operation plan: create {create}, update {update}, delete {delete}. Selected: {selected}.',
+    'webhooks.summaryEmpty': 'Operation plan is empty. Loaded CMDB webhooks: {current}.',
+    'webhooks.statusLoaded': 'Webhooks loaded from CMDB: {count}.',
+    'webhooks.statusAnalyzed': 'Rules analysis completed. Operations: {count}.',
+    'webhooks.statusSelectionChanged': 'Operation selection changed.',
+    'webhooks.statusApplied': 'Operations applied to CMDB: {count}.',
+    'webhooks.confirmApply': 'Apply selected operations to CMDBuild webhooks? This changes the managed system. Operations: {count}.',
+    'webhooks.confirmNoSelection': 'Select at least one operation.',
+    'webhooks.reasonMissing': 'webhook is missing in CMDB',
+    'webhooks.reasonChanged': 'configuration differs: {fields}',
+    'webhooks.reasonObsolete': 'managed webhook is no longer required by rules',
+    'webhooks.actionCreate': 'Create',
+    'webhooks.actionUpdate': 'Update',
+    'webhooks.actionDelete': 'Delete',
+    'webhooks.actionCurrent': 'Current',
+    'webhooks.reasonCurrent': 'loaded from CMDB',
+    'webhooks.payload': 'Payload',
+    'webhooks.edit': 'Edit',
+    'webhooks.expandPayload': 'Expand',
+    'webhooks.collapsePayload': 'Collapse',
+    'webhooks.editTitle': 'Edit webhook',
+    'webhooks.editHelp': 'Edit JSON for this webhook. For a current CMDB webhook row, the UI will create an update operation in the plan; CMDB changes happen only through "Load into CMDB".',
+    'webhooks.saveEdit': 'Save edit',
+    'webhooks.invalidJson': 'Webhook JSON cannot be parsed: {message}',
+    'webhooks.statusEdited': 'Webhook changed in the current plan.',
+    'webhooks.payloadEmpty': 'Payload is empty.',
+    'webhooks.payloadCurrent': 'current',
+    'webhooks.payloadAdded': 'added',
+    'webhooks.payloadDeleted': 'deleted',
+    'webhooks.detailsHint': 'Click the Action value to open details under that row; the shared details panel is below the table.',
+    'webhooks.currentDetailsHint': 'Loaded CMDB webhooks are shown below. Click "Analyze rules" to build the operation plan.',
+    'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
     'nav.dashboard': 'Dashboard',
     'nav.events': 'Events',
     'nav.rules': 'Rules',
     'nav.mapping': 'Conversion Rules Management',
     'nav.validateMapping': 'Conversion Rules Logical Control',
+    'nav.webhooks': 'Webhook Setup',
     'nav.zabbix': 'Zabbix Catalog',
     'nav.cmdbuild': 'CMDBuild Catalog',
     'nav.settings': 'Settings',
+    'nav.authSettings': 'Authorization',
+    'nav.runtimeSettings': 'Runtime settings',
     'nav.about': 'About',
     'nav.help': 'Help',
     'nav.logout': 'Logout',
+    'settings.runtimeConnections': 'Runtime connection settings',
+    'settings.settingsFile': 'Settings file',
+    'settings.usersFile': 'Users file',
+    'settings.cmdbuildUrl': 'CMDBuild URL',
+    'settings.maxTraversalDepth': 'Max recursion depth for domains&reference&lookups',
+    'settings.maxTraversalDepthNote': 'The change takes effect only after logout and CMDBuild catalog resync.',
+    'settings.zabbixApi': 'Zabbix API',
+    'settings.zabbixApiKey': 'Zabbix API key',
+    'settings.rulesStorage': 'Conversion rules file',
+    'settings.rulesFilePath': 'Rules file path',
+    'settings.rulesFilePathPlaceholder': 'rules/cmdbuild-to-zabbix-host-create.json',
+    'settings.rulesReadFromGit': 'Read from git',
+    'settings.rulesRepositoryUrl': 'Git repository URL',
+    'settings.rulesRepositoryUrlPlaceholder': 'https://git.example.org/cmdb2monitoring/conversion-rules.git',
+    'settings.rulesReadModeDisk': 'For the test system: read from disk, file {path}.',
+    'settings.rulesReadModeGit': 'Git mode: the URL points to the repository, and file {path} is expected inside it.',
+    'settings.rulesGitFileNote': 'When git is enabled, the rules file is expected inside the repository at the path shown above.',
+    'settings.rulesStorageNote': 'The UI saves rules through the browser; publishing to git is done by the operator outside the application.',
+    'settings.kafkaEvents': 'Kafka Events',
+    'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
+    'settings.authModeTitle': 'Authorization mode',
+    'settings.authMode': 'Authorization mode',
+    'settings.authModeLocal': 'Local',
+    'settings.authModeMsad': 'MS AD',
+    'settings.authModeIdp': 'IdP',
+    'settings.saveAuth': 'Save authorization',
+    'settings.saveRuntime': 'Save runtime',
+    'settings.idpProvider': 'IdP protocol',
+    'settings.roleMapping': 'Role to groups mapping',
+    'settings.groupsColumn': 'IdP / AD groups',
+    'settings.users': 'Local users and roles',
+    'settings.localUsersActive': 'Local users active',
+    'settings.resetUser': 'User',
+    'settings.resetPassword': 'New password',
+    'settings.mustChangePassword': 'Require change at login',
+    'settings.loadUsers': 'Load users',
+    'settings.resetUserPassword': 'Reset password',
+    'settings.userColumn': 'User',
+    'settings.roleColumn': 'Role',
+    'settings.mustChangeColumn': 'Password change',
+    'toast.runtimeSaved': 'Runtime settings saved',
+    'toast.runtimeSavedResyncRequired': 'Runtime settings saved. The new depth takes effect only after logout and CMDBuild catalog resync.',
+    'toast.maxTraversalDepthChanged': 'The new depth takes effect only after logout and CMDBuild catalog resync.',
+    'toast.idpSaved': 'Authorization settings saved',
+    'toast.rulesReloaded': 'Conversion rules reloaded',
+    'toast.validationSelectMissing': 'Choose missing items to remove from rules',
+    'toast.rulesChangedSaveCancelled': 'Rules were changed in memory, file save was cancelled',
+    'toast.rulesFileSaved': 'Rules file saved: {name}',
+    'toast.rulesNotChanged': 'Rules were not changed',
+    'toast.rulesValidationFailed': 'Rules did not pass validation after the edit',
+    'toast.validationDraftChanged': 'Rules were changed in memory. Use "Save file as" when edits are finished.',
+    'rules.createEmpty': 'Create empty',
+    'toast.emptyRulesCreated': 'Empty rules starter created in the local file area',
+    'toast.emptyRulesFailed': 'Could not create empty rules starter',
     'about.title': 'About',
-    'about.text': 'Spoken with vibe coding by Igor Lyapin in 2026. Igor.Lyapin(*)gmail.com. Free to use.',
+    'about.text': 'Designed and materialized by Igor Lyapin email:igor.lyapin@gmail.com 2026\nLicensed under GNU GPLv3.',
     'common.clearSelection': 'Clear selection',
     'common.close': 'Close',
+    'common.load': 'Load',
+    'common.undo': 'Undo',
+    'common.redo': 'Redo',
+    'common.saveFileAs': 'Save file as',
+    'common.selectAll': 'Select all',
+    'common.clear': 'Clear',
+    'common.refresh': 'Refresh',
+    'common.validate': 'Validate',
+    'common.dryRun': 'Dry-run',
+    'common.sync': 'Sync',
+    'common.delete': 'Delete',
+    'common.saveFileNamePrompt': 'File name for saving {description}',
+    'common.loading': 'Loading',
+    'mapping.mode': 'Mode',
+    'mapping.modeView': 'View mode',
+    'mapping.modeEdit': 'Edit mode',
+    'mapping.action': 'Action',
+    'mapping.actionAdd': 'Add rule',
+    'mapping.actionModify': 'Modify rule',
+    'mapping.actionDelete': 'Delete rule & classes',
+    'mapping.modifyRule': 'Rule to modify',
+    'mapping.cmdbClass': 'CMDBuild class',
+    'mapping.classField': 'Class attribute field',
+    'mapping.structure': 'Conversion structure',
+    'mapping.zabbixTarget': 'Zabbix object / payload',
+    'mapping.priority': 'Priority',
+    'mapping.regex': 'Regex',
+    'mapping.ruleName': 'Rule name',
+    'mapping.ruleNameAuto': 'auto-generated',
+    'mapping.resetFields': 'Reset fields',
+    'mapping.addRule': 'Add conversion rule',
+    'mapping.saveRuleChanges': 'Save rule changes',
+    'mapping.grouping': 'Grouping',
+    'mapping.deleteTreeCmdbuild': 'CMDBuild tree',
+    'mapping.deleteTreeZabbix': 'Zabbix tree',
+    'mapping.deleteTreeRules': 'Rules tree',
+    'mapping.deleteSelectedRules': 'Delete selected rules',
+    'mapping.delete.noRulesInDraft': 'The draft JSON has no rules that can be deleted in this mode.',
+    'mapping.confirm.deleteRulesTitle': 'Delete selected rules from draft JSON ({count})?',
+    'mapping.confirm.deleteRulesKeepSources': 'Classes and class attribute fields will remain in rules so a source used by other rules is not removed.',
+    'mapping.confirm.deleteRulesUndo': 'This action can be undone through Undo.',
+    'mapping.confirm.saveIpDnsTitle': 'Rules contain IP/DNS class attribute field links with Zabbix interface structure problems.',
+    'mapping.confirm.saveIpDnsMore': '... {count} more',
+    'mapping.confirm.saveAnyway': 'Save files despite the errors?',
+    'mapping.status.modifyStart': 'Choose a rule to modify or start from a class, field, or conversion structure.',
+    'mapping.status.beforeSave': 'Before saving, run logical control of conversion rules: create/update host must receive ipAddress or dnsName.',
+    'mapping.status.actionDelete': 'Choose rules in the delete tree: by CMDBuild class/attribute, Zabbix payload/object group, or rule collections. Classes and class attribute fields are not removed automatically.',
+    'mapping.status.actionModify': 'Start from a rule, class, attribute, or conversion structure. Linked lists will narrow automatically.',
+    'mapping.status.actionAdd': 'Add a new conversion rule. IP/DNS host binding validation runs immediately after adding.',
+    'mapping.status.defaultAction': 'Add or modify a conversion rule.',
+    'mapping.status.autoSelected': 'Rule selected automatically: {name}.',
+    'mapping.status.resetModify': 'Modification fields were reset. Start from a rule, class, attribute, or conversion structure.',
+    'mapping.status.resetAdd': 'Form fields were cleared. Choose a leaf field and Zabbix target.',
+    'mapping.status.noModifyRule': 'Choose a rule to modify.',
+    'mapping.status.ruleResetNeeded': 'The form matches the selected rule: change a field or press "Reset fields".',
+    'mapping.status.noRuleChanges': 'There are no changes to save: the rule matches the current draft JSON.',
+    'mapping.status.canModify': 'Ready to edit: the chain is unambiguous, the target is compatible, and changes can be saved.',
+    'mapping.status.canAdd': 'Ready to add a rule: the chain is unambiguous and the target is compatible.',
+    'mapping.status.undoDone': 'Undo completed.',
+    'mapping.status.redoDone': 'Redo completed.',
+    'mapping.status.loadMappingFirst': 'Load Conversion Rules Management first.',
+    'mapping.status.selectRulesForDelete': 'Select at least one rule to delete.',
+    'mapping.status.deletedRulesMissing': 'The selected rules are no longer found in the current draft JSON.',
+    'mapping.status.deletedRules': 'Deleted rules: {count}. Classes and class attribute fields were not removed automatically.',
+    'mapping.status.chooseCompatibleFieldAdd': 'Choose a compatible CMDBuild field for the new rule.',
+    'mapping.status.chooseCompatibleFieldModify': 'Choose a compatible CMDBuild field for changing the rule.',
+    'mapping.status.classFieldMissing': 'Class "{className}" has no attribute for "{field}". Add the attribute in CMDBuild or choose an existing class attribute field.',
+    'mapping.status.multiValueScalarNotAllowed': 'Field "{field}" can return multiple values through a CMDBuild domain path. For scalar Zabbix structure "{target}", choose a regular scalar/reference leaf or configure the source field with resolve.collectionMode=first.',
+    'mapping.status.addedRule': 'Added rule "{name}".',
+    'mapping.status.modifiedRule': 'Modified rule "{name}".',
+    'mapping.status.modifyRuleMissing': 'The selected rule is no longer found in the draft JSON.',
+    'mapping.status.readyButStale': 'Ready to edit, but {details}',
+    'mapping.status.ruleForModifySelected': 'Rule to modify is selected.',
+    'mapping.status.classSelected': 'CMDBuild class is selected.',
+    'mapping.status.noClassRestriction': 'Rule without a className restriction.',
+    'mapping.status.leafSelected': 'Leaf/source field is selected.',
+    'mapping.status.structureCompatible': 'Conversion structure is compatible with the selected field.',
+    'mapping.status.targetSelected': 'Zabbix target is selected.',
+    'mapping.status.prioritySet': 'Priority is set.',
+    'mapping.status.regexSaved': 'Regex will be saved in the rule condition.',
+    'mapping.status.ruleNameSetOrAuto': 'Rule name is set or will be generated automatically.',
+    'mapping.status.modifyNeedsRule': 'Modification starts without a selected rule; choose a rule explicitly.',
+    'mapping.status.selectConcreteClass': 'Choose a concrete subclass instead of a superclass/prototype class.',
+    'mapping.status.superclassNotAllowed': 'Superclass/prototype class cannot be used as a rule class.',
+    'mapping.status.chooseLeafField': 'Choose the final leaf/source field.',
+    'mapping.status.fieldMissingInClass': 'Field "{field}" was not found in the selected CMDBuild class/path.',
+    'mapping.status.fieldMultiValueIncompatible': 'Field "{field}" can return multiple values and is incompatible with "{target}".',
+    'mapping.status.chooseStructureForField': 'Choose a structure that allows the selected field, or choose another field.',
+    'mapping.status.fieldIncompatible': 'Field "{field}" is incompatible with "{target}".',
+    'mapping.status.ipFieldForDnsTarget': 'Attribute "{field}" looks like an IP address, so it cannot be used for a DNS interface (interfaces[].dns/useip=0). Choose the IP target or a DNS/FQDN attribute.',
+    'mapping.status.dnsFieldForIpTarget': 'Attribute "{field}" looks like DNS/FQDN, so it cannot be used for an IP interface (interfaces[].ip/useip=1). Choose the DNS target or an IP attribute.',
+    'mapping.status.lookupFieldForInterfaceTarget': 'Lookup/reference value "{field}" cannot be used directly as a Zabbix interface address. Choose a scalar IP/DNS leaf field or another structure.',
+    'mapping.status.fieldStale': 'Field "{field}" was loaded from the rule but is not confirmed by the current catalog/filter.',
+    'mapping.status.fieldStaleShort': 'Field "{field}" is not confirmed by the current catalog/filter.',
+    'mapping.status.chooseStructure': 'Choose a conversion structure.',
+    'mapping.status.chooseTarget': 'Choose a Zabbix object / payload.',
+    'mapping.status.targetMissing': 'Target was loaded from the rule but was not found in the Zabbix catalog/options.',
+    'mapping.status.targetMissingSummary': 'Zabbix target was not found in catalog/options: the second side of the chain is inconsistent.',
+    'mapping.status.targetStale': 'Target was loaded from the rule but is not confirmed by the current Zabbix catalog/options.',
+    'mapping.status.targetStaleShort': 'Zabbix target is not confirmed by the current catalog/options.',
+    'mapping.status.priorityPositive': 'Priority must be a positive number.',
+    'mapping.status.saveIpDnsInconsistent': 'Save file as: inconsistent IP/DNS binding found. Changes for the webhook file: {count}.',
+    'mapping.status.saveReady': 'Save file as: rules JSON and webhook file will be saved. Changes for the webhook file: {count}.',
+    'mapping.status.saveCancelledFixIpDns': 'Save cancelled: fix the IP/DNS link to the Zabbix interface structure first.',
+    'mapping.status.saveCancelled': 'Save cancelled.',
+    'mapping.status.rulesFileSavedWebhookNotSaved': 'Rules file saved: {name}. The second webhook bodies file was not saved.',
+    'mapping.status.filesSaved': 'Files saved: {rulesName}, {webhookName}.{warning}',
+    'mapping.status.saveWarnings': ' Warnings: {count}.',
+    'mapping.option.anyClass': 'Any class',
+    'mapping.option.chooseRule': 'Choose a rule to modify',
+    'mapping.option.noRulesToModify': 'No rules available for modification',
+    'mapping.option.chooseClassFilter': 'Choose CMDBuild class or leave the filter empty',
+    'mapping.option.chooseFieldFilter': 'Choose class attribute field or leave the filter empty',
+    'mapping.option.chooseStructureFilter': 'Choose conversion structure or leave the filter empty',
+    'mapping.option.chooseTargetFilter': 'Choose Zabbix object / payload or leave the filter empty',
+    'mapping.option.chooseLeaf': 'Choose leaf / source field',
+    'mapping.option.chooseStructure': 'Choose conversion structure',
+    'mapping.option.chooseTarget': 'Choose Zabbix object / payload',
+    'mapping.option.noCompatibleFields': 'No compatible CMDBuild fields for {target}',
+    'mapping.option.noFields': 'No available CMDBuild fields',
+    'mapping.option.currentFieldMissing': 'Current rule field: {field} / not confirmed by catalog',
+    'mapping.option.currentTargetMissing': 'Current rule target / missing from Zabbix catalog',
+    'mapping.option.currentTargetMissingChooseNew': 'Current rule target is missing from the Zabbix catalog: choose a new target',
+    'mapping.option.currentFieldMissingMeta': 'The value was loaded from an existing rule but was not found in the current compatible CMDBuild fields.',
+    'mapping.option.currentTargetMissingMeta': 'Target was loaded from an existing rule but was not found in the current Zabbix catalog/options. The field is left empty so a new target can be chosen.',
+    'mapping.option.chooseLeafMeta': 'Saving is available after choosing the final leaf/source field.',
+    'mapping.option.chooseStructureMeta': 'Saving is available after choosing a conversion structure.',
+    'mapping.option.chooseTargetMeta': 'Saving is available after choosing a compatible Zabbix target.',
+    'mapping.option.modifyStartsWithoutRuleMeta': 'Modification starts without a selected rule.',
+    'mapping.option.loadingZabbix': 'Loading Zabbix catalog...',
+    'mapping.option.loadError': 'Load error: {message}',
+    'mapping.option.ipAddress': 'IP address -> interfaces[].ip / useip=1',
+    'mapping.option.dnsName': 'DNS name -> interfaces[].dns / useip=0',
+    'mapping.option.agentInterface': 'Agent interface',
+    'mapping.option.snmpInterface': 'SNMP interface',
+    'mapping.option.monitoringSuppression': 'Skip create/update when attribute matches',
+    'mapping.option.profilePrefix': 'Profile: {name}',
+    'mapping.option.newHostMacro': 'New host macro from class attribute field',
+    'mapping.option.inventoryFromField': 'Inventory field from class attribute field',
+    'mapping.target.hostGroups': 'Host group rule',
+    'mapping.target.templates': 'Template rule',
+    'mapping.target.tags': 'Tag rule',
+    'mapping.target.interfaceAddress': 'Interface address rule',
+    'mapping.target.interface': 'Interface rule',
+    'mapping.target.monitoringSuppression': 'Monitoring suppression rule',
     'session.notAuthenticated': 'not authenticated',
     'help.general.title': 'General Principle',
     'help.general.1': 'The browser works only with monitoring-ui-api; it does not connect directly to CMDBuild, Zabbix, or Kafka.',
-    'help.general.2': 'Addresses, credentials, Kafka topics, IdP/SAML2, and Events read settings are configured externally or through Settings.',
+    'help.general.2': 'Addresses, Zabbix API key, Kafka topics, and Events read settings are configured externally or through Runtime settings. Authorization is configured separately: local, MS AD, or IdP with AD groups mapped to roles.',
     'help.general.3': 'Tooltips are shown when you hover or focus interface elements.',
     'help.dashboard.title': 'Dashboard And Events',
     'help.dashboard.1': 'Dashboard shows availability for cmdbwebhooks2kafka, cmdbkafka2zabbix, zabbixrequests2api, and the BFF itself.',
@@ -361,64 +996,96 @@ const translations = {
     'help.rules.1': 'Load fetches the current conversion rules JSON.',
     'help.rules.2': 'Validate checks the rules structure on the backend.',
     'help.rules.3': 'Dry-run applies rules to a test CMDBuild payload without saving.',
-    'help.rules.4': 'Upload saves a new rules JSON file on the backend after validation.',
+    'help.rules.4': 'Save file as saves the rules JSON through the browser; the backend rules file and git are not changed.',
+    'help.rules.5': 'Create empty generates a production starter from the current environment: endpoints/topics and CMDBuild/Zabbix references come from runtime config and catalog cache, while routes stay publish=false until explicitly enabled. If the CMDBuild or Zabbix cache is empty, the backend returns an error and asks to sync the catalog first.',
     'help.mapping.title': 'Conversion Rules Management',
     'help.mapping.1': 'The page shows the CMDBuild -> Conversion Rules -> Zabbix chain.',
     'help.mapping.2': 'View mode shows the selected chain and hides unrelated class attributes, rule sub-blocks, and Zabbix list items.',
     'help.mapping.3': 'Clear selection is available in view mode and returns the page to the normal overview.',
-    'help.mapping.4': 'Edit mode changes the current session draft JSON: choose a CMDBuild class/class attribute field, conversion structure, Zabbix object/payload, priority, and regex.',
-    'help.mapping.5': 'The Delete rule action shows rules from the current draft JSON, removes checked rules after confirmation, and leaves classes/class attribute fields in place.',
-    'help.mapping.6': 'Undo and Redo work with the current session history, and Save file as saves the draft to a separate JSON file without sending it to the backend.',
-    'help.mapping.7': 'Save file as also checks that every configured class has an IP or DNS class attribute field linked to Zabbix interface rules or hostProfiles[].interfaces.',
-    'help.mapping.8': 'Clicking the selected item again clears the selection.',
-    'help.mapping.9': 'Interface address rules choose how to fill the Zabbix interface: ipAddress gives useip=1, dnsName gives useip=0.',
-    'help.mapping.10': 'Host profiles describe two modes: multiple interfaces[] inside one Zabbix host, or several Zabbix hosts from one CMDB object.',
-    'help.mapping.11': 'Inside a host profile, interface profile selects agent/SNMP/IPMI/JMX monitoring type, and valueField points to the CMDB attribute used as IP or DNS.',
-    'help.mapping.12': 'For Server, webhook keys interface/interface2/profile/profile2 are linked to real CMDBuild attributes iLo/iLo2/mgmt/mgmt2 through cmdbAttribute; this is for Conversion Rules Management and Body generation and does not add old aliases to payload processing.',
-    'help.mapping.13': 'For lookup values, only the exact class + lookup + value link is highlighted, for example Notebook.zabbixTag.tag1.',
-    'help.mapping.14': 'Regex rules show which class attribute fields select groups, templates, tags, and extended Zabbix objects.',
+    'help.mapping.4': 'Edit mode hides the lower preview and changes the current session draft JSON: you can start from any form node, while dependent fields are filtered and highlighted.',
+    'help.mapping.5': 'Modify rule starts without an automatically selected rule: you can start from a rule, class, field, or conversion structure. Linked lists are filtered, a single matching rule is selected automatically, and Reset fields returns the form to empty filters. A target missing from the Zabbix catalog is inconsistent and blocks saving.',
+    'help.mapping.6': 'The Delete rule & classes action shows current draft rules as a CMDBuild, Zabbix, or rules tree. You can check a whole class, CMDBuild attribute, Zabbix payload field, Zabbix object group, or a single rule; source classes/class attribute fields are cleaned through Conversion Rules Logical Control.',
+    'help.mapping.7': 'Undo and Redo work with the current session history, and Save file as saves the draft to a separate JSON file without sending it to the backend.',
+    'help.mapping.8': 'Save file as also checks that every configured class has an IP or DNS class attribute field linked to Zabbix interface rules or hostProfiles[].interfaces.',
+    'help.mapping.9': 'Clicking the selected item again clears the selection.',
+    'help.mapping.10': 'Interface address rules choose how to fill the Zabbix interface: the IP target writes interfaces[].ip/useip=1, and the DNS target writes interfaces[].dns/useip=0. The editor blocks explicit IP attributes as DNS and DNS/FQDN attributes as IP.',
+    'help.mapping.11': 'Host profiles describe two modes: multiple interfaces[] inside one Zabbix host, or several Zabbix hosts from one CMDB object.',
+    'help.mapping.12': 'Inside a host profile, interface profile selects agent/SNMP/IPMI/JMX monitoring type, and valueField points to the CMDB attribute used as IP or DNS.',
+    'help.mapping.13': 'Webhook source keys may differ from CMDBuild attribute names; the link is declared through cmdbAttribute or cmdbPath and does not add hidden aliases to payload processing.',
+    'help.mapping.14': 'For lookup values, only the exact class + lookup + value link is highlighted, for example Notebook.zabbixTag.tag1.',
+    'help.mapping.15': 'Regex rules show which class attribute fields select groups, templates, tags, and extended Zabbix objects.',
+    'help.mapping.16': 'A domain path such as Class.{domain:RelatedClass}.Attribute reads related cards through CMDBuild relations; fields that may return multiple values are unavailable for scalar Zabbix structures.',
+    'help.mapping.17': 'monitoringSuppressionRules is used when instance attributes intentionally block monitoring; create/update are skipped, while delete is not blocked.',
     'help.validate.title': 'Conversion Rules Logical Control',
     'help.validate.1': 'The page does not build an interactive chain; it highlights only missing entities.',
     'help.validate.2': 'Red marks classes and attributes missing from the CMDBuild catalog, as well as Zabbix references missing from the Zabbix catalog.',
     'help.validate.3': 'A checkbox above a missing item includes it in removal from the rules JSON.',
     'help.validate.4': 'Delete asks for confirmation, saves the previous version, and fixes the selected references in rules.',
+    'help.webhooks.title': 'Webhook Setup',
+    'help.webhooks.1': 'The page is available to the Editor and Administrator roles.',
+    'help.webhooks.2': 'Load from CMDB reads current CMDBuild webhooks through the backend; the browser does not connect to CMDBuild directly.',
+    'help.webhooks.3': 'Analyze rules builds desired webhooks from current conversion rules: missing webhooks are proposed for creation, changed ones for update, and obsolete managed ones for deletion.',
+    'help.webhooks.4': 'Save file as exports only the JSON plan through the browser and does not change CMDBuild, the backend rules file, or git.',
+    'help.webhooks.5': 'Load into CMDB applies only selected operations and really changes webhooks in the managed system.',
+    'help.webhooks.6': 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved together with the conversion rules file.',
+    'help.webhooks.7': 'Undo/Redo only changes the current plan selection and does not roll back configuration already loaded into CMDBuild.',
+    'help.webhooks.8': 'Each table row can expand its payload: green means added, red means deleted, and black means current value. Clicking the Action value opens details under that row, while the shared details panel is below the table and uses the same highlighting. Edit changes JSON for that concrete webhook in the current plan.',
     'help.catalogs.title': 'Catalogs And Settings',
     'help.catalogs.1': 'Zabbix Catalog loads templates, host groups, template groups, tags, and extended Zabbix catalogs.',
-    'help.catalogs.2': 'CMDBuild Catalog loads classes, attributes, and lookup values.',
-    'help.catalogs.3': 'Settings saves runtime connection settings, Events Kafka browser settings, and IdP/SAML2 settings.',
+    'help.catalogs.2': 'CMDBuild Catalog loads classes, attributes, domains, and lookup values.',
+    'help.catalogs.3': 'Runtime settings saves connections and the Events Kafka browser; Authorization saves local mode, MS AD, IdP/SAML2/OAuth2, and AD group-to-role mapping.',
     'help.catalogs.4': 'Source catalogs should usually be changed in CMDBuild/Zabbix, while conversion behavior is changed in JSON rules.',
+    'help.catalogs.5': 'For the test system, rules are read from disk at rules/cmdbuild-to-zabbix-host-create.json; when git reading is enabled, the same file is expected inside the repository at that path.',
     'tooltip.brand': 'Application name: cmdb2monitoring.',
     'tooltip.sessionSummary': 'Current user and authentication method.',
-    'tooltip.idpLoginButton': 'Starts login through the external SAML2 IdP.',
+    'tooltip.idpLoginButton': 'Starts login through the selected external IdP.',
     'tooltip.logoutButton': 'Ends the current user session.',
+    'tooltip.changePasswordOpen': 'Opens password change for the current local user.',
     'tooltip.refreshDashboard': 'Checks service availability again.',
     'tooltip.eventsMaxMessages': 'Number of latest Kafka messages shown below.',
     'tooltip.refreshEvents': 'Loads the topic list and latest messages for the selected topic.',
     'tooltip.loadRules': 'Loads the current conversion rules JSON.',
     'tooltip.validateRules': 'Validates rules JSON against the backend schema.',
-    'tooltip.rulesFile': 'Selects a local rules JSON file for validation or upload.',
+    'tooltip.createEmptyRules': 'Creates a clean rules starter with current-environment baseline data. Loaded CMDBuild and Zabbix catalog caches are required; it is saved only through the browser.',
+    'tooltip.rulesFile': 'Selects a local rules JSON file for validation, dry-run, or browser save.',
+    'tooltip.rulesFilePath': 'For the test system: rules/cmdbuild-to-zabbix-host-create.json. When reading from git, the same path is expected inside the repository checkout.',
+    'tooltip.rulesReadFromGit': 'Switches the displayed storage mode: off means read from disk; on means read from a git working copy when the converter service is configured accordingly.',
+    'tooltip.rulesRepositoryUrl': 'Repository URL with rules. The expected file inside it is rules/cmdbuild-to-zabbix-host-create.json, or the path configured in Rules file path.',
     'tooltip.dryRunPayload': 'Test CMDBuild payload for dry-run conversion.',
     'tooltip.dryRunRules': 'Runs a trial conversion without saving rules.',
-    'tooltip.uploadRules': 'Saves the selected rules JSON on the backend.',
+    'tooltip.saveRulesAs': 'Saves the current rules JSON through the browser. The backend rules file, git commit, and git push are not changed.',
     'tooltip.loadMapping': 'Loads the visual map of Zabbix, rules, and CMDBuild links.',
     'tooltip.mappingMode': 'Switches conversion rules management between view and current-session draft editing.',
-    'tooltip.mappingEditAction': 'Switches the editor action: add a new conversion rule or delete existing rules from draft JSON.',
+    'tooltip.mappingEditAction': 'Switches the editor action: add, modify, or delete rules from draft JSON.',
     'tooltip.mappingClearSelection': 'Clears the highlighted chain and returns the normal overview.',
     'tooltip.mappingUndo': 'Undoes the latest draft-rules change in the current session.',
     'tooltip.mappingRedo': 'Restores the reverted draft-rules change.',
     'tooltip.mappingSaveAs': 'Saves the current draft rules JSON without sending it to the backend. A second file contains only webhook Body/DELETE instructions for rules added or removed in the current session.',
-    'tooltip.mappingAddRule': 'Adds the selected conversion structure to draft rules JSON.',
+    'tooltip.mappingAddRule': 'Adds a new rule or saves changes to the selected rule in draft JSON.',
+    'tooltip.mappingResetForm': 'In modify mode, clears the selected rule and filters; in add mode, clears the leaf field and target.',
     'tooltip.mappingDeleteSelectAll': 'Checks all rules in delete mode.',
     'tooltip.mappingDeleteClear': 'Clears all rule checks in delete mode.',
     'tooltip.mappingDeleteSelected': 'Deletes checked rules from draft JSON after confirmation. Classes and class attribute fields remain in place.',
+    'tooltip.mappingDeleteView': 'Chooses the delete tree: by CMDBuild class/attribute, by Zabbix payload/object group, or by rule collections.',
     'tooltip.loadValidateMapping': 'Runs logical control of rules against current Zabbix and CMDBuild catalogs.',
+    'tooltip.webhooksUndo': 'Undoes the latest webhook operation selection change in the current session.',
+    'tooltip.webhooksRedo': 'Restores the reverted webhook operation selection change.',
+    'tooltip.webhooksAnalyze': 'Builds the CMDBuild webhook plan from current conversion rules and the loaded CMDBuild catalog.',
+    'tooltip.webhooksLoadCmdb': 'Loads current CMDBuild webhooks from the managed system.',
+    'tooltip.webhooksSaveAs': 'Saves the webhook JSON plan through the browser. CMDBuild, backend rules file, and git are not changed.',
+    'tooltip.webhooksApplyCmdb': 'Applies selected create/update/delete operations to CMDBuild webhooks. This changes the managed system.',
+    'tooltip.webhooksSelectAll': 'Selects all webhook plan operations.',
+    'tooltip.webhooksClear': 'Clears all webhook plan operation selections.',
     'tooltip.syncZabbix': 'Refreshes the Zabbix catalog from the Zabbix API.',
     'tooltip.loadZabbix': 'Loads the saved Zabbix catalog.',
     'tooltip.syncCmdbuild': 'Refreshes the CMDBuild catalog through the CMDBuild API.',
     'tooltip.loadCmdbuild': 'Loads the saved CMDBuild catalog.',
-    'tooltip.loadSettings': 'Loads runtime settings from the external file.',
+    'tooltip.loadRuntimeSettings': 'Loads runtime settings from the external file.',
+    'tooltip.loadAuthSettings': 'Loads authorization settings and local users.',
     'tooltip.saveRuntimeSettings': 'Saves runtime settings to the external file.',
-    'tooltip.saveIdp': 'Saves IdP/SAML2 settings.',
+    'tooltip.saveIdp': 'Saves authorization mode, IdP/MS AD parameters, and role-to-group mapping.',
+    'tooltip.loadUsers': 'Loads local users and roles.',
+    'tooltip.resetUserPassword': 'Resets the selected user password. The hash is stored in the users file.',
     'tooltip.helpPopoverClose': 'Closes the open tooltip.',
     'tooltip.field': 'Field "{label}". The value is used by the relevant interface section or saved to an external configuration file.',
     'tooltip.tableColumn': 'Table column "{label}".'
@@ -429,24 +1096,28 @@ const viewDescriptions = {
   ru: {
     dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
     events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
-    rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и upload нового файла правил.',
+    rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и сохраняет файл через браузер.',
     mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
     validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
+    webhooks: 'Пользоваться этим пунктом не обязательно: можно самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации. Здесь можно загрузить текущие CMDBuild webhooks, построить план create/update/delete по rules и явно загрузить выбранные операции в CMDBuild. Undo/Redo не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
     zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
-    cmdbuild: 'Показывает классы, атрибуты и lookup-справочники, загруженные из CMDBuild.',
-    settings: 'Содержит runtime-настройки подключений, Kafka Events и IdP/SAML2.',
+    cmdbuild: 'Показывает классы, атрибуты, domains и lookup-справочники, загруженные из CMDBuild.',
+    authSettings: 'Управляет режимом авторизации: локальная, MS AD или IdP. В IdP режиме MS AD используется для сопоставления групп с ролями.',
+    runtimeSettings: 'Содержит runtime-настройки подключений, Zabbix API key и Kafka Events.',
     about: 'Информация об авторстве и свободном использовании.',
     help: 'Содержит справку по разделам интерфейса, управлению правилами конвертации, логическому контролю правил конвертации и настройкам.'
   },
   en: {
     dashboard: 'Shows service availability and quick checks for the current environment.',
     events: 'Shows configured Kafka topics and the latest messages from the selected topic.',
-    rules: 'Loads the current rules JSON, validates it, runs dry-run, and uploads a new rules file.',
+    rules: 'Loads the current rules JSON, validates it, runs dry-run, and saves a rules file through the browser.',
     mapping: 'Shows the CMDBuild -> conversion rules -> Zabbix chain. Host profiles show fan-out and interfaces; Template rules select templates; Tag rules create tags.',
     validateMapping: 'Validates rules against Zabbix and CMDBuild catalogs; only missing source entities are highlighted.',
+    webhooks: 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved with the conversion rules file. This page loads current CMDBuild webhooks, builds a create/update/delete plan from rules, and explicitly loads selected operations into CMDBuild. Undo/Redo does not roll back configuration already loaded into CMDBuild.',
     zabbix: 'Shows templates, host groups, template groups, tags, and extended Zabbix catalogs.',
-    cmdbuild: 'Shows classes, attributes, and lookup catalogs loaded from CMDBuild.',
-    settings: 'Contains runtime connection settings, Kafka Events, and IdP/SAML2 settings.',
+    cmdbuild: 'Shows classes, attributes, domains, and lookup catalogs loaded from CMDBuild.',
+    authSettings: 'Manages authorization mode: local, MS AD, or IdP. In IdP mode, MS AD is used for group-to-role mapping.',
+    runtimeSettings: 'Contains runtime connection settings, Zabbix API key, and Kafka Events.',
     about: 'Authorship and free-use information.',
     help: 'Contains help for UI sections, Conversion Rules Management, Conversion Rules Logical Control, and settings.'
   }
@@ -485,26 +1156,107 @@ async function initialize() {
   const status = await api('/api/auth/status');
   renderAuth(status);
   if (status.authenticated) {
-    await loadRuntimeSettings();
     await loadDashboard();
-    await loadRules();
+    if (canUseRules()) {
+      await loadRules();
+    }
+    if (currentRole() === 'admin') {
+      await loadRuntimeSettings();
+    }
   }
 }
 
 function bindNavigation() {
   $$('.nav-item[data-view]').forEach(button => {
     button.addEventListener('click', async () => {
-      $$('.nav-item[data-view]').forEach(item => item.classList.toggle('active', item === button));
-      $$('.view').forEach(view => view.classList.toggle('active', view.id === button.dataset.view));
-      updateViewDescription(button.dataset.view);
+      if (!canView(button.dataset.view)) {
+        return;
+      }
+
+      showView(button.dataset.view);
       if (button.dataset.view === 'mapping' && !state.mappingLoaded) {
         await loadMapping();
       }
       if (button.dataset.view === 'validateMapping' && !state.validateMappingLoaded) {
         await loadValidateMapping();
       }
+      if (button.dataset.view === 'webhooks' && !state.webhooksLoaded) {
+        await loadCmdbuildWebhooks();
+      }
+      if (button.dataset.view === 'runtimeSettings') {
+        await loadRuntimeSettings();
+      }
+      if (button.dataset.view === 'authSettings') {
+        await loadAuthSettings();
+      }
     });
   });
+}
+
+function showView(viewId) {
+  const targetView = canView(viewId) ? viewId : defaultViewForRole();
+  $$('.nav-item[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === targetView));
+  $$('.view').forEach(view => view.classList.toggle('active', view.id === targetView));
+  updateViewDescription(targetView);
+}
+
+function applyRoleAccess() {
+  $$('.nav-item[data-view]').forEach(button => {
+    button.classList.toggle('hidden', state.authenticated && !canView(button.dataset.view));
+  });
+
+  const activeView = $('.view.active')?.id ?? 'dashboard';
+  if (state.authenticated && !canView(activeView)) {
+    showView(defaultViewForRole());
+  }
+}
+
+function currentRole() {
+  return state.user?.role ?? state.user?.roles?.[0] ?? 'viewer';
+}
+
+function canView(viewId) {
+  return (roleViews[currentRole()] ?? roleViews.viewer).includes(viewId);
+}
+
+function defaultViewForRole() {
+  return (roleViews[currentRole()] ?? roleViews.viewer)[0] ?? 'dashboard';
+}
+
+function canUseRules() {
+  return ['editor', 'admin'].includes(currentRole());
+}
+
+function currentAuthMode() {
+  const provider = currentIdpProvider();
+  if (!state.auth?.useIdp && !state.idp?.enabled) {
+    return 'local';
+  }
+
+  return provider === 'ldap' ? 'msad' : 'idp';
+}
+
+function currentIdpProvider() {
+  return normalizeIdpProvider(state.idp?.provider ?? state.auth?.provider ?? 'saml2');
+}
+
+function normalizeIdpProvider(value) {
+  const provider = String(value ?? 'saml2').trim().toLowerCase();
+  if (['oauth2', 'oauth', 'oidc', 'openidconnect'].includes(provider)) {
+    return 'oauth2';
+  }
+  if (['ldap', 'ldaps', 'msad', 'ad', 'active-directory', 'activedirectory'].includes(provider)) {
+    return 'ldap';
+  }
+  return 'saml2';
+}
+
+function isRedirectIdp() {
+  return currentAuthMode() === 'idp' && ['saml2', 'oauth2'].includes(currentIdpProvider());
+}
+
+function idpLoginRoute() {
+  return currentIdpProvider() === 'oauth2' ? '/auth/oauth2/login' : '/auth/saml2/login';
 }
 
 function applyViewDescriptions() {
@@ -572,8 +1324,15 @@ function applyLanguage() {
   $$('[data-i18n]').forEach(node => {
     node.textContent = t(node.dataset.i18n);
   });
+  $$('[data-i18n-placeholder]').forEach(node => {
+    node.placeholder = t(node.dataset.i18nPlaceholder);
+  });
+  $$('[data-help-key]').forEach(node => {
+    setHelp(node, t(node.dataset.helpKey));
+  });
   $$('.view').forEach(ensureViewDescription);
   updateSessionSummary();
+  updateLocalizedDynamicUi();
   applyHelpText();
 }
 
@@ -585,6 +1344,18 @@ function tf(key, values = {}) {
   return Object.entries(values).reduce(
     (text, [name, value]) => text.replaceAll(`{${name}}`, value ?? ''),
     t(key));
+}
+
+function updateLocalizedDynamicUi() {
+  updateMappingEditorControls();
+  updateRuntimeRulesUiState();
+  if (state.mappingLoaded && state.mappingMode === 'edit') {
+    refreshMappingEditorLocalizedControls();
+    setMappingEditorStatusForDraft(mappingEditorActionStatus());
+  }
+  if (state.webhooksLoaded) {
+    renderWebhooks();
+  }
 }
 
 function viewDescription(viewId) {
@@ -618,8 +1389,10 @@ function updateSessionSummary() {
   }
 
   summary.textContent = state.authenticated
-    ? `${state.user?.identity?.displayName ?? state.user?.cmdbuild?.username ?? 'user'} | ${state.user?.authMethod ?? 'local'}`
+    ? `${state.user?.identity?.displayName ?? state.user?.identity?.login ?? 'user'} | ${state.user?.roleLabel ?? currentRole()} | ${state.user?.authMethod ?? 'local'}`
     : t('session.notAuthenticated');
+
+  $('#changePasswordOpen')?.classList.toggle('hidden', !state.authenticated || state.user?.authMethod !== 'local');
 }
 
 function bindForms() {
@@ -629,8 +1402,8 @@ function bindForms() {
 
   $('#loginForm').addEventListener('submit', async event => {
     event.preventDefault();
-    if (state.auth?.useIdp) {
-      location.href = '/auth/saml2/login';
+    if (isRedirectIdp()) {
+      location.href = idpLoginRoute();
       return;
     }
 
@@ -640,30 +1413,22 @@ function bindForms() {
       const result = await api('/api/auth/login', {
         method: 'POST',
         body: {
-          cmdbuild: {
-            baseUrl: form.get('cmdbuildBaseUrl'),
-            username: form.get('cmdbuildUsername'),
-            password: form.get('cmdbuildPassword')
-          },
-          zabbix: {
-            apiEndpoint: form.get('zabbixApiEndpoint'),
-            username: form.get('zabbixUsername'),
-            password: form.get('zabbixPassword'),
-            apiToken: form.get('zabbixApiToken')
-          }
+          username: form.get('username'),
+          password: form.get('password')
         }
       });
       renderAuth({ authenticated: true, user: result.user });
-      await loadRuntimeSettings();
       await loadDashboard();
-      await loadRules();
+      if (canUseRules()) {
+        await loadRules();
+      }
     } catch (error) {
       $('#loginError').textContent = error.message;
     }
   });
 
   $('#idpLoginButton').addEventListener('click', () => {
-    location.href = '/auth/saml2/login';
+    location.href = idpLoginRoute();
   });
 
   $('#logoutButton').addEventListener('click', async () => {
@@ -675,46 +1440,97 @@ function bindForms() {
   $('#refreshEvents').addEventListener('click', loadEvents);
   $('#eventsTopic').addEventListener('change', loadEvents);
   $('#loadRules').addEventListener('click', loadRules);
+  $('#createEmptyRules').addEventListener('click', createEmptyRulesStarter);
   $('#loadMapping').addEventListener('click', loadMapping);
   $('#mappingClearSelection').addEventListener('click', () => clearMappingHighlight($('#mapping')));
   $('#mappingMode').addEventListener('change', updateMappingMode);
   $('#mappingEditAction').addEventListener('change', updateMappingEditorAction);
+  $('#mappingModifyRule')?.addEventListener('change', () => {
+    if ($('#mappingModifyRule').value) {
+      loadSelectedMappingRuleIntoEditor();
+      refreshMappingEditorDependentControls();
+      return;
+    }
+
+    clearMappingEditorRuleForm();
+    populateMappingModifyFilterControls({ autoSelect: false });
+    setMappingEditorStatus(t('mapping.status.noModifyRule'));
+  });
   $('#mappingUndo').addEventListener('click', undoMappingEdit);
   $('#mappingRedo').addEventListener('click', redoMappingEdit);
   $('#mappingSaveAs').addEventListener('click', saveMappingDraftAsFile);
-  $('#mappingEditTargetType').addEventListener('change', () => {
-    populateMappingEditorTargets();
-    updateMappingEditorSuggestedName();
+  $('#mappingEditTargetType').addEventListener('change', handleMappingEditorStructureChange);
+  $('#mappingEditClass').addEventListener('change', handleMappingEditorClassChange);
+  $('#mappingEditField').addEventListener('change', handleMappingEditorFieldChange);
+  $('#mappingEditZabbixObject').addEventListener('change', handleMappingEditorTargetChange);
+  $('#mappingEditRegex').addEventListener('input', handleMappingEditorLeafChange);
+  $('#mappingEditPriority').addEventListener('input', handleMappingEditorLeafChange);
+  $('#mappingEditRuleName').addEventListener('input', handleMappingEditorLeafChange);
+  $('#mappingResetForm').addEventListener('click', resetMappingEditorForm);
+  $('#mappingAddRule').addEventListener('click', applyMappingEditorRule);
+  $('#mappingDeleteView')?.addEventListener('change', () => {
+    state.mappingDeleteView = $('#mappingDeleteView').value;
+    renderMappingDeleteRules();
   });
-  $('#mappingEditClass').addEventListener('change', () => {
-    populateMappingEditorFields();
-    populateMappingEditorTargets();
-    updateMappingEditorSuggestedName();
-  });
-  $('#mappingEditField').addEventListener('change', updateMappingEditorSuggestedName);
-  $('#mappingEditZabbixObject').addEventListener('change', updateMappingEditorSuggestedName);
-  $('#mappingEditRegex').addEventListener('input', updateMappingEditorSuggestedName);
-  $('#mappingAddRule').addEventListener('click', addMappingConversionRule);
   $('#mappingDeleteSelectAll').addEventListener('click', () => setMappingDeleteSelection(true));
   $('#mappingDeleteClear').addEventListener('click', () => setMappingDeleteSelection(false));
   $('#mappingDeleteSelected').addEventListener('click', deleteSelectedMappingRules);
   $('#mappingDeleteRules').addEventListener('change', event => {
     if (event.target.matches('.mapping-delete-checkbox')) {
       updateMappingDeleteControls();
+    } else if (event.target.matches('.mapping-delete-group-checkbox')) {
+      setMappingDeleteGroupSelection(event.target);
     }
   });
   $('#loadValidateMapping').addEventListener('click', loadValidateMapping);
+  $('#validateMappingUndo')?.addEventListener('click', undoValidateMappingEdit);
+  $('#validateMappingRedo')?.addEventListener('click', redoValidateMappingEdit);
+  $('#validateMappingSaveAs')?.addEventListener('click', saveValidateMappingDraftAsFile);
+  $('#webhooksUndo')?.addEventListener('click', undoWebhooksEdit);
+  $('#webhooksRedo')?.addEventListener('click', redoWebhooksEdit);
+  $('#webhooksAnalyze')?.addEventListener('click', analyzeCmdbuildWebhooks);
+  $('#webhooksLoadCmdb')?.addEventListener('click', loadCmdbuildWebhooks);
+  $('#webhooksSaveAs')?.addEventListener('click', saveWebhooksAsFile);
+  $('#webhooksApplyCmdb')?.addEventListener('click', applyCmdbuildWebhooks);
+  $('#webhooksSelectAll')?.addEventListener('click', () => setWebhookOperationsSelection(true));
+  $('#webhooksClear')?.addEventListener('click', () => setWebhookOperationsSelection(false));
   $('#deleteValidateMappingSelected').addEventListener('click', deleteSelectedValidationFixes);
   $('#validateRules').addEventListener('click', validateRules);
   $('#dryRunRules').addEventListener('click', dryRunRules);
-  $('#uploadRules').addEventListener('click', uploadRules);
+  $('#saveRulesAs').addEventListener('click', saveRulesAsFile);
   $('#syncZabbix').addEventListener('click', syncZabbix);
   $('#loadZabbix').addEventListener('click', loadZabbix);
   $('#syncCmdbuild').addEventListener('click', syncCmdbuild);
   $('#loadCmdbuild').addEventListener('click', loadCmdbuild);
-  $('#loadSettings').addEventListener('click', loadRuntimeSettings);
+  $('#loadRuntimeSettings').addEventListener('click', loadRuntimeSettings);
+  $('#loadAuthSettings').addEventListener('click', loadAuthSettings);
   $('#saveRuntimeSettings').addEventListener('click', saveRuntimeSettings);
   $('#saveIdp').addEventListener('click', saveIdp);
+  $('#idpForm')?.addEventListener('change', event => {
+    if (event.target.matches('[name="authMode"], [name="provider"]')) {
+      updateIdpUiState();
+    }
+  });
+  $('#runtimeSettingsForm')?.addEventListener('change', event => {
+    if (event.target.matches('[name="cmdbuildMaxTraversalDepth"]')) {
+      toast(t('toast.maxTraversalDepthChanged'));
+    }
+    if (event.target.matches('[name="rulesReadFromGit"], [name="rulesFilePath"]')) {
+      updateRuntimeRulesUiState();
+    }
+  });
+  $('#changePasswordOpen')?.addEventListener('click', openPasswordDialog);
+  $('#passwordCancel')?.addEventListener('click', closePasswordDialog);
+  $('#passwordForm')?.addEventListener('submit', changeOwnPassword);
+  $('#credentialsCancel')?.addEventListener('click', cancelCredentialPrompt);
+  $('#credentialsForm')?.addEventListener('submit', submitSessionCredentials);
+  $('#validationRuleApplyEdit')?.addEventListener('click', applyValidationRuleDialogEdit);
+  $('#validationRuleDeleteAnyway')?.addEventListener('click', deleteValidationRuleDialogAnyway);
+  $('#validationRuleCancel')?.addEventListener('click', cancelValidationRuleDialog);
+  $('#webhookEditApply')?.addEventListener('click', applyWebhookEditDialog);
+  $('#webhookEditCancel')?.addEventListener('click', closeWebhookEditDialog);
+  $('#loadUsers')?.addEventListener('click', loadUsers);
+  $('#resetUserPassword')?.addEventListener('click', resetUserPassword);
   $('#rulesFile').addEventListener('change', async event => {
     const file = event.target.files?.[0];
     state.uploadedRulesText = file ? await file.text() : null;
@@ -723,6 +1539,41 @@ function bindForms() {
   $('#validateMapping').addEventListener('change', event => {
     if (event.target.matches('.validation-fix-checkbox')) {
       updateValidationSelectionControls();
+    }
+  });
+  $('#webhooks')?.addEventListener('change', event => {
+    if (event.target.matches('.webhook-operation-checkbox')) {
+      updateWebhookOperationSelection(event.target);
+    }
+  });
+  $('#webhooks')?.addEventListener('click', event => {
+    const detailCell = event.target.closest('[data-webhook-detail-kind]');
+    if (detailCell) {
+      toggleWebhookDetails(detailCell.dataset.webhookDetailKind, Number(detailCell.dataset.webhookIndex));
+      return;
+    }
+
+    const expandButton = event.target.closest('[data-webhook-expand-kind]');
+    if (expandButton) {
+      toggleWebhookPayload(expandButton.dataset.webhookExpandKind, Number(expandButton.dataset.webhookIndex));
+      return;
+    }
+
+    const editButton = event.target.closest('[data-webhook-edit-kind]');
+    if (editButton) {
+      openWebhookEditDialog(editButton.dataset.webhookEditKind, Number(editButton.dataset.webhookIndex));
+      return;
+    }
+
+    const row = event.target.closest('[data-webhook-operation-index]');
+    if (row) {
+      renderWebhookOperationDetails(Number(row.dataset.webhookOperationIndex));
+      return;
+    }
+
+    const currentRow = event.target.closest('[data-current-webhook-index]');
+    if (currentRow) {
+      renderCurrentWebhookDetails(Number(currentRow.dataset.currentWebhookIndex));
     }
   });
   $$('[data-validation-select]').forEach(button => {
@@ -736,35 +1587,25 @@ function bindForms() {
 
 function renderAuth(status) {
   state.auth = status.auth ?? {};
+  state.idp = status.idp ?? null;
   state.authenticated = Boolean(status.authenticated);
   state.user = status.user ?? null;
   $('#loginView').classList.toggle('hidden', status.authenticated);
   $('#appView').classList.toggle('hidden', !status.authenticated);
-  $('#idpLoginBlock').classList.toggle('hidden', !state.auth.useIdp || status.authenticated);
-  $('#localCredentials').classList.toggle('hidden', state.auth.useIdp);
-  $('#localLoginActions').classList.toggle('hidden', state.auth.useIdp);
+  $('#idpLoginBlock').classList.toggle('hidden', !isRedirectIdp() || status.authenticated);
+  $('#localCredentials').classList.toggle('hidden', isRedirectIdp());
+  $('#localLoginActions').classList.toggle('hidden', isRedirectIdp());
   updateSessionSummary();
-  if (status.authenticated && status.idp) {
-    fillIdpForm(status.idp);
+  applyRoleAccess();
+  if (status.authenticated) {
+    if (status.idp) {
+      fillIdpForm(status.idp);
+    }
+    updateIdpUiState();
   }
-  if (!status.authenticated && !state.auth.useIdp) {
-    fillLocalLoginDefaults(state.auth.localLoginDefaults);
+  if (status.authenticated && status.user?.passwordChangeRequired) {
+    openPasswordDialog();
   }
-}
-
-function fillLocalLoginDefaults(defaults) {
-  if (!defaults?.enabled) {
-    return;
-  }
-
-  const form = $('#loginForm');
-  form.elements.cmdbuildBaseUrl.value = defaults.cmdbuild?.baseUrl ?? '';
-  form.elements.cmdbuildUsername.value = defaults.cmdbuild?.username ?? '';
-  form.elements.cmdbuildPassword.value = defaults.cmdbuild?.password ?? '';
-  form.elements.zabbixApiEndpoint.value = defaults.zabbix?.apiEndpoint ?? '';
-  form.elements.zabbixUsername.value = defaults.zabbix?.username ?? '';
-  form.elements.zabbixPassword.value = defaults.zabbix?.password ?? '';
-  form.elements.zabbixApiToken.value = defaults.zabbix?.apiToken ?? '';
 }
 
 async function loadDashboard() {
@@ -779,8 +1620,40 @@ async function loadDashboard() {
       el('div', `metric-value ${item.ok ? 'status-ok' : 'status-bad'}`, item.ok ? 'OK' : 'FAIL'),
       el('div', 'metric-detail', `${item.statusCode ?? '-'} | ${item.latencyMs} ms | ${item.url}`)
     );
+    if (item.rulesReloadSupported && canUseRules()) {
+      const actions = el('div', 'metric-actions', '');
+      const reloadButton = el('button', 'secondary', t('dashboard.reloadRules'));
+      reloadButton.type = 'button';
+      reloadButton.addEventListener('click', () => reloadConversionRules(item.name, reloadButton));
+      actions.append(reloadButton);
+      node.append(actions);
+    }
     setHelp(node, `Проверка сервиса "${item.name}". Показывает HTTP-статус, задержку и проверяемый URL.`);
     grid.append(node);
+  }
+}
+
+async function reloadConversionRules(serviceName, button) {
+  const originalText = button?.textContent ?? '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = '...';
+  }
+
+  try {
+    await api(`/api/services/${encodeURIComponent(serviceName)}/reload-rules`, {
+      method: 'POST',
+      body: {}
+    });
+    toast(t('toast.rulesReloaded'));
+    await loadDashboard();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 }
 
@@ -917,6 +1790,7 @@ async function loadRules() {
     path: state.currentRules.path,
     name: state.currentRules.name,
     schemaVersion: state.currentRules.schemaVersion,
+    rulesVersion: state.currentRules.rulesVersion,
     valid: state.currentRules.validation.valid
   });
   $('#rulesPreview').textContent = JSON.stringify(state.currentRules.content, null, 2);
@@ -930,6 +1804,30 @@ async function validateRules() {
   $('#rulesResult').textContent = JSON.stringify(result, null, 2);
 }
 
+async function createEmptyRulesStarter() {
+  try {
+    const result = await api('/api/rules/starter', { method: 'POST', body: {} });
+    state.uploadedRulesText = JSON.stringify(result.content, null, 2);
+    $('#rulesPreview').textContent = state.uploadedRulesText;
+    $('#rulesResult').textContent = JSON.stringify({
+      generatedAt: result.generatedAt,
+      saved: result.saved,
+      templatePath: result.templatePath,
+      targetPath: result.targetPath,
+      source: result.source,
+      validation: result.validation,
+      next: 'Review generated JSON, then use Save file as and publish it to the rules git repository outside the application.'
+    }, null, 2);
+    toast(t('toast.emptyRulesCreated'));
+  } catch (error) {
+    $('#rulesResult').textContent = JSON.stringify(error.payload ?? {
+      error: 'starter_failed',
+      message: error.message
+    }, null, 2);
+    toast(`${t('toast.emptyRulesFailed')}: ${error.message}`);
+  }
+}
+
 async function dryRunRules() {
   const payload = JSON.parse($('#dryRunPayload').value);
   const body = state.uploadedRulesText
@@ -939,22 +1837,36 @@ async function dryRunRules() {
   $('#rulesResult').textContent = JSON.stringify(result, null, 2);
 }
 
-async function uploadRules() {
-  if (!state.uploadedRulesText) {
-    toast('Select rules JSON first');
+async function saveRulesAsFile() {
+  const rules = state.uploadedRulesText
+    ? JSON.parse(state.uploadedRulesText)
+    : state.currentRules?.content;
+  if (!rules) {
+    toast('Rules JSON is not loaded');
     return;
   }
 
-  const result = await api('/api/rules/upload', {
+  const validation = await api('/api/rules/validate', {
     method: 'POST',
-    body: {
-      content: state.uploadedRulesText,
-      save: true
-    }
+    body: { content: rules }
   });
-  $('#rulesResult').textContent = JSON.stringify(result, null, 2);
-  if (result.saved) {
-    await loadRules();
+  $('#rulesResult').textContent = JSON.stringify({
+    saved: false,
+    note: 'Rules JSON saved through the browser only. Publish the file to git outside the application, then reload rules on the microservice.',
+    validation
+  }, null, 2);
+  if (!validation.valid) {
+    const confirmed = window.confirm('Rules JSON has validation errors. Save file anyway?');
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  const defaultName = `${normalizeRuleName(rules.name || 'cmdbuild-to-zabbix-rules')}.json`;
+  const content = `${JSON.stringify(rules, null, 2)}\n`;
+  const result = await saveTextAsFile(content, defaultName, 'JSON rules', { 'application/json': ['.json'] });
+  if (!result.cancelled) {
+    toast(`Rules file saved: ${result.name}`);
   }
 }
 
@@ -1086,6 +1998,11 @@ function renderCmdbuild(catalog) {
     String(item.items?.length ?? 0),
     item.error ?? 'ok'
   ]);
+  renderRows($('#cmdbDomains'), catalog.domains ?? [], item => [
+    item.name,
+    cmdbDomainEndpointClass(item, 'source'),
+    cmdbDomainEndpointClass(item, 'destination')
+  ]);
 }
 
 async function loadMapping() {
@@ -1134,7 +2051,7 @@ async function loadMappingZabbix() {
 function renderMappingLoading() {
   const loadingNode = label => mappingNode({
     label,
-    meta: 'загрузка данных',
+    meta: t('mapping.loadingData'),
     level: 1,
     kind: 'rule'
   });
@@ -1144,7 +2061,7 @@ function renderMappingLoading() {
     [$('#mappingZabbix'), 'Zabbix']
   ]) {
     clear(container);
-    appendMappingSection(container, title, [loadingNode('Загрузка')]);
+    appendMappingSection(container, title, [loadingNode(t('common.loading'))]);
   }
 }
 
@@ -1158,12 +2075,12 @@ function renderMappingLoadError(error) {
     clear(container);
     appendMappingSection(container, title, [
       mappingNode({
-        label: 'Ошибка загрузки управления правилами конвертации',
+        label: t('mapping.loadErrorTitle'),
         meta: message,
         level: 1,
         kind: 'rule',
         status: 'error',
-        help: 'Ошибка показана здесь, чтобы не искать ее в console браузера.'
+        help: t('mapping.loadErrorHelp')
       })
     ], { status: 'error' });
   }
@@ -1180,8 +2097,8 @@ function renderMapping(rules, zabbixCatalog, cmdbuildCatalog) {
   clear(zabbixContainer);
   appendMappingSection(zabbixContainer, 'Zabbix', [
     mappingNode({
-      label: 'Загрузка легкого Zabbix catalog',
-      meta: 'CMDBuild и Conversion Rules уже доступны; полный Zabbix catalog не загружается в управление правилами конвертации',
+      label: t('mapping.loadingLightZabbix'),
+      meta: t('mapping.loadingLightZabbixMeta'),
       level: 1,
       kind: 'zabbix'
     })
@@ -1240,7 +2157,7 @@ function undoMappingEdit() {
 
   state.mappingHistoryIndex -= 1;
   state.mappingDraftRules = cloneJson(state.mappingHistory[state.mappingHistoryIndex]);
-  rerenderMappingDraft('Undo выполнен.');
+  rerenderMappingDraft(t('mapping.status.undoDone'));
 }
 
 function redoMappingEdit() {
@@ -1250,7 +2167,7 @@ function redoMappingEdit() {
 
   state.mappingHistoryIndex += 1;
   state.mappingDraftRules = cloneJson(state.mappingHistory[state.mappingHistoryIndex]);
-  rerenderMappingDraft('Redo выполнен.');
+  rerenderMappingDraft(t('mapping.status.redoDone'));
 }
 
 function rerenderMappingDraft(message = '') {
@@ -1259,6 +2176,1210 @@ function rerenderMappingDraft(message = '') {
   }
   renderMapping(state.mappingDraftRules, state.mappingZabbixCatalog, state.mappingCmdbuildCatalog);
   updateMappingEditor(message);
+}
+
+function initializeValidateMappingHistory(rules) {
+  state.validateMappingRules = cloneJson(rules);
+  state.validateMappingHistory = [cloneJson(state.validateMappingRules)];
+  state.validateMappingHistoryIndex = 0;
+  updateValidateMappingHistoryControls();
+}
+
+function pushValidateMappingHistory(nextRules) {
+  state.validateMappingRules = cloneJson(nextRules);
+  state.validateMappingHistory = state.validateMappingHistory.slice(0, state.validateMappingHistoryIndex + 1);
+  state.validateMappingHistory.push(cloneJson(state.validateMappingRules));
+  state.validateMappingHistoryIndex = state.validateMappingHistory.length - 1;
+  updateValidateMappingHistoryControls();
+}
+
+function undoValidateMappingEdit() {
+  if (state.validateMappingHistoryIndex <= 0) {
+    return;
+  }
+
+  state.validateMappingHistoryIndex -= 1;
+  state.validateMappingRules = cloneJson(state.validateMappingHistory[state.validateMappingHistoryIndex]);
+  rerenderValidateMappingDraft(t('mapping.status.undoDone'));
+}
+
+function redoValidateMappingEdit() {
+  if (state.validateMappingHistoryIndex >= state.validateMappingHistory.length - 1) {
+    return;
+  }
+
+  state.validateMappingHistoryIndex += 1;
+  state.validateMappingRules = cloneJson(state.validateMappingHistory[state.validateMappingHistoryIndex]);
+  rerenderValidateMappingDraft(t('mapping.status.redoDone'));
+}
+
+function rerenderValidateMappingDraft(message = '') {
+  if (state.currentRules) {
+    state.currentRules.content = state.validateMappingRules;
+  }
+  renderValidateMapping(
+    state.validateMappingRules,
+    state.validateMappingZabbixCatalog ?? {},
+    state.validateMappingCmdbuildCatalog ?? {}
+  );
+  if (message) {
+    toast(message);
+  }
+}
+
+function updateValidateMappingHistoryControls() {
+  const hasDraft = Boolean(state.validateMappingRules);
+  const undoButton = $('#validateMappingUndo');
+  const redoButton = $('#validateMappingRedo');
+  const saveButton = $('#validateMappingSaveAs');
+  if (undoButton) {
+    undoButton.disabled = !hasDraft || state.validateMappingHistoryIndex <= 0;
+  }
+  if (redoButton) {
+    redoButton.disabled = !hasDraft || state.validateMappingHistoryIndex >= state.validateMappingHistory.length - 1;
+  }
+  if (saveButton) {
+    saveButton.disabled = !hasDraft;
+  }
+}
+
+async function loadCmdbuildWebhooks() {
+  const result = await api('/api/cmdbuild/webhooks');
+  state.webhooksCurrent = result.items ?? [];
+  state.webhooksOperations = [];
+  state.webhooksHistory = [];
+  state.webhooksHistoryIndex = -1;
+  state.webhooksSelectedIndex = -1;
+  state.webhooksDetailRow = { kind: '', index: -1 };
+  state.webhooksLoaded = true;
+  renderWebhooks(tf('webhooks.statusLoaded', { count: state.webhooksCurrent.length }));
+}
+
+async function analyzeCmdbuildWebhooks() {
+  if (!state.currentRules?.content) {
+    state.currentRules = await api('/api/rules/current');
+  }
+  if (!state.webhooksLoaded) {
+    const result = await api('/api/cmdbuild/webhooks');
+    state.webhooksCurrent = result.items ?? [];
+    state.webhooksLoaded = true;
+  }
+  if (!state.webhooksCmdbuildCatalog) {
+    state.webhooksCmdbuildCatalog = await api('/api/cmdbuild/catalog');
+  }
+
+  const operations = buildCmdbuildWebhookOperations(
+    state.currentRules.content ?? {},
+    state.webhooksCmdbuildCatalog ?? {},
+    state.webhooksCurrent
+  );
+  initializeWebhooksHistory(operations);
+  renderWebhooks(tf('webhooks.statusAnalyzed', { count: operations.length }));
+}
+
+function initializeWebhooksHistory(operations) {
+  state.webhooksOperations = cloneJson(operations);
+  state.webhooksHistory = [cloneJson(state.webhooksOperations)];
+  state.webhooksHistoryIndex = 0;
+  state.webhooksSelectedIndex = operations.length > 0 ? 0 : -1;
+  state.webhooksDetailRow = operations.length > 0 ? { kind: 'operation', index: 0 } : { kind: '', index: -1 };
+  updateWebhooksHistoryControls();
+}
+
+function pushWebhooksHistory(operations, message = '') {
+  state.webhooksOperations = cloneJson(operations);
+  state.webhooksHistory = state.webhooksHistory.slice(0, state.webhooksHistoryIndex + 1);
+  state.webhooksHistory.push(cloneJson(state.webhooksOperations));
+  state.webhooksHistoryIndex = state.webhooksHistory.length - 1;
+  renderWebhooks(message);
+}
+
+function undoWebhooksEdit() {
+  if (state.webhooksHistoryIndex <= 0) {
+    return;
+  }
+
+  state.webhooksHistoryIndex -= 1;
+  state.webhooksOperations = cloneJson(state.webhooksHistory[state.webhooksHistoryIndex]);
+  renderWebhooks(t('mapping.status.undoDone'));
+}
+
+function redoWebhooksEdit() {
+  if (state.webhooksHistoryIndex >= state.webhooksHistory.length - 1) {
+    return;
+  }
+
+  state.webhooksHistoryIndex += 1;
+  state.webhooksOperations = cloneJson(state.webhooksHistory[state.webhooksHistoryIndex]);
+  renderWebhooks(t('mapping.status.redoDone'));
+}
+
+function updateWebhookOperationSelection(checkbox) {
+  const index = Number(checkbox.dataset.webhookOperationIndex);
+  if (!Number.isInteger(index) || !state.webhooksOperations[index]) {
+    return;
+  }
+
+  const operations = cloneJson(state.webhooksOperations);
+  operations[index].selected = checkbox.checked;
+  state.webhooksSelectedIndex = index;
+  pushWebhooksHistory(operations, t('webhooks.statusSelectionChanged'));
+}
+
+function setWebhookOperationsSelection(selected) {
+  if (state.webhooksOperations.length === 0) {
+    return;
+  }
+
+  const operations = state.webhooksOperations.map(operation => ({
+    ...operation,
+    selected
+  }));
+  pushWebhooksHistory(operations, t('webhooks.statusSelectionChanged'));
+}
+
+function updateWebhooksHistoryControls() {
+  const hasPlan = state.webhooksHistoryIndex >= 0;
+  const selectedCount = selectedWebhookOperations().length;
+  $('#webhooksUndo').disabled = !hasPlan || state.webhooksHistoryIndex <= 0;
+  $('#webhooksRedo').disabled = !hasPlan || state.webhooksHistoryIndex >= state.webhooksHistory.length - 1;
+  $('#webhooksSaveAs').disabled = !hasPlan;
+  $('#webhooksApplyCmdb').disabled = selectedCount === 0;
+  $('#webhooksSelectAll').disabled = state.webhooksOperations.length === 0;
+  $('#webhooksClear').disabled = state.webhooksOperations.length === 0;
+}
+
+function selectedWebhookOperations() {
+  return state.webhooksOperations.filter(operation => operation.selected !== false);
+}
+
+function renderWebhooks(message = '') {
+  renderWebhooksSummary();
+  renderWebhooksOperations();
+  renderSelectedWebhookDetails();
+  updateWebhooksHistoryControls();
+  const status = $('#webhooksStatus');
+  if (status && message) {
+    status.textContent = message;
+  }
+}
+
+function renderWebhooksSummary() {
+  const container = $('#webhooksSummary');
+  clear(container);
+  const counts = webhookOperationCounts(state.webhooksOperations);
+  const selectedCount = selectedWebhookOperations().length;
+  const hasPlan = state.webhooksHistoryIndex >= 0;
+  const summaryText = state.webhooksOperations.length > 0
+    ? tf('webhooks.summary', {
+      current: state.webhooksCurrent.length,
+      create: counts.create,
+      update: counts.update,
+      delete: counts.delete,
+      selected: selectedCount
+    })
+    : hasPlan
+      ? tf('webhooks.summaryEmpty', { current: state.webhooksCurrent.length })
+      : state.webhooksCurrent.length > 0
+        ? tf('webhooks.summaryLoaded', { current: state.webhooksCurrent.length })
+        : t('webhooks.noData');
+  container.append(el('div', 'validation-summary-line', summaryText));
+  container.append(el('div', 'validation-summary-detail', hasPlan
+    ? t('webhooks.noOperations')
+    : state.webhooksCurrent.length > 0
+      ? t('webhooks.currentDetailsHint')
+      : t('webhooks.noData')));
+}
+
+function webhookOperationCounts(operations) {
+  return operations.reduce((counts, operation) => {
+    counts[operation.action] = (counts[operation.action] ?? 0) + 1;
+    return counts;
+  }, { create: 0, update: 0, delete: 0 });
+}
+
+function renderWebhooksOperations() {
+  const tbody = $('#webhooksOperationsTable');
+  clear(tbody);
+
+  if (state.webhooksOperations.length === 0) {
+    if (state.webhooksCurrent.length > 0) {
+      state.webhooksCurrent.forEach((hook, index) => {
+        const row = document.createElement('tr');
+        row.dataset.currentWebhookIndex = String(index);
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.disabled = true;
+        const selectedCell = el('td', 'webhook-check-cell', '');
+        selectedCell.append(checkbox);
+        row.append(
+          selectedCell,
+          webhookActionTableCell('current', index, t('webhooks.actionCurrent'), 'webhook-action'),
+          el('td', '', hook.code ?? ''),
+          el('td', '', hook.target ?? ''),
+          el('td', '', `${zabbixEventTypeFromCmdbEvent(hook.event) || ''} / ${hook.event ?? ''}`),
+          el('td', '', t('webhooks.reasonCurrent')),
+          webhookPayloadButtonCell('current', index),
+          webhookEditButtonCell('current', index)
+        );
+        tbody.append(row);
+        if (isWebhookDetailRow('current', index)) {
+          tbody.append(webhookDetailsTableRow('current', hook));
+        }
+        if (isWebhookPayloadExpanded('current', index)) {
+          tbody.append(webhookPayloadRow('current', hook));
+        }
+      });
+      return;
+    }
+
+    const row = document.createElement('tr');
+    const cell = el('td', '', state.webhooksHistoryIndex >= 0 ? t('webhooks.noOperations') : t('webhooks.noData'));
+    cell.colSpan = 8;
+    row.append(cell);
+    tbody.append(row);
+    return;
+  }
+
+  state.webhooksOperations.forEach((operation, index) => {
+    const row = document.createElement('tr');
+    row.dataset.webhookOperationIndex = String(index);
+    row.classList.toggle('webhook-operation-selected', index === state.webhooksSelectedIndex);
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'webhook-operation-checkbox';
+    checkbox.checked = operation.selected !== false;
+    checkbox.dataset.webhookOperationIndex = String(index);
+
+    const selectedCell = el('td', 'webhook-check-cell', '');
+    selectedCell.append(checkbox);
+    row.append(
+      selectedCell,
+      webhookActionTableCell('operation', index, webhookActionLabel(operation.action), `webhook-action webhook-action-${operation.action}`),
+      el('td', '', operation.code ?? ''),
+      el('td', '', operation.target ?? ''),
+      el('td', '', `${operation.eventType ?? ''} / ${operation.event ?? ''}`),
+      el('td', '', webhookOperationReason(operation)),
+      webhookPayloadButtonCell('operation', index),
+      webhookEditButtonCell('operation', index)
+    );
+    tbody.append(row);
+    if (isWebhookDetailRow('operation', index)) {
+      tbody.append(webhookDetailsTableRow('operation', operation));
+    }
+    if (isWebhookPayloadExpanded('operation', index)) {
+      tbody.append(webhookPayloadRow('operation', operation));
+    }
+  });
+}
+
+function renderWebhookOperationDetails(index) {
+  const details = $('#webhooksDetails');
+  if (!details) {
+    return;
+  }
+  clear(details);
+
+  if (!Number.isInteger(index) || !state.webhooksOperations[index]) {
+    state.webhooksSelectedIndex = -1;
+    if (state.webhooksCurrent.length > 0) {
+      details.append(webhookDetailsNode('summary', {
+        note: t('webhooks.currentDetailsHint'),
+        currentWebhooks: state.webhooksCurrent
+      }));
+      return;
+    }
+    details.textContent = t('webhooks.detailsHint');
+    return;
+  }
+
+  state.webhooksSelectedIndex = index;
+  $$('#webhooksOperationsTable tr[data-webhook-operation-index]').forEach(row => {
+    row.classList.toggle('webhook-operation-selected', Number(row.dataset.webhookOperationIndex) === index);
+  });
+  const operation = state.webhooksOperations[index];
+  details.append(webhookDetailsNode('operation', operation));
+}
+
+function renderSelectedWebhookDetails() {
+  if (state.webhooksDetailRow.kind === 'current') {
+    renderCurrentWebhookDetails(state.webhooksDetailRow.index);
+    return;
+  }
+  renderWebhookOperationDetails(
+    state.webhooksDetailRow.kind === 'operation'
+      ? state.webhooksDetailRow.index
+      : state.webhooksSelectedIndex
+  );
+}
+
+function webhookActionTableCell(kind, index, text, className) {
+  const cell = el('td', className, text);
+  cell.dataset.webhookDetailKind = kind;
+  cell.dataset.webhookIndex = String(index);
+  return cell;
+}
+
+function toggleWebhookDetails(kind, index) {
+  const same = state.webhooksDetailRow.kind === kind && state.webhooksDetailRow.index === index;
+  state.webhooksDetailRow = same ? { kind: '', index: -1 } : { kind, index };
+  if (!same && kind === 'operation') {
+    state.webhooksSelectedIndex = index;
+  }
+  renderWebhooks();
+}
+
+function isWebhookDetailRow(kind, index) {
+  return state.webhooksDetailRow.kind === kind && state.webhooksDetailRow.index === index;
+}
+
+function webhookDetailsTableRow(kind, item) {
+  const row = document.createElement('tr');
+  row.className = 'webhook-details-row';
+  const cell = el('td', '', '');
+  cell.colSpan = 8;
+  cell.append(webhookDetailsNode(kind, item));
+  row.append(cell);
+  return row;
+}
+
+function webhookDetailsNode(kind, item) {
+  const wrapper = el('div', 'webhook-details-inline', '');
+  if (kind === 'operation') {
+    const operation = item ?? {};
+    const nodes = [
+      webhookDetailLine('current', `${webhookActionLabel(operation.action)} | ${operation.code ?? ''} | ${webhookOperationReason(operation)}`),
+      webhookDetailLine('current', `diff: ${(operation.diff ?? []).join(', ') || '-'}`),
+      webhookPayloadNode('operation', operation)
+    ];
+    if (operation.current) {
+      nodes.push(webhookJsonSection(operation.action === 'delete' ? 'deleted' : 'current', 'current', operation.current));
+    }
+    if (operation.desired) {
+      nodes.push(webhookJsonSection('added', 'desired', operation.desired));
+    }
+    wrapper.append(...nodes);
+    return wrapper;
+  }
+
+  if (kind === 'current') {
+    wrapper.append(
+      webhookDetailLine('current', `${item?.code ?? ''} | ${item?.target ?? ''} | ${item?.event ?? ''}`),
+      webhookPayloadNode('current', item),
+      webhookJsonSection('current', 'current', item)
+    );
+    return wrapper;
+  }
+
+  wrapper.append(webhookJsonSection('current', 'details', item));
+  return wrapper;
+}
+
+function webhookJsonSection(status, title, value) {
+  const section = el('div', `webhook-details-json webhook-payload-${status}`, '');
+  section.append(
+    el('div', 'webhook-details-json-title', title),
+    el('pre', '', JSON.stringify(value ?? null, null, 2))
+  );
+  return section;
+}
+
+function webhookDetailLine(status, text) {
+  return el('div', `webhook-detail-line webhook-payload-${status}`, text);
+}
+
+function webhookPayloadButtonCell(kind, index) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'secondary webhook-row-button';
+  button.dataset.webhookExpandKind = kind;
+  button.dataset.webhookIndex = String(index);
+  button.textContent = isWebhookPayloadExpanded(kind, index)
+    ? t('webhooks.collapsePayload')
+    : t('webhooks.expandPayload');
+  const cell = el('td', '', '');
+  cell.append(button);
+  return cell;
+}
+
+function webhookEditButtonCell(kind, index) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'secondary webhook-row-button';
+  button.dataset.webhookEditKind = kind;
+  button.dataset.webhookIndex = String(index);
+  button.textContent = t('webhooks.edit');
+  const cell = el('td', '', '');
+  cell.append(button);
+  return cell;
+}
+
+function isWebhookPayloadExpanded(kind, index) {
+  return Boolean(state.webhooksExpandedRows?.[webhookExpandedBucket(kind)]?.[String(index)]);
+}
+
+function toggleWebhookPayload(kind, index) {
+  const bucket = webhookExpandedBucket(kind);
+  state.webhooksExpandedRows[bucket] = {
+    ...(state.webhooksExpandedRows[bucket] ?? {}),
+    [String(index)]: !isWebhookPayloadExpanded(kind, index)
+  };
+  renderWebhooks();
+}
+
+function webhookExpandedBucket(kind) {
+  return kind === 'current' ? 'current' : 'operations';
+}
+
+function webhookPayloadRow(kind, item) {
+  const row = document.createElement('tr');
+  row.className = 'webhook-payload-row';
+  const cell = el('td', '', '');
+  cell.colSpan = 8;
+  cell.append(webhookPayloadNode(kind, item));
+  row.append(cell);
+  return row;
+}
+
+function webhookPayloadNode(kind, item) {
+  const wrapper = el('div', 'webhook-payload-box', '');
+  const title = el('div', 'webhook-payload-title', t('webhooks.payload'));
+  const lines = el('div', 'webhook-payload-lines', '');
+  const payloadLines = kind === 'current'
+    ? currentWebhookPayloadLines(item)
+    : operationWebhookPayloadLines(item);
+  if (payloadLines.length === 0) {
+    lines.append(el('div', 'webhook-payload-line webhook-payload-current', t('webhooks.payloadEmpty')));
+  } else {
+    for (const line of payloadLines) {
+      lines.append(webhookPayloadLineNode(line));
+    }
+  }
+  wrapper.append(title, lines);
+  return wrapper;
+}
+
+function currentWebhookPayloadLines(hook) {
+  const body = plainObjectOrEmpty(hook?.body);
+  return Object.keys(body)
+    .sort(compareText)
+    .map(key => ({ status: 'current', key, value: body[key] }));
+}
+
+function operationWebhookPayloadLines(operation) {
+  if (operation.action === 'create') {
+    return Object.keys(plainObjectOrEmpty(operation.desired?.body))
+      .sort(compareText)
+      .map(key => ({ status: 'added', key, value: operation.desired.body[key] }));
+  }
+  if (operation.action === 'delete') {
+    return Object.keys(plainObjectOrEmpty(operation.current?.body))
+      .sort(compareText)
+      .map(key => ({ status: 'deleted', key, value: operation.current.body[key] }));
+  }
+
+  const currentBody = plainObjectOrEmpty(operation.current?.body);
+  const desiredBody = plainObjectOrEmpty(operation.desired?.body);
+  const lines = [];
+  for (const key of uniqueTokens([...Object.keys(currentBody), ...Object.keys(desiredBody)]).sort(compareText)) {
+    const hasCurrent = Object.prototype.hasOwnProperty.call(currentBody, key);
+    const hasDesired = Object.prototype.hasOwnProperty.call(desiredBody, key);
+    if (hasCurrent && !hasDesired) {
+      lines.push({ status: 'deleted', key, value: currentBody[key] });
+    } else if (!hasCurrent && hasDesired) {
+      lines.push({ status: 'added', key, value: desiredBody[key] });
+    } else if (stableJson(currentBody[key]) !== stableJson(desiredBody[key])) {
+      lines.push({ status: 'deleted', key, value: currentBody[key] });
+      lines.push({ status: 'added', key, value: desiredBody[key] });
+    } else {
+      lines.push({ status: 'current', key, value: currentBody[key] });
+    }
+  }
+  return lines;
+}
+
+function webhookPayloadLineNode(line) {
+  const node = el('div', `webhook-payload-line webhook-payload-${line.status}`, '');
+  const marker = {
+    added: '+',
+    deleted: '-',
+    current: ' '
+  }[line.status] ?? ' ';
+  const label = {
+    added: t('webhooks.payloadAdded'),
+    deleted: t('webhooks.payloadDeleted'),
+    current: t('webhooks.payloadCurrent')
+  }[line.status] ?? '';
+  node.textContent = `${marker} ${line.key}: ${formatWebhookPayloadValue(line.value)}  ${label}`;
+  return node;
+}
+
+function formatWebhookPayloadValue(value) {
+  return value && typeof value === 'object'
+    ? stableJson(value)
+    : JSON.stringify(value);
+}
+
+function renderCurrentWebhookDetails(index) {
+  const details = $('#webhooksDetails');
+  if (!details) {
+    return;
+  }
+  clear(details);
+
+  $$('#webhooksOperationsTable tr[data-current-webhook-index]').forEach(row => {
+    row.classList.toggle('webhook-operation-selected', Number(row.dataset.currentWebhookIndex) === index);
+  });
+
+  const hook = state.webhooksCurrent[index];
+  details.append(hook
+    ? webhookDetailsNode('current', hook)
+    : webhookDetailsNode('summary', {
+      note: t('webhooks.currentDetailsHint'),
+      currentWebhooks: state.webhooksCurrent
+    }));
+}
+
+function openWebhookEditDialog(kind, index) {
+  const item = webhookEditableItem(kind, index);
+  if (!item) {
+    return;
+  }
+
+  state.webhookEditDialog = { kind, index };
+  $('#webhookEditJson').value = JSON.stringify(item, null, 2);
+  $('#webhookEditError').textContent = '';
+  $('#webhookEditDialog').classList.remove('hidden');
+}
+
+function webhookEditableItem(kind, index) {
+  if (kind === 'current') {
+    return cloneJson(state.webhooksCurrent[index]);
+  }
+
+  const operation = state.webhooksOperations[index];
+  if (!operation) {
+    return null;
+  }
+
+  return cloneJson(operation.desired ?? operation.current ?? {});
+}
+
+function closeWebhookEditDialog() {
+  state.webhookEditDialog = null;
+  $('#webhookEditDialog')?.classList.add('hidden');
+  $('#webhookEditError').textContent = '';
+}
+
+function applyWebhookEditDialog() {
+  const dialog = state.webhookEditDialog;
+  if (!dialog) {
+    return;
+  }
+
+  let edited;
+  try {
+    edited = normalizeWebhookItem(JSON.parse($('#webhookEditJson').value));
+  } catch (error) {
+    $('#webhookEditError').textContent = tf('webhooks.invalidJson', {
+      message: error instanceof Error ? error.message : 'invalid JSON'
+    });
+    return;
+  }
+
+  if (!edited.code) {
+    $('#webhookEditError').textContent = tf('webhooks.invalidJson', {
+      message: 'code is required'
+    });
+    return;
+  }
+
+  const operations = cloneJson(state.webhooksOperations);
+  if (dialog.kind === 'current') {
+    const current = normalizeWebhookItem(state.webhooksCurrent[dialog.index] ?? {});
+    upsertWebhookEditOperation(operations, current, edited);
+  } else {
+    const operation = operations[dialog.index];
+    if (!operation) {
+      closeWebhookEditDialog();
+      return;
+    }
+
+    operations[dialog.index] = editedWebhookOperation(operation, edited);
+    state.webhooksSelectedIndex = dialog.index;
+  }
+
+  closeWebhookEditDialog();
+  pushWebhooksHistory(operations, t('webhooks.statusEdited'));
+}
+
+function upsertWebhookEditOperation(operations, current, desired) {
+  const operation = editedWebhookOperation({
+    action: 'update',
+    selected: true,
+    current,
+    desired
+  }, desired);
+  const existingIndex = operations.findIndex(item => normalizeWebhookCode(item.code) === normalizeWebhookCode(operation.code));
+  if (existingIndex >= 0) {
+    operations[existingIndex] = operation;
+    state.webhooksSelectedIndex = existingIndex;
+  } else {
+    operations.push(operation);
+    state.webhooksSelectedIndex = operations.length - 1;
+  }
+}
+
+function editedWebhookOperation(operation, desired) {
+  const current = normalizeWebhookItem(operation.current ?? desired);
+  const action = operation.action === 'create' ? 'create' : 'update';
+  return {
+    ...operation,
+    action,
+    selected: true,
+    code: desired.code,
+    target: desired.target,
+    event: desired.event,
+    eventType: desired.eventType ?? zabbixEventTypeFromCmdbEvent(desired.event),
+    reasonKey: action === 'create' ? 'webhooks.reasonMissing' : 'webhooks.reasonChanged',
+    diff: action === 'create' ? [] : webhookDiffFields(current, desired),
+    current: action === 'create' ? null : current,
+    desired
+  };
+}
+
+function webhookActionLabel(action) {
+  return {
+    create: t('webhooks.actionCreate'),
+    update: t('webhooks.actionUpdate'),
+    delete: t('webhooks.actionDelete')
+  }[action] ?? action;
+}
+
+function webhookOperationReason(operation) {
+  if (operation.reasonKey === 'webhooks.reasonChanged') {
+    return tf(operation.reasonKey, { fields: (operation.diff ?? []).join(', ') });
+  }
+  return t(operation.reasonKey ?? 'webhooks.reasonChanged');
+}
+
+async function saveWebhooksAsFile() {
+  const plan = {
+    generatedAt: new Date().toISOString(),
+    rules: {
+      name: state.currentRules?.name ?? state.currentRules?.content?.name ?? '',
+      schemaVersion: state.currentRules?.schemaVersion ?? state.currentRules?.content?.schemaVersion ?? '',
+      rulesVersion: state.currentRules?.rulesVersion ?? state.currentRules?.content?.rulesVersion ?? ''
+    },
+    managedPrefix: managedWebhookPrefix,
+    note: 'This file is exported by the browser only. Apply to CMDBuild from the UI or review and apply manually.',
+    operations: state.webhooksOperations
+  };
+  const content = `${JSON.stringify(plan, null, 2)}\n`;
+  const result = await saveTextAsFile(content, 'cmdbuild-webhooks-plan.json', 'CMDBuild webhooks plan', {
+    'application/json': ['.json']
+  });
+  if (!result.cancelled) {
+    toast(tf('toast.rulesFileSaved', { name: result.name }));
+  }
+}
+
+async function applyCmdbuildWebhooks() {
+  const operations = selectedWebhookOperations();
+  if (operations.length === 0) {
+    toast(t('webhooks.confirmNoSelection'));
+    return;
+  }
+
+  if (!window.confirm(tf('webhooks.confirmApply', { count: operations.length }))) {
+    return;
+  }
+
+  const result = await api('/api/cmdbuild/webhooks/apply', {
+    method: 'POST',
+    body: { operations }
+  });
+  toast(tf('webhooks.statusApplied', { count: result.count ?? operations.length }));
+  await loadCmdbuildWebhooks();
+  await analyzeCmdbuildWebhooks();
+}
+
+function buildCmdbuildWebhookOperations(rules, cmdbuildCatalog, currentHooks) {
+  const desired = buildDesiredCmdbuildWebhooks(rules, cmdbuildCatalog, currentHooks);
+  const currentByCode = new Map(currentHooks.map(hook => [normalizeWebhookCode(hook.code), normalizeWebhookItem(hook)]));
+  const desiredByCode = new Map(desired.map(hook => [normalizeWebhookCode(hook.code), normalizeWebhookItem(hook)]));
+  const operations = [];
+
+  for (const desiredHook of desired) {
+    const currentHook = currentByCode.get(normalizeWebhookCode(desiredHook.code));
+    if (!currentHook) {
+      operations.push({
+        action: 'create',
+        selected: true,
+        code: desiredHook.code,
+        target: desiredHook.target,
+        event: desiredHook.event,
+        eventType: desiredHook.eventType,
+        reasonKey: 'webhooks.reasonMissing',
+        current: null,
+        desired: desiredHook
+      });
+      continue;
+    }
+
+    const diff = webhookDiffFields(currentHook, desiredHook);
+    if (diff.length > 0) {
+      operations.push({
+        action: 'update',
+        selected: true,
+        code: desiredHook.code,
+        target: desiredHook.target,
+        event: desiredHook.event,
+        eventType: desiredHook.eventType,
+        reasonKey: 'webhooks.reasonChanged',
+        diff,
+        current: currentHook,
+        desired: desiredHook
+      });
+    }
+  }
+
+  for (const currentHook of currentHooks.map(normalizeWebhookItem)) {
+    if (!isManagedWebhook(currentHook) || desiredByCode.has(normalizeWebhookCode(currentHook.code))) {
+      continue;
+    }
+
+    operations.push({
+      action: 'delete',
+      selected: false,
+      code: currentHook.code,
+      target: currentHook.target,
+      event: currentHook.event,
+      eventType: zabbixEventTypeFromCmdbEvent(currentHook.event),
+      reasonKey: 'webhooks.reasonObsolete',
+      current: currentHook,
+      desired: null
+    });
+  }
+
+  return operations.sort((left, right) =>
+    compareText(left.target, right.target)
+    || compareText(left.eventType, right.eventType)
+    || compareText(left.action, right.action)
+    || compareText(left.code, right.code));
+}
+
+function buildDesiredCmdbuildWebhooks(rules, cmdbuildCatalog, currentHooks) {
+  const classes = allWebhookClasses(rules, cmdbuildCatalog);
+  const events = webhookEventsForRules(rules);
+  const defaults = currentWebhookDefaults(currentHooks);
+  const currentByCode = new Map(currentHooks.map(hook => [normalizeWebhookCode(hook.code), normalizeWebhookItem(hook)]));
+  const desired = [];
+
+  for (const className of classes) {
+    for (const event of events) {
+      const code = cmdbuildWebhookCode(className, event.eventType);
+      const current = currentByCode.get(normalizeWebhookCode(code));
+      const prefix = currentWebhookPlaceholderPrefix(current) || defaults.placeholderPrefix;
+      desired.push(normalizeWebhookItem({
+        code,
+        description: current?.description || `cmdb2monitoring ${className} ${event.eventType}`,
+        event: event.cmdbuildEvent,
+        eventType: event.eventType,
+        target: className,
+        method: current?.method || defaults.method,
+        url: current?.url || defaults.url,
+        headers: current?.headers ?? defaults.headers,
+        body: webhookBodyForClassEventCmdb(rules, cmdbuildCatalog, className, event, prefix, current?.body),
+        language: current?.language ?? defaults.language,
+        active: current?.active ?? true
+      }));
+    }
+  }
+
+  return desired;
+}
+
+function currentWebhookDefaults(currentHooks) {
+  const managed = currentHooks.map(normalizeWebhookItem).filter(isManagedWebhook);
+  const sample = managed.find(hook => hook.url) ?? managed[0] ?? {};
+  return {
+    method: sample.method || 'post',
+    url: sample.url || defaultCmdbuildWebhookUrl,
+    headers: sample.headers ?? {},
+    language: sample.language ?? '',
+    placeholderPrefix: currentWebhookPlaceholderPrefix(sample) || 'server'
+  };
+}
+
+function webhookBodyForClassEventCmdb(rules, cmdbuildCatalog, className, event, prefix, baseBody = {}) {
+  const catalogClass = findCatalogClass(cmdbuildCatalog ?? {}, className);
+  const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass ?? className);
+  const usedFields = webhookSourceFieldsForClass(rules, className);
+  const body = {
+    ...plainObjectOrEmpty(baseBody),
+    source: 'cmdbuild',
+    eventType: event.eventType,
+    cmdbuildEvent: event.cmdbuildEvent,
+    className
+  };
+
+  for (const [fieldKey, field] of Object.entries(rules.source?.fields ?? {})) {
+    const bodyKey = webhookBodyKeyForField(fieldKey, field);
+    if (!bodyKey || webhookBodyHasField(body, fieldKey, field)) {
+      continue;
+    }
+    if (!webhookSourceFieldIsUsed(usedFields, fieldKey) && !field.required) {
+      continue;
+    }
+    if (field.cmdbPath && !cmdbPathRootAppliesToClass(field.cmdbPath, className, cmdbuildCatalog, rules)) {
+      continue;
+    }
+
+    const value = webhookBodyValueForFieldCmdb(className, event, attributes, fieldKey, field, prefix);
+    if (value !== undefined) {
+      body[bodyKey] = value;
+    }
+  }
+
+  return body;
+}
+
+function webhookSourceFieldsForClass(rules, className) {
+  const fields = new Set(['entityId', 'code', 'className', 'eventType'].map(normalizeToken));
+  for (const [fieldKey, field] of Object.entries(rules.source?.fields ?? {})) {
+    if (field.required) {
+      fields.add(normalizeToken(fieldKey));
+      fields.add(normalizeToken(canonicalSourceField(fieldKey)));
+    }
+  }
+
+  addWebhookSourceFields(fields, sourceFieldsFromSerializedValue(rules.t4Templates ?? {}));
+  addWebhookSourceFields(fields, sourceFieldsFromSerializedValue(rules.normalization ?? {}));
+  for (const collection of mappingRuleCollections()) {
+    for (const rule of asArray(rules[collection.key])) {
+      addWebhookSourceFields(fields, sourceFieldsForClassScopedRule(rule, className));
+    }
+  }
+
+  return fields;
+}
+
+function addWebhookSourceFields(target, fields) {
+  for (const field of fields) {
+    target.add(normalizeToken(field));
+    target.add(normalizeToken(canonicalSourceField(field)));
+  }
+}
+
+function webhookSourceFieldIsUsed(fields, fieldKey) {
+  return fields.has(normalizeToken(fieldKey)) || fields.has(normalizeToken(canonicalSourceField(fieldKey)));
+}
+
+function webhookBodyHasField(body, fieldKey, field) {
+  const candidates = uniqueTokens([
+    webhookBodyKeyForField(fieldKey, field),
+    fieldKey,
+    canonicalSourceField(fieldKey),
+    ...sourceFieldSources(field),
+    ...sourceFieldCatalogSources(field)
+  ].filter(Boolean));
+  const existingKeys = Object.keys(plainObjectOrEmpty(body));
+  return candidates.some(candidate => existingKeys.some(key =>
+    equalsIgnoreCase(key, candidate) || normalizeToken(key) === normalizeToken(candidate)));
+}
+
+function webhookRuleAppliesToClass(rule, className) {
+  const matchers = {
+    all: asArray(rule?.when?.allRegex).filter(matcher => canonicalSourceField(matcher.field) === 'className'),
+    any: asArray(rule?.when?.anyRegex).filter(matcher => canonicalSourceField(matcher.field) === 'className'),
+    anyOther: asArray(rule?.when?.anyRegex).filter(matcher => canonicalSourceField(matcher.field) !== 'className')
+  };
+  if (matchers.all.length === 0 && matchers.any.length === 0) {
+    return true;
+  }
+
+  const matchesClass = matcher => {
+    try {
+      return compileRuleRegex(matcher.pattern).test(className);
+    } catch {
+      return false;
+    }
+  };
+
+  if (matchers.all.length > 0 && !matchers.all.every(matchesClass)) {
+    return false;
+  }
+
+  return matchers.any.length === 0
+    || matchers.anyOther.length > 0
+    || matchers.any.some(matchesClass);
+}
+
+function cmdbPathRootAppliesToClass(cmdbPath, className, cmdbuildCatalog, rules) {
+  const segments = String(cmdbPath ?? '').split('.').map(segment => segment.trim()).filter(Boolean);
+  if (segments.length < 2) {
+    return true;
+  }
+
+  const root = segments[0];
+  if (!root || root.toLowerCase().startsWith('{domain:')) {
+    return true;
+  }
+
+  const knownClass = findCatalogClass(cmdbuildCatalog ?? {}, root)
+    || asArray(rules.source?.entityClasses).some(item => normalizeClassName(item) === normalizeClassName(root));
+  return !knownClass || normalizeClassName(root) === normalizeClassName(className);
+}
+
+function sourceFieldsFromSerializedValue(value) {
+  return sourceFieldsForRule({ serializedValue: value });
+}
+
+function sourceFieldsForClassScopedRule(value, className) {
+  const result = [];
+  collectSourceFieldsForClassScopedNode(value, className, true, result);
+  return uniqueTokens(result.map(canonicalSourceField));
+}
+
+function collectSourceFieldsForClassScopedNode(value, className, parentApplies, result) {
+  if (Array.isArray(value)) {
+    value.forEach(item => collectSourceFieldsForClassScopedNode(item, className, parentApplies, result));
+    return result;
+  }
+  if (typeof value === 'string') {
+    result.push(...sourceFieldsFromTemplateText(value));
+    return result;
+  }
+  if (!value || typeof value !== 'object') {
+    return result;
+  }
+
+  const applies = parentApplies && webhookRuleAppliesToClass(value, className);
+  if (!applies) {
+    return result;
+  }
+
+  result.push(...sourceFieldsForRuleOwnScope(value));
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'when') {
+      continue;
+    }
+    collectSourceFieldsForClassScopedNode(item, className, applies, result);
+  }
+  return result;
+}
+
+function sourceFieldsForRuleOwnScope(rule = {}) {
+  const when = rule.when ?? {};
+  const fields = [
+    ...(when.anyRegex ?? []).map(matcher => matcher.field),
+    ...(when.allRegex ?? []).map(matcher => matcher.field),
+    when.fieldExists,
+    ...(Array.isArray(when.fieldsExist) ? when.fieldsExist : []),
+    rule.field,
+    rule.valueField,
+    rule.sourceField,
+    rule.fieldName
+  ].filter(Boolean);
+
+  for (const [key, value] of Object.entries(rule)) {
+    if (key === 'when') {
+      continue;
+    }
+    if (typeof value === 'string') {
+      fields.push(...sourceFieldsFromTemplateText(value));
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string') {
+          fields.push(...sourceFieldsFromTemplateText(item));
+        }
+      }
+    }
+  }
+
+  return uniqueTokens(fields.map(canonicalSourceField));
+}
+
+function sourceFieldsFromTemplateText(text) {
+  const fields = [];
+  const serialized = String(text ?? '');
+  for (const match of serialized.matchAll(/Model\.Source\(["']([^"']+)["']\)/g)) {
+    fields.push(match[1]);
+  }
+  for (const match of serialized.matchAll(/Model\.Field\(["']([^"']+)["']\)/g)) {
+    fields.push(match[1]);
+  }
+  for (const match of serialized.matchAll(/Model\.([A-Za-z0-9_]+)/g)) {
+    if (!['Source', 'Field'].includes(match[1])) {
+      fields.push(match[1]);
+    }
+  }
+  return uniqueTokens(fields);
+}
+
+function sourceFieldNamesFromObject(value, result = []) {
+  if (Array.isArray(value)) {
+    value.forEach(item => sourceFieldNamesFromObject(item, result));
+    return result;
+  }
+  if (!value || typeof value !== 'object') {
+    return result;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (['field', 'valueField', 'sourceField', 'fieldName'].includes(key) && typeof item === 'string') {
+      result.push(item);
+    } else {
+      sourceFieldNamesFromObject(item, result);
+    }
+  }
+  return uniqueTokens(result);
+}
+
+function webhookBodyValueForFieldCmdb(className, event, attributes, fieldKey, field, prefix) {
+  const canonical = canonicalSourceField(fieldKey);
+  if (canonical === 'eventType') {
+    return event.eventType;
+  }
+  if (canonical === 'className') {
+    return className;
+  }
+  if (field.cmdbPath) {
+    return webhookBodyValueForCmdbPath(className, attributes, field.cmdbPath, prefix);
+  }
+
+  const attribute = findCatalogAttributeForField(attributes, field, fieldKey);
+  if (attribute) {
+    return cmdbuildPlaceholder(prefix, attribute.name);
+  }
+  if (canonical === 'entityId') {
+    return cmdbuildPlaceholder(prefix, 'Id');
+  }
+  if (canonical === 'code') {
+    return cmdbuildPlaceholder(prefix, 'Code');
+  }
+
+  return undefined;
+}
+
+function webhookBodyValueForCmdbPath(className, attributes, cmdbPath, prefix) {
+  const segments = String(cmdbPath ?? '').split('.').map(segment => segment.trim()).filter(Boolean);
+  if (segments.length === 0) {
+    return undefined;
+  }
+
+  let currentSegments = segments;
+  if (normalizeClassName(currentSegments[0]) === normalizeClassName(className)) {
+    currentSegments = currentSegments.slice(1);
+  }
+
+  const firstSegment = currentSegments[0] ?? '';
+  if (!firstSegment || firstSegment.toLowerCase().startsWith('{domain:')) {
+    return cmdbuildPlaceholder(prefix, 'Id');
+  }
+
+  const attribute = findCatalogAttribute(attributes, firstSegment, firstSegment);
+  return cmdbuildPlaceholder(prefix, attribute?.name ?? firstSegment);
+}
+
+function cmdbuildPlaceholder(prefix, attributeName) {
+  return `{${prefix}:${attributeName}}`;
+}
+
+function cmdbuildWebhookCode(className, eventType) {
+  return `${managedWebhookPrefix}${normalizeRuleName(className)}-${normalizeRuleName(eventType)}`;
+}
+
+function normalizeWebhookItem(item = {}) {
+  return {
+    _id: item._id ?? item.id ?? item.code ?? '',
+    id: item.id ?? item._id ?? item.code ?? '',
+    code: item.code ?? item._id ?? item.id ?? '',
+    description: item.description ?? '',
+    event: item.event ?? '',
+    eventType: item.eventType ?? zabbixEventTypeFromCmdbEvent(item.event),
+    target: item.target ?? '',
+    method: String(item.method ?? 'post').toLowerCase(),
+    url: item.url ?? '',
+    headers: plainObjectOrEmpty(item.headers),
+    body: plainObjectOrEmpty(item.body),
+    language: item.language ?? '',
+    active: item.active !== false,
+    raw: item.raw ?? undefined
+  };
+}
+
+function plainObjectOrEmpty(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function normalizeWebhookCode(code) {
+  return normalizeRuleName(code);
+}
+
+function isManagedWebhook(hook) {
+  return String(hook?.code ?? '').startsWith(managedWebhookPrefix);
+}
+
+function webhookDiffFields(current, desired) {
+  const currentComparable = webhookComparable(current);
+  const desiredComparable = webhookComparable(desired);
+  return Object.keys(desiredComparable).filter(key => stableJson(currentComparable[key]) !== stableJson(desiredComparable[key]));
+}
+
+function webhookComparable(hook) {
+  const normalized = normalizeWebhookItem(hook);
+  return {
+    description: normalized.description,
+    event: normalized.event,
+    target: normalized.target,
+    method: normalized.method,
+    url: normalized.url,
+    headers: normalized.headers,
+    body: normalized.body,
+    language: normalized.language,
+    active: normalized.active
+  };
+}
+
+function currentWebhookPlaceholderPrefix(hook) {
+  const values = [];
+  collectWebhookBodyValues(hook?.body, values);
+  for (const value of values) {
+    const match = String(value).match(/^\{([^}:]+):[^}]+\}$/);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return '';
+}
+
+function collectWebhookBodyValues(value, result) {
+  if (Array.isArray(value)) {
+    value.forEach(item => collectWebhookBodyValues(item, result));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach(item => collectWebhookBodyValues(item, result));
+    return;
+  }
+  result.push(value);
+}
+
+function zabbixEventTypeFromCmdbEvent(eventName) {
+  const text = String(eventName ?? '').toLowerCase();
+  if (text.includes('create')) {
+    return 'create';
+  }
+  if (text.includes('update')) {
+    return 'update';
+  }
+  if (text.includes('delete')) {
+    return 'delete';
+  }
+  return text.replace(/^card_/, '').replace(/_after$/, '') || '';
 }
 
 function updateMappingEditorControls() {
@@ -1272,9 +3393,20 @@ function updateMappingEditorControls() {
   updateMappingClearSelectionButton();
   $('#mapping')?.classList.toggle('mapping-edit-mode', editMode);
   $('#mappingEditor')?.classList.toggle('hidden', !editMode);
-  $('#mappingAddPanel')?.classList.toggle('hidden', !editMode || action !== 'add');
+  $('#mappingAddPanel')?.classList.toggle('hidden', !editMode || !['add', 'modify'].includes(action));
+  $('#mappingModifyRuleField')?.classList.toggle('hidden', !editMode || action !== 'modify');
   $('#mappingDeletePanel')?.classList.toggle('hidden', !editMode || action !== 'delete');
+  $('#mappingResetForm')?.classList.toggle('hidden', !editMode || !['add', 'modify'].includes(action));
+  if ($('#mappingAddRule')) {
+    $('#mappingAddRule').textContent = action === 'modify'
+      ? t('mapping.saveRuleChanges')
+      : t('mapping.addRule');
+  }
+  if ($('#mappingDeleteView') && $('#mappingDeleteView').value !== state.mappingDeleteView) {
+    $('#mappingDeleteView').value = state.mappingDeleteView;
+  }
   updateMappingDeleteControls();
+  updateMappingEditorFormState();
 }
 
 function updateMappingEditor(message = '') {
@@ -1284,12 +3416,67 @@ function updateMappingEditor(message = '') {
   }
 
   populateMappingEditorClasses();
-  populateMappingEditorFields();
   populateMappingEditorStructures();
+  if (state.mappingEditAction === 'modify') {
+    populateMappingModifyRules();
+    if ($('#mappingModifyRule').value) {
+      loadSelectedMappingRuleIntoEditor({ silent: true });
+      populateMappingEditorStructures({
+        selectedValue: $('#mappingEditTargetType').value,
+        fieldValue: state.mappingModifyFieldValue || $('#mappingEditField').value
+      });
+    } else {
+      clearMappingEditorRuleForm();
+      populateMappingModifyFilterControls({ autoSelect: false });
+      renderMappingDeleteRules();
+      updateMappingEditorSuggestedName();
+      setMappingEditorStatusForDraft(message || t('mapping.status.modifyStart'));
+      updateMappingEditorFormState();
+      return;
+    }
+  }
+  populateMappingEditorFields();
   populateMappingEditorTargets();
   renderMappingDeleteRules();
   updateMappingEditorSuggestedName();
-  setMappingEditorStatusForDraft(message || 'Перед сохранением проверьте логический контроль правил конвертации: для создания/обновления host должен приходить ipAddress или dnsName.');
+  setMappingEditorStatusForDraft(message || t('mapping.status.beforeSave'));
+  updateMappingEditorFormState();
+}
+
+function refreshMappingEditorLocalizedControls() {
+  const selectedRule = $('#mappingModifyRule')?.value ?? '';
+  const selectedField = $('#mappingEditField')?.value ?? '';
+  const selectedType = $('#mappingEditTargetType')?.value ?? '';
+  const selectedTarget = $('#mappingEditZabbixObject')?.value ?? '';
+
+  if (state.mappingEditAction === 'delete') {
+    renderMappingDeleteRules();
+    return;
+  }
+
+  if (state.mappingEditAction === 'modify' && !selectedRule) {
+    populateMappingModifyFilterControls({ autoSelect: false });
+    return;
+  }
+
+  if (state.mappingEditAction === 'modify') {
+    populateMappingModifyRules({ selectedValue: selectedRule });
+  }
+
+  populateMappingEditorClasses();
+  populateMappingEditorStructures({ selectedValue: selectedType, fieldValue: selectedField });
+  populateMappingEditorFields({ selectedValue: selectedField });
+  populateMappingEditorTargets({ selectedValue: selectedTarget });
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
+function mappingEditorActionStatus() {
+  return {
+    delete: t('mapping.status.actionDelete'),
+    modify: t('mapping.status.actionModify'),
+    add: t('mapping.status.actionAdd')
+  }[state.mappingEditAction] ?? t('mapping.status.defaultAction');
 }
 
 function updateMappingEditorAction() {
@@ -1297,12 +3484,122 @@ function updateMappingEditorAction() {
   updateMappingEditorControls();
   if (state.mappingEditAction === 'delete') {
     renderMappingDeleteRules();
+  } else if (state.mappingEditAction === 'modify') {
+    clearMappingEditorRuleForm();
+    populateMappingModifyFilterControls({ autoSelect: false });
   } else {
     updateMappingEditorSuggestedName();
   }
-  setMappingEditorStatusForDraft(state.mappingEditAction === 'delete'
-    ? 'Выберите правила для удаления из draft JSON. Классы и class attribute fields не удаляются автоматически.'
-    : 'Добавьте новое правило конвертации. После добавления будет сразу выполнена проверка IP/DNS для host binding.');
+  setMappingEditorStatusForDraft(mappingEditorActionStatus());
+  updateMappingEditorFormState();
+}
+
+function handleMappingEditorClassChange() {
+  if (isMappingModifyFilterMode()) {
+    populateMappingModifyFilterControls({ autoSelect: true, changed: 'className' });
+    return;
+  }
+
+  $('#mappingEditField').value = '';
+  $('#mappingEditZabbixObject').value = '';
+  state.mappingModifyFieldValue = '';
+  state.mappingModifyTargetValue = '';
+  refreshMappingEditorDependentControls({ selectedField: '', selectedTarget: '' });
+}
+
+function handleMappingEditorFieldChange() {
+  if (isMappingModifyFilterMode()) {
+    populateMappingModifyFilterControls({ autoSelect: true, changed: 'field' });
+    return;
+  }
+
+  const previousType = $('#mappingEditTargetType').value;
+  populateMappingEditorStructures({ selectedValue: previousType });
+  const targetValue = $('#mappingEditTargetType').value === previousType
+    ? $('#mappingEditZabbixObject').value
+    : '';
+  populateMappingEditorTargets({ selectedValue: targetValue });
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
+function handleMappingEditorStructureChange() {
+  if (isMappingModifyFilterMode()) {
+    populateMappingModifyFilterControls({ autoSelect: true, changed: 'type' });
+    return;
+  }
+
+  $('#mappingEditZabbixObject').value = '';
+  state.mappingModifyTargetValue = '';
+  populateMappingEditorFields({ selectedValue: $('#mappingEditField').value });
+  populateMappingEditorTargets({ selectedValue: '' });
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
+function handleMappingEditorTargetChange() {
+  if (isMappingModifyFilterMode()) {
+    populateMappingModifyFilterControls({ autoSelect: true, changed: 'target' });
+    return;
+  }
+
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
+function handleMappingEditorLeafChange() {
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
+function isMappingModifyFilterMode() {
+  return state.mappingEditAction === 'modify' && !($('#mappingModifyRule')?.value);
+}
+
+function refreshMappingEditorDependentControls(options = {}) {
+  const selectedField = options.selectedField ?? state.mappingModifyFieldValue ?? $('#mappingEditField').value;
+  populateMappingEditorStructures({
+    selectedValue: options.selectedType ?? $('#mappingEditTargetType').value,
+    fieldValue: selectedField
+  });
+  populateMappingEditorFields({ selectedValue: selectedField });
+  populateMappingEditorTargets({ selectedValue: options.selectedTarget ?? $('#mappingEditZabbixObject').value });
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
+function clearMappingEditorRuleForm() {
+  $('#mappingEditClass').value = '';
+  $('#mappingEditField').value = '';
+  $('#mappingEditTargetType').value = '';
+  $('#mappingEditZabbixObject').value = '';
+  $('#mappingEditPriority').value = '100';
+  $('#mappingEditRegex').value = '(?i).*';
+  $('#mappingEditRuleName').value = '';
+  state.mappingModifyFieldValue = '';
+  state.mappingModifyTargetValue = '';
+}
+
+function resetMappingEditorForm() {
+  if (state.mappingEditAction === 'modify') {
+    if ($('#mappingModifyRule')) {
+      $('#mappingModifyRule').value = '';
+    }
+    clearMappingEditorRuleForm();
+    populateMappingModifyFilterControls({ autoSelect: false });
+    setMappingEditorStatus(t('mapping.status.resetModify'));
+    return;
+  }
+
+  $('#mappingEditField').value = '';
+  $('#mappingEditZabbixObject').value = '';
+  $('#mappingEditPriority').value = '100';
+  $('#mappingEditRegex').value = '(?i).*';
+  $('#mappingEditRuleName').value = '';
+  state.mappingModifyFieldValue = '';
+  state.mappingModifyTargetValue = '';
+  refreshMappingEditorDependentControls({ selectedField: '', selectedTarget: '' });
+  setMappingEditorStatus(t('mapping.status.resetAdd'));
 }
 
 function renderMappingDeleteRules() {
@@ -1314,62 +3611,337 @@ function renderMappingDeleteRules() {
   clear(container);
   const rules = currentMappingRules();
   const items = mappingDeleteRuleItems(rules);
+  const view = $('#mappingDeleteView')?.value || state.mappingDeleteView || 'cmdbuild';
+  state.mappingDeleteView = view;
   if (!state.mappingDraftRules) {
-    container.append(mappingDeleteEmptyNode('Сначала загрузите управление правилами конвертации.'));
+    container.append(mappingDeleteEmptyNode(t('mapping.status.loadMappingFirst')));
     updateMappingDeleteControls();
     return;
   }
   if (items.length === 0) {
-    container.append(mappingDeleteEmptyNode('В draft JSON нет правил, которые можно удалить через этот режим.'));
+    container.append(mappingDeleteEmptyNode(t('mapping.delete.noRulesInDraft')));
     updateMappingDeleteControls();
     return;
   }
 
-  const groups = mappingDeleteRuleGroups(items);
+  const groups = mappingDeleteTreeGroups(items, rules, view);
   for (const group of groups) {
     container.append(mappingDeleteGroupNode(group, rules));
   }
   updateMappingDeleteControls();
 }
 
-function mappingDeleteRuleGroups(items) {
-  const groups = [];
-  let currentGroup = null;
-  let currentKey = '';
-  for (const item of items) {
-    if (item.collection.key !== currentKey) {
-      currentKey = item.collection.key;
-      currentGroup = {
-        key: item.collection.key,
-        label: item.collection.label,
-        items: []
-      };
-      groups.push(currentGroup);
-    }
-    currentGroup.items.push(item);
+function mappingDeleteTreeGroups(items, rules, view) {
+  if (view === 'zabbix') {
+    return mappingDeleteZabbixGroups(items, rules);
   }
-  return groups;
+  if (view === 'rules') {
+    return mappingDeleteRulesGroups(items);
+  }
+  return mappingDeleteCmdbuildGroups(items, rules);
 }
 
-function mappingDeleteGroupNode(group, rules) {
+function mappingDeleteRulesGroups(items) {
+  return mappingDeleteFlatGroups(items, item => ({
+    key: item.collection.key,
+    label: item.collection.label,
+    meta: 'rules collection'
+  }));
+}
+
+function mappingDeleteFlatGroups(items, selector) {
+  const groups = new Map();
+  for (const item of items) {
+    const selected = selector(item);
+    const group = ensureMappingDeleteGroup(groups, selected.key, selected.label, selected.meta);
+    group.items.push(item);
+  }
+  return [...groups.values()];
+}
+
+function mappingDeleteCmdbuildGroups(items, rules) {
+  const groups = new Map();
+  for (const item of items) {
+    const classes = mappingDeleteClassesForItem(item, rules);
+    const fields = mappingDeleteSourceFieldsForItem(item.rule)
+      .filter(field => !['eventType', 'zabbixHostId'].includes(canonicalSourceField(field)));
+    const fieldKeys = fields.length > 0 ? fields : ['__no_cmdb_field'];
+
+    for (const className of classes) {
+      const classKey = normalizeToken(className);
+      const classGroup = ensureMappingDeleteGroup(
+        groups,
+        `cmdb-class:${classKey}`,
+        className === '__any_class' ? 'Любой класс / без условия className' : catalogClassDisplayName(state.mappingCmdbuildCatalog ?? {}, className),
+        className === '__any_class' ? 'rules без явного ограничения по CMDBuild class' : 'CMDBuild class'
+      );
+
+      for (const field of fieldKeys) {
+        const fieldGroup = ensureMappingDeleteChildGroup(
+          classGroup,
+          `cmdb-field:${classKey}:${canonicalSourceField(field)}`,
+          field === '__no_cmdb_field' ? 'Без CMDBuild attribute field' : mappingDeleteSourceFieldLabel(rules, field),
+          field === '__no_cmdb_field' ? 'rule не привязано к конкретному source field' : mappingDeleteSourceFieldMeta(rules, field)
+        );
+        fieldGroup.items.push(item);
+      }
+    }
+  }
+
+  return [...groups.values()];
+}
+
+function mappingDeleteClassesForItem(item, rules) {
+  const explicit = ruleClassConditions(item.rule);
+  if (explicit.length > 0) {
+    return explicit;
+  }
+
+  const fields = mappingDeleteSourceFieldsForItem(item.rule);
+  const classesFromPaths = uniqueTokens(fields
+    .map(field => rules.source?.fields?.[canonicalSourceField(field)]?.cmdbPath)
+    .filter(Boolean)
+    .map(path => String(path).split('.')[0])
+    .filter(Boolean));
+
+  return classesFromPaths.length > 0 ? classesFromPaths : ['__any_class'];
+}
+
+function mappingDeleteSourceFieldsForItem(rule = {}) {
+  const fields = new Set(sourceFieldsForRule(rule));
+  collectMappingDeleteSourceFields(rule, fields);
+  return uniqueTokens([...fields].map(canonicalSourceField));
+}
+
+function collectMappingDeleteSourceFields(value, fields) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectMappingDeleteSourceFields(item, fields);
+    }
+    return;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+
+  for (const [key, raw] of Object.entries(value)) {
+    if (key === 'when') {
+      mappingDeleteConditionFields(raw).forEach(field => fields.add(field));
+    } else if (key === 'valueField' && raw) {
+      fields.add(raw);
+    }
+    collectMappingDeleteSourceFields(raw, fields);
+  }
+}
+
+function mappingDeleteConditionFields(condition = {}) {
+  return uniqueTokens([
+    ...(condition.anyRegex ?? []).map(matcher => matcher.field),
+    ...(condition.allRegex ?? []).map(matcher => matcher.field),
+    condition.fieldExists,
+    ...(Array.isArray(condition.fieldsExist) ? condition.fieldsExist : [])
+  ].filter(Boolean));
+}
+
+function mappingDeleteSourceFieldLabel(rules, field) {
+  const sourceField = rules.source?.fields?.[canonicalSourceField(field)];
+  const sourceNames = sourceField ? sourceFieldSources(sourceField) : [];
+  const sourceName = sourceNames.find(name => !equalsIgnoreCase(name, field));
+  return sourceName ? `${field} / ${sourceName}` : field;
+}
+
+function mappingDeleteSourceFieldMeta(rules, field) {
+  const sourceField = rules.source?.fields?.[canonicalSourceField(field)];
+  if (!sourceField) {
+    return 'source field from rule condition';
+  }
+
+  return sourceFieldMeta(sourceField) || 'source field';
+}
+
+function mappingDeleteZabbixGroups(items, rules) {
+  const roots = new Map();
+  const payloadRoot = ensureMappingDeleteGroup(roots, 'zabbix-payload', 'Zabbix payload fields', 'groups of JSON-RPC attributes');
+  const objectRoot = ensureMappingDeleteGroup(roots, 'zabbix-objects', 'Zabbix objects and references', 'host groups, templates, tags and extended catalogs');
+  const structureRoot = ensureMappingDeleteGroup(roots, 'zabbix-structures', 'Conversion structures', 'rules grouped by conversion block');
+
+  for (const item of items) {
+    for (const payload of mappingDeletePayloadFieldsForItem(item)) {
+      ensureMappingDeleteChildGroup(
+        payloadRoot,
+        `payload:${normalizeToken(payload)}`,
+        payload,
+        'Zabbix payload field or field group'
+      ).items.push(item);
+    }
+
+    const structure = ensureMappingDeleteChildGroup(
+      structureRoot,
+      `structure:${item.collection.type}`,
+      mappingDeleteZabbixTypeLabel(item.collection.type, item.collection.label),
+      item.collection.label
+    );
+    structure.items.push(item);
+
+    const targets = mappingDeleteTargetsForItem(item, rules);
+    if (targets.length === 0) {
+      ensureMappingDeleteChildGroup(
+        objectRoot,
+        `object:${item.collection.type}:__none`,
+        mappingDeleteZabbixTypeLabel(item.collection.type, item.collection.label),
+        'нет конкретного Zabbix object, правило влияет на structure/payload'
+      ).items.push(item);
+      continue;
+    }
+
+    const typeGroup = ensureMappingDeleteChildGroup(
+      objectRoot,
+      `object-type:${item.collection.type}`,
+      mappingDeleteZabbixTypeLabel(item.collection.type, item.collection.label),
+      'Zabbix object group'
+    );
+    for (const target of targets) {
+      ensureMappingDeleteChildGroup(
+        typeGroup,
+        `object:${item.collection.type}:${normalizeToken(target)}`,
+        target,
+        'Zabbix object / reference'
+      ).items.push(item);
+    }
+  }
+
+  return [...roots.values()].filter(group => mappingDeleteGroupOperationKeys(group).length > 0);
+}
+
+function mappingDeleteTargetsForItem(item, rules) {
+  const targets = selectionItemsForRule(rules, item.rule, item.collection.type)
+    .map(target => mappingDeleteTargetLabel(item.collection.type, target))
+    .filter(Boolean);
+  if (item.collection.type === 'interface' && item.rule.interfaceRef) {
+    targets.push(item.rule.interfaceRef);
+  }
+  if (item.collection.type === 'interfaceProfiles' && item.rule.interfaceProfileRef) {
+    targets.push(item.rule.interfaceProfileRef);
+  }
+  return uniqueTokens(targets);
+}
+
+function mappingDeletePayloadFieldsForItem(item) {
+  const type = item.collection.type;
+  const rule = item.rule;
+  const fields = {
+    eventRouting: ['method', 'hostid', 'host'],
+    hostProfiles: ['host', 'name', 'interfaces[]'],
+    hostGroups: ['groups[].groupid'],
+    templates: ['templates[].templateid'],
+    templateGroups: ['templateGroups[].groupid'],
+    interfaceAddress: [rule.mode === 'dns' ? 'interfaces[].dns' : 'interfaces[].ip', 'interfaces[].useip'],
+    interface: ['interfaces[]'],
+    tags: ['tags[].tag', 'tags[].value'],
+    monitoringSuppression: ['suppression/no Zabbix request'],
+    proxies: ['proxyid'],
+    proxyGroups: ['proxy_groupid'],
+    globalMacros: ['macros[]'],
+    hostMacros: ['macros[].macro', 'macros[].value'],
+    inventoryFields: ['inventory'],
+    interfaceProfiles: ['interfaces[].type', 'interfaces[].port'],
+    hostStatuses: ['status'],
+    maintenances: ['maintenances'],
+    tlsPskModes: ['tls_connect', 'tls_accept', 'tls_psk_identity', 'tls_psk'],
+    valueMaps: ['valueMaps']
+  }[type] ?? [`target:${type}`];
+
+  return uniqueTokens(fields.filter(Boolean));
+}
+
+function mappingDeleteZabbixTypeLabel(type, fallback) {
+  return {
+    eventRouting: 'Event routing',
+    hostProfiles: 'Host profiles / interfaces',
+    hostGroups: 'Host groups',
+    templates: 'Templates',
+    templateGroups: 'Template groups',
+    interfaceAddress: 'Interface address',
+    interface: 'Interface structure',
+    tags: 'Tags',
+    monitoringSuppression: 'Monitoring suppression'
+  }[type]
+    ?? zabbixExtensionDefinitions.find(definition => definition.rulesKey === type)?.title
+    ?? fallback
+    ?? type;
+}
+
+function mappingDeleteGroupNode(group, rules, level = 0) {
   const groupNode = el('div', 'mapping-delete-group is-collapsed', '');
   groupNode.dataset.deleteRuleGroup = group.key;
+  groupNode.dataset.deleteRuleLevel = String(level);
 
   const header = el('div', 'mapping-delete-group-header', '');
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'mapping-delete-group-checkbox';
+  checkbox.dataset.operationKeys = JSON.stringify(mappingDeleteGroupOperationKeys(group));
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'mapping-delete-group-toggle secondary';
   toggle.textContent = '+';
-  const title = el('h3', '', group.label);
-  const count = el('span', 'mapping-delete-group-count', String(group.items.length));
-  header.append(toggle, title, count);
+  const title = el('h3', '', '');
+  title.append(el('span', '', group.label));
+  if (group.meta) {
+    title.append(el('span', 'mapping-delete-group-meta', group.meta));
+  }
+  const count = el('span', 'mapping-delete-group-count', String(mappingDeleteGroupOperationKeys(group).length));
+  header.append(checkbox, toggle, title, count);
 
   const body = el('div', 'mapping-delete-group-body', '');
-  body.replaceChildren(...group.items.map(item => mappingDeleteRuleNode(item, rules)));
+  body.replaceChildren(
+    ...asArray(group.children).map(child => mappingDeleteGroupNode(child, rules, level + 1)),
+    ...group.items.map(item => mappingDeleteRuleNode(item, rules))
+  );
   groupNode.append(header, body);
-  setHelp(header, `Группа rules "${group.label}". Нажмите +, чтобы раскрыть правила этой группы для выбора на удаление.`);
-  header.addEventListener('click', () => setMappingDeleteGroupExpanded(groupNode, groupNode.classList.contains('is-collapsed')));
+  setHelp(header, `Группа удаления "${group.label}". Чекбокс отмечает все правила внутри группы; + раскрывает дочерние узлы и отдельные rules.`);
+  toggle.addEventListener('click', event => {
+    event.stopPropagation();
+    setMappingDeleteGroupExpanded(groupNode, groupNode.classList.contains('is-collapsed'));
+  });
+  header.addEventListener('click', event => {
+    if (event.target.matches('input, button')) {
+      return;
+    }
+    setMappingDeleteGroupExpanded(groupNode, groupNode.classList.contains('is-collapsed'));
+  });
   return groupNode;
+}
+
+function ensureMappingDeleteGroup(groups, key, label, meta = '') {
+  if (!groups.has(key)) {
+    groups.set(key, {
+      key,
+      label,
+      meta,
+      items: [],
+      children: [],
+      childGroups: new Map()
+    });
+  }
+
+  return groups.get(key);
+}
+
+function ensureMappingDeleteChildGroup(parent, key, label, meta = '') {
+  const group = ensureMappingDeleteGroup(parent.childGroups, key, label, meta);
+  if (!parent.children.includes(group)) {
+    parent.children.push(group);
+  }
+  return group;
+}
+
+function mappingDeleteGroupOperationKeys(group) {
+  return uniqueTokens([
+    ...asArray(group.items).map(item => item.operationKey),
+    ...asArray(group.children).flatMap(mappingDeleteGroupOperationKeys)
+  ]);
 }
 
 function setMappingDeleteGroupExpanded(groupNode, expanded) {
@@ -1468,10 +4040,17 @@ function mappingDeleteOperationKey(collectionKey, index, rule) {
 }
 
 function selectedMappingRuleDeletions() {
-  return $$('.mapping-delete-checkbox:checked').map(checkbox => ({
-    operationKey: checkbox.dataset.operationKey,
-    collection: checkbox.dataset.ruleCollection
-  }));
+  const operations = new Map();
+  for (const checkbox of $$('.mapping-delete-checkbox:checked')) {
+    if (!checkbox.dataset.operationKey) {
+      continue;
+    }
+    operations.set(checkbox.dataset.operationKey, {
+      operationKey: checkbox.dataset.operationKey,
+      collection: checkbox.dataset.ruleCollection
+    });
+  }
+  return [...operations.values()];
 }
 
 function updateMappingDeleteControls() {
@@ -1483,6 +4062,7 @@ function updateMappingDeleteControls() {
   $('#mappingDeleteClear').disabled = !enabled || !hasRules || selectedCount === 0;
   $('#mappingDeleteSelected').disabled = !enabled || selectedCount === 0;
   deletePanel?.classList.toggle('has-selection', selectedCount > 0);
+  updateMappingDeleteGroupCheckboxes();
 }
 
 function setMappingDeleteSelection(checked) {
@@ -1492,22 +4072,51 @@ function setMappingDeleteSelection(checked) {
   updateMappingDeleteControls();
 }
 
+function setMappingDeleteGroupSelection(groupCheckbox) {
+  const keys = new Set(mappingDeleteGroupKeysFromCheckbox(groupCheckbox));
+  $$('.mapping-delete-checkbox').forEach(checkbox => {
+    if (keys.has(checkbox.dataset.operationKey)) {
+      checkbox.checked = groupCheckbox.checked;
+    }
+  });
+  updateMappingDeleteControls();
+}
+
+function updateMappingDeleteGroupCheckboxes() {
+  const selectedKeys = new Set(selectedMappingRuleDeletions().map(operation => operation.operationKey));
+  $$('.mapping-delete-group-checkbox').forEach(checkbox => {
+    const keys = mappingDeleteGroupKeysFromCheckbox(checkbox);
+    const selectedCount = keys.filter(key => selectedKeys.has(key)).length;
+    checkbox.checked = keys.length > 0 && selectedCount === keys.length;
+    checkbox.indeterminate = selectedCount > 0 && selectedCount < keys.length;
+  });
+}
+
+function mappingDeleteGroupKeysFromCheckbox(checkbox) {
+  try {
+    const keys = JSON.parse(checkbox.dataset.operationKeys ?? '[]');
+    return Array.isArray(keys) ? keys : [];
+  } catch {
+    return [];
+  }
+}
+
 function deleteSelectedMappingRules() {
   if (!state.mappingDraftRules) {
-    setMappingEditorStatus('Сначала загрузите управление правилами конвертации.');
+    setMappingEditorStatus(t('mapping.status.loadMappingFirst'));
     return;
   }
 
   const operations = selectedMappingRuleDeletions();
   if (operations.length === 0) {
-    setMappingEditorStatus('Выберите хотя бы одно правило для удаления.');
+    setMappingEditorStatus(t('mapping.status.selectRulesForDelete'));
     return;
   }
 
   const confirmed = window.confirm([
-    `Удалить выбранные правила из draft JSON (${operations.length})?`,
-    'Классы и class attribute fields останутся в rules, чтобы не удалить источник, который может использоваться другими правилами.',
-    'Действие можно отменить через Undo.'
+    tf('mapping.confirm.deleteRulesTitle', { count: operations.length }),
+    t('mapping.confirm.deleteRulesKeepSources'),
+    t('mapping.confirm.deleteRulesUndo')
   ].join('\n'));
   if (!confirmed) {
     return;
@@ -1531,13 +4140,13 @@ function deleteSelectedMappingRules() {
   }
 
   if (removed === 0) {
-    setMappingEditorStatus('Выбранные правила уже не найдены в текущем draft JSON.');
+    setMappingEditorStatus(t('mapping.status.deletedRulesMissing'));
     renderMappingDeleteRules();
     return;
   }
 
   pushMappingHistory(rules);
-  rerenderMappingDraft(`Удалено правил: ${removed}. Классы и class attribute fields не удалялись автоматически.`);
+  rerenderMappingDraft(tf('mapping.status.deletedRules', { count: removed }));
 }
 
 function populateMappingEditorClasses() {
@@ -1547,19 +4156,28 @@ function populateMappingEditorClasses() {
   const classes = mappingEditorClassOptions(rules, state.mappingCmdbuildCatalog ?? {});
 
   setClassSelectOptions(select, [
-    { value: '', label: 'Любой класс' },
+    { value: '', label: t('mapping.option.anyClass') },
     ...classes
-  ], previous);
+  ], previous, state.mappingCmdbuildCatalog ?? {});
 }
 
-function setClassSelectOptions(select, options, selectedValue = '') {
-  setSelectOptions(select, options, selectedValue);
+function setClassSelectOptions(select, options, selectedValue = '', catalog = {}) {
+  let nextValue = selectedValue;
+  if (selectedValue) {
+    const selectedOption = options.find(option => normalizeClassName(option.value) === normalizeClassName(selectedValue));
+    if (!selectedOption || selectedOption.disabled) {
+      const nearest = nearestConcreteClassOption(options, catalog, selectedValue);
+      nextValue = nearest?.value ?? selectedValue;
+    }
+  }
+
+  setSelectOptions(select, options, nextValue);
   if (!select || !selectedValue || select.value === selectedValue) {
     return;
   }
 
   const normalizedSelected = normalizeClassName(selectedValue);
-  const normalizedOption = options.find(option => normalizeClassName(option.value) === normalizedSelected);
+  const normalizedOption = options.find(option => !option.disabled && normalizeClassName(option.value) === normalizedSelected);
   if (normalizedOption) {
     select.value = normalizedOption.value;
   }
@@ -1567,7 +4185,7 @@ function setClassSelectOptions(select, options, selectedValue = '') {
 
 function mappingEditorClassOptions(rules, catalog) {
   const byClass = new Map();
-  const putClass = className => {
+  const putClass = (className, override = {}) => {
     if (!className) {
       return;
     }
@@ -1577,62 +4195,210 @@ function mappingEditorClassOptions(rules, catalog) {
     }
     byClass.set(key, {
       value: catalogClassRuleName(catalog, className),
-      label: catalogClassDisplayName(catalog, className)
+      label: catalogClassDisplayName(catalog, className),
+      ...override
     });
   };
 
-  (rules.source?.entityClasses ?? []).forEach(putClass);
-  (catalog.classes ?? [])
-    .filter(item => item?.name && !isCmdbCatalogSuperclass(catalog, item))
-    .forEach(item => putClass(item.name));
+  const configured = new Set((rules.source?.entityClasses ?? []).map(normalizeClassName));
+  const hierarchyOptions = cmdbClassHierarchySelectOptions(catalog, configured);
+  hierarchyOptions.forEach(option => putClass(option.value, option));
+  (rules.source?.entityClasses ?? [])
+    .filter(className => !byClass.has(normalizeClassName(className)))
+    .forEach(className => putClass(className, { label: `${className} / rules only` }));
+
+  if (hierarchyOptions.length > 0) {
+    return [...byClass.values()];
+  }
 
   return [...byClass.values()].sort((left, right) => compareText(left.label, right.label));
 }
 
-function populateMappingEditorFields() {
+function cmdbClassHierarchySelectOptions(catalog = {}, configured = new Set()) {
+  const classes = (catalog.classes ?? []).filter(item => item?.name);
+  if (classes.length === 0) {
+    return [];
+  }
+
+  const byName = new Map(classes.map(item => [normalizeClassName(item.name), item]));
+  const childrenByParent = cmdbChildrenByParent(catalog);
+  const roots = classes
+    .filter(item => {
+      const parentName = cmdbParentClassName(item);
+      return !parentName || !byName.has(parentName);
+    })
+    .sort(compareCmdbClasses);
+
+  return roots.flatMap(item => cmdbClassHierarchySelectBranch(item, 0, childrenByParent, configured));
+}
+
+function cmdbClassHierarchySelectBranch(item, depth, childrenByParent, configured) {
+  const children = childrenByParent.get(normalizeClassName(item.name)) ?? [];
+  const superclass = isCmdbSuperclass(item, children);
+  const displayName = catalogClassDisplayName(state.mappingCmdbuildCatalog ?? {}, item);
+  const prefix = depth > 0 ? `${'  '.repeat(depth)}↳ ` : '';
+  const markers = [
+    superclass ? 'superclass' : '',
+    configured.has(normalizeClassName(item.name)) ? 'rules' : ''
+  ].filter(Boolean);
+  const option = {
+    value: item.name,
+    label: `${prefix}${displayName}${displayName !== item.name ? ` / ${item.name}` : ''}${markers.length ? ` (${markers.join(', ')})` : ''}`,
+    disabled: superclass,
+    className: superclass ? 'mapping-class-option-super' : ''
+  };
+
+  return [
+    option,
+    ...children.flatMap(child => cmdbClassHierarchySelectBranch(child, depth + 1, childrenByParent, configured))
+  ];
+}
+
+function nearestConcreteClassOption(options, catalog, className) {
+  const candidates = nearestConcreteClassNames(catalog, className).map(normalizeClassName);
+  if (candidates.length === 0) {
+    return null;
+  }
+  return options.find(option => !option.disabled && candidates.includes(normalizeClassName(option.value))) ?? null;
+}
+
+function nearestConcreteClassNames(catalog = {}, className = '') {
+  const start = findCatalogClass(catalog, className);
+  if (!start) {
+    return [];
+  }
+
+  const childrenByParent = cmdbChildrenByParent(catalog);
+  const queue = [...(childrenByParent.get(normalizeClassName(start.name)) ?? [])].sort(compareCmdbClasses);
+  const result = [];
+  while (queue.length > 0) {
+    const item = queue.shift();
+    const children = childrenByParent.get(normalizeClassName(item.name)) ?? [];
+    if (!isCmdbSuperclass(item, children)) {
+      result.push(item.name);
+      continue;
+    }
+    queue.push(...children.sort(compareCmdbClasses));
+  }
+  return result;
+}
+
+function cmdbChildrenByParent(catalog = {}) {
+  const classes = (catalog.classes ?? []).filter(item => item?.name);
+  const byName = new Map(classes.map(item => [normalizeClassName(item.name), item]));
+  const childrenByParent = new Map();
+  for (const item of classes) {
+    const parentName = cmdbParentClassName(item);
+    if (!parentName || !byName.has(parentName)) {
+      continue;
+    }
+
+    const children = childrenByParent.get(parentName) ?? [];
+    children.push(item);
+    childrenByParent.set(parentName, children);
+  }
+
+  for (const children of childrenByParent.values()) {
+    children.sort(compareCmdbClasses);
+  }
+  return childrenByParent;
+}
+
+function populateMappingEditorFields(options = {}) {
   const select = $('#mappingEditField');
-  const previous = select.value;
+  const previous = options.selectedValue !== undefined ? options.selectedValue : select.value;
   const rules = currentMappingRules();
   const sourceFields = rules.source?.fields ?? {};
   const selectedClass = $('#mappingEditClass').value;
+  const targetType = $('#mappingEditTargetType')?.value ?? '';
   const configuredOptions = Object.entries(sourceFields)
-    .filter(([fieldKey, field]) => !selectedClass || isVirtualSourceFieldRule(fieldKey, field) || mappingEditorAttributeForField(selectedClass, fieldKey, rules) || field.cmdbPath)
+    .filter(([fieldKey, field]) => isMappingSourceFieldCompatibleWithClass(selectedClass, fieldKey, field, rules))
+    .filter(([fieldKey, field]) => isMappingFieldAllowedForTarget(fieldKey, field, targetType))
     .sort(([left], [right]) => compareText(left, right))
     .map(([fieldKey, field]) => ({
       value: fieldKey,
       label: mappingEditorSourceFieldLabel(fieldKey, field)
     }));
-  const catalogOptions = mappingEditorCatalogFieldOptions(selectedClass, sourceFields);
+  const catalogOptions = mappingEditorCatalogFieldOptions(selectedClass, sourceFields)
+    .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
   state.mappingEditorFieldOptions = new Map(catalogOptions
     .filter(option => option.fieldRule)
     .map(option => [option.value, option]));
-  const options = selectedClass
+  let fieldOptions = selectedClass
     ? [...configuredOptions, ...catalogOptions]
     : configuredOptions;
-  setSelectOptions(select, options, previous || 'className');
+  const selectedField = state.mappingModifyFieldValue || previous || '';
+  if (selectedField && !fieldOptions.some(option => option.value === selectedField)) {
+    fieldOptions = [{
+      value: selectedField,
+      label: tf('mapping.option.currentFieldMissing', { field: selectedField }),
+      status: 'stale',
+      meta: t('mapping.option.currentFieldMissingMeta')
+    }, ...fieldOptions];
+  }
+  if (fieldOptions.length === 0) {
+    fieldOptions = [{
+      value: '',
+      label: targetType
+        ? tf('mapping.option.noCompatibleFields', { target: mappingTargetTypeLabel(targetType) })
+        : t('mapping.option.noFields'),
+      status: 'invalid'
+    }];
+  }
+  fieldOptions = [
+    {
+      value: '',
+      label: t('mapping.option.chooseLeaf'),
+      status: 'invalid',
+      meta: t('mapping.option.chooseLeafMeta')
+    },
+    ...fieldOptions.filter(option => option.value !== '')
+  ];
+  state.mappingEditorFieldOptionStates = new Map(fieldOptions.map(option => [option.value, option.status ?? 'valid']));
+  state.mappingModifyFieldValue = '';
+  setSelectOptions(select, fieldOptions, selectedField);
 }
 
-function populateMappingEditorStructures() {
+function populateMappingEditorStructures(options = {}) {
   const select = $('#mappingEditTargetType');
-  const previous = select.value;
-  setSelectOptions(select, [
-    { value: 'hostGroups', label: 'Host group rule' },
-    { value: 'templates', label: 'Template rule' },
-    { value: 'tags', label: 'Tag rule' },
-    { value: 'interfaceAddress', label: 'Interface address rule' },
-    { value: 'interface', label: 'Interface rule' },
+  const previous = options.selectedValue !== undefined ? options.selectedValue : select.value;
+  const field = options.fieldValue !== undefined ? options.fieldValue : $('#mappingEditField')?.value ?? '';
+  const fieldRule = field
+    ? currentMappingRules().source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {}
+    : null;
+  let structureOptions = [
+    { value: 'hostGroups', label: mappingTargetTypeLabel('hostGroups') },
+    { value: 'templates', label: mappingTargetTypeLabel('templates') },
+    { value: 'tags', label: mappingTargetTypeLabel('tags') },
+    { value: 'interfaceAddress', label: mappingTargetTypeLabel('interfaceAddress') },
+    { value: 'interface', label: mappingTargetTypeLabel('interface') },
+    { value: 'monitoringSuppression', label: mappingTargetTypeLabel('monitoringSuppression') },
     ...mappingEditorEditableExtensionDefinitions()
       .map(definition => ({ value: definition.rulesKey, label: `${definition.title} rule` }))
-  ], previous || 'hostGroups');
+  ];
+  if (fieldRule) {
+    structureOptions = structureOptions
+      .filter(option => isMappingFieldAllowedForTarget(field, fieldRule, option.value));
+  }
+  structureOptions = [
+    {
+      value: '',
+      label: t('mapping.option.chooseStructure'),
+      status: 'invalid',
+      meta: t('mapping.option.chooseStructureMeta')
+    },
+    ...structureOptions
+  ];
+  setSelectOptions(select, structureOptions, previous);
 }
 
-async function populateMappingEditorTargets() {
+async function populateMappingEditorTargets(options = {}) {
   const select = $('#mappingEditZabbixObject');
-  const previous = select.value;
+  const previous = options.selectedValue !== undefined ? options.selectedValue : select.value;
   const type = $('#mappingEditTargetType').value;
   const extension = mappingEditorExtensionDefinition(type);
   if (shouldLoadMappingEditorExtensionCatalog(extension)) {
-    setSelectOptions(select, [{ value: '', label: 'Загрузка Zabbix catalog...' }], '');
+    setSelectOptions(select, [{ value: '', label: t('mapping.option.loadingZabbix') }], '');
     try {
       const response = await api(`/api/zabbix/catalog/${extension.lazyCatalogPath}`);
       if ($('#mappingEditTargetType').value !== type) {
@@ -1643,32 +4409,46 @@ async function populateMappingEditorTargets() {
       if ($('#mappingEditTargetType').value !== type) {
         return;
       }
-      setSelectOptions(select, [{ value: '', label: `Ошибка загрузки: ${error.message}` }], '');
+      setSelectOptions(select, [{ value: '', label: tf('mapping.option.loadError', { message: error.message }) }], '');
       return;
     }
   }
 
-  const items = mappingEditorTargetOptions(type, currentMappingRules());
-  setSelectOptions(select, items, previous);
+  let items = mappingEditorTargetOptions(type, currentMappingRules());
+  let selectedTarget = state.mappingModifyTargetValue || previous;
+  let missingRuleTarget = false;
+  if (selectedTarget && !items.some(item => item.value === selectedTarget)) {
+    missingRuleTarget = true;
+    selectedTarget = '';
+  }
+  items = [
+    {
+      value: '',
+      label: missingRuleTarget
+        ? t('mapping.option.currentTargetMissingChooseNew')
+        : t('mapping.option.chooseTarget'),
+      status: 'invalid',
+      meta: missingRuleTarget
+        ? t('mapping.option.currentTargetMissingMeta')
+        : t('mapping.option.chooseTargetMeta')
+    },
+    ...items.filter(item => item.value !== '')
+  ];
+  state.mappingEditorTargetOptionStates = new Map(items.map(option => [option.value, option.status ?? 'valid']));
+  state.mappingModifyTargetValue = '';
+  setSelectOptions(select, items, selectedTarget);
   updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
 }
 
 function mappingEditorTargetOptions(type, rules) {
   if (type === 'hostGroups') {
-    return uniqueMappingObjects([
-      ...(state.mappingZabbixCatalog?.hostGroups ?? []),
-      ...(rules.lookups?.hostGroups ?? []),
-      ...(rules.defaults?.hostGroups ?? [])
-    ], item => item.groupid || item.name)
+    return uniqueMappingObjects(state.mappingZabbixCatalog?.hostGroups ?? [], item => item.groupid || item.name)
       .map(item => optionFromPayload(item.name || item.groupid, item));
   }
 
   if (type === 'templates') {
-    return uniqueMappingObjects([
-      ...(state.mappingZabbixCatalog?.templates ?? []),
-      ...(rules.lookups?.templates ?? []),
-      ...(rules.defaults?.templates ?? [])
-    ], item => item.templateid || item.name || item.host)
+    return uniqueMappingObjects(state.mappingZabbixCatalog?.templates ?? [], item => item.templateid || item.name || item.host)
       .map(item => optionFromPayload(item.name || item.host || item.templateid, item));
   }
 
@@ -1683,15 +4463,23 @@ function mappingEditorTargetOptions(type, rules) {
 
   if (type === 'interfaceAddress') {
     return [
-      optionFromPayload('IP address -> interfaces[].ip / useip=1', { mode: 'ip', valueField: 'ipAddress' }),
-      optionFromPayload('DNS name -> interfaces[].dns / useip=0', { mode: 'dns', valueField: 'dnsName' })
+      optionFromPayload(t('mapping.option.ipAddress'), { mode: 'ip', valueField: 'ipAddress' }),
+      optionFromPayload(t('mapping.option.dnsName'), { mode: 'dns', valueField: 'dnsName' })
     ];
   }
 
   if (type === 'interface') {
     return [
-      optionFromPayload('Agent interface', { interfaceRef: 'agentInterface' }),
-      optionFromPayload('SNMP interface', { interfaceRef: 'snmpInterface' })
+      optionFromPayload(t('mapping.option.agentInterface'), { interfaceRef: 'agentInterface' }),
+      optionFromPayload(t('mapping.option.snmpInterface'), { interfaceRef: 'snmpInterface' })
+    ];
+  }
+
+  if (type === 'monitoringSuppression') {
+    return [
+      optionFromPayload(t('mapping.option.monitoringSuppression'), {
+        reason: 'object_policy_do_not_monitor'
+      })
     ];
   }
 
@@ -1735,7 +4523,7 @@ function mappingEditorExtensionTargetOptions(definition, rules) {
   if (definition.rulesKey === 'interfaceProfiles') {
     return Object.keys(rules.defaults?.interfaceProfiles ?? {})
       .sort(compareText)
-      .map(name => optionFromPayload(`Profile: ${name}`, { interfaceProfileRef: name }));
+      .map(name => optionFromPayload(tf('mapping.option.profilePrefix', { name }), { interfaceProfileRef: name }));
   }
 
   const items = zabbixExtensionItems(rules, state.mappingZabbixCatalog ?? {}, definition);
@@ -1745,13 +4533,13 @@ function mappingEditorExtensionTargetOptions(definition, rules) {
     .map(target => optionFromPayload(mappingEditorTargetLabel(definition, target), target));
 
   if (definition.rulesKey === 'hostMacros') {
-    options.unshift(optionFromPayload('Новый host macro из class attribute field', {
+    options.unshift(optionFromPayload(t('mapping.option.newHostMacro'), {
       macro: '{$CMDB.VALUE}',
       valueTemplate: ''
     }));
   }
   if (definition.rulesKey === 'inventoryFields' && options.length === 0) {
-    options.push(optionFromPayload('Inventory field из class attribute field', {
+    options.push(optionFromPayload(t('mapping.option.inventoryFromField'), {
       field: 'asset_tag',
       valueTemplate: ''
     }));
@@ -1877,11 +4665,24 @@ function setSelectOptions(select, options, selectedValue = '') {
     const node = document.createElement('option');
     node.value = option.value;
     node.textContent = option.label;
+    node.disabled = Boolean(option.disabled);
+    if (option.className) {
+      node.className = option.className;
+    }
+    if (option.title || option.meta) {
+      node.title = option.title ?? option.meta;
+    }
     return node;
   }));
 
-  if (options.some(option => option.value === selectedValue)) {
+  if (options.some(option => option.value === selectedValue && !option.disabled)) {
     select.value = selectedValue;
+    return;
+  }
+
+  const firstEnabled = options.find(option => !option.disabled);
+  if (firstEnabled) {
+    select.value = firstEnabled.value;
   }
 }
 
@@ -1913,12 +4714,256 @@ function isMappingEditorFieldValidForClass(className, fieldKey) {
 
   const field = currentMappingRules().source?.fields?.[fieldKey] ?? { source: fieldKey };
   return isVirtualSourceFieldRule(fieldKey, field)
+    || sourceFieldPathStartsWithClass(className, field)
     || Boolean(mappingEditorAttributeForField(className, fieldKey));
+}
+
+function isMappingSourceFieldCompatibleWithClass(className, fieldKey, field, rules = currentMappingRules()) {
+  if (!className) {
+    return true;
+  }
+  return isVirtualSourceFieldRule(fieldKey, field)
+    || Boolean(mappingEditorAttributeForField(className, fieldKey, rules))
+    || sourceFieldPathStartsWithClass(className, field);
+}
+
+function sourceFieldPathStartsWithClass(className, field = {}) {
+  if (!className || !field?.cmdbPath) {
+    return false;
+  }
+
+  const rootClass = String(field.cmdbPath).split('.')[0] ?? '';
+  const catalog = state.mappingCmdbuildCatalog ?? {};
+  const selectedRuleName = catalogClassRuleName(catalog, className);
+  const rootRuleName = catalogClassRuleName(catalog, rootClass);
+  return normalizeClassName(selectedRuleName) === normalizeClassName(rootRuleName);
+}
+
+function updateMappingEditorFormState() {
+  const formState = mappingEditorFormValidation();
+  for (const selector of mappingEditorFormControlSelectors) {
+    setMappingEditorControlState(selector, 'normal', '');
+  }
+  for (const [selector, status] of Object.entries(formState.controls)) {
+    setMappingEditorControlState(selector, status.level, status.message);
+  }
+
+  const formStateNode = $('#mappingEditorFormState');
+  if (formStateNode) {
+    formStateNode.textContent = formState.summary;
+    formStateNode.classList.toggle('is-valid', formState.level === 'valid');
+    formStateNode.classList.toggle('is-invalid', formState.level === 'invalid');
+    formStateNode.classList.toggle('is-stale', formState.level === 'stale');
+  }
+
+  const saveButton = $('#mappingAddRule');
+  if (saveButton && ['add', 'modify'].includes(state.mappingEditAction)) {
+    saveButton.disabled = !formState.canSave;
+  }
+  const resetButton = $('#mappingResetForm');
+  if (resetButton) {
+    resetButton.disabled = !state.mappingDraftRules;
+  }
+}
+
+function setMappingEditorControlState(selector, level = 'normal', message = '') {
+  const control = $(selector);
+  const wrapper = control?.closest('label');
+  if (!wrapper) {
+    return;
+  }
+
+  wrapper.classList.toggle('mapping-editor-control-valid', level === 'valid');
+  wrapper.classList.toggle('mapping-editor-control-invalid', level === 'invalid');
+  wrapper.classList.toggle('mapping-editor-control-stale', level === 'stale');
+  wrapper.title = message || '';
+}
+
+function mappingEditorFormValidation() {
+  if (state.mappingMode !== 'edit' || !['add', 'modify'].includes(state.mappingEditAction)) {
+    return {
+      canSave: false,
+      level: 'normal',
+      summary: '',
+      controls: {}
+    };
+  }
+  if (!state.mappingDraftRules) {
+    return {
+      canSave: false,
+      level: 'invalid',
+      summary: t('mapping.status.loadMappingFirst'),
+      controls: {}
+    };
+  }
+
+  const className = $('#mappingEditClass')?.value ?? '';
+  const field = $('#mappingEditField')?.value ?? '';
+  const type = $('#mappingEditTargetType')?.value ?? '';
+  const targetValue = $('#mappingEditZabbixObject')?.value ?? '';
+  const priority = Number($('#mappingEditPriority')?.value || 0);
+  const selectedModifyRule = selectedMappingModifyItem(state.mappingDraftRules);
+  const fieldRule = field
+    ? currentMappingRules().source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {}
+    : {};
+  const target = targetValue ? readMappingEditorTarget() : {};
+  const classOption = [...($('#mappingEditClass')?.options ?? [])]
+    .find(option => normalizeClassName(option.value) === normalizeClassName(className));
+  const controls = {
+    '#mappingModifyRule': { level: 'valid', message: t('mapping.status.ruleForModifySelected') },
+    '#mappingEditClass': { level: 'valid', message: className ? t('mapping.status.classSelected') : t('mapping.status.noClassRestriction') },
+    '#mappingEditField': { level: 'valid', message: t('mapping.status.leafSelected') },
+    '#mappingEditTargetType': { level: 'valid', message: t('mapping.status.structureCompatible') },
+    '#mappingEditZabbixObject': { level: 'valid', message: t('mapping.status.targetSelected') },
+    '#mappingEditPriority': { level: 'valid', message: t('mapping.status.prioritySet') },
+    '#mappingEditRegex': { level: 'valid', message: t('mapping.status.regexSaved') },
+    '#mappingEditRuleName': { level: 'valid', message: t('mapping.status.ruleNameSetOrAuto') }
+  };
+  const messages = [];
+  const staleMessages = [];
+
+  if (state.mappingEditAction === 'modify' && !selectedModifyRule) {
+    return {
+      canSave: false,
+      level: 'invalid',
+      summary: t('mapping.status.noModifyRule'),
+      controls: {
+        '#mappingModifyRule': { level: 'invalid', message: t('mapping.status.modifyNeedsRule') }
+      }
+    };
+  }
+
+  if (classOption?.disabled) {
+    controls['#mappingEditClass'] = { level: 'invalid', message: t('mapping.status.superclassNotAllowed') };
+    messages.push(t('mapping.status.selectConcreteClass'));
+  }
+
+  if (!field) {
+    controls['#mappingEditField'] = { level: 'invalid', message: t('mapping.status.chooseLeafField') };
+    messages.push(t('mapping.status.chooseLeafField'));
+  } else if (!isMappingEditorFieldValidForClass(className, field)) {
+    const message = tf('mapping.status.fieldMissingInClass', { field });
+    controls['#mappingEditField'] = { level: 'invalid', message };
+    messages.push(message);
+  } else if (!isMappingFieldAllowedForTarget(field, fieldRule, type)) {
+    controls['#mappingEditField'] = { level: 'invalid', message: tf('mapping.status.fieldMultiValueIncompatible', { field, target: mappingTargetTypeLabel(type) }) };
+    controls['#mappingEditTargetType'] = { level: 'invalid', message: t('mapping.status.chooseStructureForField') };
+    messages.push(tf('mapping.status.fieldIncompatible', { field, target: mappingTargetTypeLabel(type) }));
+  } else {
+    const compatibilityMessage = mappingFieldTargetCompatibilityMessage(field, fieldRule, type, target);
+    if (compatibilityMessage) {
+      controls['#mappingEditField'] = { level: 'invalid', message: compatibilityMessage };
+      controls['#mappingEditZabbixObject'] = { level: 'invalid', message: compatibilityMessage };
+      messages.push(compatibilityMessage);
+    } else if (state.mappingEditorFieldOptionStates?.get(field) === 'stale') {
+      controls['#mappingEditField'] = { level: 'stale', message: tf('mapping.status.fieldStale', { field }) };
+      staleMessages.push(tf('mapping.status.fieldStaleShort', { field }));
+    }
+  }
+
+  if (!type) {
+    controls['#mappingEditTargetType'] = { level: 'invalid', message: t('mapping.status.chooseStructure') };
+    messages.push(t('mapping.status.chooseStructure'));
+  }
+
+  if (!targetValue) {
+    controls['#mappingEditZabbixObject'] = { level: 'invalid', message: t('mapping.status.chooseTarget') };
+    messages.push(t('mapping.status.chooseTarget'));
+  } else if (state.mappingEditorTargetOptionStates?.get(targetValue) === 'invalid') {
+    controls['#mappingEditZabbixObject'] = { level: 'invalid', message: t('mapping.status.targetMissing') };
+    messages.push(t('mapping.status.targetMissingSummary'));
+  } else if (state.mappingEditorTargetOptionStates?.get(targetValue) === 'stale') {
+    controls['#mappingEditZabbixObject'] = { level: 'stale', message: t('mapping.status.targetStale') };
+    staleMessages.push(t('mapping.status.targetStaleShort'));
+  }
+
+  if (!Number.isFinite(priority) || priority < 1) {
+    controls['#mappingEditPriority'] = { level: 'invalid', message: t('mapping.status.priorityPositive') };
+    messages.push(t('mapping.status.priorityPositive'));
+  }
+
+  const changed = state.mappingEditAction === 'add' || mappingEditorFormHasChanges();
+  if (state.mappingEditAction === 'modify' && !changed && messages.length === 0) {
+    messages.push(t('mapping.status.ruleResetNeeded'));
+  }
+
+  if (messages.length > 0) {
+    return {
+      canSave: false,
+      level: 'invalid',
+      summary: messages[0],
+      controls
+    };
+  }
+
+  if (staleMessages.length > 0) {
+    return {
+      canSave: changed,
+      level: 'stale',
+      summary: tf('mapping.status.readyButStale', { details: staleMessages.join(' ') }),
+      controls
+    };
+  }
+
+  return {
+    canSave: changed,
+    level: 'valid',
+    summary: state.mappingEditAction === 'modify'
+      ? t('mapping.status.canModify')
+      : t('mapping.status.canAdd'),
+    controls
+  };
+}
+
+function mappingEditorFormHasChanges() {
+  const selected = selectedMappingModifyItem(state.mappingDraftRules);
+  const candidate = mappingEditorRuleCandidate();
+  if (!selected || !candidate) {
+    return false;
+  }
+
+  return selected.collection.key !== candidate.rulesKey
+    || stableJson(selected.rule) !== stableJson(candidate.rule);
+}
+
+function mappingEditorRuleCandidate() {
+  const type = $('#mappingEditTargetType')?.value ?? '';
+  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass')?.value ?? '');
+  const field = $('#mappingEditField')?.value ?? '';
+  const regex = $('#mappingEditRegex')?.value.trim() ?? '';
+  const priority = Number($('#mappingEditPriority')?.value || 100);
+  const targetValue = $('#mappingEditZabbixObject')?.value ?? '';
+  if (!type || !field || !targetValue) {
+    return null;
+  }
+
+  const target = readMappingEditorTarget();
+  const ruleName = ($('#mappingEditRuleName')?.value.trim() || buildMappingRuleName(type, className, field, target)).trim();
+  return {
+    rulesKey: mappingRulesKey(type, target),
+    rule: buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName })
+  };
+}
+
+function applyMappingEditorRule() {
+  if (state.mappingEditAction === 'modify') {
+    modifyMappingConversionRule();
+    return;
+  }
+
+  addMappingConversionRule();
 }
 
 function addMappingConversionRule() {
   if (!state.mappingDraftRules) {
-    setMappingEditorStatus('Сначала загрузите управление правилами конвертации.');
+    setMappingEditorStatus(t('mapping.status.loadMappingFirst'));
+    return;
+  }
+
+  const formState = mappingEditorFormValidation();
+  if (!formState.canSave) {
+    updateMappingEditorFormState();
+    setMappingEditorStatus(formState.summary, 'warning');
     return;
   }
 
@@ -1929,8 +4974,21 @@ function addMappingConversionRule() {
   const regex = $('#mappingEditRegex').value.trim();
   const priority = Number($('#mappingEditPriority').value || 100);
   const target = readMappingEditorTarget();
+  if (!field) {
+    setMappingEditorStatus(t('mapping.status.chooseCompatibleFieldAdd'), 'warning');
+    return;
+  }
+
   if (!isMappingEditorFieldValidForClass(className, field)) {
-    setMappingEditorStatus(`В классе "${className}" нет атрибута для "${field}". Добавьте атрибут в CMDBuild или выберите существующий class attribute field.`);
+    setMappingEditorStatus(tf('mapping.status.classFieldMissing', { className, field }));
+    return;
+  }
+
+  const selectedFieldRule = rules.source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {};
+  if (!isMappingFieldAllowedForTarget(field, selectedFieldRule, type)) {
+    setMappingEditorStatus(
+      tf('mapping.status.multiValueScalarNotAllowed', { field, target: mappingTargetTypeLabel(type) }),
+      'warning');
     return;
   }
 
@@ -1944,7 +5002,454 @@ function addMappingConversionRule() {
   rules[rulesKey].push(rule);
   pushMappingHistory(rules);
   $('#mappingEditRuleName').value = '';
-  rerenderMappingDraft(`Добавлено правило "${ruleName}".`);
+  rerenderMappingDraft(tf('mapping.status.addedRule', { name: ruleName }));
+}
+
+function populateMappingModifyRules(options = {}) {
+  const select = $('#mappingModifyRule');
+  if (!select) {
+    return;
+  }
+
+  const previous = options.selectedValue !== undefined ? options.selectedValue : select.value;
+  const items = options.items ?? mappingModifyRuleItems(currentMappingRules());
+  const ruleOptions = items.map(item => ({
+    value: item.operationKey,
+    label: `${item.collection.label}: ${ruleDisplayName(item.rule)}`,
+    meta: mappingDeleteRuleMeta(item.rule, item.collection.type, currentMappingRules())
+  }));
+
+  setSelectOptions(select, ruleOptions.length > 0
+    ? [
+      {
+        value: '',
+        label: t('mapping.option.chooseRule'),
+        status: 'invalid',
+        meta: t('mapping.option.modifyStartsWithoutRuleMeta')
+      },
+      ...ruleOptions
+    ]
+    : [{ value: '', label: t('mapping.option.noRulesToModify'), disabled: true }], previous);
+}
+
+function populateMappingModifyFilterControls(options = {}) {
+  const rules = currentMappingRules();
+  const allItems = mappingModifyRuleItems(rules);
+  const filters = normalizedMappingModifyFilters(mappingModifyFilterValues());
+  if (options.autoSelect) {
+    autoFillMappingModifyFilters(filters, allItems, options.changed);
+  }
+
+  const filteredItems = mappingModifyRuleItemsMatching(allItems, filters, rules);
+  if (options.autoSelect && filteredItems.length === 1) {
+    $('#mappingModifyRule').value = filteredItems[0].operationKey;
+    populateMappingModifyRules({ items: filteredItems, selectedValue: filteredItems[0].operationKey });
+    loadSelectedMappingRuleIntoEditor({ silent: true });
+    refreshMappingEditorDependentControls();
+    setMappingEditorStatus(tf('mapping.status.autoSelected', { name: ruleDisplayName(filteredItems[0].rule) }));
+    return;
+  }
+
+  populateMappingModifyRules({ items: filteredItems, selectedValue: '' });
+  populateMappingModifyClassFilter(filteredItems, filters.className);
+  populateMappingModifyFieldFilter(filteredItems, filters.field, rules);
+  populateMappingModifyStructureFilter(filteredItems, filters.type);
+  populateMappingModifyTargetFilter(filteredItems, filters.targetValue, rules);
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
+function mappingModifyFilterValues() {
+  return {
+    className: $('#mappingEditClass')?.value ?? '',
+    field: $('#mappingEditField')?.value ?? '',
+    type: $('#mappingEditTargetType')?.value ?? '',
+    targetValue: $('#mappingEditZabbixObject')?.value ?? ''
+  };
+}
+
+function normalizedMappingModifyFilters(filters = {}) {
+  return {
+    className: filters.className ?? '',
+    field: filters.field ?? '',
+    type: filters.type ?? '',
+    targetValue: filters.targetValue ?? ''
+  };
+}
+
+function autoFillMappingModifyFilters(filters, allItems, changed) {
+  const keys = ['className', 'field', 'type', 'targetValue'].filter(key => key !== changed);
+  for (const key of keys) {
+    if (filters[key]) {
+      continue;
+    }
+
+    const candidates = mappingModifyRuleItemsMatching(allItems, filters, currentMappingRules());
+    const values = uniqueMappingModifyFilterValues(candidates, key);
+    if (values.length === 1) {
+      filters[key] = values[0];
+    }
+  }
+}
+
+function uniqueMappingModifyFilterValues(items, key) {
+  const values = new Map();
+  for (const item of items) {
+    const itemValues = {
+      className: mappingModifyItemClasses(item),
+      field: mappingModifyItemFields(item),
+      type: [item.collection.type],
+      targetValue: [mappingModifyItemTargetValue(item)]
+    }[key] ?? [];
+    for (const value of itemValues.filter(Boolean)) {
+      values.set(normalizeToken(value), value);
+    }
+  }
+  return [...values.values()];
+}
+
+function mappingModifyRuleItemsMatching(items, filters, rules) {
+  return items.filter(item => mappingModifyRuleItemMatches(item, filters, rules));
+}
+
+function mappingModifyRuleItemMatches(item, filters, rules) {
+  if (filters.className && !mappingModifyItemClasses(item, rules)
+    .some(className => normalizeClassName(className) === normalizeClassName(filters.className))) {
+    return false;
+  }
+  if (filters.field && !mappingModifyItemFields(item)
+    .some(field => canonicalSourceField(field) === canonicalSourceField(filters.field))) {
+    return false;
+  }
+  if (filters.type && item.collection.type !== filters.type) {
+    return false;
+  }
+  if (filters.targetValue && mappingModifyItemTargetValue(item) !== filters.targetValue) {
+    return false;
+  }
+  return true;
+}
+
+function mappingModifyItemClasses(item, rules = currentMappingRules()) {
+  return mappingDeleteClassesForItem(item, rules)
+    .filter(className => className !== '__any_class');
+}
+
+function mappingModifyItemFields(item) {
+  return mappingDeleteSourceFieldsForItem(item.rule)
+    .filter(field => !['className', 'eventType', 'zabbixHostId'].includes(canonicalSourceField(field)));
+}
+
+function mappingModifyItemTargetValue(item) {
+  return JSON.stringify(mappingRuleTargetForForm(item));
+}
+
+function populateMappingModifyClassFilter(items, selectedValue) {
+  const classes = uniqueTokens(items.flatMap(item => mappingModifyItemClasses(item)))
+    .sort(compareText);
+  const options = mappingModifyClassOptions(classes);
+  setClassSelectOptions($('#mappingEditClass'), [
+    { value: '', label: t('mapping.option.chooseClassFilter') },
+    ...options
+  ], selectedValue, state.mappingCmdbuildCatalog ?? {});
+}
+
+function mappingModifyClassOptions(classNames) {
+  const allowed = new Set(classNames.map(normalizeClassName));
+  const hierarchy = cmdbClassHierarchyFilteredSelectOptions(state.mappingCmdbuildCatalog ?? {}, allowed);
+  const known = new Set(hierarchy.map(option => normalizeClassName(option.value)));
+  const rulesOnly = classNames
+    .filter(className => !known.has(normalizeClassName(className)))
+    .map(className => ({
+      value: className,
+      label: `${className} / rules only`
+    }));
+  return [...hierarchy, ...rulesOnly];
+}
+
+function cmdbClassHierarchyFilteredSelectOptions(catalog = {}, allowed = new Set()) {
+  const classes = (catalog.classes ?? []).filter(item => item?.name);
+  if (classes.length === 0) {
+    return [];
+  }
+
+  const byName = new Map(classes.map(item => [normalizeClassName(item.name), item]));
+  const childrenByParent = cmdbChildrenByParent(catalog);
+  const roots = classes
+    .filter(item => {
+      const parentName = cmdbParentClassName(item);
+      return !parentName || !byName.has(parentName);
+    })
+    .sort(compareCmdbClasses);
+
+  return roots.flatMap(item => cmdbClassHierarchyFilteredBranch(item, 0, childrenByParent, allowed));
+}
+
+function cmdbClassHierarchyFilteredBranch(item, depth, childrenByParent, allowed) {
+  const children = childrenByParent.get(normalizeClassName(item.name)) ?? [];
+  const childOptions = children.flatMap(child => cmdbClassHierarchyFilteredBranch(child, depth + 1, childrenByParent, allowed));
+  const selfAllowed = allowed.has(normalizeClassName(item.name));
+  if (!selfAllowed && childOptions.length === 0) {
+    return [];
+  }
+
+  const superclass = isCmdbSuperclass(item, children);
+  const displayName = catalogClassDisplayName(state.mappingCmdbuildCatalog ?? {}, item);
+  const prefix = depth > 0 ? `${'  '.repeat(depth)}↳ ` : '';
+  const option = {
+    value: item.name,
+    label: `${prefix}${displayName}${displayName !== item.name ? ` / ${item.name}` : ''}${superclass ? ' (superclass)' : ''}`,
+    disabled: superclass || !selfAllowed,
+    className: superclass || !selfAllowed ? 'mapping-class-option-super' : ''
+  };
+  return [option, ...childOptions];
+}
+
+function populateMappingModifyFieldFilter(items, selectedValue, rules) {
+  const fields = uniqueTokens(items.flatMap(item => mappingModifyItemFields(item)))
+    .sort(compareText);
+  const options = fields.map(field => ({
+    value: field,
+    label: mappingDeleteSourceFieldLabel(rules, field),
+    meta: mappingDeleteSourceFieldMeta(rules, field)
+  }));
+  setSelectOptions($('#mappingEditField'), [
+    {
+      value: '',
+      label: t('mapping.option.chooseFieldFilter'),
+      status: 'invalid'
+    },
+    ...options
+  ], selectedValue);
+}
+
+function populateMappingModifyStructureFilter(items, selectedValue) {
+  const types = uniqueTokens(items.map(item => item.collection.type))
+    .sort(compareText);
+  const options = types.map(type => ({
+    value: type,
+    label: mappingTargetTypeLabel(type)
+  }));
+  setSelectOptions($('#mappingEditTargetType'), [
+    {
+      value: '',
+      label: t('mapping.option.chooseStructureFilter'),
+      status: 'invalid'
+    },
+    ...options
+  ], selectedValue);
+}
+
+function populateMappingModifyTargetFilter(items, selectedValue, rules) {
+  const targets = new Map();
+  for (const item of items) {
+    const value = mappingModifyItemTargetValue(item);
+    const label = mappingDeleteTargetsForItem(item, rules)[0]
+      || ruleDisplayName(item.rule)
+      || item.collection.label;
+    if (!targets.has(value)) {
+      targets.set(value, {
+        value,
+        label: `${mappingTargetTypeLabel(item.collection.type)}: ${label}`
+      });
+    }
+  }
+
+  setSelectOptions($('#mappingEditZabbixObject'), [
+    {
+      value: '',
+      label: t('mapping.option.chooseTargetFilter'),
+      status: 'invalid'
+    },
+    ...[...targets.values()].sort((left, right) => compareText(left.label, right.label))
+  ], selectedValue);
+}
+
+function mappingModifyRuleItems(rules) {
+  const editableTypes = new Set(mappingEditorEditableTargetTypes());
+  return mappingDeleteRuleItems(rules)
+    .filter(item => editableTypes.has(item.collection.type));
+}
+
+function mappingEditorEditableTargetTypes() {
+  return [
+    'hostGroups',
+    'templates',
+    'tags',
+    'interfaceAddress',
+    'interface',
+    'monitoringSuppression',
+    ...mappingEditorEditableExtensionDefinitions().map(definition => definition.rulesKey)
+  ];
+}
+
+function selectedMappingModifyItem(rules = currentMappingRules()) {
+  const operationKey = $('#mappingModifyRule')?.value ?? '';
+  if (!operationKey) {
+    return null;
+  }
+  return mappingModifyRuleItems(rules).find(item => item.operationKey === operationKey) ?? null;
+}
+
+function loadSelectedMappingRuleIntoEditor(options = {}) {
+  const item = selectedMappingModifyItem();
+  if (!item) {
+    if (!options.silent) {
+      setMappingEditorStatus(t('mapping.status.noModifyRule'), 'warning');
+    }
+    return;
+  }
+
+  const form = mappingRuleFormValues(item, currentMappingRules());
+  $('#mappingEditTargetType').value = form.type;
+  populateMappingEditorClasses();
+  const classSelect = $('#mappingEditClass');
+  const selectedClass = nearestConcreteClassOption(
+    [...classSelect.options].map(option => ({
+      value: option.value,
+      disabled: option.disabled
+    })),
+    state.mappingCmdbuildCatalog ?? {},
+    form.className
+  );
+  classSelect.value = selectedClass?.value || form.className;
+  $('#mappingEditPriority').value = String(form.priority);
+  $('#mappingEditRegex').value = form.regex;
+  $('#mappingEditRuleName').value = form.ruleName;
+  state.mappingModifyTargetValue = form.targetValue;
+  if (form.field) {
+    state.mappingModifyFieldValue = form.field;
+  }
+}
+
+function mappingRuleFormValues(item, rules) {
+  const className = ruleClassConditions(item.rule)[0] ?? '';
+  const fields = mappingDeleteSourceFieldsForItem(item.rule)
+    .filter(field => !['className', 'eventType', 'zabbixHostId'].includes(canonicalSourceField(field)));
+  const field = item.rule.valueField || fields[0] || '';
+  return {
+    type: item.collection.type,
+    className,
+    field,
+    regex: mappingRuleRegexForField(item.rule, field),
+    priority: Number.isFinite(Number(item.rule.priority)) ? Number(item.rule.priority) : 100,
+    ruleName: ruleDisplayName(item.rule),
+    targetValue: JSON.stringify(mappingRuleTargetForForm(item))
+  };
+}
+
+function mappingRuleRegexForField(rule, field) {
+  const matchers = [
+    ...(rule.when?.allRegex ?? []),
+    ...(rule.when?.anyRegex ?? [])
+  ];
+  const selected = matchers.find(matcher => canonicalSourceField(matcher.field) === canonicalSourceField(field))
+    ?? matchers.find(matcher => !['className', 'eventType', 'zabbixHostId'].includes(canonicalSourceField(matcher.field)));
+  return selected?.pattern ?? '(?i).*';
+}
+
+function mappingRuleTargetForForm(item) {
+  const rule = item.rule;
+  const type = item.collection.type;
+  if (type === 'hostGroups') {
+    return rule.hostGroups?.[0] ?? {};
+  }
+  if (type === 'templates') {
+    return rule.templates?.[0] ?? {};
+  }
+  if (type === 'tags') {
+    return rule.tags?.[0] ?? {};
+  }
+  if (type === 'interfaceAddress') {
+    return { mode: rule.mode ?? 'ip', valueField: rule.valueField ?? 'ipAddress' };
+  }
+  if (type === 'interface') {
+    return { interfaceRef: rule.interfaceRef ?? 'agentInterface' };
+  }
+  if (type === 'monitoringSuppression') {
+    return { reason: rule.reason ?? 'object_policy_do_not_monitor' };
+  }
+
+  return {
+    proxies: rule.proxy,
+    proxyGroups: rule.proxyGroup,
+    hostMacros: rule.hostMacro,
+    inventoryFields: rule.inventoryField,
+    interfaceProfiles: { interfaceProfileRef: rule.interfaceProfileRef },
+    hostStatuses: rule.hostStatus,
+    maintenances: rule.maintenance,
+    tlsPskModes: rule.tlsPskMode,
+    valueMaps: rule.valueMap
+  }[type] ?? {};
+}
+
+function modifyMappingConversionRule() {
+  if (!state.mappingDraftRules) {
+    setMappingEditorStatus(t('mapping.status.loadMappingFirst'));
+    return;
+  }
+
+  const formState = mappingEditorFormValidation();
+  if (!formState.canSave) {
+    updateMappingEditorFormState();
+    setMappingEditorStatus(formState.summary, 'warning');
+    return;
+  }
+
+  const selected = selectedMappingModifyItem(state.mappingDraftRules);
+  if (!selected) {
+    setMappingEditorStatus(t('mapping.status.noModifyRule'), 'warning');
+    return;
+  }
+
+  const rules = cloneJson(state.mappingDraftRules);
+  const type = $('#mappingEditTargetType').value;
+  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass').value);
+  const field = $('#mappingEditField').value;
+  const regex = $('#mappingEditRegex').value.trim();
+  const priority = Number($('#mappingEditPriority').value || 100);
+  const target = readMappingEditorTarget();
+  if (!field) {
+    setMappingEditorStatus(t('mapping.status.chooseCompatibleFieldModify'), 'warning');
+    return;
+  }
+
+  if (!isMappingEditorFieldValidForClass(className, field)) {
+    setMappingEditorStatus(tf('mapping.status.classFieldMissing', { className, field }));
+    return;
+  }
+
+  const selectedFieldRule = rules.source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {};
+  if (!isMappingFieldAllowedForTarget(field, selectedFieldRule, type)) {
+    setMappingEditorStatus(
+      tf('mapping.status.multiValueScalarNotAllowed', { field, target: mappingTargetTypeLabel(type) }),
+      'warning');
+    return;
+  }
+
+  const ruleName = ($('#mappingEditRuleName').value.trim() || buildMappingRuleName(type, className, field, target)).trim();
+  const rule = buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName });
+  ensureMappingEditorClass(rules, className);
+  ensureMappingEditorSourceField(rules, field);
+
+  const newRulesKey = mappingRulesKey(type, target);
+  if (selected.collection.key === newRulesKey && stableJson(selected.rule) === stableJson(rule)) {
+    setMappingEditorStatus(t('mapping.status.noRuleChanges'), 'warning');
+    updateMappingEditorFormState();
+    return;
+  }
+
+  const oldRules = Array.isArray(rules[selected.collection.key]) ? rules[selected.collection.key] : [];
+  if (selected.index < 0 || selected.index >= oldRules.length) {
+    setMappingEditorStatus(t('mapping.status.modifyRuleMissing'), 'warning');
+    return;
+  }
+
+  oldRules.splice(selected.index, 1);
+  rules[newRulesKey] = Array.isArray(rules[newRulesKey]) ? rules[newRulesKey] : [];
+  rules[newRulesKey].push(rule);
+  pushMappingHistory(rules);
+  rerenderMappingDraft(tf('mapping.status.modifiedRule', { name: ruleName }));
 }
 
 function readMappingEditorTarget() {
@@ -1977,6 +5482,8 @@ function buildMappingEditorRule({ type, className, field, regex, priority, targe
     } else {
       rule.interfaceRef = target.interfaceRef ?? 'agentInterface';
     }
+  } else if (type === 'monitoringSuppression') {
+    rule.reason = target.reason ?? 'object_policy_do_not_monitor';
   } else {
     applyMappingEditorExtensionTarget(rule, type, target, field);
   }
@@ -2045,13 +5552,15 @@ function mappingEditorCatalogFieldOptions(className, sourceFields) {
     });
   }
 
+  options.push(...domainLeafFieldOptions(rootClass));
+
   return options
     .filter(option => !sourceFieldHasCatalogOption(sourceFields, option))
     .sort((left, right) => compareText(left.label, right.label));
 }
 
 function referenceLeafFieldOptions(rootClass, attribute, prefix = [], depth = 1, seen = new Set()) {
-  const maxDepth = 5;
+  const maxDepth = mappingTraversalMaxDepth();
   const targetClass = attribute.targetClass;
   if (!targetClass || depth > maxDepth) {
     return [];
@@ -2090,6 +5599,150 @@ function referenceLeafFieldOptions(rootClass, attribute, prefix = [], depth = 1,
   return options;
 }
 
+function domainLeafFieldOptions(rootClass) {
+  const options = [];
+  for (const targetClass of domainTargetClassesForSourceClass(rootClass)) {
+    for (const attribute of mappingEditorClassAttributes(targetClass)) {
+      if (!isReadableMappingAttribute(attribute)) {
+        continue;
+      }
+
+      if (isReferenceAttribute(attribute)) {
+        options.push(...domainReferenceLeafFieldOptions(rootClass, targetClass, attribute));
+        continue;
+      }
+
+      const leafPath = [attribute];
+      const fieldRule = sourceFieldRuleForDomainPath(rootClass, targetClass, leafPath);
+      options.push({
+        value: fieldKeyForDomainPath(targetClass, leafPath),
+        label: `domain ${catalogClassDisplayName(state.mappingCmdbuildCatalog ?? {}, targetClass)} -> ${attribute.name}${attribute.type ? ` / ${attribute.type}` : ''}`,
+        fieldRule
+      });
+    }
+  }
+
+  return options;
+}
+
+function domainReferenceLeafFieldOptions(rootClass, domainTargetClass, attribute, prefix = [], depth = 1, seen = new Set()) {
+  const maxDepth = mappingTraversalMaxDepth();
+  const targetClass = attribute.targetClass;
+  if (!targetClass || depth > maxDepth) {
+    return [];
+  }
+
+  const visitKey = `${domainTargetClass}:${targetClass}:${attribute.name}`;
+  if (seen.has(visitKey)) {
+    return [];
+  }
+
+  const nextSeen = new Set(seen);
+  nextSeen.add(visitKey);
+  const path = [...prefix, attribute];
+  const options = [];
+  for (const targetAttribute of mappingEditorClassAttributes(targetClass)) {
+    if (!isReadableMappingAttribute(targetAttribute)) {
+      continue;
+    }
+
+    if (isReferenceAttribute(targetAttribute)) {
+      options.push(...domainReferenceLeafFieldOptions(rootClass, domainTargetClass, targetAttribute, path, depth + 1, nextSeen));
+      continue;
+    }
+
+    const leafPath = [...path, targetAttribute];
+    const fieldRule = sourceFieldRuleForDomainPath(rootClass, domainTargetClass, leafPath);
+    options.push({
+      value: fieldKeyForDomainPath(domainTargetClass, leafPath),
+      label: `domain ${catalogClassDisplayName(state.mappingCmdbuildCatalog ?? {}, domainTargetClass)} -> ${leafPath.map(item => item.name).join(' -> ')}${targetAttribute.type ? ` / ${targetAttribute.type}` : ''}`,
+      fieldRule
+    });
+  }
+
+  return options;
+}
+
+function domainTargetClassesForSourceClass(rootClass) {
+  const catalog = state.mappingCmdbuildCatalog ?? {};
+  const targets = new Map();
+  for (const domain of catalog.domains ?? []) {
+    const otherClass = cmdbDomainOtherClass(domain, rootClass);
+    if (!otherClass) {
+      continue;
+    }
+
+    const targetClass = catalogClassRuleName(catalog, otherClass);
+    const catalogClass = findCatalogClass(catalog, targetClass);
+    if (!catalogClass || isCmdbCatalogSuperclass(catalog, catalogClass)) {
+      continue;
+    }
+
+    const key = normalizeClassName(targetClass);
+    if (key && !targets.has(key)) {
+      targets.set(key, targetClass);
+    }
+  }
+
+  return [...targets.values()].sort(compareText);
+}
+
+function cmdbDomainOtherClass(domain, rootClass) {
+  const sourceClass = cmdbDomainEndpointClass(domain, 'source');
+  const destinationClass = cmdbDomainEndpointClass(domain, 'destination');
+  if (equalsIgnoreCase(sourceClass, rootClass) && destinationClass) {
+    return destinationClass;
+  }
+  if (equalsIgnoreCase(destinationClass, rootClass) && sourceClass) {
+    return sourceClass;
+  }
+
+  return '';
+}
+
+function cmdbDomainEndpointClass(domain, side) {
+  const isSource = side === 'source';
+  const propertyNames = isSource
+    ? ['source', 'sourceClass', 'sourceClassName', '_sourceClass', '_sourceType', 'sourceType', 'src', 'srcClass', 'srcType']
+    : ['destination', 'destinationClass', 'destinationClassName', '_destinationClass', '_destinationType', 'destinationType', 'target', 'targetClass', 'targetClassName', '_targetClass', '_targetType', 'targetType', 'dst', 'dstClass', 'dstType'];
+  for (const item of [domain, domain?.raw].filter(Boolean)) {
+    for (const propertyName of propertyNames) {
+      const value = cmdbDomainEndpointValue(item[propertyName]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return '';
+}
+
+function cmdbDomainEndpointValue(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return cmdbDomainEndpointValue(value[0]);
+  }
+  if (typeof value === 'object') {
+    for (const propertyName of ['name', '_id', 'id', 'className', 'class', 'type', '_type', 'description', '_description']) {
+      const nestedValue = cmdbDomainEndpointValue(value[propertyName]);
+      if (nestedValue) {
+        return nestedValue;
+      }
+    }
+  }
+
+  return '';
+}
+
+function mappingTraversalMaxDepth(catalog = state.mappingCmdbuildCatalog) {
+  return clampNumber(catalog?.maxTraversalDepth, 2, 2, 5);
+}
+
 function sourceFieldRuleForDirectAttribute(rootClass, attribute, fieldKey) {
   const rule = {
     source: attribute?.name ?? fieldKey,
@@ -2113,9 +5766,36 @@ function sourceFieldRuleForDirectAttribute(rootClass, attribute, fieldKey) {
   return rule;
 }
 
+function sourceFieldRuleForDomainPath(rootClass, targetClass, path) {
+  const leaf = path[path.length - 1] ?? {};
+  const cmdbPath = [rootClass, `{domain:${targetClass}}`, ...path.map(item => item.name)].join('.');
+  const maxDepth = mappingTraversalMaxDepth();
+  const rule = {
+    source: 'id',
+    cmdbAttribute: `{domain:${targetClass}}${path[0]?.name ? `.${path[0].name}` : ''}`,
+    cmdbPath,
+    type: leaf.type ?? '',
+    required: false,
+    resolve: {
+      mode: 'cmdbPath',
+      valueMode: isLookupAttribute(leaf) ? 'code' : 'leaf',
+      collectionMode: 'join',
+      collectionSeparator: '; ',
+      maxDepth
+    }
+  };
+  if (isLookupAttribute(leaf)) {
+    rule.lookupType = leaf.lookupType ?? leaf.name;
+    rule.resolve.leafType = 'lookup';
+    rule.resolve.lookupType = rule.lookupType;
+  }
+  return rule;
+}
+
 function sourceFieldRuleForCmdbPath(cmdbPath, path) {
   const first = path[0];
   const leaf = path[path.length - 1];
+  const maxDepth = mappingTraversalMaxDepth();
   const rule = {
     source: first.name,
     cmdbAttribute: first.name,
@@ -2124,7 +5804,8 @@ function sourceFieldRuleForCmdbPath(cmdbPath, path) {
     required: false,
     resolve: {
       mode: 'cmdbPath',
-      valueMode: isLookupAttribute(leaf) ? 'code' : 'leaf'
+      valueMode: isLookupAttribute(leaf) ? 'code' : 'leaf',
+      maxDepth
     }
   };
   if (isLookupAttribute(leaf)) {
@@ -2142,6 +5823,13 @@ function fieldKeyForCmdbPath(path) {
     .map((item, index) => camelPathSegment(item, index === 0))
     .join('');
   return text || 'cmdbPathField';
+}
+
+function fieldKeyForDomainPath(targetClass, path) {
+  const targetSegment = camelPathSegment(targetClass, false);
+  const leafSegment = fieldKeyForCmdbPath(path);
+  const normalizedLeaf = leafSegment.charAt(0).toUpperCase() + leafSegment.slice(1);
+  return `domain${targetSegment}${normalizedLeaf}` || 'domainPathField';
 }
 
 function camelPathSegment(value, lowerFirst) {
@@ -2164,6 +5852,117 @@ function sourceFieldHasCatalogOption(sourceFields, option) {
   }
 
   return sourceFieldHasCatalogAttribute(sourceFields, option.fieldRule?.cmdbAttribute ?? option.value);
+}
+
+function isMappingFieldAllowedForTarget(_fieldKey, fieldRule = {}, targetType = '') {
+  if (!mappingTargetExpectsScalar(targetType)) {
+    return true;
+  }
+
+  return !sourceFieldMayReturnMultiple(fieldRule);
+}
+
+function mappingTargetExpectsScalar(type) {
+  return [
+    'interfaceAddress',
+    'interface',
+    'proxies',
+    'proxyGroups',
+    'hostMacros',
+    'inventoryFields',
+    'interfaceProfiles',
+    'hostStatuses',
+    'tlsPskModes',
+    'valueMaps'
+  ].includes(type);
+}
+
+function sourceFieldMayReturnMultiple(field = {}) {
+  if (!cmdbPathIncludesDomain(field.cmdbPath)) {
+    return false;
+  }
+
+  const mode = String(field.resolve?.collectionMode ?? '').toLowerCase();
+  return mode !== 'first';
+}
+
+function mappingFieldTargetCompatibilityMessage(fieldKey, fieldRule = {}, targetType = '', target = {}) {
+  if (targetType !== 'interfaceAddress') {
+    return '';
+  }
+
+  const mode = String(target?.mode ?? '').toLowerCase();
+  if (!['ip', 'dns'].includes(mode)) {
+    return '';
+  }
+
+  const kind = sourceFieldAddressKind(fieldKey, fieldRule);
+  if (kind === 'lookup' || kind === 'reference') {
+    return tf('mapping.status.lookupFieldForInterfaceTarget', { field: fieldKey });
+  }
+  if (mode === 'dns' && kind === 'ip') {
+    return tf('mapping.status.ipFieldForDnsTarget', { field: fieldKey });
+  }
+  if (mode === 'ip' && kind === 'dns') {
+    return tf('mapping.status.dnsFieldForIpTarget', { field: fieldKey });
+  }
+
+  return '';
+}
+
+function sourceFieldAddressKind(fieldKey, fieldRule = {}) {
+  const type = String(fieldRule.type ?? '').toLowerCase();
+  const resolveLeafType = String(fieldRule.resolve?.leafType ?? '').toLowerCase();
+  if (type.includes('lookup') || resolveLeafType === 'lookup' || fieldRule.lookupType) {
+    return 'lookup';
+  }
+  if (type === 'reference') {
+    return 'reference';
+  }
+
+  const tokens = [
+    fieldKey,
+    canonicalSourceField(fieldKey),
+    fieldRule.source,
+    fieldRule.cmdbAttribute,
+    ...(Array.isArray(fieldRule.sources) ? fieldRule.sources : []),
+    ...(Array.isArray(fieldRule.cmdbAttributes) ? fieldRule.cmdbAttributes : []),
+    ...String(fieldRule.cmdbPath ?? '').split('.')
+  ].map(value => String(value ?? '').toLowerCase());
+  const joined = tokens.join(' ');
+  const compact = normalizeToken(joined);
+  const validationRegex = String(fieldRule.validationRegex ?? '').toLowerCase();
+
+  if (type.includes('ip') || validationRegex.includes('25[0-5]') || /\b(ip|ipaddress|ip_address|addressvalue)\b/.test(joined) || compact.includes('ipaddress')) {
+    return 'ip';
+  }
+  if (canonicalSourceField(fieldKey) === 'dnsName'
+    || /\b(dns|fqdn|hostname|host_dns|dnsname)\b/.test(joined)
+    || compact.includes('dnsname')
+    || compact.includes('fqdn')
+    || compact.includes('hostname')) {
+    return 'dns';
+  }
+
+  return 'unknown';
+}
+
+function cmdbPathIncludesDomain(cmdbPath) {
+  return String(cmdbPath ?? '')
+    .split('.')
+    .some(segment => segment.trim().toLowerCase().startsWith('{domain:'));
+}
+
+function mappingTargetTypeLabel(type) {
+  const extension = zabbixExtensionDefinitions.find(definition => definition.rulesKey === type);
+  return {
+    hostGroups: t('mapping.target.hostGroups'),
+    templates: t('mapping.target.templates'),
+    tags: t('mapping.target.tags'),
+    interfaceAddress: t('mapping.target.interfaceAddress'),
+    interface: t('mapping.target.interface'),
+    monitoringSuppression: t('mapping.target.monitoringSuppression')
+  }[type] ?? extension?.title ?? type ?? 'target';
 }
 
 function isReadableMappingAttribute(attribute) {
@@ -2223,7 +6022,13 @@ function buildMappingEditorCondition(type, className, field, regex, target) {
     allRegex.push({ field: 'className', pattern: `(?i)^${escapeRegex(className)}$` });
   }
 
-  if (regex) {
+  if (type === 'monitoringSuppression') {
+    allRegex.push({ field: 'eventType', pattern: '(?i)^(create|update)$' });
+    allRegex.push({
+      field,
+      pattern: regex || '(?i)^(do_not_monitor|dont_monitor|do not monitor|not_monitored|false|0)$'
+    });
+  } else if (regex) {
     allRegex.push({ field, pattern: regex });
   }
 
@@ -2254,7 +6059,8 @@ function mappingRulesKey(type, target = {}) {
     templates: 'templateSelectionRules',
     tags: 'tagSelectionRules',
     interfaceAddress: 'interfaceAddressRules',
-    interface: 'interfaceSelectionRules'
+    interface: 'interfaceSelectionRules',
+    monitoringSuppression: 'monitoringSuppressionRules'
   }[type] ?? `${type}SelectionRules`;
 }
 
@@ -2305,17 +6111,17 @@ async function saveMappingDraftAsFile() {
   const validation = validateMappingDraftBeforeSave(state.mappingDraftRules, state.mappingCmdbuildCatalog);
   const changes = mappingSessionChanges(initialMappingRules(), state.mappingDraftRules);
   if (validation.issues.length > 0) {
-    setMappingEditorStatusForDraft(`Save file as: найдена неконсистентность IP/DNS binding. Изменений для webhook-файла: ${sessionWebhookChangeCount(changes)}.`);
+    setMappingEditorStatusForDraft(tf('mapping.status.saveIpDnsInconsistent', { count: sessionWebhookChangeCount(changes) }));
     const confirmed = window.confirm([
-      'В rules найдены проблемы связи IP/DNS class attribute field с Zabbix interface structure.',
+      t('mapping.confirm.saveIpDnsTitle'),
       '',
       ...validation.issues.slice(0, 12).map(issue => `- ${issue}`),
-      validation.issues.length > 12 ? `- ... еще ${validation.issues.length - 12}` : '',
+      validation.issues.length > 12 ? `- ${tf('mapping.confirm.saveIpDnsMore', { count: validation.issues.length - 12 })}` : '',
       '',
-      'Сохранить файлы несмотря на ошибки?'
+      t('mapping.confirm.saveAnyway')
     ].filter(Boolean).join('\n'));
     if (!confirmed) {
-      setMappingEditorStatus('Сохранение отменено: сначала исправьте связь IP/DNS с Zabbix interface structure.');
+      setMappingEditorStatus(t('mapping.status.saveCancelledFixIpDns'));
       return;
     }
   }
@@ -2324,22 +6130,63 @@ async function saveMappingDraftAsFile() {
   const content = `${JSON.stringify(state.mappingDraftRules, null, 2)}\n`;
   const webhookBodiesName = defaultName.replace(/\.json$/i, '-webhook-bodies.txt');
   const webhookBodies = buildWebhookBodiesFile(state.mappingDraftRules, state.mappingCmdbuildCatalog, validation, changes);
-  setMappingEditorStatusForDraft(`Save file as: rules JSON и webhook-файл будут сохранены. Изменений для webhook-файла: ${sessionWebhookChangeCount(changes)}.`);
+  setMappingEditorStatusForDraft(tf('mapping.status.saveReady', { count: sessionWebhookChangeCount(changes) }));
 
   const rulesResult = await saveTextAsFile(content, defaultName, 'JSON rules', { 'application/json': ['.json'] });
   if (rulesResult.cancelled) {
-    setMappingEditorStatus('Сохранение отменено.');
+    setMappingEditorStatus(t('mapping.status.saveCancelled'));
     return;
   }
 
   const webhookResult = await saveTextAsFile(webhookBodies, webhookBodiesName, 'Webhook bodies', { 'text/plain': ['.txt'] });
   if (webhookResult.cancelled) {
-    setMappingEditorStatus(`Файл rules сохранен: ${rulesResult.name}. Второй файл webhook bodies не сохранен.`);
+    setMappingEditorStatus(tf('mapping.status.rulesFileSavedWebhookNotSaved', { name: rulesResult.name }));
     return;
   }
 
-  const warningText = validation.issues.length > 0 ? ` Есть предупреждения: ${validation.issues.length}.` : '';
-  setMappingEditorStatus(`Файлы сохранены: ${rulesResult.name}, ${webhookResult.name}.${warningText}`);
+  const warningText = validation.issues.length > 0
+    ? tf('mapping.status.saveWarnings', { count: validation.issues.length })
+    : '';
+  setMappingEditorStatus(tf('mapping.status.filesSaved', {
+    rulesName: rulesResult.name,
+    webhookName: webhookResult.name,
+    warning: warningText
+  }));
+}
+
+async function saveValidateMappingDraftAsFile() {
+  const rules = state.validateMappingRules ?? state.currentRules?.content;
+  if (!rules) {
+    toast('Rules JSON is not loaded');
+    return;
+  }
+
+  const validation = await api('/api/rules/validate', {
+    method: 'POST',
+    body: { content: rules }
+  });
+  $('#rulesResult').textContent = JSON.stringify({
+    saved: false,
+    note: 'Logical Control draft saved through the browser only. Publish the file to git outside the application, then reload rules on the microservice.',
+    validation,
+    content: rules
+  }, null, 2);
+  if (!validation.valid) {
+    const confirmed = window.confirm('Rules JSON has validation errors. Save file anyway?');
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  const defaultName = `${normalizeRuleName(rules.name || 'cmdbuild-to-zabbix-rules')}.json`;
+  const result = await saveTextAsFile(
+    `${JSON.stringify(rules, null, 2)}\n`,
+    defaultName,
+    'JSON rules',
+    { 'application/json': ['.json'] });
+  if (!result.cancelled) {
+    toast(tf('toast.rulesFileSaved', { name: result.name }));
+  }
 }
 
 async function saveTextAsFile(content, defaultName, description, accept) {
@@ -2361,7 +6208,7 @@ async function saveTextAsFile(content, defaultName, description, accept) {
     throw error;
   }
 
-  const requestedName = window.prompt(`Имя файла для сохранения ${description}`, defaultName);
+  const requestedName = window.prompt(tf('common.saveFileNamePrompt', { description }), defaultName);
   if (requestedName === null) {
     return { name: defaultName, cancelled: true };
   }
@@ -2433,6 +6280,7 @@ function mappingRuleCollections() {
     { key: 'interfaceAddressRules', label: 'Interface address rules', type: 'interfaceAddress' },
     { key: 'interfaceSelectionRules', label: 'Interface rules', type: 'interface' },
     { key: 'tagSelectionRules', label: 'Tag rules', type: 'tags' },
+    { key: 'monitoringSuppressionRules', label: 'Monitoring suppression rules', type: 'monitoringSuppression' },
     ...zabbixExtensionDefinitions.map(definition => ({
       key: definition.selectionRulesKey,
       label: `${definition.title} rules`,
@@ -2453,6 +6301,20 @@ function ruleDisplayName(rule) {
     || rule?.interfaceProfileRef
     || ruleIdentity(rule).slice(0, 80)
     || 'rule';
+}
+
+function ruleValidationToken(rule, type) {
+  return `rule-id:${normalizeToken(type)}:${stableTokenHash(stableJson(rule))}`;
+}
+
+function stableTokenHash(value) {
+  let hash = 2166136261;
+  const text = String(value ?? '');
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function stableJson(value) {
@@ -2559,7 +6421,43 @@ function validateMappingDraftBeforeSave(rules, cmdbuildCatalog) {
     }
   }
 
+  issues.push(...scalarDomainMappingIssues(rules));
+
   return { issues };
+}
+
+function scalarDomainMappingIssues(rules) {
+  const issues = [];
+  const sourceFields = rules.source?.fields ?? {};
+  for (const collection of mappingRuleCollections()) {
+    if (!mappingTargetExpectsScalar(collection.type)) {
+      continue;
+    }
+
+    for (const rule of asArray(rules[collection.key])) {
+      for (const fieldKey of sourceFieldsForRule(rule)) {
+        const [actualKey, fieldRule] = sourceFieldRuleByCanonicalKey(sourceFields, fieldKey);
+        if (sourceFieldMayReturnMultiple(fieldRule)) {
+          issues.push(`Скалярная Zabbix structure ${mappingTargetTypeLabel(collection.type)} в rule "${rule.name ?? collection.label}" использует multi-value domain field "${actualKey}" (${fieldRule.cmdbPath}).`);
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+function sourceFieldRuleByCanonicalKey(sourceFields, fieldKey) {
+  const canonical = canonicalSourceField(fieldKey);
+  for (const [key, field] of Object.entries(sourceFields ?? {})) {
+    const tokens = [key, canonicalSourceField(key), ...sourceFieldSources(field), ...sourceFieldCatalogSources(field)]
+      .map(canonicalSourceField);
+    if (tokens.includes(canonical)) {
+      return [key, field];
+    }
+  }
+
+  return [fieldKey, {}];
 }
 
 function addressCandidatesForClass(rules, attributes) {
@@ -2884,6 +6782,7 @@ function cmdbuildWebhookEventName(eventType) {
 function webhookBodyForClassEvent(rules, cmdbuildCatalog, className, event) {
   const catalogClass = findCatalogClass(cmdbuildCatalog ?? {}, className);
   const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass ?? className);
+  const usedFields = webhookSourceFieldsForClass(rules, className);
   const body = {
     source: 'cmdbuild',
     eventType: event.eventType,
@@ -2893,7 +6792,13 @@ function webhookBodyForClassEvent(rules, cmdbuildCatalog, className, event) {
 
   for (const [fieldKey, field] of Object.entries(rules.source?.fields ?? {})) {
     const bodyKey = webhookBodyKeyForField(fieldKey, field);
-    if (!bodyKey || body[bodyKey] !== undefined) {
+    if (!bodyKey || webhookBodyHasField(body, fieldKey, field)) {
+      continue;
+    }
+    if (!webhookSourceFieldIsUsed(usedFields, fieldKey) && !field.required) {
+      continue;
+    }
+    if (field.cmdbPath && !cmdbPathRootAppliesToClass(field.cmdbPath, className, cmdbuildCatalog, rules)) {
       continue;
     }
 
@@ -2909,9 +6814,14 @@ function webhookBodyForClassEvent(rules, cmdbuildCatalog, className, event) {
 function webhookBodyPathComments(rules, cmdbuildCatalog, className) {
   const catalogClass = findCatalogClass(cmdbuildCatalog ?? {}, className);
   const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass ?? className);
+  const usedFields = webhookSourceFieldsForClass(rules, className);
   const comments = [];
   for (const [fieldKey, field] of Object.entries(rules.source?.fields ?? {})) {
-    if (!field.cmdbPath || !findCatalogAttributeForField(attributes, field, fieldKey)) {
+    const isDomainPath = cmdbPathIncludesDomain(field.cmdbPath);
+    if (!field.cmdbPath
+      || (!webhookSourceFieldIsUsed(usedFields, fieldKey) && !field.required)
+      || !cmdbPathRootAppliesToClass(field.cmdbPath, className, cmdbuildCatalog, rules)
+      || (!isDomainPath && !findCatalogAttributeForField(attributes, field, fieldKey))) {
       continue;
     }
 
@@ -2923,7 +6833,11 @@ function webhookBodyPathComments(rules, cmdbuildCatalog, className) {
     const mode = field.resolve?.mode && field.resolve.mode !== 'none'
       ? `, resolve=${field.resolve.mode}${field.resolve.leafType ? `/${field.resolve.leafType}` : ''}`
       : '';
-    comments.push(`# Path metadata: ${bodyKey} -> ${field.cmdbPath}${mode}. Payload stays flat; CMDBuild sends the numeric id/value in "${bodyKey}".`);
+    if (isDomainPath) {
+      comments.push(`# Domain path metadata: ${fieldKey} uses "${bodyKey}" -> ${field.cmdbPath}${mode}. Payload stays flat; CMDBuild sends the current card id, converter reads related cards through /relations.`);
+    } else {
+      comments.push(`# Path metadata: ${bodyKey} -> ${field.cmdbPath}${mode}. Payload stays flat; CMDBuild sends the numeric id/value in "${bodyKey}".`);
+    }
   }
   return comments.length > 0 ? comments : ['# Path metadata: no CMDB path fields for this class.'];
 }
@@ -2986,13 +6900,29 @@ function mappingDraftValidationStatus(message) {
   }
 
   const selectedClass = $('#mappingEditClass')?.value ?? '';
-  const issues = prioritizedMappingValidationIssues(validation.issues, selectedClass);
+  const selectedToken = normalizeClassName(selectedClass);
+  const selectedIssues = selectedToken
+    ? validation.issues.filter(issue => mappingIssueMentionsClass(issue, selectedToken))
+    : [];
+  if (selectedToken && selectedIssues.length === 0) {
+    return {
+      message: `${message} Проверка IP/DNS: по выбранному классу предупреждений нет. Всего предупреждений в rules: ${validation.issues.length}.`,
+      level: 'normal'
+    };
+  }
+
+  const issues = selectedIssues.length > 0
+    ? selectedIssues
+    : prioritizedMappingValidationIssues(validation.issues, selectedClass);
   const visibleIssues = issues.slice(0, 4).join(' ');
-  const extra = validation.issues.length > 4
-    ? ` Еще предупреждений: ${validation.issues.length - 4}.`
+  const extra = issues.length > 4
+    ? ` Еще предупреждений: ${issues.length - 4}.`
     : '';
+  const scope = selectedIssues.length > 0
+    ? `по выбранному классу: ${selectedIssues.length}; всего в rules: ${validation.issues.length}`
+    : `${validation.issues.length}`;
   return {
-    message: `${message} Предупреждения save validation: ${validation.issues.length}. ${visibleIssues}${extra}`,
+    message: `${message} Предупреждения save validation: ${scope}. ${visibleIssues}${extra}`,
     level: 'warning'
   };
 }
@@ -3014,6 +6944,14 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value ?? {}));
 }
 
+function clampNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(number)));
+}
+
 function compareText(left, right) {
   return String(left).localeCompare(String(right), undefined, { sensitivity: 'base' });
 }
@@ -3030,7 +6968,11 @@ async function loadValidateMapping() {
   ]);
 
   state.currentRules = rulesDocument;
-  renderValidateMapping(rulesDocument.content, zabbixCatalog, cmdbuildCatalog);
+  state.currentRules.content = cloneJson(rulesDocument.content ?? {});
+  initializeValidateMappingHistory(state.currentRules.content);
+  state.validateMappingZabbixCatalog = zabbixCatalog;
+  state.validateMappingCmdbuildCatalog = cmdbuildCatalog;
+  renderValidateMapping(state.validateMappingRules, zabbixCatalog, cmdbuildCatalog);
   state.validateMappingLoaded = true;
 }
 
@@ -3050,9 +6992,11 @@ function renderValidationSummary(container, validation) {
   const header = el('div', 'validation-summary-line', errors.length === 0
     ? 'Критичные расхождения не найдены.'
     : `Найдено ошибок: ${errors.length}`);
-  const details = el('div', 'validation-summary-detail', `Предупреждения: ${warnings.length}. Красным отмечаются только отсутствующие сущности в Zabbix и CMDBuild.`);
+  const details = el('div', 'validation-summary-detail', errors.length === 0
+    ? `Предупреждения: ${warnings.length}. По текущим каталогам нет объектов для выбора и исправления.`
+    : `Предупреждения: ${warnings.length}. Красным отмечаются отсутствующие сущности и rules, которые на них ссылаются; их можно выбрать чекбоксами в соответствующей колонке.`);
   container.append(header, details);
-  setHelp(container, 'Сводка проверки правил. Красная подсветка используется только для сущностей, которых нет в текущих каталогах Zabbix или CMDBuild.');
+  setHelp(container, 'Сводка проверки правил. Красная подсветка показывает отсутствующие сущности Zabbix/CMDBuild и затронутые conversion rules.');
 
   if (validation.issues.length === 0) {
     return;
@@ -3119,7 +7063,7 @@ function renderValidateMappingZabbix(container, rules, catalog, validation) {
   }));
 
   appendValidationSection(container, 'Template groups', templateGroups.map(group => {
-    const tokens = [`target:templategroups`, `zbx-templateGroups:${normalizeToken(group.groupid || group.name)}`];
+    const tokens = zabbixItemTokens(rules, 'templateGroups', group.groupid, group.name);
     const exists = zabbixCatalogItemExists(catalog.templateGroups ?? [], 'groupid', group.groupid, group.name);
     const node = mappingNode({
       label: group.name || group.groupid,
@@ -3165,7 +7109,7 @@ function renderValidateMappingZabbix(container, rules, catalog, validation) {
       return mappingNode({
         label: definition.label(item),
         meta: exists ? definition.meta(item) : `нет в Zabbix: ${definition.meta(item)}`,
-        tokens: zabbixExtensionTokens(definition, item),
+        tokens: zabbixExtensionItemMappingTokens(definition, item, rules),
         level: 1,
         kind: 'zabbix',
         status: exists ? 'normal' : 'error',
@@ -3225,13 +7169,61 @@ function renderValidateMappingRules(container, rules, cmdbuildCatalog, validatio
     });
   }));
 
-  appendValidationSection(container, 'Host profiles', (rules.hostProfiles ?? []).flatMap(profile => hostProfileMappingNodes(profile)));
-  appendValidationSection(container, 'Group rules', (rules.groupSelectionRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'hostGroups', null, null, rules)));
-  appendValidationSection(container, 'Template rules', (rules.templateSelectionRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'templates', null, null, rules)));
-  appendValidationSection(container, 'Interface address rules', (rules.interfaceAddressRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'interfaceAddress', rule.valueField ?? rule.mode, null, rules)));
-  appendValidationSection(container, 'Interface rules', (rules.interfaceSelectionRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'interface', rule.interfaceRef, null, rules)));
-  appendValidationSection(container, 'Tag rules', (rules.tagSelectionRules ?? []).flatMap(rule => ruleMappingNodes(rule, 'tags', null, null, rules)));
+  appendValidationSection(container, 'Host profiles', validationRuleNodesForCollection(rules, 'hostProfiles', 'hostProfiles', validation));
+  appendValidationSection(container, 'Group rules', validationRuleNodesForCollection(rules, 'groupSelectionRules', 'hostGroups', validation));
+  appendValidationSection(container, 'Template rules', validationRuleNodesForCollection(rules, 'templateSelectionRules', 'templates', validation));
+  appendValidationSection(container, 'Interface address rules', validationRuleNodesForCollection(rules, 'interfaceAddressRules', 'interfaceAddress', validation, rule => rule.valueField ?? rule.mode));
+  appendValidationSection(container, 'Interface rules', validationRuleNodesForCollection(rules, 'interfaceSelectionRules', 'interface', validation, rule => rule.interfaceRef));
+  appendValidationSection(container, 'Tag rules', validationRuleNodesForCollection(rules, 'tagSelectionRules', 'tags', validation));
+  appendValidationSection(container, 'Monitoring suppression rules', validationRuleNodesForCollection(rules, 'monitoringSuppressionRules', 'monitoringSuppression', validation));
   appendOptionalZabbixRuleSections(container, rules, validation, appendValidationSection);
+}
+
+function validationRuleNodesForCollection(rules, collectionKey, type, validation, metaSelector = null) {
+  return asArray(rules[collectionKey]).flatMap((rule, index) =>
+    validationRuleMappingNodes(rules, collectionKey, rule, index, type, validation, metaSelector?.(rule)));
+}
+
+function validationRuleMappingNodes(rules, collectionKey, rule, index, type, validation, meta = null) {
+  const nodes = type === 'hostProfiles'
+    ? hostProfileMappingNodes(rule, validation)
+    : ruleMappingNodes(rule, type, meta, validation, rules);
+  if (nodes.length === 0) {
+    return nodes;
+  }
+
+  const tokens = ruleTokens(rule, type, rules);
+  nodes[0] = validationRuleFixWrapper(nodes[0], validationRuleItem(rules, collectionKey, rule, index), tokens, validation);
+  return nodes;
+}
+
+function validationRuleFixWrapper(node, item, tokens, validation) {
+  if (validationStatus([ruleValidationToken(item.rule, item.collection.type)], validation) !== 'error') {
+    return node;
+  }
+
+  return validationFixNode(node, {
+    scope: 'rules',
+    kind: 'rule',
+    collectionKey: item.collection.key,
+    collectionLabel: item.collection.label,
+    ruleIndex: item.index,
+    ruleName: ruleDisplayName(item.rule),
+    ruleIdentity: item.ruleIdentity,
+    reviewRequired: true
+  });
+}
+
+function validationRuleItem(rules, collectionKey, rule, index) {
+  const collection = mappingRuleCollections().find(item => item.key === collectionKey)
+    ?? { key: collectionKey, label: collectionKey, type: collectionKey };
+  return {
+    collection,
+    rule,
+    index,
+    ruleIdentity: stableJson(rule),
+    operationKey: mappingDeleteOperationKey(collection.key, index, rule)
+  };
 }
 
 function renderValidateMappingCmdbuild(container, rules, catalog, validation) {
@@ -3321,8 +7313,10 @@ function validationFixNode(node, fix) {
   checkbox.className = 'validation-fix-checkbox';
   checkbox.dataset.validationScope = fix.scope;
   checkbox.dataset.fix = JSON.stringify(fix);
-  setHelp(checkbox, 'Отметьте, чтобы удалить эту отсутствующую ссылку из JSON правил.');
-  row.append(checkbox, el('span', '', 'Удалить из правил'));
+  setHelpKey(checkbox, 'validation.deleteFromRulesHelp');
+  const label = el('span', '', t('validation.deleteFromRules'));
+  label.dataset.i18n = 'validation.deleteFromRules';
+  row.append(checkbox, label);
   wrapper.append(row, node);
   return wrapper;
 }
@@ -3341,7 +7335,7 @@ function selectedValidationFixes() {
 }
 
 function updateValidationSelectionControls() {
-  for (const scope of ['zabbix', 'cmdbuild']) {
+  for (const scope of ['zabbix', 'cmdbuild', 'rules']) {
     const checkboxes = $$(`.validation-fix-checkbox[data-validation-scope="${scope}"]`);
     $$(`[data-validation-select="${scope}"], [data-validation-clear="${scope}"]`).forEach(button => {
       button.disabled = checkboxes.length === 0;
@@ -3349,16 +7343,71 @@ function updateValidationSelectionControls() {
   }
 
   $('#deleteValidateMappingSelected').disabled = selectedValidationFixes().length === 0;
+  updateValidateMappingHistoryControls();
 }
 
 async function deleteSelectedValidationFixes() {
   const operations = selectedValidationFixes();
   if (operations.length === 0) {
-    toast('Выберите отсутствующие элементы для удаления из правил');
+    toast(t('toast.validationSelectMissing'));
     return;
   }
 
-  const confirmed = window.confirm(`Удалить выбранные элементы из JSON правил (${operations.length})? Предыдущая версия будет сохранена на backend.`);
+  const sourceRules = state.validateMappingRules ?? state.currentRules?.content;
+  if (!sourceRules) {
+    toast(t('validation.review.noRules'));
+    return;
+  }
+
+  const rules = cloneJson(sourceRules);
+  const catalogs = {
+    zabbix: state.validateMappingZabbixCatalog ?? {},
+    cmdbuild: state.validateMappingCmdbuildCatalog ?? {}
+  };
+  const plan = buildValidationRuleDeletePlan(rules, operations, catalogs);
+  if (plan.autoDelete.length === 0 && plan.review.length === 0) {
+    await deleteSelectedValidationReferences(operations);
+    return;
+  }
+
+  const edits = new Map();
+  const deletes = new Map(plan.autoDelete.map(item => [item.key, item]));
+  for (const item of plan.review) {
+    const decision = await openValidationRuleDialog(item);
+    if (decision.action === 'cancel') {
+      toast(t('validation.review.cancelled'));
+      return;
+    }
+    if (decision.action === 'delete') {
+      deletes.set(item.key, item);
+    } else if (decision.action === 'edit') {
+      edits.set(item.key, { item, rule: decision.rule });
+    }
+  }
+
+  const changes = [];
+  for (const { item, rule } of edits.values()) {
+    if (replaceValidationRule(rules, item, rule)) {
+      changes.push({ action: 'editRule', collection: item.collection.key, name: ruleDisplayName(rule) });
+    }
+  }
+  for (const item of [...deletes.values()].sort(compareValidationRuleDeleteOrder)) {
+    if (removeValidationRule(rules, item)) {
+      changes.push({ action: 'deleteRule', collection: item.collection.key, name: ruleDisplayName(item.rule) });
+    }
+  }
+  changes.push(...cleanupValidationSelectedReferences(rules, operations));
+
+  if (changes.length === 0) {
+    toast(t('toast.rulesNotChanged'));
+    return;
+  }
+
+  await saveValidationRulesFixResult(rules, changes);
+}
+
+async function deleteSelectedValidationReferences(operations) {
+  const confirmed = window.confirm(tf('validation.confirmDeleteSelected', { count: operations.length }));
   if (!confirmed) {
     return;
   }
@@ -3368,11 +7417,308 @@ async function deleteSelectedValidationFixes() {
     body: { operations }
   });
   $('#rulesResult').textContent = JSON.stringify(result, null, 2);
-  toast(result.saved
-    ? `Rules updated. Backup: ${result.backupPath}`
-    : 'Rules were not changed');
-  await loadRules();
-  await loadValidateMapping();
+  if (result.content && result.changes?.length > 0) {
+    pushValidateMappingHistory(result.content);
+    state.currentRules = { ...(state.currentRules ?? {}), content: state.validateMappingRules };
+    renderValidateMapping(state.validateMappingRules, state.validateMappingZabbixCatalog ?? {}, state.validateMappingCmdbuildCatalog ?? {});
+    toast(t('toast.validationDraftChanged'));
+    return;
+  }
+
+  toast(t('toast.rulesNotChanged'));
+}
+
+function buildValidationRuleDeletePlan(rules, operations, catalogs) {
+  const entries = new Map();
+  for (const operation of operations) {
+    for (const item of mappingDeleteRuleItems(rules)) {
+      if (!validationRuleMatchesOperation(item, operation, rules)) {
+        continue;
+      }
+
+      const key = item.operationKey;
+      const entry = entries.get(key) ?? {
+        key,
+        collection: item.collection,
+        index: item.index,
+        rule: item.rule,
+        ruleIdentity: stableJson(item.rule),
+        operations: [],
+        reviewRequired: false
+      };
+      entry.operations.push(operation);
+      entry.reviewRequired ||= validationRuleRequiresReview(item, operation, rules, catalogs);
+      entries.set(key, entry);
+    }
+  }
+
+  const values = [...entries.values()];
+  return {
+    autoDelete: values.filter(item => !item.reviewRequired),
+    review: values.filter(item => item.reviewRequired)
+  };
+}
+
+function validationRuleMatchesOperation(item, operation, rules) {
+  if (operation.scope === 'rules' && operation.kind === 'rule') {
+    if (item.collection.key !== operation.collectionKey) {
+      return false;
+    }
+    if (String(item.index) !== String(operation.ruleIndex)) {
+      return false;
+    }
+    return !operation.ruleIdentity || stableJson(item.rule) === operation.ruleIdentity;
+  }
+
+  if (operation.scope === 'zabbix') {
+    const type = validationOperationTargetType(operation);
+    if (!type || item.collection.type !== type) {
+      return false;
+    }
+    return selectionItemsForRule(rules, item.rule, type)
+      .some(target => validationTargetMatchesOperation(type, target, operation));
+  }
+
+  if (operation.scope === 'cmdbuild' && operation.kind === 'class') {
+    return mappingDeleteClassesForItem(item, rules)
+      .some(className => sameNormalized(className, operation.className));
+  }
+
+  if (operation.scope === 'cmdbuild' && operation.kind === 'attribute') {
+    return mappingDeleteSourceFieldsForItem(item.rule)
+      .some(field => canonicalSourceField(field) === canonicalSourceField(operation.fieldKey));
+  }
+
+  return false;
+}
+
+function validationRuleRequiresReview(item, operation, rules, catalogs) {
+  if (operation.scope === 'rules' && operation.kind === 'rule') {
+    return operation.reviewRequired !== false;
+  }
+
+  if (operation.scope === 'zabbix') {
+    const type = validationOperationTargetType(operation);
+    const targets = selectionItemsForRule(rules, item.rule, type);
+    return targets.some(target =>
+      !validationTargetMatchesOperation(type, target, operation)
+      && validationTargetExists(type, target, catalogs.zabbix));
+  }
+
+  if (operation.scope === 'cmdbuild' && operation.kind === 'class') {
+    return mappingDeleteClassesForItem(item, rules)
+      .some(className => !sameNormalized(className, operation.className) && findCatalogClass(catalogs.cmdbuild, className));
+  }
+
+  if (operation.scope === 'cmdbuild' && operation.kind === 'attribute') {
+    const selected = canonicalSourceField(operation.fieldKey);
+    return mappingDeleteSourceFieldsForItem(item.rule)
+      .some(field => canonicalSourceField(field) !== selected);
+  }
+
+  return false;
+}
+
+function validationOperationTargetType(operation) {
+  return {
+    hostGroup: 'hostGroups',
+    template: 'templates',
+    templateGroup: 'templateGroups'
+  }[operation.kind] ?? '';
+}
+
+function validationTargetMatchesOperation(type, target, operation) {
+  return sameMappingItem(target, type, operation.id, operation.name);
+}
+
+function validationTargetExists(type, target, zabbixCatalog = {}) {
+  if (type === 'hostGroups') {
+    return zabbixCatalogItemExists(zabbixCatalog.hostGroups ?? [], 'groupid', target.groupid, target.name);
+  }
+  if (type === 'templates') {
+    return zabbixCatalogItemExists(zabbixCatalog.templates ?? [], 'templateid', target.templateid, target.name || target.host);
+  }
+  if (type === 'templateGroups') {
+    return zabbixCatalogItemExists(zabbixCatalog.templateGroups ?? [], 'groupid', target.groupid, target.name);
+  }
+  return true;
+}
+
+function openValidationRuleDialog(item) {
+  const dialog = $('#validationRuleDialog');
+  $('#validationRuleDialogText').textContent = tf('validation.review.message', { name: ruleDisplayName(item.rule) });
+  $('#validationRuleJson').value = JSON.stringify(item.rule, null, 2);
+  $('#validationRuleDialogError').textContent = '';
+  dialog.classList.remove('hidden');
+
+  return new Promise(resolve => {
+    state.validationRuleDialog = { item, resolve };
+  });
+}
+
+function applyValidationRuleDialogEdit() {
+  const current = state.validationRuleDialog;
+  if (!current) {
+    return;
+  }
+  try {
+    const rule = JSON.parse($('#validationRuleJson').value);
+    closeValidationRuleDialog();
+    current.resolve({ action: 'edit', rule });
+  } catch (error) {
+    $('#validationRuleDialogError').textContent = tf('validation.review.invalidJson', { message: error.message });
+  }
+}
+
+function deleteValidationRuleDialogAnyway() {
+  const current = state.validationRuleDialog;
+  if (!current) {
+    return;
+  }
+  closeValidationRuleDialog();
+  current.resolve({ action: 'delete' });
+}
+
+function cancelValidationRuleDialog() {
+  const current = state.validationRuleDialog;
+  if (!current) {
+    return;
+  }
+  closeValidationRuleDialog();
+  current.resolve({ action: 'cancel' });
+}
+
+function closeValidationRuleDialog() {
+  $('#validationRuleDialog').classList.add('hidden');
+  state.validationRuleDialog = null;
+}
+
+function compareValidationRuleDeleteOrder(left, right) {
+  if (left.collection.key !== right.collection.key) {
+    return compareText(left.collection.key, right.collection.key);
+  }
+  return right.index - left.index;
+}
+
+function validationRuleIndex(rules, item) {
+  const list = rules[item.collection.key] ?? [];
+  if (stableJson(list[item.index]) === item.ruleIdentity) {
+    return item.index;
+  }
+  return list.findIndex(rule => stableJson(rule) === item.ruleIdentity);
+}
+
+function replaceValidationRule(rules, item, rule) {
+  const list = rules[item.collection.key] ?? [];
+  const index = validationRuleIndex(rules, item);
+  if (index < 0) {
+    return false;
+  }
+  list[index] = rule;
+  return true;
+}
+
+function removeValidationRule(rules, item) {
+  const list = rules[item.collection.key] ?? [];
+  const index = validationRuleIndex(rules, item);
+  if (index < 0) {
+    return false;
+  }
+  list.splice(index, 1);
+  return true;
+}
+
+function cleanupValidationSelectedReferences(rules, operations) {
+  const changes = [];
+  for (const operation of operations) {
+    if (operation.scope === 'zabbix') {
+      changes.push(...cleanupValidationZabbixReference(rules, operation));
+    } else if (operation.scope === 'cmdbuild' && operation.kind === 'class') {
+      const removed = removeFromArray(rules.source?.entityClasses, item => sameNormalized(item, operation.className));
+      if (removed > 0) {
+        changes.push({ action: 'deleteClass', className: operation.className, removed });
+      }
+    } else if (operation.scope === 'cmdbuild' && operation.kind === 'attribute' && rules.source?.fields?.[operation.fieldKey]) {
+      if (!rulesStillUseField(rules, operation.fieldKey)) {
+        delete rules.source.fields[operation.fieldKey];
+        changes.push({ action: 'deleteSourceField', fieldKey: operation.fieldKey, removed: 1 });
+      }
+    }
+  }
+  return changes;
+}
+
+function cleanupValidationZabbixReference(rules, operation) {
+  const spec = {
+    hostGroup: { lookupPath: ['lookups', 'hostGroups'], defaultsPath: ['defaults', 'hostGroups'], idField: 'groupid' },
+    template: { lookupPath: ['lookups', 'templates'], defaultsPath: ['defaults', 'templates'], idField: 'templateid' },
+    templateGroup: { lookupPath: ['lookups', 'templateGroups'], defaultsPath: ['defaults', 'templateGroups'], idField: 'groupid' }
+  }[operation.kind];
+  if (!spec) {
+    return [];
+  }
+
+  const matcher = item => sameRulesFixItemClient(item, spec.idField, operation.id, operation.name);
+  const removed = removeItemsAtClientPath(rules, spec.lookupPath, matcher)
+    + removeItemsAtClientPath(rules, spec.defaultsPath, matcher);
+  return removed > 0
+    ? [{ action: 'deleteZabbixReference', kind: operation.kind, id: operation.id, name: operation.name, removed }]
+    : [];
+}
+
+function rulesStillUseField(rules, fieldKey) {
+  const selected = canonicalSourceField(fieldKey);
+  return mappingDeleteRuleItems(rules).some(item =>
+    mappingDeleteSourceFieldsForItem(item.rule)
+      .some(field => canonicalSourceField(field) === selected));
+}
+
+function removeItemsAtClientPath(root, path, matcher) {
+  const items = path.reduce((current, part) => current?.[part], root);
+  return removeFromArray(items, matcher);
+}
+
+function removeFromArray(items, matcher) {
+  if (!Array.isArray(items)) {
+    return 0;
+  }
+  const initial = items.length;
+  items.splice(0, items.length, ...items.filter(item => !matcher(item)));
+  return initial - items.length;
+}
+
+function sameRulesFixItemClient(item, idField, id, name) {
+  const wanted = [id, name].map(normalizeToken).filter(Boolean);
+  if (wanted.length === 0) {
+    return false;
+  }
+  return [item?.[idField], item?.name, item?.host]
+    .map(normalizeToken)
+    .some(candidate => wanted.includes(candidate));
+}
+
+async function saveValidationRulesFixResult(rules, changes) {
+  const validation = await api('/api/rules/validate', {
+    method: 'POST',
+    body: { content: rules }
+  });
+  const result = {
+    saved: false,
+    note: 'Rules were changed in memory only. Save the returned JSON through the browser and publish it to git outside monitoring-ui-api.',
+    validation,
+    changes,
+    content: rules
+  };
+  $('#rulesResult').textContent = JSON.stringify(result, null, 2);
+  if (!validation.valid) {
+    toast(t('toast.rulesValidationFailed'));
+    return;
+  }
+
+  pushValidateMappingHistory(rules);
+  state.currentRules = { ...(state.currentRules ?? {}), content: state.validateMappingRules };
+  renderValidateMapping(state.validateMappingRules, state.validateMappingZabbixCatalog ?? {}, state.validateMappingCmdbuildCatalog ?? {});
+  toast(t('toast.validationDraftChanged'));
 }
 
 function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
@@ -3408,12 +7754,11 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
   }
 
   for (const group of referencedTemplateGroups(rules)) {
-    const tokens = [`target:templategroups`, `zbx-templateGroups:${normalizeToken(group.groupid || group.name)}`];
     if (!zabbixCatalogItemExists(zabbixCatalog.templateGroups ?? [], 'groupid', group.groupid, group.name)) {
       addIssue({
         source: 'zabbix',
         message: `Zabbix template group отсутствует: ${group.name || group.groupid}`,
-        tokens,
+        tokens: zabbixItemTokens(rules, 'templateGroups', group.groupid, group.name),
         help: 'Правило ссылается на template group, которой нет в Zabbix.'
       });
     }
@@ -3429,22 +7774,39 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
         addIssue({
           source: 'zabbix',
           message: `Zabbix ${definition.title} отсутствует: ${definition.label(item)}`,
-          tokens: zabbixExtensionTokens(definition, item),
+          tokens: zabbixExtensionItemMappingTokens(definition, item, rules),
           help: `${definition.help} Объект указан в JSON правил, но отсутствует в Zabbix catalog.`
         });
       }
     }
   }
 
+  const reportedMissingClassKeys = new Set();
+  const addMissingCmdbClassIssue = (className, origin = 'source.entityClasses') => {
+    const key = normalizeToken(className);
+    if (!key || reportedMissingClassKeys.has(key)) {
+      return;
+    }
+    reportedMissingClassKeys.add(key);
+    const affectedRuleTokens = mappingDeleteRuleItems(rules)
+      .filter(item => ruleClassConditions(item.rule).some(value => sameNormalized(value, className)))
+      .map(item => ruleValidationToken(item.rule, item.collection.type));
+    addIssue({
+      source: 'cmdbuild',
+      message: origin === 'rule condition'
+        ? `CMDBuild class из rule condition отсутствует: ${className}`
+        : `CMDBuild class отсутствует: ${className}`,
+      tokens: [`class:${key}`, `match:className:${key}`, ...affectedRuleTokens],
+      help: origin === 'rule condition'
+        ? 'Rule condition по className указывает значение, которого нет в каталоге CMDBuild. Исправьте condition или создайте соответствующий класс.'
+        : 'Класс указан в source.entityClasses правил, но не найден в каталоге CMDBuild.'
+    });
+  };
+
   for (const className of rules.source?.entityClasses ?? []) {
     const catalogClass = findCatalogClass(cmdbuildCatalog, className);
     if (!catalogClass) {
-      addIssue({
-        source: 'cmdbuild',
-        message: `CMDBuild class отсутствует: ${className}`,
-        tokens: [`class:${normalizeToken(className)}`, `match:className:${normalizeToken(className)}`, ...sourceFieldTokens('className')],
-        help: 'Класс указан в source.entityClasses правил, но не найден в каталоге CMDBuild.'
-      });
+      addMissingCmdbClassIssue(className);
       continue;
     }
     if (isCmdbCatalogSuperclass(cmdbuildCatalog, catalogClass)) {
@@ -3464,7 +7826,8 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
           message: `CMDBuild attribute отсутствует: ${catalogClassDisplayName(cmdbuildCatalog, className)}.${sourceFieldCatalogLabel(field) || sourceFieldLabel(field)}`,
           tokens: [
             ...sourceFieldTokensForRule(fieldKey, field),
-            classFieldToken(className, canonicalSourceField(fieldKey))
+            classFieldToken(className, canonicalSourceField(fieldKey)),
+            ...ruleValidationTokensForSourceField(rules, fieldKey)
           ],
           help: 'Обязательный атрибут указан в source.fields правил, но ни один source-алиас не найден в соответствующем классе CMDBuild.'
         });
@@ -3472,10 +7835,46 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
     }
   }
 
+  for (const className of monitoredClassNamesForRules(rules)) {
+    if (!findCatalogClass(cmdbuildCatalog, className)) {
+      addMissingCmdbClassIssue(className, 'rule condition');
+    }
+  }
+
+  const unknownSourceFieldTokens = new Map();
+  for (const item of mappingDeleteRuleItems(rules)) {
+    for (const field of mappingDeleteSourceFieldsForItem(item.rule)) {
+      const fieldKey = canonicalSourceField(field);
+      if (isKnownMappingSourceField(rules, fieldKey)) {
+        continue;
+      }
+      const tokens = unknownSourceFieldTokens.get(fieldKey) ?? [];
+      tokens.push(ruleValidationToken(item.rule, item.collection.type), ...sourceFieldTokens(fieldKey));
+      unknownSourceFieldTokens.set(fieldKey, tokens);
+    }
+  }
+
+  for (const [fieldKey, tokens] of unknownSourceFieldTokens) {
+    addIssue({
+      source: 'cmdbuild',
+      message: `Class attribute field в rule не объявлен: ${fieldKey}`,
+      tokens: [...sourceFieldTokens(fieldKey), ...tokens],
+      help: 'Rule ссылается на class attribute field, которого нет в source.fields. Добавьте field в правила или исправьте condition/valueField.'
+    });
+  }
+
   return {
     issues,
     issueTokens: buildIssueTokenMap(issues)
   };
+}
+
+function ruleValidationTokensForSourceField(rules, fieldKey) {
+  const selected = canonicalSourceField(fieldKey);
+  return mappingDeleteRuleItems(rules)
+    .filter(item => mappingDeleteSourceFieldsForItem(item.rule)
+      .some(field => canonicalSourceField(field) === selected))
+    .map(item => ruleValidationToken(item.rule, item.collection.type));
 }
 
 function appendValidationSection(container, title, nodes) {
@@ -3768,6 +8167,7 @@ function renderMappingRules(container, rules, cmdbuildCatalog = null) {
   appendConversionRuleSection(container, 'Interface address rules', rules.interfaceAddressRules ?? [], 'interfaceAddress', null, rules);
   appendConversionRuleSection(container, 'Interface rules', rules.interfaceSelectionRules ?? [], 'interface', null, rules);
   appendConversionRuleSection(container, 'Tag rules', rules.tagSelectionRules ?? [], 'tags', null, rules);
+  appendConversionRuleSection(container, 'Monitoring suppression rules', rules.monitoringSuppressionRules ?? [], 'monitoringSuppression', null, rules);
   appendOptionalZabbixRuleSections(container, rules, null, appendMappingSection);
 
   appendMappingSection(container, 'T4 templates', Object.entries(rules.t4Templates ?? {})
@@ -4065,8 +8465,8 @@ function appendLazyMappingSection(container, title, buildNodes, options = {}) {
 
     section.dataset.loading = 'true';
     body.replaceChildren(mappingNode({
-      label: 'Загрузка',
-      meta: 'данные раздела загружаются по требованию',
+      label: t('common.loading'),
+      meta: t('mapping.lazyLoadingMeta'),
       tokens: options.tokens ?? [],
       level: 1,
       kind: 'zabbix'
@@ -4167,7 +8567,7 @@ function mappingSectionHelp(title) {
     'Entity classes': 'Список классов CMDBuild, события которых правила считают допустимыми. Можно добавлять или удалять имя класса в JSON правил только если такой класс уже есть в CMDBuild и webhook передает его события.',
     'Class attribute fields': 'Conversion fields: поле слева является нормализованным Model-полем конвертера, source справа указывает атрибут или ключ webhook CMDBuild. Без правки микросервиса безопасно менять source, required и validationRegex для уже поддержанных Model-полей и реально существующих CMDBuild attributes.',
     'Event routing': 'Маршрутизация create/update/delete в JSON-RPC методы Zabbix и T4-шаблоны. Без правки микросервисов можно менять метод, templateName и fallbackTemplateName только в рамках уже поддержанных сценариев и существующих T4 templates.',
-    'Host profiles': 'Host profiles описывают fan-out: один CMDB object может дать один или несколько Zabbix hosts. Внутри profile задаются hostName/visibleName templates и interfaces. Для Server используйте interface/interface2 как дополнительные interfaces основного host и profile/profile2 как отдельные Zabbix hosts. Переименование profile меняет suffix нового Zabbix host, старые hosts не переименовываются автоматически.',
+    'Host profiles': 'Host profiles описывают fan-out: один CMDB object может дать один или несколько Zabbix hosts. Внутри profile задаются hostName/visibleName templates и interfaces. Для нескольких IP можно оставить их interfaces одного основного host или создать отдельные profiles для отдельных Zabbix hosts. Переименование profile меняет suffix нового Zabbix host, старые hosts не переименовываются автоматически.',
     'Group rules': 'Правила выбора host groups по regex над class attribute fields. Обычно редактируются в JSON правил: priority, when.anyRegex/when.allRegex и ссылки на существующие Zabbix host groups. CMDBuild менять не нужно, если поля уже приходят в webhook.',
     'Template rules': 'Правила выбора Zabbix templates по regex над class attribute fields. В условии можно использовать lookup/class attribute field zabbixTag, если tag из CMDBuild должен влиять на выбор шаблона. Результатом Template rules должны оставаться только templates/templateRef; выбирать или назначать Zabbix tags в этом блоке нецелесообразно, для этого есть Tag rules. После выбора применяется templateConflictRules: на create конфликтующие templates не попадают в payload, на update fallback они также попадают в templates_clear.',
     'Interface address rules': 'Правила выбора адреса Zabbix interface. Можно выбирать IP или DNS через mode и valueField; valueField ссылается на нормализованное class attribute field, например ipAddress или dnsName.',
@@ -4751,7 +9151,7 @@ function zabbixExtensionItemMappingTokens(definition, item, rules = null) {
   for (const rule of selectionRules) {
     if (selectionItemsForRule(rules, rule, definition.rulesKey)
       .some(candidate => sameZabbixExtensionItem(definition, candidate, item))) {
-      tokens.push(...ruleTokens(rule, definition.rulesKey, rules));
+      tokens.push(ruleValidationToken(rule, definition.rulesKey));
     }
   }
 
@@ -4823,7 +9223,7 @@ function appendOptionalZabbixRuleSections(container, rules, validation, appendSe
     if (validation && (!Array.isArray(selectionRules) || selectionRules.length === 0)) {
       continue;
     }
-    appendConversionRuleSection(container, `${definition.title} rules`, selectionRules, definition.rulesKey, validation, rules, appendSection);
+    appendConversionRuleSection(container, `${definition.title} rules`, selectionRules, definition.rulesKey, validation, rules, appendSection, definition.selectionRulesKey);
   }
 }
 
@@ -4838,17 +9238,19 @@ function zabbixItemTokens(rules, type, id, name) {
   for (const rule of ruleLists[type] ?? []) {
     const items = selectionItemsForRule(rules, rule, type);
     if (items.some(item => sameMappingItem(item, type, id, name))) {
-      tokens.push(...conditionTokens(rule.when), ...ruleTokens(rule, type, rules));
+      tokens.push(ruleValidationToken(rule, type));
     }
   }
 
   return uniqueTokens(tokens);
 }
 
-function appendConversionRuleSection(container, title, selectionRules, type, validation, rules, appendSection = appendMappingSection) {
+function appendConversionRuleSection(container, title, selectionRules, type, validation, rules, appendSection = appendMappingSection, collectionKey = null) {
   const ruleItems = Array.isArray(selectionRules) ? selectionRules : [];
   const nodes = ruleItems.length > 0
-    ? ruleItems.flatMap(rule => ruleMappingNodes(rule, type, null, validation, rules))
+    ? ruleItems.flatMap((rule, index) => validation && collectionKey
+      ? validationRuleMappingNodes(rules, collectionKey, rule, index, type, validation)
+      : ruleMappingNodes(rule, type, null, validation, rules))
     : [emptyConversionBlockNode(title, type)];
   appendSection(container, title, nodes, {
     expanded: false,
@@ -4950,6 +9352,7 @@ function conditionMappingNodes(rule, type, validation = null) {
 
 function ruleTokens(rule, type, rules = null) {
   const tokens = [
+    ruleValidationToken(rule, type),
     `rule:${normalizeToken(rule.name)}`,
     ...targetTokensForRuleType(type),
     ...conditionTokens(rule.when),
@@ -5056,23 +9459,25 @@ function appendHostProfilesSection(container, rules) {
   });
 }
 
-function hostProfileMappingNodes(profile) {
+function hostProfileMappingNodes(profile, validation = null) {
   const profileName = profile.name || 'default';
+  const tokens = hostProfileTokens(profile);
   return [
     mappingNode({
       label: profileName,
       meta: `priority ${profile.priority ?? 1000}${profile.fallback ? ' | fallback' : ''}`,
-      tokens: hostProfileTokens(profile),
+      tokens,
       level: 1,
       kind: 'rule',
+      status: validationStatus(tokens, validation),
       help: hostProfileHelp(profile)
     }),
-    ...conditionMappingNodes(profile, 'hostProfiles'),
-    ...((profile.interfaces ?? []).flatMap(item => hostProfileInterfaceMappingNodes(profile, item)))
+    ...conditionMappingNodes(profile, 'hostProfiles', validation),
+    ...((profile.interfaces ?? []).flatMap(item => hostProfileInterfaceMappingNodes(profile, item, validation)))
   ];
 }
 
-function hostProfileInterfaceMappingNodes(profile, item) {
+function hostProfileInterfaceMappingNodes(profile, item, validation = null) {
   const profileName = profile.name || 'default';
   const interfaceProfile = item.interfaceProfileRef || item.interfaceRef || profile.interfaceProfileRef || profile.interfaceRef || 'selected interface';
   const valueField = item.valueField || profile.valueField || '';
@@ -5094,9 +9499,10 @@ function hostProfileInterfaceMappingNodes(profile, item) {
       tokens,
       level: 2,
       kind: 'rule',
+      status: validationStatus(tokens, validation),
       help: hostProfileInterfaceHelp(profile, item)
     }),
-    ...conditionMappingNodes(item, 'hostProfiles')
+    ...conditionMappingNodes(item, 'hostProfiles', validation)
   ];
 }
 
@@ -5148,7 +9554,7 @@ function templateStringTokens(template = '') {
 
 function isKnownMappingSourceField(rules, field) {
   return Boolean(rules?.source?.fields?.[field])
-    || ['eventType', 'zabbixHostId', 'ipAddress', 'dnsName'].includes(canonicalSourceField(field));
+    || ['eventType', 'zabbixHostId', 'ipAddress', 'dnsName', 'hostProfile', 'outputProfile'].includes(canonicalSourceField(field));
 }
 
 function selectionItemsForRule(rules, rule, type) {
@@ -5553,6 +9959,7 @@ async function loadRuntimeSettings() {
 }
 
 async function saveRuntimeSettings() {
+  const previousDepth = clampNumber(state.runtimeSettings?.cmdbuild?.maxTraversalDepth, 2, 2, 5);
   const body = readRuntimeSettingsForm();
   const result = await api('/api/settings/runtime', {
     method: 'PUT',
@@ -5561,30 +9968,43 @@ async function saveRuntimeSettings() {
   state.runtimeSettings = result;
   fillRuntimeSettingsForm(result);
   renderEventTopics(result.eventBrowser?.topics ?? [], $('#eventsTopic').value);
-  toast('Runtime settings saved');
+  const nextDepth = clampNumber(result.cmdbuild?.maxTraversalDepth, 2, 2, 5);
+  toast(nextDepth !== previousDepth ? t('toast.runtimeSavedResyncRequired') : t('toast.runtimeSaved'));
+}
+
+async function loadAuthSettings() {
+  const result = await api('/api/settings/idp');
+  state.idp = result;
+  state.auth = {
+    ...(state.auth ?? {}),
+    useIdp: Boolean(result.enabled),
+    provider: normalizeIdpProvider(result.provider)
+  };
+  fillIdpForm(result);
+  if (currentRole() === 'admin') {
+    await loadUsers();
+  }
+  return result;
 }
 
 function fillRuntimeSettingsForm(settings) {
   const form = $('#runtimeSettingsForm');
-  const defaults = settings.auth?.localLoginDefaults ?? {};
   const cmdbuild = settings.cmdbuild ?? {};
   const zabbix = settings.zabbix ?? {};
+  const rules = settings.rules ?? {};
   const eventBrowser = settings.eventBrowser ?? {};
 
   form.elements.filePath.value = settings.filePath ?? '';
-  form.elements.localDefaultsEnabled.checked = Boolean(defaults.enabled);
-  form.elements.cmdbuildBaseUrl.value = cmdbuild.baseUrl ?? defaults.cmdbuildBaseUrl ?? '';
-  form.elements.cmdbuildServiceUsername.value = cmdbuild.serviceAccount?.username ?? '';
-  form.elements.cmdbuildServicePassword.value = cmdbuild.serviceAccount?.password ?? '';
-  form.elements.cmdbuildDefaultUsername.value = defaults.cmdbuildUsername ?? '';
-  form.elements.cmdbuildDefaultPassword.value = defaults.cmdbuildPassword ?? '';
-  form.elements.zabbixApiEndpoint.value = zabbix.apiEndpoint ?? defaults.zabbixApiEndpoint ?? '';
-  form.elements.zabbixServiceUser.value = zabbix.serviceAccount?.user ?? '';
-  form.elements.zabbixServicePassword.value = zabbix.serviceAccount?.password ?? '';
-  form.elements.zabbixServiceApiToken.value = zabbix.serviceAccount?.apiToken ?? '';
-  form.elements.zabbixDefaultUsername.value = defaults.zabbixUsername ?? '';
-  form.elements.zabbixDefaultPassword.value = defaults.zabbixPassword ?? '';
-  form.elements.zabbixDefaultApiToken.value = defaults.zabbixApiToken ?? '';
+  form.elements.usersFilePath.value = settings.usersFilePath ?? '';
+  form.elements.cmdbuildBaseUrl.value = cmdbuild.baseUrl ?? '';
+  form.elements.cmdbuildMaxTraversalDepth.value = clampNumber(cmdbuild.maxTraversalDepth, 2, 2, 5);
+  form.elements.zabbixApiEndpoint.value = zabbix.apiEndpoint ?? '';
+  form.elements.zabbixApiToken.value = zabbix.apiToken ?? '';
+  form.elements.rulesFilePath.value = rules.rulesFilePath || defaultConversionRulesFilePath;
+  form.elements.rulesReadFromGit.checked = Boolean(rules.readFromGit);
+  form.elements.rulesRepositoryUrl.value = rules.repositoryUrl ?? '';
+  updateRuntimeRulesUiState();
+  updateIdpUiState();
 
   form.elements.eventsEnabled.checked = Boolean(eventBrowser.enabled);
   form.elements.eventsBootstrapServers.value = eventBrowser.bootstrapServers ?? '';
@@ -5599,37 +10019,40 @@ function fillRuntimeSettingsForm(settings) {
   form.elements.eventsTopics.value = JSON.stringify(eventBrowser.topics ?? [], null, 2);
 }
 
+function updateRuntimeRulesUiState() {
+  const form = $('#runtimeSettingsForm');
+  if (!form) {
+    return;
+  }
+
+  const enabled = Boolean(form.elements.rulesReadFromGit?.checked);
+  const rulesPath = form.elements.rulesFilePath?.value?.trim() || defaultConversionRulesFilePath;
+  if (form.elements.rulesRepositoryUrl) {
+    form.elements.rulesRepositoryUrl.readOnly = !enabled;
+  }
+  const note = $('#rulesReadModeNote');
+  if (note) {
+    note.textContent = tf(enabled ? 'settings.rulesReadModeGit' : 'settings.rulesReadModeDisk', { path: rulesPath });
+  }
+}
+
 function readRuntimeSettingsForm() {
   const form = new FormData($('#runtimeSettingsForm'));
   const cmdbuildBaseUrl = form.get('cmdbuildBaseUrl');
   const zabbixApiEndpoint = form.get('zabbixApiEndpoint');
   return {
-    auth: {
-      localLoginDefaults: {
-        enabled: form.get('localDefaultsEnabled') === 'on',
-        cmdbuildBaseUrl,
-        cmdbuildUsername: form.get('cmdbuildDefaultUsername'),
-        cmdbuildPassword: form.get('cmdbuildDefaultPassword'),
-        zabbixApiEndpoint,
-        zabbixUsername: form.get('zabbixDefaultUsername'),
-        zabbixPassword: form.get('zabbixDefaultPassword'),
-        zabbixApiToken: form.get('zabbixDefaultApiToken')
-      }
-    },
     cmdbuild: {
       baseUrl: cmdbuildBaseUrl,
-      serviceAccount: {
-        username: form.get('cmdbuildServiceUsername'),
-        password: form.get('cmdbuildServicePassword')
-      }
+      maxTraversalDepth: Number(form.get('cmdbuildMaxTraversalDepth') || 2)
     },
     zabbix: {
       apiEndpoint: zabbixApiEndpoint,
-      serviceAccount: {
-        user: form.get('zabbixServiceUser'),
-        password: form.get('zabbixServicePassword'),
-        apiToken: form.get('zabbixServiceApiToken')
-      }
+      apiToken: form.get('zabbixApiToken')
+    },
+    rules: {
+      rulesFilePath: String(form.get('rulesFilePath') || '').trim() || defaultConversionRulesFilePath,
+      readFromGit: form.get('rulesReadFromGit') === 'on',
+      repositoryUrl: form.get('rulesRepositoryUrl')
     },
     eventBrowser: {
       enabled: form.get('eventsEnabled') === 'on',
@@ -5648,39 +10071,363 @@ function readRuntimeSettingsForm() {
 }
 
 async function saveIdp() {
-  const form = new FormData($('#idpForm'));
+  const elements = $('#idpForm').elements;
+  const value = name => elements[name]?.value ?? '';
+  const checked = name => Boolean(elements[name]?.checked);
+  const authMode = value('authMode') || currentAuthMode();
+  const provider = authMode === 'msad'
+    ? 'ldap'
+    : authMode === 'idp'
+      ? normalizeIdpProvider(value('provider'))
+      : normalizeIdpProvider(state.idp?.provider ?? value('provider') ?? 'saml2');
   const result = await api('/api/settings/idp', {
     method: 'PUT',
     body: {
-      enabled: form.get('enabled') === 'on',
-      metadataUrl: form.get('metadataUrl'),
-      entityId: form.get('entityId'),
-      ssoUrl: form.get('ssoUrl'),
-      sloUrl: form.get('sloUrl'),
-      spEntityId: form.get('spEntityId'),
-      acsUrl: form.get('acsUrl'),
-      sloCallbackUrl: form.get('sloCallbackUrl'),
-      nameIdFormat: form.get('nameIdFormat'),
-      authnRequestBinding: form.get('authnRequestBinding'),
-      requireSignedResponses: form.get('requireSignedResponses') === 'on',
-      requireSignedAssertions: form.get('requireSignedAssertions') === 'on',
-      idpX509Certificate: form.get('idpX509Certificate'),
-      spCertificate: form.get('spCertificate'),
-      spPrivateKey: form.get('spPrivateKey')
+      enabled: authMode !== 'local',
+      provider: provider === 'ldap' && authMode === 'idp' ? 'saml2' : provider,
+      metadataUrl: value('metadataUrl'),
+      entityId: value('entityId'),
+      ssoUrl: value('ssoUrl'),
+      sloUrl: value('sloUrl'),
+      spEntityId: value('spEntityId'),
+      acsUrl: value('acsUrl'),
+      sloCallbackUrl: value('sloCallbackUrl'),
+      nameIdFormat: value('nameIdFormat'),
+      authnRequestBinding: value('authnRequestBinding'),
+      requireSignedResponses: checked('requireSignedResponses'),
+      requireSignedAssertions: checked('requireSignedAssertions'),
+      idpX509Certificate: value('idpX509Certificate'),
+      spCertificate: value('spCertificate'),
+      spPrivateKey: value('spPrivateKey'),
+      roleMapping: {
+        admin: value('roleAdminGroups'),
+        editor: value('roleEditorGroups'),
+        viewer: value('roleViewerGroups')
+      },
+      oauth2: {
+        authorizationUrl: value('oauth2AuthorizationUrl'),
+        tokenUrl: value('oauth2TokenUrl'),
+        userInfoUrl: value('oauth2UserInfoUrl'),
+        clientId: value('oauth2ClientId'),
+        clientSecret: value('oauth2ClientSecret'),
+        redirectUri: value('oauth2RedirectUri'),
+        scopes: value('oauth2Scopes'),
+        loginClaim: value('oauth2LoginClaim'),
+        emailClaim: value('oauth2EmailClaim'),
+        displayNameClaim: value('oauth2DisplayNameClaim'),
+        groupsClaim: value('oauth2GroupsClaim')
+      },
+      ldap: {
+        protocol: value('ldapProtocol'),
+        host: value('ldapHost'),
+        port: Number(value('ldapPort')),
+        baseDn: value('ldapBaseDn'),
+        bindDn: value('ldapBindDn'),
+        bindPassword: value('ldapBindPassword'),
+        userDnTemplate: value('ldapUserDnTemplate'),
+        userSearchBase: value('ldapUserSearchBase'),
+        userFilter: value('ldapUserFilter'),
+        groupSearchBase: value('ldapGroupSearchBase'),
+        groupFilter: value('ldapGroupFilter'),
+        groupNameAttribute: value('ldapGroupNameAttribute'),
+        loginAttribute: value('ldapLoginAttribute'),
+        emailAttribute: value('ldapEmailAttribute'),
+        displayNameAttribute: value('ldapDisplayNameAttribute'),
+        groupsAttribute: value('ldapGroupsAttribute'),
+        tlsRejectUnauthorized: checked('ldapTlsRejectUnauthorized')
+      }
     }
   });
   fillIdpForm(result);
-  toast('IdP settings saved');
+  state.idp = result;
+  state.auth = state.auth ?? {};
+  state.auth.useIdp = Boolean(result.enabled);
+  state.auth.provider = normalizeIdpProvider(result.provider);
+  updateIdpUiState();
+  toast(t('toast.idpSaved'));
 }
 
 function fillIdpForm(idp) {
   const form = $('#idpForm');
-  form.elements.enabled.checked = Boolean(idp.enabled);
+  const provider = normalizeIdpProvider(idp.provider ?? 'saml2');
+  form.elements.authMode.value = !idp.enabled ? 'local' : provider === 'ldap' ? 'msad' : 'idp';
+  form.elements.provider.value = provider === 'ldap' ? 'saml2' : provider;
   for (const field of ['metadataUrl', 'entityId', 'ssoUrl', 'sloUrl', 'spEntityId', 'acsUrl', 'sloCallbackUrl', 'nameIdFormat', 'authnRequestBinding']) {
     form.elements[field].value = idp[field] ?? '';
   }
   form.elements.requireSignedResponses.checked = Boolean(idp.requireSignedResponses);
   form.elements.requireSignedAssertions.checked = Boolean(idp.requireSignedAssertions);
+  const mapping = idp.roleMapping ?? {};
+  form.elements.roleAdminGroups.value = normalizeGroupInput(mapping.admin ?? mapping.Admin);
+  form.elements.roleEditorGroups.value = normalizeGroupInput(mapping.editor ?? mapping.Editor);
+  form.elements.roleViewerGroups.value = normalizeGroupInput(mapping.viewer ?? mapping.Viewer);
+  const oauth2 = idp.oauth2 ?? {};
+  for (const [elementName, value] of Object.entries({
+    oauth2AuthorizationUrl: oauth2.authorizationUrl,
+    oauth2TokenUrl: oauth2.tokenUrl,
+    oauth2UserInfoUrl: oauth2.userInfoUrl,
+    oauth2ClientId: oauth2.clientId,
+    oauth2ClientSecret: '',
+    oauth2RedirectUri: oauth2.redirectUri,
+    oauth2Scopes: oauth2.scopes,
+    oauth2LoginClaim: oauth2.loginClaim,
+    oauth2EmailClaim: oauth2.emailClaim,
+    oauth2DisplayNameClaim: oauth2.displayNameClaim,
+    oauth2GroupsClaim: oauth2.groupsClaim
+  })) {
+    form.elements[elementName].value = value ?? '';
+  }
+  const ldap = idp.ldap ?? {};
+  for (const [elementName, value] of Object.entries({
+    ldapProtocol: ldap.protocol,
+    ldapHost: ldap.host,
+    ldapPort: ldap.port,
+    ldapBaseDn: ldap.baseDn,
+    ldapBindDn: ldap.bindDn,
+    ldapBindPassword: '',
+    ldapUserDnTemplate: ldap.userDnTemplate,
+    ldapUserSearchBase: ldap.userSearchBase,
+    ldapUserFilter: ldap.userFilter,
+    ldapGroupSearchBase: ldap.groupSearchBase,
+    ldapGroupFilter: ldap.groupFilter,
+    ldapGroupNameAttribute: ldap.groupNameAttribute,
+    ldapLoginAttribute: ldap.loginAttribute,
+    ldapEmailAttribute: ldap.emailAttribute,
+    ldapDisplayNameAttribute: ldap.displayNameAttribute,
+    ldapGroupsAttribute: ldap.groupsAttribute
+  })) {
+    form.elements[elementName].value = value ?? '';
+  }
+  form.elements.ldapTlsRejectUnauthorized.checked = ldap.tlsRejectUnauthorized !== false;
+  updateIdpUiState();
+}
+
+function normalizeGroupInput(value) {
+  return Array.isArray(value) ? value.join(', ') : (value ?? '');
+}
+
+function updateIdpUiState() {
+  const idpForm = $('#idpForm');
+  const authMode = idpForm?.elements.authMode?.value ?? currentAuthMode();
+  const rawProvider = idpForm?.elements.provider?.value ?? currentIdpProvider();
+  const provider = authMode === 'msad' ? 'ldap' : normalizeIdpProvider(rawProvider) === 'ldap' ? 'saml2' : normalizeIdpProvider(rawProvider);
+  const enabled = authMode !== 'local';
+  state.auth = { ...(state.auth ?? {}), useIdp: enabled, provider };
+  state.idp = { ...(state.idp ?? {}), enabled, provider };
+
+  const providerRow = $('#idpProviderRow');
+  if (providerRow) {
+    providerRow.classList.toggle('hidden', authMode !== 'idp');
+    providerRow.classList.toggle('is-disabled', authMode !== 'idp');
+    const providerSelect = providerRow.querySelector('select');
+    if (providerSelect) {
+      providerSelect.disabled = authMode !== 'idp';
+      providerSelect.value = provider === 'ldap' ? 'saml2' : provider;
+    }
+  }
+
+  for (const block of $$('.idp-provider-block')) {
+    const isSamlBlock = block.id === 'samlSettingsBlock';
+    const isOauth2Block = block.id === 'oauth2SettingsBlock';
+    const isLdapBlock = block.id === 'ldapSettingsBlock';
+    const visible = isLdapBlock
+      ? authMode !== 'local'
+      : authMode === 'idp' && ((isSamlBlock && provider === 'saml2') || (isOauth2Block && provider === 'oauth2'));
+    const isActiveProvider = isLdapBlock
+      ? authMode !== 'local'
+      : visible;
+    block.hidden = !visible;
+    block.disabled = !visible;
+    block.classList.toggle('is-disabled', !visible);
+    block.classList.toggle('is-active-provider', isActiveProvider);
+  }
+  $('#roleMappingBlock')?.classList.toggle('is-disabled', !enabled);
+  $$('#roleMappingBlock input').forEach(input => {
+    input.disabled = !enabled;
+  });
+
+  const idpDependentDisabled = authMode !== 'idp';
+  $$('.idp-dependent input, .idp-dependent select').forEach(input => {
+    input.disabled = idpDependentDisabled;
+  });
+  $$('.idp-dependent').forEach(node => {
+    node.classList.toggle('is-disabled', idpDependentDisabled);
+  });
+
+  const userAdmin = $('#userAdminForm');
+  if (userAdmin) {
+    const localUsersActive = userAdmin.elements.localUsersActive;
+    if (localUsersActive) {
+      localUsersActive.checked = authMode === 'local';
+    }
+    userAdmin.classList.toggle('is-disabled', authMode !== 'local');
+    [...userAdmin.elements].forEach(element => {
+      element.disabled = element.name === 'localUsersActive' || authMode !== 'local';
+    });
+  }
+}
+
+function openPasswordDialog() {
+  $('#passwordError').textContent = '';
+  $('#passwordForm').reset();
+  $('#passwordDialog').classList.remove('hidden');
+  $('#passwordForm').elements.currentPassword.focus();
+}
+
+function closePasswordDialog() {
+  if (state.user?.passwordChangeRequired) {
+    return;
+  }
+
+  $('#passwordDialog').classList.add('hidden');
+}
+
+async function changeOwnPassword(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const newPassword = String(form.get('newPassword') ?? '');
+  if (newPassword !== String(form.get('confirmPassword') ?? '')) {
+    $('#passwordError').textContent = state.language === 'ru' ? 'Новые пароли не совпадают.' : 'New passwords do not match.';
+    return;
+  }
+
+  try {
+    const result = await api('/api/auth/change-password', {
+      method: 'POST',
+      body: {
+        currentPassword: form.get('currentPassword'),
+        newPassword
+      }
+    });
+    state.user = result.user;
+    closePasswordDialog();
+    updateSessionSummary();
+    toast(state.language === 'ru' ? 'Пароль обновлен' : 'Password updated');
+  } catch (error) {
+    $('#passwordError').textContent = error.message;
+  }
+}
+
+async function loadUsers() {
+  if (currentRole() !== 'admin') {
+    return null;
+  }
+
+  const result = await api('/api/users');
+  state.users = result.users ?? [];
+  renderUsers(state.users);
+  return result;
+}
+
+function renderUsers(users) {
+  const form = $('#userAdminForm');
+  const select = form.elements.username;
+  const current = select.value;
+  clear(select);
+  for (const user of users) {
+    const option = document.createElement('option');
+    option.value = user.username;
+    option.textContent = `${user.username} | ${user.roleLabel}`;
+    option.selected = user.username === current;
+    select.append(option);
+  }
+
+  renderRows($('#usersTable'), users, user => [
+    user.displayName ? `${user.username} (${user.displayName})` : user.username,
+    user.roleLabel,
+    user.mustChangePassword ? (state.language === 'ru' ? 'требуется' : 'required') : ''
+  ]);
+}
+
+async function resetUserPassword() {
+  const form = new FormData($('#userAdminForm'));
+  const newPassword = String(form.get('newPassword') ?? '');
+  if (!newPassword) {
+    toast(state.language === 'ru' ? 'Введите новый пароль' : 'Enter a new password');
+    return;
+  }
+
+  const result = await api('/api/users/reset-password', {
+    method: 'POST',
+    body: {
+      username: form.get('username'),
+      newPassword,
+      mustChangePassword: form.get('mustChangePassword') === 'on'
+    }
+  });
+  state.users = result.users ?? [];
+  renderUsers(state.users);
+  $('#userAdminForm').elements.newPassword.value = '';
+  toast(state.language === 'ru' ? 'Пароль сброшен' : 'Password reset');
+}
+
+function promptSessionCredentials(details) {
+  if (state.credentialPrompt) {
+    state.credentialPrompt.reject(new Error('credentials_prompt_replaced'));
+  }
+
+  const dialog = $('#credentialsDialog');
+  const form = $('#credentialsForm');
+  form.reset();
+  form.elements.service.value = details.service ?? '';
+  form.elements.baseUrl.value = details.baseUrl ?? state.user?.cmdbuild?.baseUrl ?? '';
+  form.elements.apiEndpoint.value = details.apiEndpoint ?? state.user?.zabbix?.apiEndpoint ?? '';
+  $('#credentialsBaseUrlRow').classList.toggle('hidden', details.service !== 'cmdbuild');
+  $('#credentialsApiEndpointRow').classList.toggle('hidden', details.service !== 'zabbix');
+  $('#credentialsDialogTitle').textContent = details.service === 'zabbix'
+    ? (state.language === 'ru' ? 'Нужны учетные данные Zabbix' : 'Zabbix credentials required')
+    : (state.language === 'ru' ? 'Нужны учетные данные CMDBuild' : 'CMDBuild credentials required');
+  const idpHint = details.service === 'zabbix'
+    ? {
+        ru: 'Внешняя авторизация UI не используется для backend-доступа к Zabbix. Нужен Zabbix API key или временные учетные данные.',
+        en: 'External UI authentication is not used for backend access to Zabbix. A Zabbix API key or temporary credentials are required.'
+      }
+    : {
+        ru: 'Внешняя авторизация UI не используется для backend-доступа к CMDBuild. Нужны временные учетные данные CMDBuild.',
+        en: 'External UI authentication is not used for backend access to CMDBuild. Temporary CMDBuild credentials are required.'
+      };
+  $('#credentialsError').textContent = currentAuthMode() !== 'local'
+    ? idpHint[state.language]
+    : '';
+  dialog.classList.remove('hidden');
+  form.elements.username.focus();
+
+  return new Promise((resolve, reject) => {
+    state.credentialPrompt = { resolve, reject };
+  });
+}
+
+function cancelCredentialPrompt() {
+  $('#credentialsDialog').classList.add('hidden');
+  if (state.credentialPrompt) {
+    state.credentialPrompt.reject(new Error(state.language === 'ru' ? 'Ввод учетных данных отменен.' : 'Credential entry was cancelled.'));
+    state.credentialPrompt = null;
+  }
+}
+
+async function submitSessionCredentials(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  try {
+    const result = await api('/api/auth/session-credentials', {
+      method: 'POST',
+      body: {
+        service: form.get('service'),
+        baseUrl: form.get('baseUrl'),
+        apiEndpoint: form.get('apiEndpoint'),
+        username: form.get('username'),
+        password: form.get('password')
+      },
+      retryCredentials: false
+    });
+    state.user = result.user;
+    $('#credentialsDialog').classList.add('hidden');
+    updateSessionSummary();
+    state.credentialPrompt?.resolve();
+    state.credentialPrompt = null;
+  } catch (error) {
+    $('#credentialsError').textContent = error.message;
+  }
 }
 
 function bindHelp() {
@@ -5727,16 +10474,18 @@ function applyHelpText() {
     '.brand': 'tooltip.brand',
     '#sessionSummary': 'tooltip.sessionSummary',
     '#idpLoginButton': 'tooltip.idpLoginButton',
+    '#changePasswordOpen': 'tooltip.changePasswordOpen',
     '#logoutButton': 'tooltip.logoutButton',
     '#refreshDashboard': 'tooltip.refreshDashboard',
     '#eventsMaxMessages': 'tooltip.eventsMaxMessages',
     '#refreshEvents': 'tooltip.refreshEvents',
     '#loadRules': 'tooltip.loadRules',
     '#validateRules': 'tooltip.validateRules',
+    '#createEmptyRules': 'tooltip.createEmptyRules',
     '#rulesFile': 'tooltip.rulesFile',
     '#dryRunPayload': 'tooltip.dryRunPayload',
     '#dryRunRules': 'tooltip.dryRunRules',
-    '#uploadRules': 'tooltip.uploadRules',
+    '#saveRulesAs': 'tooltip.saveRulesAs',
     '#loadMapping': 'tooltip.loadMapping',
     '#mappingMode': 'tooltip.mappingMode',
     '#mappingEditAction': 'tooltip.mappingEditAction',
@@ -5744,18 +10493,34 @@ function applyHelpText() {
     '#mappingUndo': 'tooltip.mappingUndo',
     '#mappingRedo': 'tooltip.mappingRedo',
     '#mappingSaveAs': 'tooltip.mappingSaveAs',
+    '#mappingResetForm': 'tooltip.mappingResetForm',
     '#mappingAddRule': 'tooltip.mappingAddRule',
+    '#mappingDeleteView': 'tooltip.mappingDeleteView',
     '#mappingDeleteSelectAll': 'tooltip.mappingDeleteSelectAll',
     '#mappingDeleteClear': 'tooltip.mappingDeleteClear',
     '#mappingDeleteSelected': 'tooltip.mappingDeleteSelected',
     '#loadValidateMapping': 'tooltip.loadValidateMapping',
+    '#webhooksUndo': 'tooltip.webhooksUndo',
+    '#webhooksRedo': 'tooltip.webhooksRedo',
+    '#webhooksAnalyze': 'tooltip.webhooksAnalyze',
+    '#webhooksLoadCmdb': 'tooltip.webhooksLoadCmdb',
+    '#webhooksSaveAs': 'tooltip.webhooksSaveAs',
+    '#webhooksApplyCmdb': 'tooltip.webhooksApplyCmdb',
+    '#webhooksSelectAll': 'tooltip.webhooksSelectAll',
+    '#webhooksClear': 'tooltip.webhooksClear',
     '#syncZabbix': 'tooltip.syncZabbix',
     '#loadZabbix': 'tooltip.loadZabbix',
     '#syncCmdbuild': 'tooltip.syncCmdbuild',
     '#loadCmdbuild': 'tooltip.loadCmdbuild',
-    '#loadSettings': 'tooltip.loadSettings',
+    '#loadRuntimeSettings': 'tooltip.loadRuntimeSettings',
+    '#loadAuthSettings': 'tooltip.loadAuthSettings',
     '#saveRuntimeSettings': 'tooltip.saveRuntimeSettings',
+    '[name="rulesFilePath"]': 'tooltip.rulesFilePath',
+    '[name="rulesReadFromGit"]': 'tooltip.rulesReadFromGit',
+    '[name="rulesRepositoryUrl"]': 'tooltip.rulesRepositoryUrl',
     '#saveIdp': 'tooltip.saveIdp',
+    '#loadUsers': 'tooltip.loadUsers',
+    '#resetUserPassword': 'tooltip.resetUserPassword',
     '#helpPopoverClose': 'tooltip.helpPopoverClose'
   };
   for (const [selector, key] of Object.entries(selectorHelp)) {
@@ -5861,7 +10626,15 @@ async function api(path, options = {}) {
   });
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(payload.message ?? payload.error ?? `HTTP ${response.status}`);
+    if (response.status === 428 && payload.error === 'credentials_required' && options.retryCredentials !== false) {
+      await promptSessionCredentials(payload);
+      return api(path, { ...options, retryCredentials: false });
+    }
+
+    const error = new Error(payload.message ?? payload.error ?? `HTTP ${response.status}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
   return payload;
 }
@@ -5944,6 +10717,10 @@ function normalizeToken(value) {
 
 function equalsIgnoreCase(left, right) {
   return String(left ?? '').toLowerCase() === String(right ?? '').toLowerCase();
+}
+
+function sameNormalized(left, right) {
+  return normalizeToken(left) === normalizeToken(right);
 }
 
 function toast(message) {

@@ -3,7 +3,7 @@ info:
   title: cmdbwebhooks2kafka HTTP API
   version: 0.4.0
   description: >
-    Receives flat CMDBuild webhook payloads. Reference and lookup fields can
+    Receives flat CMDBuild webhook payloads. Reference, lookup, and domain-path fields can
     carry numeric ids; leaf interpretation is driven by conversion rules
     metadata in downstream cmdbkafka2zabbix.
 servers:

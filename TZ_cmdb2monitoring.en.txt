@@ -1,0 +1,532 @@
+cmdb2monitoring Technical Specification
+
+Document version: 0.4.0
+Last updated: 2026-05-02
+English companion for TZ_cmdb2monitoring.txt. Architecture artifacts under aa/ are intentionally not translated in this pass.
+
+1. Project Purpose
+
+The project implements an integration chain:
+
+CMDBuild webhook -> Kafka -> conversion rules -> Kafka -> Zabbix API -> Kafka response.
+
+Goals:
+- receive CMDBuild card lifecycle events;
+- normalize webhook payloads into Kafka events;
+- convert CMDBuild events to Zabbix JSON-RPC requests using JSON rules and T4 templates;
+- call Zabbix API through a dedicated worker;
+- keep audit/diagnostic responses in Kafka;
+- provide an operator UI/BFF for health, events, catalog sync, rules validation/dry-run, rules editing, logical control, authorization, and runtime settings.
+
+monitoring-ui-api does not write active rules files and does not commit/push rules to git. Operators save JSON through the browser, publish it to their chosen git repository outside the application, and then request rules reload on the converter microservice.
+
+2. Technology Stack
+
+- C# / .NET `net10.0` for backend microservices.
+- Node.js `>=22` for `monitoring-ui-api`.
+- Apache Kafka for event, request, response, and structured log topics.
+- CMDBuild REST API v3 for catalog/reference/lookup/domain resolution.
+- Zabbix JSON-RPC `/api_jsonrpc.php`.
+- JSON conversion rules and T4 templates for request rendering.
+- Mermaid/OpenAPI/AsyncAPI architecture artifacts under `aa/`.
+
+2.1. Compatibility And Verified Versions
+
+Verified development environment:
+
+| Component | Version | Status |
+| --- | --- | --- |
+| CMDBuild | `4.1.0` | Verified with REST API v3 and flat webhook JSON |
+| Zabbix | `7.0.25` | Verified through `apiinfo.version` and JSON-RPC |
+| Apache Kafka | `3.9.2` | Verified in PLAINTEXT/KRaft dev mode |
+| CMDBuild DB | PostgreSQL `17.9` + PostGIS `3.5.x` | Used by CMDBuild only |
+| Zabbix DB | PostgreSQL `16.13` | Used by Zabbix only |
+| .NET SDK | `10.0.203` | Repository wrapper `scripts/dotnet` |
+| Node.js | `>=22` | Required by monitoring-ui-api |
+
+Expected compatibility is contract-based: CMDBuild `4.x` with REST v3, Zabbix `7.0.x LTS`, Kafka `3.x`. Any major/minor upgrade requires health checks, catalog sync, rules validation/dry-run, and create/update/delete smoke tests.
+
+3. Repository Structure
+
+- `src/cmdbwebhooks2kafka`: webhook receiver and Kafka event producer.
+- `src/cmdbkafka2zabbix`: CMDB event consumer, rules/T4 converter, Zabbix request producer.
+- `src/zabbixrequests2api`: Zabbix request consumer, Zabbix API caller, response producer.
+- `src/monitoring-ui-api`: Node.js frontend/BFF.
+- `rules/`: demo and starter conversion rules.
+- `tests/configvalidation`: config and rules validation.
+- `scripts/`: local wrappers and demo/E2E scripts.
+- `aa/`: architecture artifacts.
+
+4. cmdbwebhooks2kafka
+
+4.1. HTTP Endpoint
+
+The service exposes:
+
+- `GET /health`;
+- `POST /webhooks/cmdbuild`.
+
+Development binding is `0.0.0.0:5080`, because CMDBuild runs in Docker and must reach the host service through `http://192.168.202.100:5080/webhooks/cmdbuild`.
+
+4.2. Webhook Input Format
+
+The CMDBuild webhook payload is a flat JSON object. It must carry enough data to identify event type, source class, entity id, and configured source fields.
+
+Required logical fields:
+- event type;
+- entity id;
+- class name;
+- enough IP or DNS data for Zabbix interface construction unless rules intentionally suppress monitoring.
+
+The service accepts configurable field aliases for event type, entity type, and entity id.
+
+4.3. Supported CMDBuild Events
+
+Supported lifecycle events:
+- `create`;
+- `update`;
+- `delete`.
+
+Unknown event types are normalized but skipped by downstream rules unless explicitly configured.
+
+4.4. CMDBuild Classes And Model Boundaries
+
+CMDBuild class names and attribute names are not product constraints. Concrete models are described by webhook body and conversion rules. Names such as `Computer`, `Notebook`, `Server`, `iLo`, `mgmt`, or `zabbixTag` are examples from the dev model.
+
+5. Webhook Authorization
+
+Webhook authorization is configurable. Production secrets must not be committed. Bearer/static token mode must use config/env/secret storage.
+
+6. Kafka
+
+6.1. Business Event Topic
+
+Dev topic: `cmdbuild.webhooks.dev`.
+Base/prod topic: `cmdbuild.webhooks`.
+
+6.2. Kafka Connection Mode
+
+Development uses PLAINTEXT/KRaft with host access `localhost:9092` and Docker-network access `kafka:29092`.
+
+6.3. Kafka Security Config
+
+All services must expose Kafka security settings through config: bootstrap servers, topic, client id, group id for consumers, security protocol, SASL mechanism, username, password, acks, idempotence, and timeouts.
+
+6.4. Kafka Message Contract
+
+Normalized CMDBuild events include source, event type, class name, entity id, payload fields, and metadata needed for downstream processing.
+
+6.5. Kafka Topics
+
+- `cmdbuild.webhooks.*`;
+- `zabbix.host.requests.*`;
+- `zabbix.host.responses.*`;
+- `cmdbwebhooks2kafka.logs.*`;
+- `cmdbkafka2zabbix.logs.*`;
+- `zabbixrequests2api.logs.*`.
+
+Topics are created externally. Services must not create topics on startup.
+
+7. Logging And ELK
+
+Until ELK is available, services write structured JSON logs to Kafka log topics. ELK configuration must be externalized and can replace or complement Kafka log sinks later.
+
+8. Configuration
+
+Base configs must not contain production secrets. Development configs may contain local stand values. Production secrets use env/secret storage/local ignored config.
+
+.NET services use standard `__` environment overrides. monitoring-ui-api uses explicit env mappings documented in project documentation.
+
+9. Local CMDBuild Settings
+
+The development CMDBuild endpoint is:
+
+`http://localhost:8090/cmdbuild/services/rest/v3`
+
+Webhook calls from CMDBuild Docker container must use the host-reachable address.
+
+10. Acceptance Checks
+
+Required checks include:
+- service health endpoints;
+- webhook post from CMDBuild to Kafka;
+- Kafka topic message visibility;
+- structured log messages;
+- create/update/delete chain smoke tests;
+- config validation through `scripts/test-configs.sh`.
+
+11. Known Limitations And Next Tasks
+
+Current known work includes stronger production webhook authorization, extended tests, retry/dead-letter policy clarification, and production ELK integration once endpoints are known.
+
+12. Current Verification Summary
+
+The local development chain is validated through health endpoints, config tests, rules rendering checks, and demo E2E scripts.
+
+13. cmdbkafka2zabbix
+
+13.1. Purpose
+
+The service consumes normalized CMDBuild events, loads conversion rules, resolves CMDBuild lookup/reference/domain leaf values when configured, renders one or more Zabbix JSON-RPC requests, and publishes them to Kafka.
+
+13.2. Kafka Input
+
+Input topic: `cmdbuild.webhooks.*`.
+The service commits offsets only after all resulting Zabbix request messages for one CMDB event are successfully published or the event is intentionally skipped.
+
+13.3. Kafka Output
+
+Output topic: `zabbix.host.requests.*`.
+When `hostProfiles[]` produces multiple profiles, one source event can produce multiple output messages. Profile metadata is carried in configured headers and internal request metadata.
+
+13.4. Conversion Rules From Git
+
+Rules are stored in a Git-managed JSON file. Configuration:
+
+- `RepositoryPath`;
+- `ReadFromGit`;
+- `RepositoryUrl`;
+- `RulesFilePath`;
+- `PullOnStartup`;
+- `PullOnReload`;
+- `GitExecutablePath`;
+- `TemplateName`;
+- `TemplateEngine`;
+- `AddDefaultDirectives`.
+
+In development, `RepositoryPath` points to the current monorepo. In production, it should point to a local git working copy with rules. Clone/fetch/commit/push of that working copy is handled outside `monitoring-ui-api`; the converter only pulls/reads according to config. If `ReadFromGit=false`, the service reads only the local file and does not run git commands. If `ReadFromGit=true`, `RepositoryUrl` stores the source URL for operators/logs, for example `https://git.example.org/cmdb2monitoring/conversion-rules.git`, and `PullOnStartup`/`PullOnReload` control `git pull --ff-only` in the already prepared working copy.
+For the dev/test system, the default mode is reading from disk at `rules/cmdbuild-to-zabbix-host-create.json`. When `ReadFromGit=true`, the same file is expected inside the repository at `RulesFilePath`; if the operator changes `RulesFilePath`, the expected path inside the repository changes with it.
+
+Every rules file must include:
+- `schemaVersion`: rules JSON format compatibility;
+- `rulesVersion`: visual/operator revision of the concrete rules set.
+
+13.4.1. Rules Reload Signal
+
+`cmdbkafka2zabbix` exposes `POST /admin/reload-rules`.
+
+The endpoint:
+- requires `Authorization: Bearer <Service:RulesReloadToken>`;
+- calls `IConversionRulesProvider.ReloadAsync`;
+- runs provider-specific refresh, currently `git pull --ff-only` when `ConversionRules:ReadFromGit=true` and `ConversionRules:PullOnReload=true`;
+- otherwise clears cache and rereads the local rules file;
+- returns rule name, `schemaVersion`, `rulesVersion`, location, git version/commit, storage refresh flag, and reload timestamp.
+
+`monitoring-ui-api` shows a `Перечитать правила конвертации` / reload rules button in the converter dashboard card for `editor` and `admin`.
+
+13.5. Zabbix Host Data
+
+The converter builds an intermediate model containing:
+- entity id, code, class name;
+- technical host name and visible name;
+- source fields;
+- interfaces;
+- host groups, templates, and tags;
+- status, proxy, proxy group;
+- TLS/PSK;
+- macros and inventory fields;
+- maintenance/value map references;
+- internal metadata for fallback/upsert.
+
+13.6. Regex And Selection
+
+Regex rules are used for validation and selection of groups, templates, interfaces, tags, profiles, status, macros, and extended host properties.
+
+13.6.1. Host Profiles And Multiple Interfaces
+
+Supported scenarios:
+
+1. One CMDB object -> one Zabbix host with multiple `interfaces[]`.
+2. One CMDB object -> multiple Zabbix hosts through profile fan-out.
+
+For multiple Zabbix interfaces of the same type in one host, only one interface may have `main=1`; additional interfaces must use `main=0`.
+
+13.7. T4 Template
+
+Final JSON-RPC requests are rendered from T4 template blocks stored in the rules file. New templates should use `Model.Interfaces`; `Model.Interface` is backward compatibility for the first interface.
+
+13.8. Processing State File
+
+The service persists the last processed CMDB event and Kafka input offset. On restart it resumes from `lastInputOffset + 1` for the assigned topic/partition.
+
+13.9. Logging
+
+Structured service logs are written to configured log sinks, currently Kafka log topics in dev.
+
+13.10. create/update/delete Handling
+
+- `create` normally renders `host.create`;
+- `update` without `zabbix_hostid` uses fallback `host.get -> host.update`;
+- update can upsert through `host.get -> host.create` when a profile has `createOnUpdateWhenMissing=true`;
+- `delete` without `zabbix_hostid` uses fallback `host.get -> host.delete`.
+
+`zabbix_hostid` source:
+
+- `zabbix_hostid`/`zabbixHostId` is not created automatically in the incoming CMDBuild webhook;
+- it can come from a dedicated CMDBuild attribute when an installation stores the Zabbix hostid on the card;
+- it can be added by an external enrichment process between the CMDBuild webhook and `cmdbkafka2zabbix`;
+- it can be read by rules as `source.fields.zabbixHostId` when explicitly mapped to a payload field.
+
+Normal host identity for update/delete without `zabbix_hostid`:
+
+- `cmdbkafka2zabbix` computes the technical host name from `normalization.hostName` or `hostProfiles[].hostNameTemplate`;
+- the technical host name must use stable CMDBuild identity: `className`, `id`, immutable `code`, and profile name;
+- IP/DNS must not be used as part of the host identifier when IP/DNS changes are expected;
+- `zabbixrequests2api` performs `host.get` with `filter.host`, reads the found `hostid`, and then builds `host.update` or `host.delete`;
+- the `cmdb.id` tag may be written to Zabbix for audit and manual search, but the current fallback lookup does not search by tag;
+- service processing state files are not a `CMDBuild id -> Zabbix hostid` registry.
+
+Multi-value `host.update` behavior:
+
+- `groups[]` are merged by `groupid`;
+- `templates[]` are merged by `templateid`, while `templates_clear` explicitly removes linked conflicting templates;
+- `tags[]` are merged by `tag`;
+- `macros[]` are merged by `macro`;
+- `inventory` is merged by field name;
+- values from rules override same-key current Zabbix values;
+- `interfaces[]` are not merged. Rules define the resulting interface list, and `zabbixrequests2api` only injects existing `interfaceid` values for a valid update.
+
+IP address change:
+
+- the host is identified by technical host name, so changing IP must not create a new Zabbix host;
+- the new IP is sent in `fallbackUpdateParams.interfaces`;
+- on update, `zabbixrequests2api` injects the existing `interfaceid`: first by exact type/useip/ip/dns/port match, then by type/port/address match, and for the first interface it falls back to the first existing `interfaceid`;
+- therefore a primary IP change updates the interface of the existing host;
+- additional interfaces can be ambiguous without a stable profile marker, so rules must define profile/order/type/port explicitly enough.
+
+14. zabbixrequests2api
+
+14.1. Purpose
+
+The service consumes Zabbix JSON-RPC requests from Kafka, validates payloads and referenced catalogs, calls Zabbix API, and publishes responses.
+
+14.2. Kafka Input/Output
+
+Input topic: `zabbix.host.requests.*`.
+Output topic: `zabbix.host.responses.*`.
+
+14.3. Zabbix API
+
+Zabbix endpoint is configured through `Zabbix:ApiEndpoint`.
+Supported auth modes: `Token`, `Login`, `LoginOrToken`, `None`.
+Production should use secrets/env for API token or credentials.
+
+14.4. Required JSON-RPC Fields
+
+Requests must be valid JSON-RPC and contain method, params, id, and all fields required by the Zabbix method. Internal `cmdb2monitoring` metadata must be removed before the Zabbix API call.
+
+14.5. Zabbix Catalog Validation
+
+Before host create/update, the service validates referenced host groups, templates, and template groups when validation is enabled.
+
+14.6. Gentle Processing
+
+`Processing:DelayBetweenObjectsMs` defaults to `2000` ms to avoid overloading Zabbix.
+
+14.7. Response Topic Contract
+
+Responses include source request metadata, success/failure status, Zabbix API result or error, and processing diagnostics.
+
+14.8. Processing State File
+
+The service stores last successfully processed input offset and resumes from `lastInputOffset + 1`.
+
+14.9. Logging
+
+Structured JSON logs go to configured log sinks.
+
+14.10. Zabbix Templates
+
+Zabbix templates are external Zabbix objects. Project rules reference existing templates by `templateid`/name and do not define template JSON files.
+
+14.11. Full Chain Check
+
+Full check: CMDBuild event -> Kafka event -> converter -> Kafka Zabbix request -> Zabbix API -> response topic -> host state in Zabbix.
+
+14.12. create/update/delete Fallback Check
+
+Smoke checks must cover create, update fallback, update upsert for new profiles, and delete fallback.
+
+15. Architecture Artifacts
+
+Architecture artifacts are kept in `aa/` and are not translated by this English companion unless explicitly requested.
+
+16. Configuration Documentation
+
+Configuration guidance is maintained in project documentation and `aa/configuration-files.md`.
+
+17. Configuration Tests
+
+`scripts/test-configs.sh` must remain fast and must not require live Kafka/Zabbix/CMDBuild.
+
+18. Frontend/BFF monitoring-ui-api
+
+18.1. Purpose
+
+monitoring-ui-api provides:
+- local login and external MS AD/IdP login;
+- health dashboard;
+- Events read-only Kafka browser;
+- rules JSON load, validate, dry-run, browser save-as;
+- Zabbix and CMDBuild catalog sync;
+- Conversion Rules Management;
+- Logical Control of Conversion Rules;
+- Webhook Setup for CMDBuild webhook planning and apply;
+- Runtime Settings and Authorization settings.
+
+18.2. Authorization
+
+Roles:
+- `viewer`: Dashboard and Events;
+- `editor`: all rule/catalog views except Settings;
+- `admin`: all menus and settings.
+
+Default local users:
+- `viewer` / `viewer`;
+- `editor` / `editor`;
+- `admin` / `admin`.
+
+Passwords are stored hashed in the users file next to UI settings. Operators can change their own password; admins can reset local user passwords.
+
+Authorization modes:
+- Local;
+- MS AD through LDAP/LDAPS;
+- IdP through SAML2 or OAuth2/OIDC. IdP identifies the user; role mapping can use AD groups through LDAP service bind.
+
+CMDBuild/Zabbix backend access does not reuse UI/AD/IdP credentials. Zabbix uses configured API token first, then session login/password if token is absent. CMDBuild requests session login/password on first API operation.
+
+18.3. Rules Local File Save
+
+The frontend can load and save a JSON rules file through the browser without writing the backend active rules file.
+
+Flow:
+- user selects local JSON;
+- frontend sends JSON to monitoring-ui-api for validation/dry-run;
+- API validates JSON and can run dry-run;
+- frontend saves JSON through browser save-as;
+- user publishes the file to the chosen git repository outside the application;
+- user clicks `Перечитать правила конвертации`; `cmdbkafka2zabbix` pulls/reads rules according to `ConversionRules`.
+
+Local file save, dry-run, validate, mapping, and catalog sync are available to `editor` and `admin`.
+Webhook Setup is also available to `editor` and `admin`.
+Authorization, Runtime Settings, and password reset are admin-only.
+
+18.3.1. Minimum Permissions By Operation
+
+- CMDBuild for UI/catalog sync: REST API login and read-only access to metadata classes/attributes/domains, lookup types/values, current-card relations, and target cards reachable through reference/domain chains used by `source.fields[].cmdbPath`. CMDBuild card create/update/delete permissions are not required for catalog sync.
+- CMDBuild for `Webhook Setup` load/analyze: read access to ETL/webhook records through REST v3 `/etl/webhook/?detailed=true`.
+- CMDBuild for `Load into CMDB`: create/update/delete, or equivalent modify permissions, on ETL/webhook records through REST v3 `/etl/webhook/`. These permissions are needed only by operators who apply webhook plans to CMDBuild.
+- The backend must restrict writes to the managed `cmdbwebhooks2kafka-*` prefix, but this is an application guard, not a replacement for CMDBuild permissions. The CMDBuild account must still be restricted as narrowly as the CMDBuild permission model allows.
+- Zabbix for UI/catalog sync: API access and read-only access to used host groups, template groups, templates, hosts/tags, and catalogs read through `*.get`.
+- Zabbix host create/update/delete permissions are not required for UI catalog reads, but they are required by the separate `zabbixrequests2api` API user that applies monitoring.
+
+18.4. Zabbix Catalog Sync
+
+UI reads Zabbix catalogs through API and caches them for validation and mapping. If `Zabbix:ApiToken` is configured, it is used first; otherwise session Zabbix credentials are requested.
+
+18.5. CMDBuild Catalog Sync
+
+UI reads CMDBuild classes, attributes, lookup types/values, domains, and reference/domain metadata through CMDBuild REST. Session CMDBuild credentials are requested when needed.
+
+18.5.1. CMDBuild Webhook Setup
+
+The UI must provide a `Webhook Setup` page.
+
+Access:
+- `viewer` does not see the page;
+- `editor` and `admin` can load, analyze, select, export, and apply webhook operations;
+- CMDBuild credentials are requested for the server-side session on first use, as for catalog sync;
+- `Load from CMDB` requires read access to ETL/webhook records, while `Load into CMDB` requires create/update/delete or equivalent modify permissions on ETL/webhook records.
+
+Behavior:
+- using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved together with the conversion rules file;
+- `Load from CMDB` reads current CMDBuild ETL/webhook records through REST v3 `/etl/webhook/?detailed=true`;
+- after only loading from CMDB, the UI must show current webhooks for reference even when the operation plan has not been built yet;
+- `Analyze rules` builds the desired webhook set from the current rules JSON, supported events, and classes without creating or changing CMDBuild records;
+- a missing managed webhook becomes a `Create` operation;
+- an existing managed webhook with different body/event/target/method/url/headers/active/language becomes an `Update` operation;
+- an existing managed webhook with prefix `cmdbwebhooks2kafka-` that is no longer required by current rules becomes a `Delete` operation;
+- each table row must allow payload expansion; added values are green, deleted values are red, and current values are black;
+- clicking the value in the `Action` column must open details under the selected row, and the shared `Details` panel must be below the table and highlight text with the same colors;
+- when an existing managed webhook is analyzed, the already loaded body must be preserved, and optional source fields must be added only when rules for that class actually need them; adding an independent class must not mass-convert unrelated records into `Update`;
+- analysis must not add a duplicate key with another case or alias, for example `OS` next to an existing `os`;
+- a `cmdbPath` rooted in a class that does not match the current webhook class must not create a placeholder in the current class body;
+- each table row must have an `Edit` button; editing JSON changes only the current plan and does not apply anything to CMDBuild until `Load into CMDB`;
+- editing a current CMDB webhook row before building a plan must create a selected `update` operation;
+- delete operations are not selected by default and require explicit operator selection;
+- undo/redo works on the operation selection in the current UI session;
+- undo/redo must not promise or perform rollback of configuration already loaded into CMDBuild;
+- `Save file as` exports the JSON webhook plan through the browser and does not change CMDBuild, the backend rules file, or git;
+- `Load into CMDB` applies only selected operations after confirmation and really changes CMDBuild through REST v3 `/etl/webhook/`;
+- the backend must restrict apply operations to the managed prefix `cmdbwebhooks2kafka-`;
+- new or updated webhook bodies remain flat: reference/domain/lookup leaf paths stay in `rules.source.fields[].cmdbPath`, while the CMDBuild webhook sends the scalar/id of the current attribute or current card id for a domain path.
+
+Rules files:
+- `rules/cmdbuild-to-zabbix-host-create.json` remains the populated demo/e2e rules file and is now a clean C2MTest ruleset: the active webhook class is `C2MTestCI`, with C2MTest reference/domain/lookup leaf paths to `C2MTestAddress`, `C2MTestReferenceLevel1`, and `C2MTestReferenceLevel2`;
+- the default active `RulesFilePath` still points to `rules/cmdbuild-to-zabbix-host-create.json`;
+- `rules/cmdbuild-to-zabbix-host-create.production-empty.json` is the clean production no-op starter;
+- `rules/cmdbuild-to-zabbix-host-create.dev-empty.json` is the clean dev no-op starter generated from the empty installation profile and already points to `cmdbuild.webhooks.dev` and `http://localhost:8081/api_jsonrpc.php`;
+- starter routes remain `publish=false` until the operator fills source fields, host profiles, Zabbix catalog IDs, T4 templates, and enables verified routes;
+- to work with the empty dev starter, the operator loads it in the UI or points `Rules.RulesFilePath` to it through config/env or Runtime settings.
+
+18.6. monitoring-ui-api Configuration
+
+Runtime Settings include CMDBuild/Zabbix endpoints, optional Zabbix API key, Kafka Events browser settings, and health/reload endpoints. `Cmdbuild:UseIdp` and `Zabbix:UseIdp` runtime flags are not supported.
+
+18.7. Checks
+
+Check Node syntax, config validation, and UI health after changes. For UI text changes, update Russian and English dictionaries.
+
+19. Documentation And Architecture Artifacts
+
+19.1. Main Documents
+
+- `README.md`;
+- `PROJECT_DOCUMENTATION.md` and `PROJECT_DOCUMENTATION.en.md`;
+- `TZ_cmdb2monitoring.txt` and `TZ_cmdb2monitoring.en.txt`;
+- `TEST_PLAN_MAPPING_EDITOR.md` and `TEST_PLAN_MAPPING_EDITOR.en.md`;
+- `must.md` and `must.en.md`;
+- `CHANGELOG.md`.
+
+19.2. Architecture Artifacts
+
+`aa/` contains architecture artifacts, diagrams, OpenAPI/AsyncAPI, maps, and configuration docs. These are maintained separately and translated only on explicit request.
+
+19.3. Documentation Update Rule
+
+Any non-architecture documentation change must update the English companion in the same change. Architecture artifacts are excluded from this translation rule unless requested.
+
+20. Current Implementation Notes
+
+20.1. Webhook Network Startup
+
+Webhook service must listen on `0.0.0.0:5080` in dev because CMDBuild calls it from Docker.
+
+20.2. Kafka State And Restart Recovery
+
+Kafka consumers use state files and resume from the next offset after the last successful processing.
+
+20.3. Zabbix Inventory
+
+When inventory fields are present, `inventory_mode` must allow inventory. `-1` disables inventory and is incompatible with inventory field payloads.
+
+20.4. Extended Rules Model
+
+Rules support reference/lookup/domain leaf paths, host profiles, selection rules, template conflict rules, extended host parameters, and monitoring suppression.
+The maximum recursion depth for `domain`/`reference`/`lookup` paths is configured in Runtime settings by `Max recursion depth for domains&reference&lookups`. The allowed range is `2..5`, with default `2`. After changing it, the operator must logout and resync the CMDBuild catalog; until then, the UI can keep using the current session or old cache depth. Newly created source fields with `cmdbPath` must receive `resolve.maxDepth` matching the active catalog sync depth.
+
+20.5. UI Rules Management And Logical Control
+
+The UI supports iterative reference navigation, lookup leaf selection, domain navigation with class-end validation, add/modify/delete rule actions, group deletion trees, undo/redo, and browser save-as. Edit mode hides the lower three-column preview. The CMDBuild class selector must show hierarchy indentation, disable superclass/prototype classes, and replace a previously selected superclass with the nearest concrete subclass. Rule modification starts with no rule selected automatically; the operator can start from a rule, CMDBuild class, class attribute field, or conversion structure. The UI filters linked lists, and when a single matching rule remains it is selected automatically and loaded into the same editor form. Changing a class clears the dependent leaf field and Zabbix target; changing a field filters compatible structures; changing a structure filters fields and Zabbix targets. Save is disabled until the chain has an unambiguous leaf/source field and compatible Zabbix target. For `interfaceAddress`, the UI must reject semantic mode mismatches: IP-looking fields cannot be saved as DNS target `interfaces[].dns/useip=0`, and DNS/FQDN-looking fields cannot be saved as IP target `interfaces[].ip/useip=1`. Green borders mean valid, red means required/conflicting, and yellow means loaded from the rule but not confirmed by the current catalog/filter. A Zabbix target loaded from a rule but missing from the current Zabbix catalog/options is inconsistent, red, and blocks saving; this is the same chain-link error class as a missing CMDBuild class/attribute. `Reset fields` clears the selected rule and all filters in modify mode and clears leaf/target in add mode. Scalar Zabbix targets block potentially multi-value domain fields unless the rules explicitly use `collectionMode=first`.
+
+Demo scripts:
+
+1. `node scripts/cmdbuild-demo-schema.mjs --apply`
+2. `node scripts/cmdbuild-demo-instances.mjs --apply`
+3. `node scripts/cmdbuild-demo-e2e.mjs --apply`
+
+The current live E2E has no DNS-only Zabbix host. All demo cards have `PrimaryIp`. DNS fallback is present in rules and should be covered by a future `C2M-DEMO-013-DNS-ONLY` instance.
+
+20.6. Latest Create Smoke Check
+
+Reports are written to `reports/cmdbuild-demo-e2e-*.md` and validate Zabbix host presence, names, interfaces, groups, templates, tags, macros, inventory, status, and TLS mode.

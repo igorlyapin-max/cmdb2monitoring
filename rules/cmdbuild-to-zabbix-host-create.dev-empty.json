@@ -1,0 +1,654 @@
+{
+  "schemaVersion": "0.1",
+  "rulesVersion": "2026.05.02-dev-empty",
+  "name": "cmdbuild-to-zabbix-host-create-dev-empty",
+  "description": "Clean dev starter generated from the empty installation profile. Safe no-op until an operator fills dev source fields, Zabbix catalog IDs, host profiles, selection rules, T4 templates and sets publish=true for required event routes. Use the demo/e2e rules file for populated test scenarios.",
+  "source": {
+    "topic": "cmdbuild.webhooks.dev",
+    "supportedEvents": [
+      "create",
+      "update",
+      "delete"
+    ],
+    "hostCreateEvents": [
+      "create"
+    ],
+    "entityClasses": [],
+    "fields": {
+      "entityId": {
+        "source": "id",
+        "required": true
+      },
+      "code": {
+        "source": "code",
+        "required": false
+      },
+      "className": {
+        "source": "className",
+        "required": true
+      },
+      "ipAddress": {
+        "source": "ip_address",
+        "required": false
+      },
+      "dnsName": {
+        "source": "dns_name",
+        "required": false
+      },
+      "description": {
+        "source": "description",
+        "required": false
+      }
+    }
+  },
+  "zabbix": {
+    "apiEndpoint": "http://localhost:8081/api_jsonrpc.php",
+    "method": "host.create",
+    "auth": {
+      "mode": "configuredTokenOrLogin",
+      "tokenConfigKey": "Zabbix:ApiToken",
+      "loginConfigKeys": {
+        "user": "Zabbix:User",
+        "password": "Zabbix:Password"
+      }
+    },
+    "requiredHostCreateFields": [
+      "host",
+      "interfaces",
+      "groups"
+    ],
+    "expectedMonitoringFields": [
+      "host",
+      "name",
+      "interfaces[].ip",
+      "interfaces[].dns",
+      "interfaces[].useip",
+      "groups[].groupid",
+      "templates[].templateid",
+      "tags[].tag",
+      "tags[].value"
+    ]
+  },
+  "lookups": {},
+  "catalog": {
+    "hostGroups": [],
+    "templates": [],
+    "templateGroups": [],
+    "proxies": [],
+    "proxyGroups": [],
+    "globalMacros": [],
+    "hostMacros": [],
+    "inventoryFields": [],
+    "interfaceProfiles": [],
+    "hostStatuses": [
+      {
+        "name": "monitored",
+        "status": 0
+      },
+      {
+        "name": "disabled",
+        "status": 1
+      }
+    ],
+    "tlsPskModes": [],
+    "maintenances": [],
+    "valueMaps": [],
+    "cmdbuild": {
+      "classes": [],
+      "attributes": [],
+      "lookups": [],
+      "domains": []
+    },
+    "generatedAt": "2026-05-02T00:00:00.000Z",
+    "source": "production-empty starter with dev runtime defaults"
+  },
+  "defaults": {
+    "host": {
+      "status": 0,
+      "inventory_mode": 0
+    },
+    "hostGroups": [],
+    "templates": [],
+    "agentInterface": {
+      "type": 1,
+      "main": 1,
+      "useip": 1,
+      "dns": "",
+      "port": "10050"
+    },
+    "snmpInterface": {
+      "type": 2,
+      "main": 1,
+      "useip": 1,
+      "dns": "",
+      "port": "161",
+      "details": {
+        "version": 2,
+        "bulk": 1,
+        "community": "{$SNMP_COMMUNITY}"
+      }
+    },
+    "interfaceProfiles": {
+      "agent": {
+        "type": 1,
+        "main": 1,
+        "useip": 1,
+        "dns": "",
+        "port": "10050"
+      },
+      "snmp": {
+        "type": 2,
+        "main": 1,
+        "useip": 1,
+        "dns": "",
+        "port": "161",
+        "details": {
+          "version": 2,
+          "bulk": 1,
+          "community": "{$SNMP_COMMUNITY}"
+        }
+      }
+    },
+    "hostStatus": {
+      "status": 0,
+      "name": "monitored"
+    },
+    "hostMacros": [],
+    "inventoryFields": [],
+    "tlsPsk": {
+      "name": "none",
+      "tls_connect": 1,
+      "tls_accept": 1
+    },
+    "maintenances": [],
+    "valueMaps": [],
+    "tags": [
+      {
+        "tag": "source",
+        "value": "cmdbuild"
+      }
+    ]
+  },
+  "normalization": {
+    "hostName": {
+      "inputPriority": [
+        "code",
+        "id"
+      ],
+      "prefixTemplate": "cmdb-<#= Model.ClassName #>-",
+      "regexReplacements": [
+        {
+          "pattern": "[^A-Za-z0-9_.-]+",
+          "replacement": "-"
+        },
+        {
+          "pattern": "^-+|-+$",
+          "replacement": ""
+        }
+      ],
+      "lowercase": true,
+      "fallbackTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.EntityId #>"
+    },
+    "visibleName": {
+      "template": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>"
+    }
+  },
+  "eventRoutingRules": [
+    {
+      "eventType": "create",
+      "method": "host.create",
+      "templateName": "hostCreateJsonRpcRequestLines",
+      "requiresZabbixHostId": false,
+      "requiredFields": [
+        "entityId",
+        "className",
+        "interfaceAddress"
+      ],
+      "publish": false
+    },
+    {
+      "eventType": "update",
+      "method": "host.update",
+      "templateName": "hostUpdateJsonRpcRequestLines",
+      "requiresZabbixHostId": true,
+      "fallbackMethod": "host.get",
+      "fallbackTemplateName": "hostGetByHostJsonRpcRequestLines",
+      "requiredFields": [
+        "entityId",
+        "className",
+        "interfaceAddress"
+      ],
+      "publish": false
+    },
+    {
+      "eventType": "delete",
+      "method": "host.delete",
+      "templateName": "hostDeleteJsonRpcRequestLines",
+      "requiresZabbixHostId": true,
+      "fallbackMethod": "host.get",
+      "fallbackTemplateName": "hostGetByHostJsonRpcRequestLines",
+      "requiredFields": [
+        "entityId",
+        "className"
+      ],
+      "publish": false
+    }
+  ],
+  "monitoringSuppressionRules": [],
+  "hostProfiles": [],
+  "selectionPolicy": {
+    "ruleOrder": "ascendingPriority",
+    "groupSelection": "mergeAllMatchesOrFallback",
+    "templateSelection": "mergeAllMatchesOrFallback",
+    "hostProfileSelection": "allMatchedProfiles",
+    "interfaceSelection": "firstMatchOrFallback",
+    "tagSelection": "mergeDefaultsAndMatches",
+    "deduplicateBy": {
+      "hostGroups": "groupid",
+      "templates": "templateid",
+      "tags": "tag"
+    }
+  },
+  "groupSelectionRules": [
+    {
+      "name": "fallback-empty-host-groups",
+      "fallback": true,
+      "hostGroups": []
+    }
+  ],
+  "templateSelectionRules": [
+    {
+      "name": "fallback-empty-templates",
+      "fallback": true,
+      "templates": []
+    }
+  ],
+  "templateConflictRules": [],
+  "interfaceAddressRules": [
+    {
+      "name": "fallback-ip-address",
+      "fallback": true,
+      "mode": "ip",
+      "valueField": "ipAddress"
+    }
+  ],
+  "interfaceSelectionRules": [
+    {
+      "name": "fallback-agent-interface",
+      "fallback": true,
+      "interfaceRef": "agentInterface"
+    }
+  ],
+  "tagSelectionRules": [
+    {
+      "name": "fallback-empty-tags",
+      "fallback": true,
+      "tags": []
+    }
+  ],
+  "hostMacroSelectionRules": [],
+  "inventorySelectionRules": [],
+  "hostStatusSelectionRules": [],
+  "tlsPskSelectionRules": [],
+  "proxySelectionRules": [],
+  "proxyGroupSelectionRules": [],
+  "maintenanceSelectionRules": [],
+  "valueMapSelectionRules": [],
+  "t4Templates": {
+    "engine": "Mono.TextTemplating",
+    "modelParameter": "Model",
+    "hostCreateJsonRpcRequestLines": [
+      "{",
+      "  \"cmdb2monitoring\": {",
+      "    \"eventType\": \"<#= Model.EventType #>\",",
+      "    \"entityId\": \"<#= Model.EntityId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\"",
+      "  },",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.create\",",
+      "  \"params\": {",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"name\": \"<#= Model.VisibleName #>\",",
+      "    \"status\": <#= Model.Status #>,",
+      "    \"inventory_mode\": <#= Model.InventoryMode #>,",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyId)) { #>",
+      "    \"proxyid\": \"<#= Model.ProxyId #>\",",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyGroupId)) { #>",
+      "    \"proxy_groupid\": \"<#= Model.ProxyGroupId #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.Enabled) { #>",
+      "    \"tls_connect\": <#= Model.TlsPsk.TlsConnect ?? 1 #>,",
+      "    \"tls_accept\": <#= Model.TlsPsk.TlsAccept ?? 1 #>,",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasIdentity) { #>",
+      "    \"tls_psk_identity\": \"<#= Model.TlsPsk.TlsPskIdentity #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasPsk) { #>",
+      "    \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
+      "<# } #>",
+      "    \"interfaces\": [",
+      "      <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
+      "      {",
+      "        \"type\": <#= zif.Type #>,",
+      "        \"main\": <#= zif.Main #>,",
+      "        \"useip\": <#= zif.UseIp #>,",
+      "        \"ip\": \"<#= zif.Ip #>\",",
+      "        \"dns\": \"<#= zif.Dns #>\",",
+      "        \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "        \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "          \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "          \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "          \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "        }<# } #>",
+      "      }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"groups\": [",
+      "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
+      "      { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"templates\": [",
+      "      <# for (var i = 0; i < Model.Templates.Count; i++) { #>",
+      "      { \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"tags\": [",
+      "      <# for (var i = 0; i < Model.Tags.Count; i++) { #>",
+      "      { \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ]<# if (Model.Macros.Count > 0) { #>,",
+      "    \"macros\": [",
+      "      <# for (var i = 0; i < Model.Macros.Count; i++) { #>",
+      "      { \"macro\": \"<#= Model.Macros[i].Macro #>\", \"value\": \"<#= Model.Macros[i].Value #>\"<# if (!string.IsNullOrWhiteSpace(Model.Macros[i].Description)) { #>, \"description\": \"<#= Model.Macros[i].Description #>\"<# } #> }<#= i + 1 < Model.Macros.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ]<# } #><# if (Model.InventoryFields.Count > 0) { #>,",
+      "    \"inventory\": {",
+      "      <# for (var i = 0; i < Model.InventoryFields.Count; i++) { #>",
+      "      \"<#= Model.InventoryFields[i].Field #>\": \"<#= Model.InventoryFields[i].Value #>\"<#= i + 1 < Model.InventoryFields.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    }<# } #>",
+      "  },",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ],
+    "hostUpdateJsonRpcRequestLines": [
+      "{",
+      "  \"cmdb2monitoring\": {",
+      "    \"eventType\": \"<#= Model.EventType #>\",",
+      "    \"entityId\": \"<#= Model.EntityId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\"",
+      "  },",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.update\",",
+      "  \"params\": {",
+      "    \"hostid\": \"<#= Model.ZabbixHostId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"name\": \"<#= Model.VisibleName #>\",",
+      "    \"status\": <#= Model.Status #>,",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyId)) { #>",
+      "    \"proxyid\": \"<#= Model.ProxyId #>\",",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyGroupId)) { #>",
+      "    \"proxy_groupid\": \"<#= Model.ProxyGroupId #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.Enabled) { #>",
+      "    \"tls_connect\": <#= Model.TlsPsk.TlsConnect ?? 1 #>,",
+      "    \"tls_accept\": <#= Model.TlsPsk.TlsAccept ?? 1 #>,",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasIdentity) { #>",
+      "    \"tls_psk_identity\": \"<#= Model.TlsPsk.TlsPskIdentity #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasPsk) { #>",
+      "    \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
+      "<# } #>",
+      "    \"interfaces\": [",
+      "      <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
+      "      {",
+      "        \"type\": <#= zif.Type #>,",
+      "        \"main\": <#= zif.Main #>,",
+      "        \"useip\": <#= zif.UseIp #>,",
+      "        \"ip\": \"<#= zif.Ip #>\",",
+      "        \"dns\": \"<#= zif.Dns #>\",",
+      "        \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "        \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "          \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "          \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "          \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "        }<# } #>",
+      "      }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"groups\": [",
+      "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
+      "      { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"templates\": [",
+      "      <# for (var i = 0; i < Model.Templates.Count; i++) { #>",
+      "      { \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ],",
+      "    \"tags\": [",
+      "      <# for (var i = 0; i < Model.Tags.Count; i++) { #>",
+      "      { \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ]<# if (Model.Macros.Count > 0) { #>,",
+      "    \"macros\": [",
+      "      <# for (var i = 0; i < Model.Macros.Count; i++) { #>",
+      "      { \"macro\": \"<#= Model.Macros[i].Macro #>\", \"value\": \"<#= Model.Macros[i].Value #>\"<# if (!string.IsNullOrWhiteSpace(Model.Macros[i].Description)) { #>, \"description\": \"<#= Model.Macros[i].Description #>\"<# } #> }<#= i + 1 < Model.Macros.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    ]<# } #><# if (Model.InventoryFields.Count > 0) { #>,",
+      "    \"inventory\": {",
+      "      <# for (var i = 0; i < Model.InventoryFields.Count; i++) { #>",
+      "      \"<#= Model.InventoryFields[i].Field #>\": \"<#= Model.InventoryFields[i].Value #>\"<#= i + 1 < Model.InventoryFields.Count ? \",\" : \"\" #>",
+      "      <# } #>",
+      "    }<# } #>",
+      "  },",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ],
+    "hostDeleteJsonRpcRequestLines": [
+      "{",
+      "  \"cmdb2monitoring\": {",
+      "    \"eventType\": \"<#= Model.EventType #>\",",
+      "    \"entityId\": \"<#= Model.EntityId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\"",
+      "  },",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.delete\",",
+      "  \"params\": [",
+      "    \"<#= Model.ZabbixHostId #>\"",
+      "  ],",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ],
+    "hostGetByHostJsonRpcRequestLines": [
+      "{",
+      "  \"cmdb2monitoring\": {",
+      "    \"eventType\": \"<#= Model.EventType #>\",",
+      "    \"entityId\": \"<#= Model.EntityId #>\",",
+      "    \"host\": \"<#= Model.Host #>\",",
+      "    \"hostProfile\": \"<#= Model.HostProfileName #>\",",
+      "    \"fallbackForMethod\": \"<#= Model.FallbackForMethod #>\",",
+      "    \"createOnUpdateWhenMissing\": <#= Model.CreateOnUpdateWhenMissing ? \"true\" : \"false\" #>,",
+      "<# if (Model.CreateOnUpdateWhenMissing) { #>",
+      "    \"fallbackCreateParams\": {",
+      "      \"host\": \"<#= Model.Host #>\",",
+      "      \"name\": \"<#= Model.VisibleName #>\",",
+      "      \"status\": <#= Model.Status #>,",
+      "      \"inventory_mode\": <#= Model.InventoryMode #>,",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyId)) { #>",
+      "      \"proxyid\": \"<#= Model.ProxyId #>\",",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyGroupId)) { #>",
+      "      \"proxy_groupid\": \"<#= Model.ProxyGroupId #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.Enabled) { #>",
+      "      \"tls_connect\": <#= Model.TlsPsk.TlsConnect ?? 1 #>,",
+      "      \"tls_accept\": <#= Model.TlsPsk.TlsAccept ?? 1 #>,",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasIdentity) { #>",
+      "      \"tls_psk_identity\": \"<#= Model.TlsPsk.TlsPskIdentity #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasPsk) { #>",
+      "      \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
+      "<# } #>",
+      "      \"interfaces\": [",
+      "        <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
+      "        {",
+      "          \"type\": <#= zif.Type #>,",
+      "          \"main\": <#= zif.Main #>,",
+      "          \"useip\": <#= zif.UseIp #>,",
+      "          \"ip\": \"<#= zif.Ip #>\",",
+      "          \"dns\": \"<#= zif.Dns #>\",",
+      "          \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "          \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "            \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "            \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "            \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "          }<# } #>",
+      "        }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "      \"groups\": [",
+      "        <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
+      "        { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "      \"templates\": [",
+      "        <# for (var i = 0; i < Model.Templates.Count; i++) { #>",
+      "        { \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "      \"tags\": [",
+      "        <# for (var i = 0; i < Model.Tags.Count; i++) { #>",
+      "        { \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ]<# if (Model.Macros.Count > 0) { #>,",
+      "      \"macros\": [",
+      "        <# for (var i = 0; i < Model.Macros.Count; i++) { #>",
+      "        { \"macro\": \"<#= Model.Macros[i].Macro #>\", \"value\": \"<#= Model.Macros[i].Value #>\"<# if (!string.IsNullOrWhiteSpace(Model.Macros[i].Description)) { #>, \"description\": \"<#= Model.Macros[i].Description #>\"<# } #> }<#= i + 1 < Model.Macros.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ]<# } #><# if (Model.InventoryFields.Count > 0) { #>,",
+      "      \"inventory\": {",
+      "        <# for (var i = 0; i < Model.InventoryFields.Count; i++) { #>",
+      "        \"<#= Model.InventoryFields[i].Field #>\": \"<#= Model.InventoryFields[i].Value #>\"<#= i + 1 < Model.InventoryFields.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      }<# } #>",
+      "    },",
+      "<# } #>",
+      "    \"fallbackUpdateParams\": {",
+      "      \"host\": \"<#= Model.Host #>\",",
+      "      \"name\": \"<#= Model.VisibleName #>\",",
+      "      \"status\": <#= Model.Status #>,",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyId)) { #>",
+      "      \"proxyid\": \"<#= Model.ProxyId #>\",",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(Model.ProxyGroupId)) { #>",
+      "      \"proxy_groupid\": \"<#= Model.ProxyGroupId #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.Enabled) { #>",
+      "      \"tls_connect\": <#= Model.TlsPsk.TlsConnect ?? 1 #>,",
+      "      \"tls_accept\": <#= Model.TlsPsk.TlsAccept ?? 1 #>,",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasIdentity) { #>",
+      "      \"tls_psk_identity\": \"<#= Model.TlsPsk.TlsPskIdentity #>\",",
+      "<# } #>",
+      "<# if (Model.TlsPsk.HasPsk) { #>",
+      "      \"tls_psk\": \"<#= Model.TlsPsk.TlsPsk #>\",",
+      "<# } #>",
+      "      \"interfaces\": [",
+      "        <# for (var i = 0; i < Model.Interfaces.Count; i++) { var zif = Model.Interfaces[i]; #>",
+      "        {",
+      "          \"type\": <#= zif.Type #>,",
+      "          \"main\": <#= zif.Main #>,",
+      "          \"useip\": <#= zif.UseIp #>,",
+      "          \"ip\": \"<#= zif.Ip #>\",",
+      "          \"dns\": \"<#= zif.Dns #>\",",
+      "          \"port\": \"<#= zif.Port #>\"<# if (zif.Details.Enabled) { #>,",
+      "          \"details\": {",
+      "<# if (zif.Details.Version.HasValue) { #>",
+      "            \"version\": <#= zif.Details.Version.Value #><# if (zif.Details.Bulk.HasValue || !string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (zif.Details.Bulk.HasValue) { #>",
+      "            \"bulk\": <#= zif.Details.Bulk.Value #><# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>,<# } #>",
+      "<# } #>",
+      "<# if (!string.IsNullOrWhiteSpace(zif.Details.Community)) { #>",
+      "            \"community\": \"<#= zif.Details.Community #>\"",
+      "<# } #>",
+      "          }<# } #>",
+      "        }<#= i + 1 < Model.Interfaces.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "      \"groups\": [",
+      "        <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
+      "        { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "      \"templates\": [",
+      "        <# for (var i = 0; i < Model.Templates.Count; i++) { #>",
+      "        { \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "<# if (Model.TemplatesToClear.Count > 0) { #>",
+      "      \"templates_clear\": [",
+      "        <# for (var i = 0; i < Model.TemplatesToClear.Count; i++) { #>",
+      "        { \"templateid\": \"<#= Model.TemplatesToClear[i].TemplateId #>\" }<#= i + 1 < Model.TemplatesToClear.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ],",
+      "<# } #>",
+      "      \"tags\": [",
+      "        <# for (var i = 0; i < Model.Tags.Count; i++) { #>",
+      "        { \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ]<# if (Model.Macros.Count > 0) { #>,",
+      "      \"macros\": [",
+      "        <# for (var i = 0; i < Model.Macros.Count; i++) { #>",
+      "        { \"macro\": \"<#= Model.Macros[i].Macro #>\", \"value\": \"<#= Model.Macros[i].Value #>\"<# if (!string.IsNullOrWhiteSpace(Model.Macros[i].Description)) { #>, \"description\": \"<#= Model.Macros[i].Description #>\"<# } #> }<#= i + 1 < Model.Macros.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      ]<# } #><# if (Model.InventoryFields.Count > 0) { #>,",
+      "      \"inventory\": {",
+      "        <# for (var i = 0; i < Model.InventoryFields.Count; i++) { #>",
+      "        \"<#= Model.InventoryFields[i].Field #>\": \"<#= Model.InventoryFields[i].Value #>\"<#= i + 1 < Model.InventoryFields.Count ? \",\" : \"\" #>",
+      "        <# } #>",
+      "      }<# } #>",
+      "    }",
+      "  },",
+      "  \"jsonrpc\": \"2.0\",",
+      "  \"method\": \"host.get\",",
+      "  \"params\": {",
+      "    \"output\": [\"hostid\", \"host\", \"name\"],",
+      "    \"selectInterfaces\": [\"interfaceid\", \"type\", \"main\", \"useip\", \"ip\", \"dns\", \"port\"],",
+      "    \"selectParentTemplates\": [\"templateid\"],",
+      "    \"filter\": {",
+      "      \"host\": [\"<#= Model.Host #>\"]",
+      "    }",
+      "  },",
+      "  \"id\": <#= Model.RequestId #>",
+      "}"
+    ]
+  }
+}

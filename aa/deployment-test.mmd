@@ -15,18 +15,19 @@ flowchart TB
     end
 
     subgraph external[External/Future]
-        idp[IdP SAML2]
+        idp[IdP / MS AD]
         elk[ELK]
     end
 
     browser[Browser] -->|HTTP :5090| monui
-    monui -->|SAML2 :443 или :80| idp
+    monui -->|SAML2/OAuth2 + LDAP groups :443/:80/:636/:389| idp
     monui -->|CMDB REST :8090| cmdb
     monui -->|Zabbix JSON-RPC :8081| zbx
     monui -->|Kafka read-only :9092| kafka
     monui -->|GET /health :5080| wh
     monui -->|GET /health :5081| conv
     monui -->|GET /health :5082| api
+    monui -->|POST /admin/reload-rules :5081| conv
     cmdb -->|HTTP webhook :5080 via 192.168.202.100| wh
     wh -->|produce :9092| kafka
     kafka -->|consume :9092| conv

@@ -7,6 +7,8 @@ using CmdbKafka2Zabbix.Rules;
 using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +16,7 @@ builder.Services.AddOptions<ServiceOptions>()
     .Bind(builder.Configuration.GetSection(ServiceOptions.SectionName))
     .Validate(options => !string.IsNullOrWhiteSpace(options.Name), "Service name is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.HealthRoute), "Service health route is required.")
+    .Validate(options => string.IsNullOrWhiteSpace(options.RulesReloadRoute) || options.RulesReloadRoute.StartsWith('/'), "Rules reload route must start with '/'.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<KafkaOptions>()
@@ -50,7 +53,7 @@ builder.Services.AddOptions<ConversionRulesOptions>()
 builder.Services.AddOptions<CmdbuildOptions>()
     .Bind(builder.Configuration.GetSection(CmdbuildOptions.SectionName))
     .Validate(options => options.RequestTimeoutMs > 0, "CMDBuild request timeout must be greater than zero.")
-    .Validate(options => options.MaxPathDepth > 0, "CMDBuild max path depth must be greater than zero.")
+    .Validate(options => options.MaxPathDepth is >= 2 and <= 5, "CMDBuild max path depth must be from 2 to 5.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ProcessingStateOptions>()
@@ -102,4 +105,59 @@ app.MapGet(serviceOptions.HealthRoute, () => Results.Ok(new
     status = "ok"
 }));
 
+if (!string.IsNullOrWhiteSpace(serviceOptions.RulesReloadRoute))
+{
+    app.MapPost(
+        serviceOptions.RulesReloadRoute,
+        async (HttpContext context, IConversionRulesProvider rulesProvider, IOptions<ServiceOptions> options, CancellationToken cancellationToken) =>
+        {
+            var currentOptions = options.Value;
+            if (string.IsNullOrWhiteSpace(currentOptions.RulesReloadToken))
+            {
+                return Results.Problem(
+                    "Rules reload token is not configured.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Rules reload is not configured");
+            }
+
+            if (!IsBearerTokenValid(context.Request, currentOptions.RulesReloadToken))
+            {
+                return Results.Unauthorized();
+            }
+
+            var result = await rulesProvider.ReloadAsync(cancellationToken);
+            return Results.Ok(new
+            {
+                service = currentOptions.Name,
+                status = "ok",
+                rules = new
+                {
+                    name = result.RuleName,
+                    schemaVersion = result.SchemaVersion,
+                    rulesVersion = result.RulesVersion,
+                    location = result.Location,
+                    version = result.Version,
+                    storageRefreshed = result.StorageRefreshed,
+                    reloadedAt = result.ReloadedAt
+                }
+            });
+        });
+}
+
 app.Run();
+
+static bool IsBearerTokenValid(HttpRequest request, string expectedToken)
+{
+    var authorization = request.Headers.Authorization.ToString();
+    const string prefix = "Bearer ";
+    if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    var actualToken = authorization[prefix.Length..].Trim();
+    var expectedBytes = Encoding.UTF8.GetBytes(expectedToken);
+    var actualBytes = Encoding.UTF8.GetBytes(actualToken);
+    return expectedBytes.Length == actualBytes.Length
+        && CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
+}

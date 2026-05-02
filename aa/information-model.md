@@ -13,15 +13,17 @@
 | IF-007 | cmdbkafka2zabbix `:5081` | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
 | IF-008 | Микросервисы `:5080/:5081/:5082` | Local FS | `state/*.json` | Последний обработанный объект |
 | IF-009 | Browser | monitoring-ui-api `:5090` | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
-| IF-010 | monitoring-ui-api `:5090` | IdP SAML2 `:443/:80` | Redirect/POST SAML2 | AuthnRequest, SAMLResponse, metadata |
-| IF-011 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP | Classes, attributes, lookup types, optional service account |
+| IF-010 | monitoring-ui-api `:5090` | IdP/SAML2/OAuth2 и MS AD LDAP/LDAPS `:443/:80/:636/:389` | Redirect/POST SAML2, OAuth2 Authorization Code, LDAP bind/search | AuthnRequest, SAMLResponse, metadata, OAuth2 code/token/userinfo, LDAP user/groups |
+| IF-011 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP | Classes, attributes, lookup types, optional session credentials |
 | IF-012 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC | Templates, host groups, template groups, known tags |
 | IF-013 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
-| IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json` | Catalog cache и persisted UI settings; runtime-файл не попадает в git |
+| IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json`, `state/users.json` | Catalog cache, persisted UI settings и local users; runtime/state-файлы не попадают в git |
 | IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
 | IF-016 | monitoring-ui-api `:5090` | .NET services `:5080/:5081/:5082` | HTTP GET `/health` | Проверка готовности микросервисов на dashboard |
 | IF-017 | Browser | Local downloads | rules JSON и `*-webhook-bodies.txt` | `Управление правилами конвертации` / `Save file as`: draft rules и webhook Body/DELETE-инструкции только по изменениям текущей UI-сессии |
-| IF-018 | cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP GET `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/lookup_types/{type}/values` | Подъем reference/lookup leaf-значений по `source.fields[].cmdbPath` |
+| IF-018 | cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP GET `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/classes/{class}/cards/{id}/relations`, `/lookup_types/{type}/values` | Подъем reference/lookup/domain leaf-значений по `source.fields[].cmdbPath` |
+| IF-019 | monitoring-ui-api `:5090` | cmdbkafka2zabbix `:5081` | HTTP POST `/admin/reload-rules` с Bearer token | Сигнал перечитывания conversion rules через provider abstraction |
+| IF-020 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT/DELETE `/etl/webhook/` | Чтение и применение выбранного плана CMDBuild webhooks в разделе `Настройка webhooks` |
 
 ## Срез бизнес-описания
 
@@ -29,7 +31,7 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-018:
+Срез поддержки включает IF-006..IF-020:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
@@ -37,8 +39,10 @@
 - read-only просмотр Kafka topics через monitoring-ui-api;
 - health dashboard микросервисов через HTTP endpoints;
 - локальный save-as draft rules и webhook-инструкций для оператора;
-- чтение CMDBuild reference/lookup leaf-значений конвертером по path metadata из rules;
-- SAML2 session и IdP settings;
+- чтение CMDBuild reference/lookup/domain leaf-значений конвертером по path metadata из rules;
+- авторизованный reload сигнал для перечитывания conversion rules;
+- настройка managed CMDBuild webhooks из UI через BFF с явным apply и ограничением префикса `cmdbwebhooks2kafka-`;
+- Authorization session и settings для локального входа, MS AD LDAP/LDAPS и IdP SAML2/OAuth2/OIDC;
 - секреты и credentials через конфиги/переменные окружения.
 
 ## Основные объекты данных
@@ -76,6 +80,8 @@
 
 Если передается `inventory`, `inventory_mode` не должен быть `-1`.
 
+Для `host.update` поля `groups`, `templates`, `tags`, `macros` и `inventory` являются merge-полями на стороне `zabbixrequests2api`: текущие значения Zabbix host сохраняются, если rules не передают значение с тем же ключом. `templates_clear` явно удаляет конфликтующие linked templates. `interfaces` остаются authoritative по rules, writer только переносит существующие `interfaceid`.
+
 ### Zabbix response
 
 Передается в `zabbix.host.responses.*`.
@@ -100,12 +106,25 @@
 Хранится в памяти процесса `monitoring-ui-api`.
 
 Поля:
-- `authMethod`: `local` или `saml2`;
-- `roles`: `admin`, `operator`, `readonly`;
-- `identity`: login/email/displayName/groups для SAML2;
-- `cmdbuild`: base URL и server-side credentials;
-- `zabbix`: API endpoint и server-side credentials/token;
+- `authMethod`: `local`, `saml2`, `oauth2` или `ldap`;
+- `roles`: `admin`, `editor`, `viewer`;
+- `identity`: login/email/displayName/groups для IdP или local user;
+- optional `oauth2`: token metadata без записи в state-файл;
+- `cmdbuild`: base URL и session-only credentials, если они уже запрошены;
+- `zabbix`: API endpoint и session-only credentials/token, если они уже заданы;
 - `createdAt`, `lastSeenAt`.
+
+### Monitoring UI users
+
+Хранится в `src/monitoring-ui-api/state/users.json` рядом с `ui-settings.json` и не попадает в git.
+
+Поля:
+- `username`;
+- `displayName`;
+- `role`: `viewer`, `editor`, `admin`;
+- `password`: PBKDF2-SHA256 settings, salt и hash;
+- `mustChangePassword`;
+- `createdAt`, `updatedAt`.
 
 ### Catalog cache
 
@@ -129,10 +148,11 @@ Zabbix cache:
 CMDBuild cache:
 - classes;
 - attributes;
+- domains;
 - lookups;
 - lookup values, если `Cmdbuild:Catalog:IncludeLookupValues=true`.
 
-Conversion rules могут содержать `source.fields[].cmdbPath`. Webhook payload при этом остается плоским: значение source key является scalar или numeric id первого reference/lookup, а converter поднимает leaf через CMDBuild REST по path metadata из rules.
+Conversion rules могут содержать `source.fields[].cmdbPath`. Webhook payload при этом остается плоским: значение source key является scalar или numeric id первого reference/lookup, а converter поднимает leaf через CMDBuild REST по path metadata из rules. Для N:N CMDBuild domains используется path `Class.{domain:TargetClass}.Attribute`; converter читает relations текущей карточки и обрабатывает найденные target cards тем же leaf resolver.
 
 ### Conversion rules draft session
 
@@ -147,6 +167,18 @@ Conversion rules могут содержать `source.fields[].cmdbPath`. Webho
 `Save file as` не пишет draft на backend. Пользователь сохраняет два локальных файла:
 - draft rules JSON;
 - текстовый файл с CMDBuild webhook Body snippets для добавлений и DELETE-инструкциями для удалений.
+
+### CMDBuild webhook plan
+
+Хранится в памяти браузера текущей вкладки `monitoring-ui-api` и может быть выгружен через `Save file as`.
+
+Содержит:
+- текущие managed/unmanaged CMDBuild webhook records, загруженные через BFF;
+- желаемые managed records, построенные из conversion rules;
+- операции `create`, `update`, `delete` с checkbox выбора;
+- current/desired JSON для проверки оператором.
+
+`Save file as` сохраняет только JSON-план локально. `Загрузить в CMDB` отправляет выбранные операции на BFF, а BFF применяет их к CMDBuild REST `/etl/webhook/`. Backend принимает к apply только records с префиксом `cmdbwebhooks2kafka-`, чтобы не менять чужие CMDBuild webhooks.
 
 ### Interface language preference
 

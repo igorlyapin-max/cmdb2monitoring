@@ -18,19 +18,29 @@ const config = JSON.parse(readFileSync(join(serviceRoot, 'config/appsettings.jso
 required(config, 'Service.Name');
 required(config, 'Service.HealthRoute');
 required(config, 'UiSettings.FilePath');
+required(config, 'Auth.UsersFilePath');
 required(config, 'Auth.SessionCookieName');
 required(config, 'Auth.MaxSamlPostBytes');
-required(config, 'Auth.LocalLoginDefaults');
 required(config, 'Idp.Provider');
 required(config, 'Idp.SpEntityId');
 required(config, 'Idp.AcsUrl');
 required(config, 'Idp.SloCallbackUrl');
 required(config, 'Idp.NameIdFormat');
 required(config, 'Idp.AuthnRequestBinding');
+required(config, 'Idp.OAuth2.RedirectUri');
+required(config, 'Idp.OAuth2.Scopes');
+required(config, 'Idp.OAuth2.LoginClaim');
+required(config, 'Idp.OAuth2.GroupsClaim');
+required(config, 'Idp.Ldap.Protocol');
+required(config, 'Idp.Ldap.Port');
+required(config, 'Idp.Ldap.UserFilter');
+required(config, 'Idp.Ldap.GroupFilter');
+required(config, 'Idp.Ldap.LoginAttribute');
+required(config, 'Idp.Ldap.GroupsAttribute');
 required(config, 'Cmdbuild.BaseUrl');
-required(config, 'Cmdbuild.ServiceAccount');
+required(config, 'Cmdbuild.Catalog.MaxTraversalDepth');
 required(config, 'Zabbix.ApiEndpoint');
-required(config, 'Zabbix.ServiceAccount');
+required(config, 'Rules.ReadFromGit');
 required(config, 'Rules.RulesFilePath');
 required(config, 'EventBrowser.BootstrapServers');
 required(config, 'EventBrowser.ClientId');
@@ -42,12 +52,20 @@ if (!existsSync(join(repoRoot, config.Rules.RulesFilePath))) {
   errors.push(`Rules file does not exist: ${config.Rules.RulesFilePath}`);
 }
 
+if (typeof config.Rules.ReadFromGit !== 'boolean') {
+  errors.push('Rules.ReadFromGit must be boolean.');
+}
+
 if (!Array.isArray(config.EventBrowser.Topics) || config.EventBrowser.Topics.length === 0) {
   errors.push('EventBrowser.Topics must contain at least one topic.');
 }
 
 if (!['Plaintext', 'Ssl', 'SaslPlaintext', 'SaslSsl'].includes(config.EventBrowser.SecurityProtocol)) {
   errors.push(`EventBrowser.SecurityProtocol has unsupported value: ${config.EventBrowser.SecurityProtocol}`);
+}
+
+if (!intInRange(config.Cmdbuild?.Catalog?.MaxTraversalDepth, 2, 5)) {
+  errors.push('Cmdbuild.Catalog.MaxTraversalDepth must be an integer from 2 to 5.');
 }
 
 for (const relativePath of ['package.json', 'package-lock.json', 'server.mjs', 'public/index.html', 'public/styles.css', 'public/app.js']) {
@@ -75,4 +93,9 @@ function required(object, path) {
   if (current === undefined || current === null || current === '') {
     errors.push(`Missing required config value: ${path}`);
   }
+}
+
+function intInRange(value, min, max) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max;
 }

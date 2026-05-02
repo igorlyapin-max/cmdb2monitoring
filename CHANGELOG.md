@@ -1,9 +1,57 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-05-02
 
 ### Changed
 
+- `monitoring-ui-api` local login now uses local UI users with roles `viewer`, `editor`, and `admin`, stored with hashed passwords in `state/users.json`.
+- Settings is split into two admin menu items: `Авторизация` and `Runtime-настройки`; CMDBuild/Zabbix credentials are no longer prefilled from development config.
+- Authorization now has three explicit modes: local users, MS AD over LDAP/LDAPS, and IdP over SAML2/OAuth2.
+- In IdP mode, SAML2/OAuth2 identifies the user while MS AD LDAP/LDAPS settings remain available for AD group-to-role mapping; the BFF reads AD groups when service bind is configured.
+- The local user administration panel is now labeled as local users, shows an active/inactive checkbox, and becomes inactive in MS AD or IdP mode.
+- `cmdbkafka2zabbix` now exposes a Bearer-protected rules reload endpoint, and the dashboard shows `Перечитать правила конвертации` for the converter service to trigger it through the BFF.
+- CMDBuild/Zabbix login/password are requested only when an API operation first needs them, while Zabbix uses the configured API key when present.
+- Runtime settings no longer contain persistent CMDBuild/Zabbix service login/password fields.
+- Runtime settings no longer expose CMDBuild/Zabbix `Use IdP` switches; backend access uses Zabbix API key when configured or session-scoped CMDBuild/Zabbix credentials requested on demand.
+- Runtime settings now show the conversion rules file path, `Read from git` switch, and git repository URL; `cmdbkafka2zabbix` has the matching `ConversionRules:ReadFromGit` and `RepositoryUrl` config fields.
+- Runtime settings help now states the dev/test disk file and the expected rules filename inside the git repository: `rules/cmdbuild-to-zabbix-host-create.json`.
+- Conversion Rules Management now warns that reference-attribute changes do not update monitoring unless the source object card itself is modified.
+- Conversion Rules Management now supports CMDBuild domain paths such as `Класс.{domain:СвязанныйКласс}.Атрибут`, and blocks potentially multi-value domain fields for scalar Zabbix structures.
+- Conversion Rules Management edit mode now hides the lower preview, supports rule modification, and shows CMDBuild class hierarchy while blocking superclass/prototype selection.
+- Rule modification now has `Сбросить поля`, dependent field filtering, invalid/stale/valid visual states, and disabled save until the rule chain has an unambiguous leaf/source field and compatible Zabbix target.
+- Conversion Rules Management now validates IP/DNS interface target semantics: an IP-looking CMDBuild attribute cannot be added as `interfaces[].dns`, and a DNS/FQDN-looking attribute cannot be added as `interfaces[].ip`.
+- `zabbixrequests2api` now merges `groups[]`, `templates[]`, `tags[]`, `macros[]`, and `inventory` on `host.update` so external Zabbix assignments are preserved; `interfaces[]` remain rules-authoritative.
+- Rule modification no longer auto-selects the first rule; the operator can start from a rule, CMDBuild class, class attribute field, or conversion structure, with linked lists narrowed and a single matching rule auto-selected.
+- `Сбросить поля` in rule modification now clears the selected rule and all modification filters instead of restoring the selected rule.
+- Zabbix targets loaded from a rule but missing from the current catalog/options are now treated as inconsistent red blocking errors, not as editable stale values.
+- Conversion Rules Management delete mode now provides CMDBuild, Zabbix, and rules trees with group checkboxes for removing all rules tied to a class, CMDBuild attribute, Zabbix payload field, Zabbix object group, or rule collection.
+- Conversion Rules Logical Control now has undo/redo for in-session fixes and lets operators select inconsistent conversion rules directly in the middle column.
+- Conversion Rules Logical Control now marks rules that reference missing Zabbix targets, missing CMDBuild class conditions, or undeclared class attribute fields.
+- Conversion Rules Logical Control no longer offers `eventRoutingRules` as direct delete fixes for catalog mismatches; only rules that contain the concrete inconsistent condition/target become selectable.
+- Conversion Rules Logical Control rule deletion checkboxes are now bound to concrete rule identities instead of shared condition tokens, preventing unrelated profile/tag rules from being offered for deletion.
+- Conversion Rules Logical Control now treats `hostProfile` and `outputProfile` as known virtual fields, so fan-out profile routing rules are not flagged as missing CMDBuild attributes.
+- Conversion Rules Logical Control fixes now stay in the in-session draft with undo/redo and no longer open browser save-as after every delete; a separate `Save file as` button exports the accumulated draft.
+- Added `Настройка webhooks` for `editor`/`admin`: load CMDBuild webhooks, analyze current rules into a create/update/delete plan, undo/redo operation selection, export the plan through browser save-as, and explicitly apply selected managed `cmdbwebhooks2kafka-*` operations to CMDBuild.
+- `Настройка webhooks` now shows loaded CMDBuild webhooks even before rules analysis, states that the page is optional, and clarifies that undo/redo does not roll back already applied CMDBuild configuration.
+- `Настройка webhooks` table rows can now expand payload diffs with green additions, red deletions, and black current values, and each row has an edit action that changes the current webhook plan.
+- `Настройка webhooks` now opens row details from the `Действие` column directly under the clicked row, moves the shared details panel below the table, highlights details text, and preserves existing webhook bodies so unrelated records are not mass-marked as `Изменить` when an independent class is added.
+- `Настройка webhooks` no longer adds duplicate body keys with different case/aliases, respects nested class filters, and ignores `cmdbPath` roots that belong to another class when deciding which source fields are needed for a class.
+- About text now identifies Igor Lyapin as designer/author and states GNU GPLv3 licensing.
+- Runtime settings now expose CMDBuild domain/reference/lookup recursion depth, clamped to `2..5` with default `2`; changes take effect after logout and CMDBuild catalog resync.
+- `cmdbkafka2zabbix` now supports `monitoringSuppressionRules` so object attributes such as `monitoringPolicy=do_not_monitor` can intentionally skip host create/update without publishing a Zabbix request.
+- Documentation now distinguishes object-level "не ставить на мониторинг" suppression from domain leaf `do_not_monitor`, which only excludes a related endpoint and must not "остановить мониторинг объекта".
+- Added an abstract CI/КЕ mapping-editor test plan plus CMDBuild demo schema and instance scripts for repeatable rule-editor checks.
+- Extended the mapping-editor test plan with Webhook Setup checks: clean managed webhook deletion, UI recreate/apply, event arrival, no unrelated class updates, and class-local payload changes when a new attribute is added.
+- Added a CMDBuild demo E2E runner that sends demo webhook events, verifies Zabbix hosts, and writes a markdown report.
+- Demo E2E now verifies Zabbix assignment targets on live hosts: host name, visible name, groups, templates, interfaces, tags, macros, inventory, status, and TLS mode.
+- Demo E2E now includes DNS-only monitoring through `interfaces[].dns/useip=0` and supports `--code` for running one scenario.
+- Mapping editor test plan now records report locations and covers Zabbix host update merge scenarios for groups, templates, tags, macros, inventory, `templates_clear`, direct `host.update`, and authoritative `interfaces[]`.
+- Added a clean no-op production starter rules file next to the demo conversion rules.
+- Added a clean no-op dev starter rules file with dev topic/API defaults next to the demo and production starter rules.
+- Rebuilt the active demo/e2e conversion rules from the clean dev starter around the C2MTest model only, removing the old `Computer`/`Notebook`/`PC`/`Server`/`tk` dev rules and legacy fields from `rules/cmdbuild-to-zabbix-host-create.json`.
+- Rules UI now has `Создать пустой`, which generates a no-op production starter from current runtime settings and CMDBuild/Zabbix catalog caches for browser save-as; empty caches now return a clear backend error.
+- Conversion rules now carry `rulesVersion`; monitoring-ui-api no longer writes active rules files or performs git commit/push, leaving publication to the operator outside the application.
+- Documentation now states minimum permissions by operation, including CMDBuild ETL/webhook read and create/update/delete requirements for Webhook Setup apply.
 - Documentation now separates product conversion capabilities from the concrete dev CMDBuild/Zabbix model names such as `Computer`, `Server`, `zabbixTag`, `iLo`, and `mgmt`.
 - Documentation now records the tested compatibility matrix for CMDBuild `4.1.0`, Zabbix `7.0.25`, Kafka `3.9.2`, .NET `10.0.203`, and Node.js `>=22`.
 

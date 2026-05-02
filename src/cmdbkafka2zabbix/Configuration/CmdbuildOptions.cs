@@ -12,7 +12,7 @@ public sealed class CmdbuildOptions
 
     public int RequestTimeoutMs { get; init; } = 10000;
 
-    public int MaxPathDepth { get; init; } = 5;
+    public int MaxPathDepth { get; init; } = 2;
 
     public bool Enabled { get; init; } = true;
 

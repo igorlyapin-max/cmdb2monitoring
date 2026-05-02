@@ -15,6 +15,7 @@ public sealed class CmdbSourceFieldResolver(
     private readonly Dictionary<string, IReadOnlyDictionary<string, CmdbAttributeInfo>> attributeCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IReadOnlyDictionary<string, string>> cardCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IReadOnlyList<CmdbLookupValue>> lookupCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IReadOnlyList<CmdbRelationEndpoint>> relationCache = new(StringComparer.OrdinalIgnoreCase);
     private bool missingConfigurationWarningLogged;
 
     public async Task<CmdbSourceEvent> ResolveAsync(
@@ -31,6 +32,11 @@ public sealed class CmdbSourceFieldResolver(
             }
 
             var sourceValue = ReadSourceValue(fieldName, fieldRule, resolvedFields);
+            if (string.IsNullOrWhiteSpace(sourceValue) && IsDomainPath(fieldRule.CmdbPath))
+            {
+                sourceValue = source.EntityId;
+            }
+
             if (string.IsNullOrWhiteSpace(sourceValue))
             {
                 continue;
@@ -88,7 +94,7 @@ public sealed class CmdbSourceFieldResolver(
             {
                 missingConfigurationWarningLogged = true;
                 logger.LogWarning(
-                    "CMDBuild field resolution is configured, but Cmdbuild:BaseUrl/Username/Password are not set; lookup/reference path values will stay unresolved");
+                    "CMDBuild field resolution is configured, but Cmdbuild:BaseUrl/Username/Password are not set; lookup/reference/domain path values will stay unresolved");
             }
             return null;
         }
@@ -166,6 +172,18 @@ public sealed class CmdbSourceFieldResolver(
             return sourceValue;
         }
 
+        if (TryReadDomainSegment(path[index], out var domainTargetClass))
+        {
+            return await ResolveDomainPathAsync(
+                source,
+                rule,
+                currentClass,
+                FirstNonEmpty(source.EntityId, sourceValue),
+                domainTargetClass,
+                path[(index + 1)..],
+                cancellationToken);
+        }
+
         var maxDepth = rule.Resolve.MaxDepth ?? options.Value.MaxPathDepth;
         var depth = 0;
         var currentValue = sourceValue;
@@ -230,6 +248,146 @@ public sealed class CmdbSourceFieldResolver(
         }
 
         return currentValue;
+    }
+
+    private async Task<string?> ResolveDomainPathAsync(
+        CmdbSourceEvent source,
+        SourceFieldRule rule,
+        string sourceClass,
+        string sourceCardId,
+        string targetClass,
+        string[] targetPath,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceClass) || string.IsNullOrWhiteSpace(sourceCardId))
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(source.ClassName)
+            && !string.Equals(source.ClassName, sourceClass, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogDebug(
+                "Skipping CMDBuild domain path {CmdbPath}: source class {SourceClass} does not match event class {EventClass}",
+                rule.CmdbPath,
+                sourceClass,
+                source.ClassName);
+            return null;
+        }
+
+        var relatedCards = await GetRelatedCardsAsync(sourceClass, sourceCardId, targetClass, cancellationToken);
+        if (relatedCards.Count == 0)
+        {
+            return null;
+        }
+
+        var values = new List<string>();
+        foreach (var relatedCard in relatedCards)
+        {
+            var value = await ResolveCardPathAsync(
+                relatedCard.ClassName,
+                relatedCard.CardId,
+                targetPath,
+                rule,
+                cancellationToken);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                values.Add(value);
+            }
+        }
+
+        return FormatCollectionValues(values, rule);
+    }
+
+    private async Task<string?> ResolveCardPathAsync(
+        string className,
+        string cardId,
+        string[] path,
+        SourceFieldRule rule,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(className) || string.IsNullOrWhiteSpace(cardId))
+        {
+            return null;
+        }
+
+        if (path.Length == 0)
+        {
+            var card = await GetCardAsync(className, cardId, cancellationToken);
+            return ReadCardValue(card, "Code")
+                ?? ReadCardValue(card, "Description")
+                ?? cardId;
+        }
+
+        var maxDepth = rule.Resolve.MaxDepth ?? options.Value.MaxPathDepth;
+        var depth = 0;
+        var currentClass = className;
+        var currentCardId = cardId;
+        var currentCard = await GetCardAsync(currentClass, currentCardId, cancellationToken);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            $"{currentClass}:{currentCardId}"
+        };
+
+        for (var i = 0; i < path.Length; i++)
+        {
+            var attributeName = path[i];
+            var attribute = await GetAttributeAsync(currentClass, attributeName, cancellationToken);
+            if (attribute is null)
+            {
+                return ReadCardValue(currentCard, attributeName);
+            }
+
+            var attributeValue = ReadCardValue(currentCard, attribute.Name);
+            if (string.Equals(attribute.Type, "reference", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(attribute.TargetClass) || string.IsNullOrWhiteSpace(attributeValue))
+                {
+                    return null;
+                }
+
+                depth++;
+                if (depth > maxDepth)
+                {
+                    throw new InvalidOperationException($"CMDBuild path '{rule.CmdbPath}' exceeds max depth {maxDepth}.");
+                }
+
+                currentClass = attribute.TargetClass;
+                currentCardId = attributeValue;
+                var visitKey = $"{currentClass}:{currentCardId}";
+                if (!visited.Add(visitKey))
+                {
+                    throw new InvalidOperationException($"CMDBuild path '{rule.CmdbPath}' contains a reference cycle at {visitKey}.");
+                }
+
+                currentCard = await GetCardAsync(currentClass, currentCardId, cancellationToken);
+                if (i == path.Length - 1)
+                {
+                    return ReadCardValue(currentCard, "Code")
+                        ?? ReadCardValue(currentCard, "Description")
+                        ?? currentCardId;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(attribute.Type, "lookup", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(rule.Resolve.LeafType, "lookup", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(rule.Type, "lookup", StringComparison.OrdinalIgnoreCase))
+            {
+                return await ResolveLookupValueAsync(
+                    FirstNonEmpty(rule.Resolve.LookupType, rule.LookupType, attribute.LookupType),
+                    attributeValue ?? string.Empty,
+                    ResolveValueMode(rule),
+                    cancellationToken,
+                    currentCard,
+                    attribute.Name);
+            }
+
+            return attributeValue;
+        }
+
+        return null;
     }
 
     private async Task<string> ResolveLookupTypeFromPathAsync(
@@ -409,6 +567,108 @@ public sealed class CmdbSourceFieldResolver(
         return values;
     }
 
+    private async Task<IReadOnlyList<CmdbRelationEndpoint>> GetRelatedCardsAsync(
+        string sourceClass,
+        string sourceCardId,
+        string targetClass,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = $"{sourceClass}:{sourceCardId}:{targetClass}";
+        if (relationCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        using var document = await GetJsonAsync(
+            $"/classes/{Uri.EscapeDataString(sourceClass)}/cards/{Uri.EscapeDataString(sourceCardId)}/relations",
+            cancellationToken);
+        var related = ReadDataArray(document.RootElement)
+            .Select(item => ReadRelatedEndpoint(item, sourceClass, sourceCardId, targetClass))
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .GroupBy(item => $"{item.ClassName}:{item.CardId}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+
+        relationCache[cacheKey] = related;
+        return related;
+    }
+
+    private static CmdbRelationEndpoint? ReadRelatedEndpoint(
+        JsonElement relation,
+        string sourceClass,
+        string sourceCardId,
+        string targetClass)
+    {
+        var sourceEndpoint = ReadRelationEndpoint(relation, "source");
+        var destinationEndpoint = ReadRelationEndpoint(relation, "destination");
+
+        if (IsSameEndpoint(sourceEndpoint, sourceClass, sourceCardId)
+            && IsSameClass(destinationEndpoint.ClassName, targetClass)
+            && !string.IsNullOrWhiteSpace(destinationEndpoint.CardId))
+        {
+            return destinationEndpoint;
+        }
+
+        if (IsSameEndpoint(destinationEndpoint, sourceClass, sourceCardId)
+            && IsSameClass(sourceEndpoint.ClassName, targetClass)
+            && !string.IsNullOrWhiteSpace(sourceEndpoint.CardId))
+        {
+            return sourceEndpoint;
+        }
+
+        if (IsSameClass(destinationEndpoint.ClassName, targetClass)
+            && !IsSameClass(destinationEndpoint.ClassName, sourceClass)
+            && !string.IsNullOrWhiteSpace(destinationEndpoint.CardId))
+        {
+            return destinationEndpoint;
+        }
+
+        if (IsSameClass(sourceEndpoint.ClassName, targetClass)
+            && !IsSameClass(sourceEndpoint.ClassName, sourceClass)
+            && !string.IsNullOrWhiteSpace(sourceEndpoint.CardId))
+        {
+            return sourceEndpoint;
+        }
+
+        return null;
+    }
+
+    private static CmdbRelationEndpoint ReadRelationEndpoint(JsonElement relation, string side)
+    {
+        var isSource = string.Equals(side, "source", StringComparison.OrdinalIgnoreCase);
+        var shortPrefix = isSource ? "src" : "dst";
+        var className = FirstNonEmpty(
+            ReadString(relation, isSource ? "_sourceType" : "_destinationType"),
+            ReadString(relation, isSource ? "sourceType" : "destinationType"),
+            ReadString(relation, isSource ? "sourceClass" : "destinationClass"),
+            ReadString(relation, isSource ? "_sourceClass" : "_destinationClass"),
+            isSource ? null : ReadString(relation, "_targetType"),
+            isSource ? null : ReadString(relation, "targetType"),
+            isSource ? null : ReadString(relation, "targetClass"),
+            isSource ? null : ReadString(relation, "_targetClass"),
+            ReadString(relation, $"{shortPrefix}Type"),
+            ReadString(relation, $"{shortPrefix}Class"),
+            ReadNestedString(relation, isSource ? "_source" : "_destination", "_type", "type", "className", "class", "name", "_id"),
+            ReadNestedString(relation, side, "_type", "type", "className", "class", "name", "_id"),
+            isSource ? null : ReadNestedString(relation, "target", "_type", "type", "className", "class", "name", "_id"),
+            isSource ? null : ReadNestedString(relation, "_target", "_type", "type", "className", "class", "name", "_id"),
+            ReadNestedString(relation, shortPrefix, "_type", "type", "className", "class", "name", "_id"));
+        var cardId = FirstNonEmpty(
+            ReadString(relation, isSource ? "_sourceId" : "_destinationId"),
+            ReadString(relation, isSource ? "sourceId" : "destinationId"),
+            isSource ? null : ReadString(relation, "_targetId"),
+            isSource ? null : ReadString(relation, "targetId"),
+            ReadString(relation, $"{shortPrefix}Id"),
+            ReadNestedString(relation, isSource ? "_source" : "_destination", "_id", "id", "cardId"),
+            ReadNestedString(relation, side, "_id", "id", "cardId"),
+            isSource ? null : ReadNestedString(relation, "target", "_id", "id", "cardId"),
+            isSource ? null : ReadNestedString(relation, "_target", "_id", "id", "cardId"),
+            ReadNestedString(relation, shortPrefix, "_id", "id", "cardId"));
+
+        return new CmdbRelationEndpoint(className, cardId);
+    }
+
     private async Task<JsonDocument> GetJsonAsync(string path, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -462,6 +722,30 @@ public sealed class CmdbSourceFieldResolver(
         return card.TryGetValue(attributeName, out var value) ? value : null;
     }
 
+    private static string? ReadNestedString(JsonElement element, string propertyName, params string[] nestedPropertyNames)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !TryGetPropertyIgnoreCase(element, propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind != JsonValueKind.Object)
+        {
+            return ReadScalar(property);
+        }
+
+        foreach (var nestedPropertyName in nestedPropertyNames)
+        {
+            var value = ReadString(property, nestedPropertyName);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
     private static string? ReadString(JsonElement element, string propertyName)
     {
         if (element.ValueKind != JsonValueKind.Object)
@@ -469,20 +753,31 @@ public sealed class CmdbSourceFieldResolver(
             return null;
         }
 
-        if (element.TryGetProperty(propertyName, out var property))
+        if (TryGetPropertyIgnoreCase(element, propertyName, out var property))
         {
             return ReadScalar(property);
+        }
+
+        return null;
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement property)
+    {
+        if (element.TryGetProperty(propertyName, out property))
+        {
+            return true;
         }
 
         foreach (var item in element.EnumerateObject())
         {
             if (string.Equals(item.Name, propertyName, StringComparison.OrdinalIgnoreCase))
             {
-                return ReadScalar(item.Value);
+                property = item.Value;
+                return true;
             }
         }
 
-        return null;
+        return false;
     }
 
     private static string? ReadScalar(JsonElement value)
@@ -501,6 +796,61 @@ public sealed class CmdbSourceFieldResolver(
                 ?? ReadString(value, "description"),
             _ => null
         };
+    }
+
+    private static bool IsDomainPath(string path)
+    {
+        return SplitPath(path).Any(segment => TryReadDomainSegment(segment, out _));
+    }
+
+    private static bool TryReadDomainSegment(string segment, out string targetClass)
+    {
+        targetClass = string.Empty;
+        var text = segment.Trim();
+        if (!text.StartsWith("{domain:", StringComparison.OrdinalIgnoreCase) || !text.EndsWith('}'))
+        {
+            return false;
+        }
+
+        targetClass = text["{domain:".Length..^1].Trim();
+        return !string.IsNullOrWhiteSpace(targetClass);
+    }
+
+    private static string? FormatCollectionValues(IReadOnlyList<string> values, SourceFieldRule rule)
+    {
+        var distinctValues = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (distinctValues.Length == 0)
+        {
+            return null;
+        }
+
+        if (distinctValues.Length == 1)
+        {
+            return distinctValues[0];
+        }
+
+        return rule.Resolve.CollectionMode.ToLowerInvariant() switch
+        {
+            "first" => distinctValues[0],
+            "json" => JsonSerializer.Serialize(distinctValues),
+            _ => string.Join(
+                string.IsNullOrEmpty(rule.Resolve.CollectionSeparator) ? "; " : rule.Resolve.CollectionSeparator,
+                distinctValues)
+        };
+    }
+
+    private static bool IsSameEndpoint(CmdbRelationEndpoint endpoint, string className, string cardId)
+    {
+        return IsSameClass(endpoint.ClassName, className)
+            && string.Equals(endpoint.CardId, cardId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSameClass(string left, string right)
+    {
+        return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string[] SplitPath(string path)
@@ -564,6 +914,10 @@ public sealed class CmdbSourceFieldResolver(
         string Type,
         string TargetClass,
         string LookupType);
+
+    private sealed record CmdbRelationEndpoint(
+        string ClassName,
+        string CardId);
 
     private sealed record CmdbLookupValue(
         string Id,

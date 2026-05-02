@@ -6,6 +6,8 @@ public sealed class ConversionRulesDocument
 {
     public string SchemaVersion { get; init; } = string.Empty;
 
+    public string RulesVersion { get; init; } = string.Empty;
+
     public string Name { get; init; } = string.Empty;
 
     public SourceRules Source { get; init; } = new();
@@ -17,6 +19,8 @@ public sealed class ConversionRulesDocument
     public NormalizationRules Normalization { get; init; } = new();
 
     public EventRoutingRule[] EventRoutingRules { get; init; } = [];
+
+    public SuppressionRule[] MonitoringSuppressionRules { get; init; } = [];
 
     public HostProfileRule[] HostProfiles { get; init; } = [];
 
@@ -70,6 +74,19 @@ public sealed class EventRoutingRule
     public string[] RequiredFields { get; init; } = [];
 
     public bool Publish { get; init; } = true;
+}
+
+public sealed class SuppressionRule
+{
+    public string Name { get; init; } = string.Empty;
+
+    public int Priority { get; init; } = 1000;
+
+    public bool Enabled { get; init; } = true;
+
+    public RuleCondition When { get; init; } = new();
+
+    public string Reason { get; init; } = string.Empty;
 }
 
 public sealed class HostProfileRule
@@ -165,6 +182,10 @@ public sealed class SourceFieldResolveRule
     public string LookupType { get; init; } = string.Empty;
 
     public string ValueMode { get; init; } = string.Empty;
+
+    public string CollectionMode { get; init; } = string.Empty;
+
+    public string CollectionSeparator { get; init; } = string.Empty;
 
     public int? MaxDepth { get; init; }
 }

@@ -40,7 +40,8 @@ ValidateTopicChain(configs, "base", errors);
 ValidateTopicChain(configs, "development", errors);
 ValidateRulesFile(repositoryRoot, errors);
 await ValidateRulesT4Rendering(repositoryRoot, errors);
-await ValidateServerMultiProfileConversion(repositoryRoot, errors);
+await ValidateC2MTestMultiProfileConversion(repositoryRoot, errors);
+await ValidateMonitoringSuppressionConversion(repositoryRoot, errors);
 ValidateArchitectureArtifacts(repositoryRoot, errors);
 
 foreach (var warning in warnings)
@@ -242,6 +243,10 @@ static void ValidateConversionRules(
     RequireNonEmpty(config, "ConversionRules:RulesFilePath", context, errors);
     RequireNonEmpty(config, "ConversionRules:TemplateEngine", context, errors);
     RequireNonEmpty(config, "ConversionRules:TemplateName", context, errors);
+    if (GetBool(config, "ConversionRules:ReadFromGit") is null)
+    {
+        errors.Add($"{context} ConversionRules:ReadFromGit must be configured as a boolean switch.");
+    }
 
     var serviceDirectory = Path.Combine(repositoryRoot, service.RelativePath);
     var configuredRepository = GetString(config, "ConversionRules:RepositoryPath") ?? ".";
@@ -256,7 +261,7 @@ static void ValidateConversionRules(
 static void ValidateCmdbuildResolver(JsonObject config, string context, List<string> errors)
 {
     RequirePositiveInt(config, "Cmdbuild:RequestTimeoutMs", context, errors);
-    RequirePositiveInt(config, "Cmdbuild:MaxPathDepth", context, errors);
+    RequireIntRange(config, "Cmdbuild:MaxPathDepth", 2, 5, context, errors);
 }
 
 static void ValidateZabbix(JsonObject config, string context, List<string> errors, List<string> warnings)
@@ -330,6 +335,10 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
         return;
     }
 
+    RequireNonEmpty(rules, "schemaVersion", "rules", errors);
+    RequireNonEmpty(rules, "rulesVersion", "rules", errors);
+    RequireNonEmpty(rules, "name", "rules", errors);
+
     var routes = GetArray(rules, "eventRoutingRules");
     foreach (var eventType in new[] { "create", "update", "delete" })
     {
@@ -343,13 +352,20 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
     RequireArray(rules, "t4Templates:hostUpdateJsonRpcRequestLines", "rules", errors);
     RequireArray(rules, "t4Templates:hostDeleteJsonRpcRequestLines", "rules", errors);
     RequireArray(rules, "hostProfiles", "rules", errors);
-    RequireObject(rules, "source:fields:profileIpAddress", "rules", errors);
-    RequireObject(rules, "source:fields:profile2IpAddress", "rules", errors);
-    RequireObject(rules, "source:fields:profileDnsName", "rules", errors);
-    RequireObject(rules, "source:fields:interfaceIpAddress", "rules", errors);
-    RequireObject(rules, "source:fields:interface2IpAddress", "rules", errors);
+    RequireArray(rules, "monitoringSuppressionRules", "rules", errors);
+    RequireObject(rules, "source:fields:c2mExtraInterface1Ip", "rules", errors);
+    RequireObject(rules, "source:fields:c2mExtraInterface2Ip", "rules", errors);
+    RequireObject(rules, "source:fields:c2mSeparateProfile1Ip", "rules", errors);
+    RequireObject(rules, "source:fields:c2mSeparateProfile2Ip", "rules", errors);
+    RequireObject(rules, "source:fields:c2mAddressRefIp", "rules", errors);
+    RequireObject(rules, "source:fields:c2mDeepReferenceIp", "rules", errors);
+    RequireObject(rules, "source:fields:c2mDeepReferenceLookup", "rules", errors);
+    RequireObject(rules, "source:fields:c2mDomainAddressFirstIp", "rules", errors);
+    RequireObject(rules, "source:fields:c2mDomainAddressState", "rules", errors);
+    RequireObject(rules, "source:fields:lifecycleState", "rules", errors);
+    RequireObject(rules, "source:fields:monitoringPolicy", "rules", errors);
     RequireArray(rules, "templateConflictRules", "rules", errors);
-    ValidateNoLegacyServerFieldAliases(rules, errors);
+    ValidateNoLegacyDemoModelInActiveRules(rules, errors);
     ValidateCmdbPathSourceFields(rules, errors);
 
     var hostProfiles = GetArray(rules, "hostProfiles");
@@ -368,7 +384,7 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
         RequireArray(profile, "interfaces", $"hostProfile:{GetString(profile, "name") ?? "<unknown>"}", errors);
     }
 
-    foreach (var profileName in new[] { "main", "profile", "profile2" })
+    foreach (var profileName in new[] { "main", "separate-profile-1", "separate-profile-2" })
     {
         if (!hostProfiles.OfType<JsonObject>().Any(profile => string.Equals(GetString(profile, "name"), profileName, StringComparison.Ordinal)))
         {
@@ -376,7 +392,7 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
         }
     }
 
-    foreach (var profileName in new[] { "profile", "profile2" })
+    foreach (var profileName in new[] { "separate-profile-1", "separate-profile-2" })
     {
         var profile = hostProfiles.OfType<JsonObject>()
             .FirstOrDefault(item => string.Equals(GetString(item, "name"), profileName, StringComparison.Ordinal));
@@ -384,6 +400,14 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
         {
             errors.Add($"Rules file hostProfile '{profileName}' must enable createOnUpdateWhenMissing.");
         }
+    }
+
+    var suppressionRules = GetArray(rules, "monitoringSuppressionRules");
+    if (!suppressionRules.OfType<JsonObject>().Any(rule =>
+        string.Equals(GetString(rule, "name"), "object-policy-do-not-monitor", StringComparison.Ordinal)
+        && string.Equals(GetString(rule, "reason"), "object_policy_do_not_monitor", StringComparison.Ordinal)))
+    {
+        errors.Add("Rules file must contain monitoringSuppressionRules entry 'object-policy-do-not-monitor'.");
     }
 
     var templateConflictRules = GetArray(rules, "templateConflictRules");
@@ -471,6 +495,7 @@ static void ValidateCmdbPathSourceFields(JsonObject rules, List<string> errors)
                 || string.Equals(leafType, "lookup", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(mode, "lookup", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(mode, "referenceLookupLeaf", StringComparison.OrdinalIgnoreCase))
+            && string.IsNullOrWhiteSpace(cmdbPath)
             && string.IsNullOrWhiteSpace(lookupType))
         {
             errors.Add($"Rules file source field '{fieldName}' resolves a lookup but lookupType is empty.");
@@ -482,9 +507,9 @@ static void ValidateCmdbPathSourceFields(JsonObject rules, List<string> errors)
             errors.Add($"Rules file source field '{fieldName}' has unsupported resolve.valueMode '{valueMode}'.");
         }
 
-        if (maxDepth is <= 0)
+        if (maxDepth is not null && (maxDepth < 2 || maxDepth > 5))
         {
-            errors.Add($"Rules file source field '{fieldName}' resolve.maxDepth must be greater than zero.");
+            errors.Add($"Rules file source field '{fieldName}' resolve.maxDepth must be from 2 to 5.");
         }
     }
 }
@@ -520,27 +545,24 @@ static async Task ValidateRulesT4Rendering(string repositoryRoot, List<string> e
     }));
     var model = new ZabbixHostCreateModel
     {
-        Host = "cmdb-server-s1",
-        VisibleName = "Server s1",
+        Host = "cmdb-c2mtestci-c2m-demo-001-scalar",
+        VisibleName = "C2MTestCI C2M-DEMO-001-SCALAR",
         HostProfileName = "main",
-        ClassName = "Server",
+        ClassName = "C2MTestCI",
         EntityId = "1001",
-        Code = "s1",
+        Code = "C2M-DEMO-001-SCALAR",
         IpAddress = "192.168.202.2",
         DnsName = "s1.example.local",
         ZabbixHostId = "12345",
-        OperatingSystem = "Windows server",
-        ZabbixTag = "tag1",
         EventType = "update",
         CurrentMethod = "host.update",
         FallbackForMethod = "host.update",
         SourceFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["entityId"] = "1001",
-            ["code"] = "s1",
-            ["className"] = "Server",
+            ["code"] = "C2M-DEMO-001-SCALAR",
+            ["className"] = "C2MTestCI",
             ["ipAddress"] = "192.168.202.2",
-            ["profileIpAddress"] = "192.168.202.102",
             ["hostProfile"] = "main"
         },
         Status = 0,
@@ -598,7 +620,7 @@ static async Task ValidateRulesT4Rendering(string repositoryRoot, List<string> e
     }
 }
 
-static async Task ValidateServerMultiProfileConversion(string repositoryRoot, List<string> errors)
+static async Task ValidateC2MTestMultiProfileConversion(string repositoryRoot, List<string> errors)
 {
     var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
     ConversionRulesDocument? rules;
@@ -613,13 +635,13 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
     }
     catch (Exception ex)
     {
-        errors.Add($"Rules Server multi-profile validation cannot read rules document: {ex.Message}");
+        errors.Add($"Rules C2MTest multi-profile validation cannot read rules document: {ex.Message}");
         return;
     }
 
     if (rules is null)
     {
-        errors.Add("Rules Server multi-profile validation cannot read rules document.");
+        errors.Add("Rules C2MTest multi-profile validation cannot read rules document.");
         return;
     }
 
@@ -627,23 +649,21 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
     {
         source = "cmdbuild",
         eventType = "create",
-        entityType = "Server",
+        entityType = "C2MTestCI",
         entityId = "2001",
         payload = new Dictionary<string, object?>
         {
             ["source"] = "cmdbuild",
             ["eventType"] = "create",
-            ["className"] = "Server",
+            ["className"] = "C2MTestCI",
             ["id"] = "2001",
-            ["code"] = "srv-interface",
+            ["code"] = "C2M-DEMO-007-MULTI-IP-SAME-HOST",
             ["ip_address"] = "192.168.202.10",
-            ["interface"] = "192.168.202.101",
-            ["interface2"] = "192.168.202.102",
-            ["profile"] = "192.168.202.201",
-            ["profile2"] = "192.168.202.202",
-            ["description"] = "server with main additional interfaces and additional profiles",
-            ["os"] = "105152",
-            ["zabbixTag"] = "106857"
+            ["ExtraInterface1Ip"] = "192.168.202.101",
+            ["ExtraInterface2Ip"] = "192.168.202.102",
+            ["SeparateProfile1Ip"] = "192.168.202.201",
+            ["SeparateProfile2Ip"] = "192.168.202.202",
+            ["description"] = "C2MTestCI with main additional interfaces and separate profiles"
         }
     });
 
@@ -665,34 +685,34 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
         .Select(result => result.ProfileName ?? string.Empty)
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    foreach (var profileName in new[] { "main", "profile", "profile2" })
+    foreach (var profileName in new[] { "main", "separate-profile-1", "separate-profile-2" })
     {
         if (!publishedProfiles.Contains(profileName))
         {
-            errors.Add($"Rules Server multi-profile validation expected published host profile '{profileName}'.");
+            errors.Add($"Rules C2MTest multi-profile validation expected published host profile '{profileName}'.");
         }
     }
 
     var mainResult = results.FirstOrDefault(result => result.ShouldPublish && string.Equals(result.ProfileName, "main", StringComparison.OrdinalIgnoreCase));
     if (mainResult?.Value is null)
     {
-        errors.Add("Rules Server multi-profile validation expected main profile request.");
+        errors.Add("Rules C2MTest multi-profile validation expected main profile request.");
         return;
     }
 
     if (!mainResult.Value.Contains("\"templateid\": \"10256\"", StringComparison.Ordinal))
     {
-        errors.Add("Rules Server multi-profile validation expected main profile with interface/interface2 IPs to use template HP iLO by SNMP (10256).");
+        errors.Add("Rules C2MTest multi-profile validation expected main profile with extra interface IPs to use template HP iLO by SNMP (10256).");
     }
 
     if (mainResult.Value.Contains("\"templateid\": \"10564\"", StringComparison.Ordinal))
     {
-        errors.Add("Rules Server multi-profile validation expected template conflict rules to remove ICMP Ping (10564) from main profile when HP iLO by SNMP is selected.");
+        errors.Add("Rules C2MTest multi-profile validation expected template conflict rules to remove ICMP Ping (10564) from main profile when HP iLO by SNMP is selected.");
     }
 
     if (mainResult.Value.Contains("\"templateid\": \"10081\"", StringComparison.Ordinal))
     {
-        errors.Add("Rules Server multi-profile validation expected template conflict rules to remove Windows by Zabbix agent (10081) from main profile when HP iLO by SNMP is selected.");
+        errors.Add("Rules C2MTest multi-profile validation expected template conflict rules to remove Windows by Zabbix agent (10081) from main profile when HP iLO by SNMP is selected.");
     }
 
     using var mainDocument = JsonDocument.Parse(mainResult.Value);
@@ -701,7 +721,7 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
         || interfaces.ValueKind != JsonValueKind.Array
         || interfaces.GetArrayLength() != 3)
     {
-        errors.Add("Rules Server multi-profile validation expected main profile to render exactly three interfaces: ipAddress, interface, interface2.");
+        errors.Add("Rules C2MTest multi-profile validation expected main profile to render exactly three interfaces: ipAddress, ExtraInterface1Ip, ExtraInterface2Ip.");
     }
     else
     {
@@ -713,7 +733,7 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
             .Count();
         if (mainSnmpInterfaces != 1)
         {
-            errors.Add("Rules Server multi-profile validation expected exactly one main SNMP interface among interface/interface2.");
+            errors.Add("Rules C2MTest multi-profile validation expected exactly one main SNMP interface among ExtraInterface1Ip/ExtraInterface2Ip.");
         }
     }
 
@@ -721,7 +741,7 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
     {
         if (!mainResult.Value.Contains($"\"ip\": \"{expectedIp}\"", StringComparison.Ordinal))
         {
-            errors.Add($"Rules Server multi-profile validation expected main profile interface IP {expectedIp}.");
+            errors.Add($"Rules C2MTest multi-profile validation expected main profile interface IP {expectedIp}.");
         }
     }
 
@@ -729,28 +749,26 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
     {
         source = "cmdbuild",
         eventType = "update",
-        entityType = "Server",
+        entityType = "C2MTestCI",
         entityId = "2002",
         payload = new Dictionary<string, object?>
         {
             ["source"] = "cmdbuild",
             ["eventType"] = "update",
-            ["className"] = "Server",
+            ["className"] = "C2MTestCI",
             ["id"] = "2002",
-            ["code"] = "srv-upsert",
+            ["code"] = "C2M-DEMO-008-SEPARATE-PROFILES",
             ["ip_address"] = "192.168.203.10",
-            ["profile"] = "192.168.203.201",
-            ["description"] = "server update with newly added profile address",
-            ["os"] = "105152",
-            ["zabbixTag"] = "106857"
+            ["SeparateProfile1Ip"] = "192.168.203.201",
+            ["description"] = "C2MTestCI update with newly added separate profile address"
         }
     });
     var updateSource = reader.Read(updateMessage, rules);
     var updateResults = await converter.ConvertAsync(updateSource, rules, CancellationToken.None);
-    var profileUpdate = updateResults.FirstOrDefault(result => result.ShouldPublish && string.Equals(result.ProfileName, "profile", StringComparison.OrdinalIgnoreCase));
+    var profileUpdate = updateResults.FirstOrDefault(result => result.ShouldPublish && string.Equals(result.ProfileName, "separate-profile-1", StringComparison.OrdinalIgnoreCase));
     if (profileUpdate?.Value is null)
     {
-        errors.Add("Rules Server multi-profile validation expected profile update fallback request.");
+        errors.Add("Rules C2MTest multi-profile validation expected separate-profile-1 update fallback request.");
         return;
     }
 
@@ -758,7 +776,7 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
     var profileRoot = profileUpdateDocument.RootElement;
     if (!profileRoot.TryGetProperty("method", out var method) || method.GetString() != "host.get")
     {
-        errors.Add("Rules Server multi-profile validation expected profile update without hostid to render host.get fallback.");
+        errors.Add("Rules C2MTest multi-profile validation expected separate-profile-1 update without hostid to render host.get fallback.");
     }
 
     if (!profileRoot.TryGetProperty("cmdb2monitoring", out var metadata)
@@ -768,13 +786,13 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
         || !metadata.TryGetProperty("fallbackCreateParams", out var createParams)
         || createParams.ValueKind != JsonValueKind.Object)
     {
-        errors.Add("Rules Server multi-profile validation expected profile update fallback metadata with createOnUpdateWhenMissing and fallbackCreateParams.");
+        errors.Add("Rules C2MTest multi-profile validation expected separate-profile-1 update fallback metadata with createOnUpdateWhenMissing and fallbackCreateParams.");
     }
     else
     {
-        if (!createParams.TryGetProperty("host", out var host) || host.GetString() != "cmdb-server-srv-upsert-profile")
+        if (!createParams.TryGetProperty("host", out var host) || host.GetString() != "cmdb-c2mtestci-c2m-demo-008-separate-profiles-separate-profile-1")
         {
-            errors.Add("Rules Server multi-profile validation expected fallbackCreateParams.host for profile hostProfile.");
+            errors.Add("Rules C2MTest multi-profile validation expected fallbackCreateParams.host for separate-profile-1 hostProfile.");
         }
 
         if (!createParams.TryGetProperty("interfaces", out var createInterfaces)
@@ -783,19 +801,19 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
             || !createInterfaces[0].TryGetProperty("ip", out var profileIp)
             || profileIp.GetString() != "192.168.203.201")
         {
-            errors.Add("Rules Server multi-profile validation expected fallbackCreateParams with one profile interface IP.");
+            errors.Add("Rules C2MTest multi-profile validation expected fallbackCreateParams with one separate profile interface IP.");
         }
 
         if (createParams.GetRawText().Contains("\"templateid\":\"10564\"", StringComparison.Ordinal)
             || createParams.GetRawText().Contains("\"templateid\": \"10564\"", StringComparison.Ordinal))
         {
-            errors.Add("Rules Server multi-profile validation expected template conflict rules to remove ICMP Ping (10564) from profile fallback create params when Generic by SNMP is selected.");
+            errors.Add("Rules C2MTest multi-profile validation expected template conflict rules to remove ICMP Ping (10564) from separate profile fallback create params when Generic by SNMP is selected.");
         }
 
         if (createParams.GetRawText().Contains("\"templateid\":\"10081\"", StringComparison.Ordinal)
             || createParams.GetRawText().Contains("\"templateid\": \"10081\"", StringComparison.Ordinal))
         {
-            errors.Add("Rules Server multi-profile validation expected template conflict rules to remove Windows by Zabbix agent (10081) from profile fallback create params when Generic by SNMP is selected.");
+            errors.Add("Rules C2MTest multi-profile validation expected template conflict rules to remove Windows by Zabbix agent (10081) from separate profile fallback create params when Generic by SNMP is selected.");
         }
     }
 
@@ -808,64 +826,152 @@ static async Task ValidateServerMultiProfileConversion(string repositoryRoot, Li
             item.TryGetProperty("templateid", out var templateId)
             && templateId.GetString() == "10081"))
     {
-        errors.Add("Rules Server multi-profile validation expected fallbackUpdateParams.templates_clear to include Windows by Zabbix agent (10081) for SNMP update conflict cleanup.");
+        errors.Add("Rules C2MTest multi-profile validation expected fallbackUpdateParams.templates_clear to include Windows by Zabbix agent (10081) for SNMP update conflict cleanup.");
     }
 }
 
-static void ValidateNoLegacyServerFieldAliases(JsonObject rules, List<string> errors)
+static async Task ValidateMonitoringSuppressionConversion(string repositoryRoot, List<string> errors)
 {
-    foreach (var oldFieldName in new[] { "managementIpAddress", "management2IpAddress", "managementDnsName", "iloIpAddress", "ilo2IpAddress" })
+    var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
+    ConversionRulesDocument? rules;
+    try
     {
-        if (GetNode(rules, $"source:fields:{oldFieldName}") is not null)
+        rules = JsonSerializer.Deserialize<ConversionRulesDocument>(
+            File.ReadAllText(rulesPath),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            });
+    }
+    catch (Exception ex)
+    {
+        errors.Add($"Rules monitoring suppression validation cannot read rules document: {ex.Message}");
+        return;
+    }
+
+    if (rules is null)
+    {
+        errors.Add("Rules monitoring suppression validation cannot read rules document.");
+        return;
+    }
+
+    var reader = new CmdbEventReader();
+    var renderer = new T4TemplateRenderer(Options.Create(new ConversionRulesOptions
+    {
+        AddDefaultDirectives = true
+    }));
+    var converter = new CmdbToZabbixConverter(
+        renderer,
+        Options.Create(new ConversionRulesOptions
         {
-            errors.Add($"Rules file must not contain legacy source field '{oldFieldName}'.");
+            AddDefaultDirectives = true
+        }));
+
+    var suppressedMessage = JsonSerializer.Serialize(new
+    {
+        source = "cmdbuild",
+        eventType = "create",
+        entityType = "C2MTestCI",
+        entityId = "9009",
+        payload = new Dictionary<string, object?>
+        {
+            ["source"] = "cmdbuild",
+            ["eventType"] = "create",
+            ["className"] = "C2MTestCI",
+            ["id"] = "9009",
+            ["code"] = "C2M-DEMO-009-DONT-MONITOR-INSTANCE",
+            ["ip_address"] = "10.20.9.10",
+            ["MonitoringPolicy"] = "do_not_monitor",
+            ["LifecycleState"] = "do_not_monitor"
+        }
+    });
+    var suppressedSource = reader.Read(suppressedMessage, rules);
+    var suppressedResults = await converter.ConvertAsync(suppressedSource, rules, CancellationToken.None);
+    if (suppressedResults.Any(result => result.ShouldPublish))
+    {
+        errors.Add("Rules monitoring suppression validation expected do_not_monitor create event to publish no Zabbix request.");
+    }
+
+    if (!suppressedResults.Any(result =>
+        string.Equals(result.SkipReason, "monitoring_suppressed:object-policy-do-not-monitor:object_policy_do_not_monitor", StringComparison.Ordinal)))
+    {
+        errors.Add("Rules monitoring suppression validation expected skip reason object_policy_do_not_monitor.");
+    }
+
+    var deleteMessage = JsonSerializer.Serialize(new
+    {
+        source = "cmdbuild",
+        eventType = "delete",
+        entityType = "C2MTestCI",
+        entityId = "9009",
+        payload = new Dictionary<string, object?>
+        {
+            ["source"] = "cmdbuild",
+            ["eventType"] = "delete",
+            ["className"] = "C2MTestCI",
+            ["id"] = "9009",
+            ["code"] = "C2M-DEMO-009-DONT-MONITOR-INSTANCE",
+            ["MonitoringPolicy"] = "do_not_monitor",
+            ["LifecycleState"] = "do_not_monitor"
+        }
+    });
+    var deleteSource = reader.Read(deleteMessage, rules);
+    var deleteResults = await converter.ConvertAsync(deleteSource, rules, CancellationToken.None);
+    if (!deleteResults.Any(result => result.ShouldPublish))
+    {
+        errors.Add("Rules monitoring suppression validation expected delete event to bypass suppression and publish cleanup/fallback request.");
+    }
+}
+
+static void ValidateNoLegacyDemoModelInActiveRules(JsonObject rules, List<string> errors)
+{
+    foreach (var oldClassName in new[] { "Computer", "Notebook", "PC", "Server", "tk" })
+    {
+        if (GetArray(rules, "source:entityClasses").Any(item => string.Equals(item?.GetValue<string>(), oldClassName, StringComparison.Ordinal)))
+        {
+            errors.Add($"Active rules file must not contain old demo class '{oldClassName}'.");
         }
     }
 
-    foreach (var (fieldName, oldNames) in new Dictionary<string, string[]>
+    foreach (var oldFieldName in new[]
     {
-        ["profileIpAddress"] = ["mgmt", "management_ip", "mgmt_ip", "oob_ip", "idrac_ip", "managementIpAddress"],
-        ["profile2IpAddress"] = ["mgmt2", "management2_ip", "mgmt2_ip", "oob2_ip", "idrac2_ip", "management2IpAddress"],
-        ["profileDnsName"] = ["management_dns", "mgmt_dns", "oob_dns", "ilo_dns", "idrac_dns", "managementDnsName"],
-        ["interfaceIpAddress"] = ["iLo", "ilo", "ilo_ip", "iloIpAddress"],
-        ["interface2IpAddress"] = ["iLo2", "ilo2", "ilo2_ip", "ilo2IpAddress"]
+        "profileIpAddress",
+        "profile2IpAddress",
+        "profileDnsName",
+        "interfaceIpAddress",
+        "interface2IpAddress",
+        "managementIpAddress",
+        "management2IpAddress",
+        "managementDnsName",
+        "iloIpAddress",
+        "ilo2IpAddress",
+        "os",
+        "zabbixTag"
     })
     {
-        if (GetArray(rules, $"source:fields:{fieldName}:sources").Count > 0)
+        if (GetNode(rules, $"source:fields:{oldFieldName}") is not null)
         {
-            errors.Add($"Rules file source field '{fieldName}' must not define aliases in sources[].");
-        }
-
-        var configuredNames = new[]
-            {
-                GetString(rules, $"source:fields:{fieldName}:source") ?? string.Empty
-            }
-            .Concat(GetArray(rules, $"source:fields:{fieldName}:sources")
-                .Select(item => item?.GetValue<string>() ?? string.Empty))
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .ToArray();
-
-        foreach (var oldName in oldNames)
-        {
-            if (configuredNames.Any(name => string.Equals(name, oldName, StringComparison.Ordinal)))
-            {
-                errors.Add($"Rules file source field '{fieldName}' must not accept legacy alias '{oldName}'.");
-            }
+            errors.Add($"Active rules file must not contain old demo source field '{oldFieldName}'.");
         }
     }
 
     foreach (var (fieldName, expectedAttribute) in new Dictionary<string, string>
     {
-        ["profileIpAddress"] = "mgmt",
-        ["profile2IpAddress"] = "mgmt2",
-        ["interfaceIpAddress"] = "iLo",
-        ["interface2IpAddress"] = "iLo2"
+        ["ipAddress"] = "PrimaryIp",
+        ["dnsName"] = "DnsName",
+        ["c2mExtraInterface1Ip"] = "ExtraInterface1Ip",
+        ["c2mExtraInterface2Ip"] = "ExtraInterface2Ip",
+        ["c2mSeparateProfile1Ip"] = "SeparateProfile1Ip",
+        ["c2mSeparateProfile2Ip"] = "SeparateProfile2Ip",
+        ["c2mAddressRefIp"] = "AddressRef",
+        ["c2mDeepReferenceIp"] = "Reference1",
+        ["c2mDeepReferenceLookup"] = "Reference1"
     })
     {
         var actualAttribute = GetString(rules, $"source:fields:{fieldName}:cmdbAttribute");
         if (!string.Equals(actualAttribute, expectedAttribute, StringComparison.Ordinal))
         {
-            errors.Add($"Rules file source field '{fieldName}' must define cmdbAttribute '{expectedAttribute}' for Mapping/CMDBuild Body generation.");
+            errors.Add($"Active rules file source field '{fieldName}' must define cmdbAttribute '{expectedAttribute}' for Mapping/CMDBuild Body generation.");
         }
     }
 }
@@ -999,6 +1105,15 @@ static void RequirePositiveInt(JsonObject config, string path, string context, L
     if (value is null or <= 0)
     {
         errors.Add($"{context} {path} must be greater than zero.");
+    }
+}
+
+static void RequireIntRange(JsonObject config, string path, int min, int max, string context, List<string> errors)
+{
+    var value = GetInt(config, path);
+    if (value is null || value < min || value > max)
+    {
+        errors.Add($"{context} {path} must be from {min} to {max}.");
     }
 }
 

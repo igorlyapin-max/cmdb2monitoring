@@ -229,6 +229,11 @@ public sealed class KafkaZabbixRequestWorker(
                 validation.MissingTemplateGroups.ToArray());
         }
 
+        if (IsDirectUpdateRequest(request) && HasMergeableHostUpdateFields(request.Params))
+        {
+            return await ProcessDirectUpdateAsync(request, cancellationToken);
+        }
+
         var apiResult = await zabbixClient.ExecuteAsync(request, cancellationToken);
         if (IsDeleteFallbackRequest(request))
         {
@@ -347,6 +352,75 @@ public sealed class KafkaZabbixRequestWorker(
         return ZabbixProcessingResult.FromApiResult(updateRequest, updateResult);
     }
 
+    private async Task<ZabbixProcessingResult> ProcessDirectUpdateAsync(
+        ZabbixRequestDocument updateRequest,
+        CancellationToken cancellationToken)
+    {
+        var hostId = ReadString(updateRequest.Params, "hostid");
+        if (string.IsNullOrWhiteSpace(hostId))
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                updateRequest,
+                "missing_hostid",
+                "host.update params.hostid is required for mergeable host update fields.",
+                [],
+                [],
+                []);
+        }
+
+        var lookupRequestJson = BuildHostGetByIdRequestJson(updateRequest, hostId);
+        var lookupRequest = requestReader.Read(updateRequest.EntityId, lookupRequestJson, updateRequest.Host);
+        var lookupValidation = await requestValidator.ValidateAsync(lookupRequest, cancellationToken);
+        if (!lookupValidation.IsValid)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                lookupRequest,
+                lookupValidation.PrimaryErrorCode(),
+                lookupValidation.PrimaryErrorMessage(),
+                lookupValidation.MissingHostGroups.ToArray(),
+                lookupValidation.MissingTemplates.ToArray(),
+                lookupValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var lookupResult = await zabbixClient.ExecuteAsync(lookupRequest, cancellationToken);
+        if (!lookupResult.Success)
+        {
+            return ZabbixProcessingResult.FromApiResult(lookupRequest, lookupResult);
+        }
+
+        var hostInfo = ReadFirstHostLookupInfo(lookupResult.ResponseJson);
+        if (hostInfo is null)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                updateRequest,
+                "host_not_found",
+                $"Zabbix hostid '{hostId}' was not found for update merge.",
+                [],
+                [],
+                []);
+        }
+
+        var mergedUpdateRequestJson = BuildHostUpdateRequestJson(
+            updateRequest,
+            updateRequest.Params,
+            hostInfo);
+        var mergedUpdateRequest = requestReader.Read(updateRequest.EntityId, mergedUpdateRequestJson, updateRequest.Host);
+        var mergedValidation = await requestValidator.ValidateAsync(mergedUpdateRequest, cancellationToken);
+        if (!mergedValidation.IsValid)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                mergedUpdateRequest,
+                mergedValidation.PrimaryErrorCode(),
+                mergedValidation.PrimaryErrorMessage(),
+                mergedValidation.MissingHostGroups.ToArray(),
+                mergedValidation.MissingTemplates.ToArray(),
+                mergedValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var mergedUpdateResult = await zabbixClient.ExecuteAsync(mergedUpdateRequest, cancellationToken);
+        return ZabbixProcessingResult.FromApiResult(mergedUpdateRequest, mergedUpdateResult);
+    }
+
     private async Task<ZabbixProcessingResult> ProcessCreateOnMissingUpdateAsync(
         ZabbixRequestDocument lookupRequest,
         CancellationToken cancellationToken)
@@ -392,6 +466,27 @@ public sealed class KafkaZabbixRequestWorker(
             && string.Equals(request.FallbackForMethod, "host.update", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsDirectUpdateRequest(ZabbixRequestDocument request)
+    {
+        return string.Equals(request.Method, "host.update", StringComparison.OrdinalIgnoreCase)
+            && request.Params.ValueKind == JsonValueKind.Object;
+    }
+
+    private static bool HasMergeableHostUpdateFields(JsonElement parameters)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        return parameters.TryGetProperty("groups", out var groups) && groups.ValueKind == JsonValueKind.Array
+            || parameters.TryGetProperty("templates", out var templates) && templates.ValueKind == JsonValueKind.Array
+            || parameters.TryGetProperty("templates_clear", out var templatesClear) && templatesClear.ValueKind == JsonValueKind.Array
+            || parameters.TryGetProperty("tags", out var tags) && tags.ValueKind == JsonValueKind.Array
+            || parameters.TryGetProperty("macros", out var macros) && macros.ValueKind == JsonValueKind.Array
+            || parameters.TryGetProperty("inventory", out var inventory) && inventory.ValueKind == JsonValueKind.Object;
+    }
+
     private static string? ReadFirstHostId(string? responseJson)
     {
         return ReadFirstHostLookupInfo(responseJson)?.HostId;
@@ -421,11 +516,40 @@ public sealed class KafkaZabbixRequestWorker(
                     continue;
                 }
 
-                return new ZabbixHostLookupInfo(parsedHostId, ReadInterfaces(host), ReadTemplateIds(host));
+                return new ZabbixHostLookupInfo(
+                    parsedHostId,
+                    ReadInterfaces(host),
+                    ReadTemplateIds(host),
+                    ReadObjectArray(host, "groups"),
+                    ReadObjectArray(host, "tags"),
+                    ReadObjectArray(host, "macros"),
+                    ReadObject(host, "inventory"));
             }
         }
 
         return null;
+    }
+
+    private static JsonElement[] ReadObjectArray(JsonElement value, string propertyName)
+    {
+        if (!value.TryGetProperty(propertyName, out var array)
+            || array.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return array.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.Object)
+            .Select(item => item.Clone())
+            .ToArray();
+    }
+
+    private static JsonElement ReadObject(JsonElement value, string propertyName)
+    {
+        return value.TryGetProperty(propertyName, out var nested)
+            && nested.ValueKind == JsonValueKind.Object
+                ? nested.Clone()
+                : default;
     }
 
     private static ZabbixInterfaceLookupInfo[] ReadInterfaces(JsonElement host)
@@ -482,6 +606,17 @@ public sealed class KafkaZabbixRequestWorker(
         ZabbixRequestDocument lookupRequest,
         ZabbixHostLookupInfo hostInfo)
     {
+        return BuildHostUpdateRequestJson(
+            lookupRequest,
+            lookupRequest.FallbackUpdateParams,
+            hostInfo);
+    }
+
+    private static string BuildHostUpdateRequestJson(
+        ZabbixRequestDocument lookupRequest,
+        JsonElement updateParams,
+        ZabbixHostLookupInfo hostInfo)
+    {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -491,7 +626,9 @@ public sealed class KafkaZabbixRequestWorker(
             writer.WritePropertyName("params");
             writer.WriteStartObject();
             writer.WriteString("hostid", hostInfo.HostId);
-            foreach (var property in lookupRequest.FallbackUpdateParams.EnumerateObject())
+            var templateIdsToClear = ReadObjectArrayValues(updateParams, "templates_clear", "templateid")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in updateParams.EnumerateObject())
             {
                 if (string.Equals(property.Name, "hostid", StringComparison.OrdinalIgnoreCase))
                 {
@@ -502,6 +639,41 @@ public sealed class KafkaZabbixRequestWorker(
                     && property.Value.ValueKind == JsonValueKind.Array)
                 {
                     WriteInterfacesWithExistingIds(writer, property.Value, hostInfo.Interfaces);
+                    continue;
+                }
+
+                if (string.Equals(property.Name, "groups", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    WriteMergedObjectArrayByKey(writer, "groups", property.Value, hostInfo.Groups, "groupid", true);
+                    continue;
+                }
+
+                if (string.Equals(property.Name, "templates", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    WriteMergedTemplates(writer, property.Value, hostInfo.TemplateIds, templateIdsToClear);
+                    continue;
+                }
+
+                if (string.Equals(property.Name, "tags", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    WriteMergedObjectArrayByKey(writer, "tags", property.Value, hostInfo.Tags, "tag", false);
+                    continue;
+                }
+
+                if (string.Equals(property.Name, "macros", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    WriteMergedObjectArrayByKey(writer, "macros", property.Value, hostInfo.Macros, "macro", false);
+                    continue;
+                }
+
+                if (string.Equals(property.Name, "inventory", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.Object)
+                {
+                    WriteMergedObject(writer, "inventory", hostInfo.Inventory, property.Value);
                     continue;
                 }
 
@@ -518,6 +690,42 @@ public sealed class KafkaZabbixRequestWorker(
             writer.WriteEndObject();
             writer.WritePropertyName("id");
             lookupRequest.Id.WriteTo(writer);
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string BuildHostGetByIdRequestJson(
+        ZabbixRequestDocument updateRequest,
+        string hostId)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("jsonrpc", "2.0");
+            writer.WriteString("method", "host.get");
+            writer.WritePropertyName("params");
+            writer.WriteStartObject();
+            writer.WritePropertyName("output");
+            WriteStringArray(writer, new[] { "hostid", "host", "name" });
+            writer.WritePropertyName("hostids");
+            WriteStringArray(writer, new[] { hostId });
+            writer.WritePropertyName("selectInterfaces");
+            WriteStringArray(writer, new[] { "interfaceid", "type", "main", "useip", "ip", "dns", "port" });
+            writer.WritePropertyName("selectGroups");
+            WriteStringArray(writer, new[] { "groupid", "name" });
+            writer.WritePropertyName("selectParentTemplates");
+            WriteStringArray(writer, new[] { "templateid" });
+            writer.WritePropertyName("selectTags");
+            WriteStringArray(writer, new[] { "tag", "value" });
+            writer.WritePropertyName("selectMacros");
+            WriteStringArray(writer, new[] { "hostmacroid", "macro", "value", "description", "type" });
+            writer.WriteString("selectInventory", "extend");
+            writer.WriteEndObject();
+            writer.WritePropertyName("id");
+            updateRequest.Id.WriteTo(writer);
             writer.WriteEndObject();
         }
 
@@ -603,6 +811,168 @@ public sealed class KafkaZabbixRequestWorker(
         writer.WriteEndArray();
     }
 
+    private static void WriteMergedObjectArrayByKey(
+        Utf8JsonWriter writer,
+        string propertyName,
+        JsonElement desiredObjects,
+        IReadOnlyCollection<JsonElement> existingObjects,
+        string keyName,
+        bool preserveExistingAsKeyOnly)
+    {
+        var desiredByKey = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        var desiredKeyOrder = new List<string>();
+        var desiredWithoutKey = new List<JsonElement>();
+        foreach (var desired in desiredObjects.EnumerateArray())
+        {
+            if (desired.ValueKind != JsonValueKind.Object)
+            {
+                desiredWithoutKey.Add(desired.Clone());
+                continue;
+            }
+
+            var key = ReadString(desired, keyName);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                desiredWithoutKey.Add(desired.Clone());
+                continue;
+            }
+
+            if (!desiredByKey.ContainsKey(key))
+            {
+                desiredKeyOrder.Add(key);
+            }
+
+            desiredByKey[key] = desired.Clone();
+        }
+
+        writer.WritePropertyName(propertyName);
+        writer.WriteStartArray();
+        foreach (var existing in existingObjects)
+        {
+            var key = ReadString(existing, keyName);
+            if (string.IsNullOrWhiteSpace(key) || desiredByKey.ContainsKey(key))
+            {
+                continue;
+            }
+
+            if (preserveExistingAsKeyOnly)
+            {
+                WriteKeyOnlyObject(writer, keyName, key);
+            }
+            else
+            {
+                existing.WriteTo(writer);
+            }
+        }
+
+        foreach (var key in desiredKeyOrder)
+        {
+            desiredByKey[key].WriteTo(writer);
+        }
+
+        foreach (var desired in desiredWithoutKey)
+        {
+            desired.WriteTo(writer);
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteMergedTemplates(
+        Utf8JsonWriter writer,
+        JsonElement desiredTemplates,
+        IReadOnlyCollection<string> existingTemplateIds,
+        IReadOnlySet<string> templateIdsToClear)
+    {
+        var desiredById = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        var desiredIdOrder = new List<string>();
+        var desiredWithoutId = new List<JsonElement>();
+        foreach (var desired in desiredTemplates.EnumerateArray())
+        {
+            if (desired.ValueKind != JsonValueKind.Object)
+            {
+                desiredWithoutId.Add(desired.Clone());
+                continue;
+            }
+
+            var templateId = ReadString(desired, "templateid");
+            if (string.IsNullOrWhiteSpace(templateId))
+            {
+                desiredWithoutId.Add(desired.Clone());
+                continue;
+            }
+
+            if (!desiredById.ContainsKey(templateId))
+            {
+                desiredIdOrder.Add(templateId);
+            }
+
+            desiredById[templateId] = desired.Clone();
+        }
+
+        writer.WritePropertyName("templates");
+        writer.WriteStartArray();
+        foreach (var templateId in existingTemplateIds)
+        {
+            if (string.IsNullOrWhiteSpace(templateId)
+                || templateIdsToClear.Contains(templateId)
+                || desiredById.ContainsKey(templateId))
+            {
+                continue;
+            }
+
+            WriteKeyOnlyObject(writer, "templateid", templateId);
+        }
+
+        foreach (var templateId in desiredIdOrder)
+        {
+            if (!templateIdsToClear.Contains(templateId))
+            {
+                desiredById[templateId].WriteTo(writer);
+            }
+        }
+
+        foreach (var desired in desiredWithoutId)
+        {
+            desired.WriteTo(writer);
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteMergedObject(
+        Utf8JsonWriter writer,
+        string propertyName,
+        JsonElement existingObject,
+        JsonElement desiredObject)
+    {
+        writer.WritePropertyName(propertyName);
+        if (existingObject.ValueKind != JsonValueKind.Object)
+        {
+            desiredObject.WriteTo(writer);
+            return;
+        }
+
+        writer.WriteStartObject();
+        var desiredNames = desiredObject.EnumerateObject()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in existingObject.EnumerateObject())
+        {
+            if (!desiredNames.Contains(property.Name))
+            {
+                property.WriteTo(writer);
+            }
+        }
+
+        foreach (var property in desiredObject.EnumerateObject())
+        {
+            property.WriteTo(writer);
+        }
+
+        writer.WriteEndObject();
+    }
+
     private static void WriteTemplatesClearWithExistingIds(
         Utf8JsonWriter writer,
         JsonElement templatesClear,
@@ -634,6 +1004,24 @@ public sealed class KafkaZabbixRequestWorker(
             writer.WriteStartObject();
             writer.WriteString("templateid", templateId);
             writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteKeyOnlyObject(Utf8JsonWriter writer, string keyName, string value)
+    {
+        writer.WriteStartObject();
+        writer.WriteString(keyName, value);
+        writer.WriteEndObject();
+    }
+
+    private static void WriteStringArray(Utf8JsonWriter writer, IReadOnlyCollection<string> values)
+    {
+        writer.WriteStartArray();
+        foreach (var value in values)
+        {
+            writer.WriteStringValue(value);
         }
 
         writer.WriteEndArray();
@@ -696,6 +1084,28 @@ public sealed class KafkaZabbixRequestWorker(
             : null;
     }
 
+    private static IEnumerable<string> ReadObjectArrayValues(
+        JsonElement element,
+        string arrayPropertyName,
+        string valuePropertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(arrayPropertyName, out var values)
+            || values.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        foreach (var value in values.EnumerateArray())
+        {
+            var scalar = ReadString(value, valuePropertyName);
+            if (!string.IsNullOrWhiteSpace(scalar))
+            {
+                yield return scalar;
+            }
+        }
+    }
+
     private static string? ReadScalar(JsonElement value)
     {
         return value.ValueKind switch
@@ -711,7 +1121,11 @@ public sealed class KafkaZabbixRequestWorker(
     private sealed record ZabbixHostLookupInfo(
         string HostId,
         ZabbixInterfaceLookupInfo[] Interfaces,
-        string[] TemplateIds);
+        string[] TemplateIds,
+        JsonElement[] Groups,
+        JsonElement[] Tags,
+        JsonElement[] Macros,
+        JsonElement Inventory);
 
     private sealed record ZabbixInterfaceLookupInfo(
         string? InterfaceId,

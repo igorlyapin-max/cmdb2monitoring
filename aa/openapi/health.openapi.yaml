@@ -32,3 +32,38 @@ paths:
                   status:
                     type: string
                     example: ok
+  /admin/reload-rules:
+    post:
+      summary: Reload cmdbkafka2zabbix conversion rules
+      description: >
+        Available on cmdbkafka2zabbix. The endpoint calls the configured
+        conversion rules provider; the current Git provider may run
+        git pull --ff-only when ConversionRules:PullOnReload is enabled.
+      security:
+        - reloadBearer: []
+      responses:
+        '200':
+          description: Conversion rules were reloaded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, status, rules]
+                properties:
+                  service:
+                    type: string
+                  status:
+                    type: string
+                    example: ok
+                  rules:
+                    type: object
+                    additionalProperties: true
+        '401':
+          description: Missing or invalid bearer token.
+        '503':
+          description: Reload token is not configured.
+components:
+  securitySchemes:
+    reloadBearer:
+      type: http
+      scheme: bearer

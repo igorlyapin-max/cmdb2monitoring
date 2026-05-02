@@ -23,6 +23,13 @@ public sealed class CmdbToZabbixConverter(
             return [ZabbixConversionResult.Skipped(source, method, $"event_type_not_configured:{source.EventType}")];
         }
 
+        var suppressionRule = ResolveSuppressionRule(source, rules);
+        if (suppressionRule is not null)
+        {
+            var method = string.IsNullOrWhiteSpace(route.Method) ? rules.Zabbix.Method : route.Method;
+            return [ZabbixConversionResult.Skipped(source, method, BuildSuppressionReason(suppressionRule))];
+        }
+
         var results = new List<ZabbixConversionResult>();
         var profiles = ResolveHostProfiles(source, rules);
         foreach (var profile in profiles)
@@ -93,6 +100,23 @@ public sealed class CmdbToZabbixConverter(
         }
 
         return results;
+    }
+
+    private static SuppressionRule? ResolveSuppressionRule(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules)
+    {
+        return rules.MonitoringSuppressionRules
+            .Where(rule => rule.Enabled && Matches(source, rule.When))
+            .OrderBy(rule => rule.Priority)
+            .FirstOrDefault();
+    }
+
+    private static string BuildSuppressionReason(SuppressionRule rule)
+    {
+        var name = string.IsNullOrWhiteSpace(rule.Name) ? "unnamed" : rule.Name;
+        var reason = string.IsNullOrWhiteSpace(rule.Reason) ? "matched" : rule.Reason;
+        return $"monitoring_suppressed:{name}:{reason}";
     }
 
     private ZabbixHostCreateModel BuildModel(
