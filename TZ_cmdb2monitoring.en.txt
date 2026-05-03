@@ -1,6 +1,6 @@
 cmdb2monitoring Technical Specification
 
-Document version: 0.7.0
+Document version: 0.8.0
 Last updated: 2026-05-03
 English companion for TZ_cmdb2monitoring.txt. Architecture artifacts under aa/ are intentionally not translated in this pass.
 
@@ -459,6 +459,7 @@ Behavior:
 - a missing managed webhook becomes a `Create` operation;
 - an existing managed webhook with different body/event/target/method/url/headers/active/language becomes an `Update` operation;
 - an existing managed webhook with prefix `cmdbwebhooks2kafka-` that is no longer required by current rules becomes a `Delete` operation;
+- if an existing CMDBuild webhook lacks payload fields required by rules for the selected class, the UI must explicitly show these keys in the summary and operation reason; this reminder means the converter will not receive the corresponding values until the operator runs `Load into CMDB` or updates the webhook manually;
 - each table row must allow payload expansion; added values are green, deleted values are red, and current values are black;
 - clicking the value in the `Action` column must open details under the selected row, and the shared `Details` panel must be below the table and highlight text with the same colors;
 - when an existing managed webhook is analyzed, the already loaded body must be preserved, and optional source fields must be added only when rules for that class actually need them; adding an independent class must not mass-convert unrelated records into `Update`;

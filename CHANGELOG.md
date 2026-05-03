@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-05-03
+
+### Added
+
+- Added the `Аудит систем` / `Systems Audit` menu placeholder for `editor` and `admin` roles.
+- Added explicit Webhook Setup reminders for CMDBuild webhook payload fields that are required by current rules but missing from loaded CMDBuild webhooks.
+- Added current `serveri.serialnum` source mapping and `inventory.serialno_a` demo rule so the webhook plan exposes the missing `serialnum` payload field before converter processing.
+
 ## 0.7.0 - 2026-05-03
 
 ### Added

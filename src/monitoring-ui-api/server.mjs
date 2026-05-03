@@ -28,13 +28,13 @@ const roles = {
     key: 'editor',
     label: 'Редактирование правил',
     legacy: ['operator'],
-    views: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'about', 'help']
+    views: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'about', 'help']
   },
   admin: {
     key: 'admin',
     label: 'Администрирование',
     legacy: [],
-    views: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'authSettings', 'runtimeSettings', 'about', 'help']
+    views: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
   }
 };
 

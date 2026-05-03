@@ -92,8 +92,8 @@ const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
 const roleViews = {
   viewer: ['dashboard', 'events'],
-  editor: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'about', 'help'],
-  admin: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
+  editor: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'about', 'help'],
+  admin: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
 const defaultCmdbuildWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
@@ -380,6 +380,9 @@ const translations = {
     'webhooks.noData': 'Загрузите webhooks из CMDB и выполните анализ rules.',
     'webhooks.summary': 'CMDB webhooks: {current}. План операций: создать {create}, изменить {update}, удалить {delete}. Выбрано: {selected}.',
     'webhooks.summaryEmpty': 'План операций пуст. Загружено CMDB webhooks: {current}.',
+    'webhooks.planDetails': 'Раскройте payload строки, чтобы увидеть добавляемые, удаляемые и актуальные значения.',
+    'webhooks.missingPayloadFields': 'В текущих CMDBuild webhooks отсутствуют поля payload, которые нужны rules: {items}. Загрузите выбранные операции в CMDB или обновите webhooks вручную.',
+    'webhooks.missingPayloadFieldsMore': 'Еще записей: {count}.',
     'webhooks.statusLoaded': 'Webhooks загружены из CMDB: {count}.',
     'webhooks.statusAnalyzed': 'Анализ rules выполнен. Операций: {count}.',
     'webhooks.statusSelectionChanged': 'Выбор операций изменен.',
@@ -388,6 +391,7 @@ const translations = {
     'webhooks.confirmNoSelection': 'Выберите хотя бы одну операцию.',
     'webhooks.reasonMissing': 'webhook отсутствует в CMDB',
     'webhooks.reasonChanged': 'конфигурация отличается: {fields}',
+    'webhooks.reasonChangedMissingPayload': 'конфигурация отличается: {fields}; отсутствуют payload поля: {missing}',
     'webhooks.reasonObsolete': 'управляемый webhook больше не нужен по rules',
     'webhooks.actionCreate': 'Создать',
     'webhooks.actionUpdate': 'Изменить',
@@ -412,6 +416,7 @@ const translations = {
     'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
     'nav.dashboard': 'Панель',
     'nav.events': 'События',
+    'nav.systemAudit': 'Аудит систем',
     'nav.rules': 'Правила',
     'nav.mapping': 'Управление правилами конвертации',
     'nav.validateMapping': 'Логический контроль правил конвертации',
@@ -761,6 +766,7 @@ const translations = {
     'help.webhooks.6': 'Пользоваться этим пунктом не обязательно: webhooks можно настроить вручную в CMDBuild или использовать webhook-файлы, которые сохраняются вместе с файлом правил конвертации.',
     'help.webhooks.7': 'Undo/Redo отменяют только выбор операций в текущем плане и не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
     'help.webhooks.8': 'В таблице можно раскрыть payload каждой строки: зеленым показано добавление, красным удаление, черным актуальное значение. Нажатие на значение в столбце "Действие" открывает детали под этой строкой, а общий блок деталей находится под таблицей и использует ту же подсветку. Редактировать меняет JSON конкретного webhook в текущем плане.',
+    'help.webhooks.9': 'Если текущий CMDBuild webhook не передает payload-поля, которые нужны rules, summary и причина операции показывают конкретные отсутствующие ключи. Без загрузки операции в CMDB или ручной правки webhook converter не получит эти значения.',
     'help.catalogs.title': 'Каталоги и настройки',
     'help.catalogs.1': 'Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.',
     'help.catalogs.2': 'CMDBuild Catalog загружает классы, атрибуты, domains и lookup-значения.',
@@ -895,6 +901,9 @@ const translations = {
     'webhooks.noData': 'Load webhooks from CMDB and analyze rules.',
     'webhooks.summary': 'CMDB webhooks: {current}. Operation plan: create {create}, update {update}, delete {delete}. Selected: {selected}.',
     'webhooks.summaryEmpty': 'Operation plan is empty. Loaded CMDB webhooks: {current}.',
+    'webhooks.planDetails': 'Expand a row payload to see added, deleted, and current values.',
+    'webhooks.missingPayloadFields': 'Current CMDBuild webhooks do not contain payload fields required by rules: {items}. Load selected operations into CMDB or update the webhooks manually.',
+    'webhooks.missingPayloadFieldsMore': 'More entries: {count}.',
     'webhooks.statusLoaded': 'Webhooks loaded from CMDB: {count}.',
     'webhooks.statusAnalyzed': 'Rules analysis completed. Operations: {count}.',
     'webhooks.statusSelectionChanged': 'Operation selection changed.',
@@ -903,6 +912,7 @@ const translations = {
     'webhooks.confirmNoSelection': 'Select at least one operation.',
     'webhooks.reasonMissing': 'webhook is missing in CMDB',
     'webhooks.reasonChanged': 'configuration differs: {fields}',
+    'webhooks.reasonChangedMissingPayload': 'configuration differs: {fields}; missing payload fields: {missing}',
     'webhooks.reasonObsolete': 'managed webhook is no longer required by rules',
     'webhooks.actionCreate': 'Create',
     'webhooks.actionUpdate': 'Update',
@@ -927,6 +937,7 @@ const translations = {
     'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
     'nav.dashboard': 'Dashboard',
     'nav.events': 'Events',
+    'nav.systemAudit': 'Systems Audit',
     'nav.rules': 'Rules',
     'nav.mapping': 'Conversion Rules Management',
     'nav.validateMapping': 'Conversion Rules Logical Control',
@@ -1275,6 +1286,7 @@ const translations = {
     'help.webhooks.6': 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved together with the conversion rules file.',
     'help.webhooks.7': 'Undo/Redo only changes the current plan selection and does not roll back configuration already loaded into CMDBuild.',
     'help.webhooks.8': 'Each table row can expand its payload: green means added, red means deleted, and black means current value. Clicking the Action value opens details under that row, while the shared details panel is below the table and uses the same highlighting. Edit changes JSON for that concrete webhook in the current plan.',
+    'help.webhooks.9': 'If a current CMDBuild webhook does not send payload fields required by rules, the summary and operation reason show the concrete missing keys. Until the operation is loaded into CMDB or the webhook is updated manually, the converter will not receive those values.',
     'help.catalogs.title': 'Catalogs And Settings',
     'help.catalogs.1': 'Zabbix Catalog loads templates, host groups, template groups, tags, and extended Zabbix catalogs.',
     'help.catalogs.2': 'CMDBuild Catalog loads classes, attributes, domains, and lookup values.',
@@ -1354,7 +1366,7 @@ const viewDescriptions = {
     rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и сохраняет файл через браузер.',
     mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
     validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
-    webhooks: 'Пользоваться этим пунктом не обязательно: можно самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации. Здесь можно загрузить текущие CMDBuild webhooks, построить план create/update/delete по rules и явно загрузить выбранные операции в CMDBuild. Undo/Redo не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
+    webhooks: 'Пользоваться этим пунктом не обязательно: можно самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации. Здесь можно загрузить текущие CMDBuild webhooks, построить план create/update/delete по rules и явно загрузить выбранные операции в CMDBuild. Отсутствующие payload-поля, необходимые rules, показываются до применения плана. Undo/Redo не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
     zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
     zabbixMetadata: 'Показывает метаданные Zabbix templates, конфликтующие item keys, LLD rule keys и inventory fields. Эти данные используются редактором и логическим контролем правил.',
     cmdbuild: 'Показывает классы, атрибуты, domains и lookup-справочники, загруженные из CMDBuild.',
@@ -1370,7 +1382,7 @@ const viewDescriptions = {
     rules: 'Loads the current rules JSON, validates it, runs dry-run, and saves a rules file through the browser.',
     mapping: 'Shows the CMDBuild -> conversion rules -> Zabbix chain. Host profiles show fan-out and interfaces; Template rules select templates; Tag rules create tags.',
     validateMapping: 'Validates rules against Zabbix and CMDBuild catalogs; only missing source entities are highlighted.',
-    webhooks: 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved with the conversion rules file. This page loads current CMDBuild webhooks, builds a create/update/delete plan from rules, and explicitly loads selected operations into CMDBuild. Undo/Redo does not roll back configuration already loaded into CMDBuild.',
+    webhooks: 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved with the conversion rules file. This page loads current CMDBuild webhooks, builds a create/update/delete plan from rules, and explicitly loads selected operations into CMDBuild. Missing payload fields required by rules are shown before applying the plan. Undo/Redo does not roll back configuration already loaded into CMDBuild.',
     zabbix: 'Shows templates, host groups, template groups, tags, and extended Zabbix catalogs.',
     zabbixMetadata: 'Shows Zabbix template metadata, conflicting item keys, LLD rule keys, and inventory fields. The rule editor and logical control use this data.',
     cmdbuild: 'Shows classes, attributes, domains, and lookup catalogs loaded from CMDBuild.',
@@ -3144,8 +3156,16 @@ function renderWebhooksSummary() {
         ? tf('webhooks.summaryLoaded', { current: state.webhooksCurrent.length })
         : t('webhooks.noData');
   container.append(el('div', 'validation-summary-line', summaryText));
+  const missingPayloadFields = webhookMissingPayloadFields(state.webhooksOperations);
+  if (missingPayloadFields.length > 0) {
+    container.append(el('div', 'validation-summary-detail validation-issue-warning', tf('webhooks.missingPayloadFields', {
+      items: formatWebhookMissingPayloadFields(missingPayloadFields)
+    })));
+  }
   container.append(el('div', 'validation-summary-detail', hasPlan
-    ? t('webhooks.noOperations')
+    ? state.webhooksOperations.length > 0
+      ? t('webhooks.planDetails')
+      : t('webhooks.noOperations')
     : state.webhooksCurrent.length > 0
       ? t('webhooks.currentDetailsHint')
       : t('webhooks.noData')));
@@ -3619,9 +3639,48 @@ function webhookActionLabel(action) {
 
 function webhookOperationReason(operation) {
   if (operation.reasonKey === 'webhooks.reasonChanged') {
+    const missingPayloadFields = operationMissingWebhookPayloadFields(operation);
+    if (missingPayloadFields.length > 0) {
+      return tf('webhooks.reasonChangedMissingPayload', {
+        fields: (operation.diff ?? []).join(', '),
+        missing: missingPayloadFields.join(', ')
+      });
+    }
     return tf(operation.reasonKey, { fields: (operation.diff ?? []).join(', ') });
   }
   return t(operation.reasonKey ?? 'webhooks.reasonChanged');
+}
+
+function operationMissingWebhookPayloadFields(operation) {
+  if (operation?.action !== 'update') {
+    return [];
+  }
+
+  const currentBody = plainObjectOrEmpty(operation.current?.body);
+  const desiredBody = plainObjectOrEmpty(operation.desired?.body);
+  return Object.keys(desiredBody)
+    .filter(key => !Object.prototype.hasOwnProperty.call(currentBody, key))
+    .sort(compareText);
+}
+
+function webhookMissingPayloadFields(operations) {
+  return operations
+    .map(operation => ({
+      target: operation.target ?? '',
+      eventType: operation.eventType ?? zabbixEventTypeFromCmdbEvent(operation.event),
+      fields: operationMissingWebhookPayloadFields(operation)
+    }))
+    .filter(item => item.fields.length > 0);
+}
+
+function formatWebhookMissingPayloadFields(items) {
+  const maxItems = 6;
+  const visible = items.slice(0, maxItems).map(item =>
+    `${item.target}/${item.eventType}: ${item.fields.join(', ')}`);
+  if (items.length > maxItems) {
+    visible.push(tf('webhooks.missingPayloadFieldsMore', { count: items.length - maxItems }));
+  }
+  return visible.join('; ');
 }
 
 async function saveWebhooksAsFile() {
