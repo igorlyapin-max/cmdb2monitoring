@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 - 2026-05-03
+
+### Fixed
+
+- Fixed browser loading of the extracted mapping logic module by serving/importing it as JavaScript, restoring the login screen after the 0.6.1 test refactor.
+
 ## 0.6.1 - 2026-05-03
 
 ### Changed

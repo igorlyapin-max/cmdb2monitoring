@@ -9,7 +9,7 @@ import {
   minimalHostProfileInterfaceMode,
   sourceFieldAddressKind,
   sourceFieldMayReturnMultiple
-} from '../public/lib/mapping-logic.mjs';
+} from '../public/lib/mapping-logic.js';
 
 test('sourceFieldAddressKind recognizes IP fields by validation regex', () => {
   assert.equal(sourceFieldAddressKind('primaryAddress', {

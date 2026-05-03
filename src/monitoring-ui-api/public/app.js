@@ -13,7 +13,7 @@ import {
   sameNormalized,
   sourceFieldMayReturnMultiple,
   uniqueTokens
-} from './lib/mapping-logic.mjs';
+} from './lib/mapping-logic.js';
 
 const state = {
   currentRules: null,

@@ -1,6 +1,6 @@
 # cmdb2monitoring
 
-Current release version: `0.6.1`.
+Current release version: `0.6.2`.
 
 Local .NET development environment is installed in `.dotnet`.
 The repository wrapper also keeps .NET CLI state and NuGet packages inside this workspace, which makes it work without a global SDK installation.
