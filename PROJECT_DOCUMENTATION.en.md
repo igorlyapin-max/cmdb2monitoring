@@ -1,6 +1,6 @@
 # cmdb2monitoring Project Documentation
 
-Documentation version: `0.6.0`.
+Documentation version: `0.6.1`.
 Last updated: 2026-05-03.
 
 ## Purpose

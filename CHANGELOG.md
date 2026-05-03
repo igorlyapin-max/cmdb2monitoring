@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 - 2026-05-03
+
+### Changed
+
+- Added a testing development plan with the first automation package, `No Silent Actions` UI regression class, and Webhook visual diff checks.
+- Started the first package by extracting reusable mapping/rules logic into a pure UI module and adding Node.js regression tests for host profile creation, IP/DNS target compatibility, and domain collection semantics.
+
 ## 0.6.0 - 2026-05-03
 
 ### Changed

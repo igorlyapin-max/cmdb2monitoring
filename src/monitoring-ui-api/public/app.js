@@ -1,3 +1,20 @@
+import {
+  canonicalSourceField,
+  classHasHostProfile,
+  cmdbPathIncludesDomain,
+  ensureMinimalHostProfileForClass,
+  escapeRegex,
+  interfaceAddressCompatibilityIssue,
+  minimalHostProfileInterfaceMode,
+  normalizeRuleName,
+  normalizeToken,
+  regexLiteralValues,
+  ruleClassConditions,
+  sameNormalized,
+  sourceFieldMayReturnMultiple,
+  uniqueTokens
+} from './lib/mapping-logic.mjs';
+
 const state = {
   currentRules: null,
   uploadedRulesText: null,
@@ -5555,86 +5572,6 @@ function ensureMappingEditorSourceField(rules, field) {
   rules.source.fields[field] = sourceFieldRuleForDirectAttribute(catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass').value), attribute, field);
 }
 
-function ensureMinimalHostProfileForClass(rules, className, fieldKey, fieldRule = {}, target = {}) {
-  if (!rules || !className || !fieldKey || classHasHostProfile(rules, className)) {
-    return { created: false };
-  }
-
-  const mode = minimalHostProfileInterfaceMode(fieldKey, fieldRule, target);
-  if (!['ip', 'dns'].includes(mode)) {
-    return { created: false };
-  }
-
-  rules.hostProfiles = Array.isArray(rules.hostProfiles) ? rules.hostProfiles : [];
-  const baseName = `${normalizeRuleName(className)}-main`;
-  const profileName = uniqueHostProfileName(rules, baseName);
-  const nextPriority = Math.max(0, ...rules.hostProfiles.map(profile => Number(profile.priority) || 0)) + 10;
-  const profile = {
-    name: profileName,
-    priority: nextPriority,
-    createOnUpdateWhenMissing: true,
-    when: {
-      allRegex: [
-        {
-          field: 'className',
-          pattern: `(?i)^${escapeRegex(className)}$`
-        }
-      ]
-    },
-    hostNameTemplate: 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>',
-    visibleNameTemplate: '<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>',
-    interfaces: [
-      {
-        name: `${profileName}-agent-${mode}`,
-        priority: 10,
-        interfaceProfileRef: 'agent',
-        mode,
-        valueField: fieldKey,
-        when: {
-          fieldExists: fieldKey
-        }
-      }
-    ]
-  };
-
-  rules.hostProfiles.push(profile);
-  return { created: true, profileName, profile };
-}
-
-function minimalHostProfileInterfaceMode(fieldKey, fieldRule = {}, target = {}) {
-  const targetMode = String(target?.mode ?? '').toLowerCase();
-  if (targetMode === 'ip' || targetMode === 'dns') {
-    return targetMode;
-  }
-
-  const kind = sourceFieldAddressKind(fieldKey, fieldRule);
-  return kind === 'dns' ? 'dns' : kind === 'ip' ? 'ip' : '';
-}
-
-function uniqueHostProfileName(rules, baseName) {
-  const existing = new Set((rules.hostProfiles ?? []).map(profile => normalizeRuleName(profile.name)));
-  let candidate = baseName || 'class-main';
-  let index = 2;
-  while (existing.has(normalizeRuleName(candidate))) {
-    candidate = `${baseName}-${index}`;
-    index += 1;
-  }
-  return candidate;
-}
-
-function classHasHostProfile(rules, className) {
-  return (rules?.hostProfiles ?? []).some(profile => hostProfileAppliesToClass(profile, className));
-}
-
-function hostProfileAppliesToClass(profile, className) {
-  if (!profile || profile.enabled === false) {
-    return false;
-  }
-
-  const classes = ruleClassConditions(profile);
-  return classes.length === 0 || classes.some(item => sameNormalized(item, className));
-}
-
 function hostProfileFixFieldForClass(rules, cmdbuildCatalog, className) {
   const catalogClass = findCatalogClass(cmdbuildCatalog ?? {}, className);
   if (!catalogClass || isCmdbCatalogSuperclass(cmdbuildCatalog ?? {}, catalogClass)) {
@@ -6006,83 +5943,9 @@ function mappingTargetExpectsScalar(type) {
   ].includes(type);
 }
 
-function sourceFieldMayReturnMultiple(field = {}) {
-  if (!cmdbPathIncludesDomain(field.cmdbPath)) {
-    return false;
-  }
-
-  const mode = String(field.resolve?.collectionMode ?? '').toLowerCase();
-  return mode !== 'first';
-}
-
 function mappingFieldTargetCompatibilityMessage(fieldKey, fieldRule = {}, targetType = '', target = {}) {
-  if (targetType !== 'interfaceAddress') {
-    return '';
-  }
-
-  const mode = String(target?.mode ?? '').toLowerCase();
-  if (!['ip', 'dns'].includes(mode)) {
-    return '';
-  }
-
-  const kind = sourceFieldAddressKind(fieldKey, fieldRule);
-  if (kind === 'lookup' || kind === 'reference') {
-    return tf('mapping.status.lookupFieldForInterfaceTarget', { field: fieldKey });
-  }
-  if (mode === 'dns' && kind === 'ip') {
-    return tf('mapping.status.ipFieldForDnsTarget', { field: fieldKey });
-  }
-  if (mode === 'ip' && kind === 'dns') {
-    return tf('mapping.status.dnsFieldForIpTarget', { field: fieldKey });
-  }
-  if (kind === 'unknown') {
-    return tf('mapping.status.unknownFieldForInterfaceTarget', { field: fieldKey, target: mode.toUpperCase() });
-  }
-
-  return '';
-}
-
-function sourceFieldAddressKind(fieldKey, fieldRule = {}) {
-  const type = String(fieldRule.type ?? '').toLowerCase();
-  const resolveLeafType = String(fieldRule.resolve?.leafType ?? '').toLowerCase();
-  if (type.includes('lookup') || resolveLeafType === 'lookup' || fieldRule.lookupType) {
-    return 'lookup';
-  }
-  if (type === 'reference') {
-    return 'reference';
-  }
-
-  const tokens = [
-    fieldKey,
-    canonicalSourceField(fieldKey),
-    fieldRule.source,
-    fieldRule.cmdbAttribute,
-    ...(Array.isArray(fieldRule.sources) ? fieldRule.sources : []),
-    ...(Array.isArray(fieldRule.cmdbAttributes) ? fieldRule.cmdbAttributes : []),
-    ...String(fieldRule.cmdbPath ?? '').split('.')
-  ].map(value => String(value ?? '').toLowerCase());
-  const joined = tokens.join(' ');
-  const compact = normalizeToken(joined);
-  const validationRegex = String(fieldRule.validationRegex ?? '').toLowerCase();
-
-  if (type.includes('ip') || validationRegex.includes('25[0-5]') || /\b(ip|ipaddress|ip_address|addressvalue)\b/.test(joined) || compact.includes('ipaddress')) {
-    return 'ip';
-  }
-  if (canonicalSourceField(fieldKey) === 'dnsName'
-    || /\b(dns|fqdn|hostname|host_dns|dnsname)\b/.test(joined)
-    || compact.includes('dnsname')
-    || compact.includes('fqdn')
-    || compact.includes('hostname')) {
-    return 'dns';
-  }
-
-  return 'unknown';
-}
-
-function cmdbPathIncludesDomain(cmdbPath) {
-  return String(cmdbPath ?? '')
-    .split('.')
-    .some(segment => segment.trim().toLowerCase().startsWith('{domain:'));
+  const issue = interfaceAddressCompatibilityIssue(fieldKey, fieldRule, targetType, target);
+  return issue ? tf(`mapping.status.${issue.code}`, issue.params) : '';
 }
 
 function mappingTargetTypeLabel(type) {
@@ -6213,13 +6076,6 @@ function buildMappingRuleName(type, className, field, target) {
     || target.interfaceProfileRef
     || 'target';
   return normalizeRuleName([type, className || 'any', field, targetName].join('-'));
-}
-
-function normalizeRuleName(value) {
-  return String(value)
-    .replace(/[^A-Za-z0-9_.-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
 }
 
 function updateMappingEditorSuggestedName() {
@@ -6457,15 +6313,6 @@ function stableJson(value) {
     return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
   }
   return JSON.stringify(value);
-}
-
-function ruleClassConditions(rule) {
-  const matchers = [
-    ...(rule.when?.anyRegex ?? []),
-    ...(rule.when?.allRegex ?? [])
-  ].filter(matcher => canonicalSourceField(matcher.field) === 'className');
-
-  return uniqueTokens(matchers.flatMap(matcher => regexLiteralValues(matcher.pattern)));
 }
 
 function hasSessionWebhookChanges(changes) {
@@ -7090,10 +6937,6 @@ function clampNumber(value, fallback, min, max) {
 
 function compareText(left, right) {
   return String(left).localeCompare(String(right), undefined, { sensitivity: 'base' });
-}
-
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function loadValidateMapping() {
@@ -9818,26 +9661,6 @@ function regexLiteralTokens(field, pattern) {
   return regexLiteralValues(pattern).map(value => `match:${sourceField}:${normalizeToken(value)}`);
 }
 
-function regexLiteralValues(pattern) {
-  const cleaned = String(pattern ?? '')
-    .replaceAll('(?i)', '')
-    .replaceAll('\\b', '')
-    .replace(/^\^|\$$/g, '')
-    .replace(/[()]/g, '');
-  if (!cleaned.includes('|')) {
-    const singleValue = cleaned
-      .replace(/\\/g, '')
-      .replace(/[[\]{}.*+?^$]/g, '')
-      .trim();
-    return singleValue ? [singleValue] : [];
-  }
-
-  return cleaned
-    .split('|')
-    .map(item => item.replace(/\\/g, '').replace(/[[\]{}.*+?^$]/g, '').trim())
-    .filter(item => item.length > 0);
-}
-
 function sourceFieldTokens(fieldKey, sourceName = fieldKey) {
   const token = canonicalSourceField(fieldKey);
   const sourceToken = canonicalSourceField(sourceName);
@@ -10099,52 +9922,6 @@ function monitoringFieldKey(field) {
     .replace(/\.+/g, '.')
     .replace(/^\./, '')
     .replace(/\.$/, '');
-}
-
-function canonicalSourceField(field) {
-  const normalized = normalizeToken(field);
-  return {
-    entityid: 'entityId',
-    id: 'entityId',
-    code: 'code',
-    classname: 'className',
-    class: 'className',
-    ipaddress: 'ipAddress',
-    ip_address: 'ipAddress',
-    profileipaddress: 'profileIpAddress',
-    profile_ip: 'profileIpAddress',
-    profile: 'profileIpAddress',
-    profile2ipaddress: 'profile2IpAddress',
-    profile2_ip: 'profile2IpAddress',
-    profile2: 'profile2IpAddress',
-    interfaceipaddress: 'interfaceIpAddress',
-    interface_ip_address: 'interfaceIpAddress',
-    interfaceip: 'interfaceIpAddress',
-    interface_ip: 'interfaceIpAddress',
-    interface: 'interfaceIpAddress',
-    interface2ipaddress: 'interface2IpAddress',
-    interface2_ip_address: 'interface2IpAddress',
-    interface2ip: 'interface2IpAddress',
-    interface2_ip: 'interface2IpAddress',
-    interface2: 'interface2IpAddress',
-    dnsname: 'dnsName',
-    dns_name: 'dnsName',
-    profiledns: 'profileDnsName',
-    profile_dns: 'profileDnsName',
-    fqdn: 'dnsName',
-    hostname: 'dnsName',
-    hostdns: 'dnsName',
-    description: 'description',
-    os: 'os',
-    operatingsystem: 'os',
-    zabbixtag: 'zabbixTag',
-    zabbix_tag: 'zabbixTag',
-    zabbixhostid: 'zabbixHostId',
-    zabbix_hostid: 'zabbixHostId',
-    eventtype: 'eventType',
-    hostprofile: 'hostProfile',
-    outputprofile: 'outputProfile'
-  }[normalized] ?? field;
 }
 
 function classMeta(catalog, className) {
@@ -10914,20 +10691,8 @@ function sameMappingItem(item, type, id, name) {
   return candidates.map(normalizeToken).some(candidate => wanted.includes(candidate));
 }
 
-function uniqueTokens(tokens) {
-  return [...new Set(tokens.filter(Boolean).map(String))];
-}
-
-function normalizeToken(value) {
-  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
 function equalsIgnoreCase(left, right) {
   return String(left ?? '').toLowerCase() === String(right ?? '').toLowerCase();
-}
-
-function sameNormalized(left, right) {
-  return normalizeToken(left) === normalizeToken(right);
 }
 
 function toast(message) {

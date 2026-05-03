@@ -1,12 +1,14 @@
 {
   "name": "monitoring-ui-api",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
     "dev": "NODE_ENV=Development node server.mjs",
-    "test:config": "node scripts/validate-config.mjs"
+    "test": "npm run test:config && npm run test:mapping",
+    "test:config": "node scripts/validate-config.mjs",
+    "test:mapping": "node test/mapping-logic.test.mjs"
   },
   "engines": {
     "node": ">=22"

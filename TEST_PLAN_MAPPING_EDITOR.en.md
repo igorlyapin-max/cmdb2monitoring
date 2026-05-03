@@ -17,6 +17,8 @@ Generic examples in this document use abstract names:
 
 All live-run and manual scenario results are stored in `reports/`.
 
+The automated coverage development plan is stored separately in `TESTING_DEVELOPMENT_PLAN.en.md`. It records the full additional 80+ scenario set, the first implementation package, the `No Silent Actions` UI regression class, and visual diff checks for `Webhook Setup`.
+
 The main automated E2E runner writes:
 
 ```text
