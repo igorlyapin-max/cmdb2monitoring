@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+## 0.7.0 - 2026-05-03
+
+### Added
+
+- Added admin runtime switches for dynamic Zabbix Tags and Host groups from CMDBuild leaf values, with explicit `targetMode=dynamicFromLeaf` rule serialization in Conversion Rules Management.
+- Added converter and Zabbix writer support for dynamic host groups: resolve by name, optionally create with `Zabbix:AllowDynamicHostGroupCreate`, and return `auto_expand_disabled` when creation is disabled.
+- Added a regression fixture for first-seen dynamic leaf host groups: the writer creates/resolves the group and attaches the returned `groupid` to the same host payload; dynamic tags stay in that payload.
+- Extended mapping regression tests and the testing development plan for dynamic target behavior.
+- Added pre-send Zabbix template compatibility validation in `zabbixrequests2api`: conflicting item keys, LLD keys, or inventory links return `template_conflict` with `zabbixRequestSent=false` before `host.create/update`.
+- Switched Zabbix template metadata reads to the 7+ non-deprecated `template.get` subselects `selectTemplateGroups` and `selectDiscoveryRules`.
+- Added `Метаданные Zabbix` for `editor`/`admin`: template item keys, LLD rule keys, inventory links, existing host templates, and a template conflict index used by Mapping and Logical Control.
+- Added admin `Настройка git`, separating conversion-rules storage settings from Runtime settings and showing resolved path, `schemaVersion`, and `rulesVersion`.
+- Added local git-copy load/export in `Настройка git`: UI can load rules from disk/git working copy and write rules plus a redacted `*.webhooks.json` artifact without commit/push.
+- Added converter rules status display on the Dashboard: the `cmdbkafka2zabbix` card now shows the microservice-loaded rules version and the management-system rules version next to reload.
+
 ## 0.6.2 - 2026-05-03
 
 ### Fixed

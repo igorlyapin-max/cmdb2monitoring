@@ -89,6 +89,7 @@ builder.Services.AddHttpClient<IZabbixClient, ZabbixClient>((services, client) =
 });
 builder.Services.AddSingleton<ZabbixRequestReader>();
 builder.Services.AddSingleton<ZabbixRequestValidator>();
+builder.Services.AddSingleton<ZabbixDynamicHostGroupResolver>();
 builder.Services.AddSingleton<IZabbixResponsePublisher, ZabbixResponsePublisher>();
 builder.Services.AddSingleton<IProcessingStateStore, FileProcessingStateStore>();
 builder.Services.AddHostedService<KafkaZabbixRequestWorker>();

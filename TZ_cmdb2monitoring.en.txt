@@ -1,7 +1,7 @@
 cmdb2monitoring Technical Specification
 
-Document version: 0.4.0
-Last updated: 2026-05-02
+Document version: 0.7.0
+Last updated: 2026-05-03
 English companion for TZ_cmdb2monitoring.txt. Architecture artifacts under aa/ are intentionally not translated in this pass.
 
 1. Project Purpose
@@ -44,7 +44,7 @@ Verified development environment:
 | .NET SDK | `10.0.203` | Repository wrapper `scripts/dotnet` |
 | Node.js | `>=22` | Required by monitoring-ui-api |
 
-Expected compatibility is contract-based: CMDBuild `4.x` with REST v3, Zabbix `7.0.x LTS`, Kafka `3.x`. Any major/minor upgrade requires health checks, catalog sync, rules validation/dry-run, and create/update/delete smoke tests.
+Expected compatibility is contract-based: CMDBuild `4.x` with REST v3, Zabbix `7.0.x LTS` and newer 7.x versions that keep `template.get` subselects `selectTemplateGroups`, `selectItems`, and `selectDiscoveryRules`, Kafka `3.x`. Any major/minor upgrade requires health checks, catalog sync, rules validation/dry-run, and create/update/delete smoke tests.
 
 3. Repository Structure
 
@@ -199,7 +199,7 @@ For the dev/test system, the default mode is reading from disk at `rules/cmdbuil
 
 Every rules file must include:
 - `schemaVersion`: rules JSON format compatibility;
-- `rulesVersion`: visual/operator revision of the concrete rules set.
+- `rulesVersion`: visual/operator revision of the concrete rules set. It must include the date and time of the change in a human-readable form, for example `2026.05.03-2027-serveri-webhook-fix`.
 
 13.4.1. Rules Reload Signal
 
@@ -212,7 +212,8 @@ The endpoint:
 - otherwise clears cache and rereads the local rules file;
 - returns rule name, `schemaVersion`, `rulesVersion`, location, git version/commit, storage refresh flag, and reload timestamp.
 
-`monitoring-ui-api` shows a `Перечитать правила конвертации` / reload rules button in the converter dashboard card for `editor` and `admin`.
+`cmdbkafka2zabbix` must expose a read-only management endpoint `GET /admin/rules-status` that returns rule name, `schemaVersion`, `rulesVersion`, location, git version/commit, read-from-git flag, and check timestamp without forcing a reload.
+`monitoring-ui-api` shows a `Перечитать правила конвертации` / reload rules button in the converter dashboard card for `editor` and `admin`. Next to the button it must show two versions: the rules version currently loaded by the microservice and the rules-file version currently read by the management system.
 
 13.5. Zabbix Host Data
 
@@ -280,7 +281,7 @@ Multi-value `host.update` behavior:
 
 - `groups[]` are merged by `groupid`;
 - `templates[]` are merged by `templateid`, while `templates_clear` explicitly removes linked conflicting templates;
-- `tags[]` are merged by `tag`;
+- `tags[]` are merged by the `tag/value` pair;
 - `macros[]` are merged by `macro`;
 - `inventory` is merged by field name;
 - values from rules override same-key current Zabbix values;
@@ -317,7 +318,9 @@ Requests must be valid JSON-RPC and contain method, params, id, and all fields r
 
 14.5. Zabbix Catalog Validation
 
-Before host create/update, the service validates referenced host groups, templates, and template groups when validation is enabled.
+Before host create/update, the service validates referenced host groups, templates, and template groups when validation is enabled. With `Zabbix:ValidateTemplateCompatibility=true`, it also reads template metadata through `template.get` with `selectTemplateGroups`, `selectItems`, and `selectDiscoveryRules` and blocks the final template set when two or more templates contain the same item key, LLD rule key, or inventory binding through `inventory_link`.
+
+If a catalog reference is missing or template compatibility fails, the service must not call `host.create/update`. It publishes an error response with `zabbixRequestSent=false`. For `template_conflict`, `errorMessage` must include the conflicting key or inventory link, template names/templateids, the expected corrective action, and the reading location: `PROJECT_DOCUMENTATION.md` / `PROJECT_DOCUMENTATION.en.md`, section `Zabbix template compatibility`.
 
 14.6. Gentle Processing
 
@@ -369,16 +372,17 @@ monitoring-ui-api provides:
 - Events read-only Kafka browser;
 - rules JSON load, validate, dry-run, browser save-as;
 - Zabbix and CMDBuild catalog sync;
+- Zabbix Metadata with templates, item keys, LLD rule keys, inventory bindings, existing host templates, and the template conflict index;
 - Conversion Rules Management;
 - Logical Control of Conversion Rules;
 - Webhook Setup for CMDBuild webhook planning and apply;
-- Runtime Settings and Authorization settings.
+- Runtime Settings, Git Settings, and Authorization settings.
 
 18.2. Authorization
 
 Roles:
 - `viewer`: Dashboard and Events;
-- `editor`: all rule/catalog views except Settings;
+- `editor`: all rule/catalog views except Authorization, Runtime Settings, and Git Settings;
 - `admin`: all menus and settings.
 
 Default local users:
@@ -405,11 +409,20 @@ Flow:
 - API validates JSON and can run dry-run;
 - frontend saves JSON through browser save-as;
 - user publishes the file to the chosen git repository outside the application;
+- when `Git Settings` is enabled, the frontend may write the rules JSON to a local working copy together with a neighboring `*.webhooks.json`, but commit/push remain a manual operator action;
 - user clicks `Перечитать правила конвертации`; `cmdbkafka2zabbix` pulls/reads rules according to `ConversionRules`.
 
 Local file save, dry-run, validate, mapping, and catalog sync are available to `editor` and `admin`.
 Webhook Setup is also available to `editor` and `admin`.
-Authorization, Runtime Settings, and password reset are admin-only.
+Authorization, Runtime Settings, Git Settings, and password reset are admin-only.
+
+Git Settings must be separate from Runtime Settings. It stores only the `rules` block in UI settings: `RulesFilePath`, `ReadFromGit`, `RepositoryPath`, and `RepositoryUrl`. It also shows the resolved path, `schemaVersion`, and `rulesVersion`, and can load the current rules file from the selected source. The UI does not commit or push; publishing remains an operator task. When `ReadFromGit` is enabled, the repository is expected to contain the file named by `RulesFilePath`, defaulting to `rules/cmdbuild-to-zabbix-host-create.json`. `Save to git` writes rules JSON to the local working copy and creates a matching `*.webhooks.json` artifact next to it; token/password/secret/API key/Authorization values in the webhook artifact must be replaced with `XXXXX`.
+
+Runtime Settings must expose two independent switches for rule authoring:
+- `Allow dynamic Zabbix Tags expansion from a CMDBuild leaf`;
+- `Allow dynamic Zabbix Host groups creation from a CMDBuild leaf`.
+
+With a switch disabled, `Tag rule`/`Host group rule` must require an existing Zabbix target. With a switch enabled, the editor must show a separate target option for `Create/expand from CMDBuild leaf` and save `targetMode=dynamicFromLeaf`, `valueField`, and `createIfMissing`. For host groups, the first arrival of a new leaf value may create the group only when `Zabbix:AllowDynamicHostGroupCreate` is enabled; after that, the same host.create/update payload must receive the new `groupid`. Help and Runtime Settings must warn that dynamic expansion is used responsibly, after analyzing the variety of leaf values, because uncontrolled changes to mapped CMDBuild attributes will create the same amount of dynamic change in Zabbix.
 
 18.3.1. Minimum Permissions By Operation
 
@@ -417,16 +430,16 @@ Authorization, Runtime Settings, and password reset are admin-only.
 - CMDBuild for `Webhook Setup` load/analyze: read access to ETL/webhook records through REST v3 `/etl/webhook/?detailed=true`.
 - CMDBuild for `Load into CMDB`: create/update/delete, or equivalent modify permissions, on ETL/webhook records through REST v3 `/etl/webhook/`. These permissions are needed only by operators who apply webhook plans to CMDBuild.
 - The backend must restrict writes to the managed `cmdbwebhooks2kafka-*` prefix, but this is an application guard, not a replacement for CMDBuild permissions. The CMDBuild account must still be restricted as narrowly as the CMDBuild permission model allows.
-- Zabbix for UI/catalog sync: API access and read-only access to used host groups, template groups, templates, hosts/tags, and catalogs read through `*.get`.
+- Zabbix for UI/catalog sync: API access and read-only access to used host groups, template groups, templates, hosts/tags, and catalogs read through `*.get`, including `template.get` subselects for item keys, LLD rules, inventory links, linked templates, and template groups.
 - Zabbix host create/update/delete permissions are not required for UI catalog reads, but they are required by the separate `zabbixrequests2api` API user that applies monitoring.
 
 18.4. Zabbix Catalog Sync
 
-UI reads Zabbix catalogs through API and caches them for validation and mapping. If `Zabbix:ApiToken` is configured, it is used first; otherwise session Zabbix credentials are requested.
+UI reads Zabbix catalogs through API and caches them for validation and mapping. If `Zabbix:ApiToken` is configured, it is used first; otherwise session Zabbix credentials are requested. The same sync must populate Zabbix Metadata: template item keys, LLD rule keys, inventory links, linked parent templates, existing host templates, Zabbix version, and a conflict index for duplicate item keys, duplicate LLD rule keys, and duplicate inventory links. The metadata cache is used by Conversion Rules Management and Logical Control, but it does not replace the runtime `zabbixrequests2api` compatibility check.
 
 18.5. CMDBuild Catalog Sync
 
-UI reads CMDBuild classes, attributes, lookup types/values, domains, and reference/domain metadata through CMDBuild REST. Session CMDBuild credentials are requested when needed.
+UI reads CMDBuild classes, attributes, lookup types/values, domains, and reference/domain metadata through CMDBuild REST. For domains, catalog sync must read detailed `/domains/{domain}` records so the cache includes `source`/`destination` endpoints; otherwise N:N domain paths cannot be offered in the rule editor. Session CMDBuild credentials are requested when needed.
 
 18.5.1. CMDBuild Webhook Setup
 
@@ -471,7 +484,7 @@ Rules files:
 
 18.6. monitoring-ui-api Configuration
 
-Runtime Settings include CMDBuild/Zabbix endpoints, optional Zabbix API key, Kafka Events browser settings, and health/reload endpoints. `Cmdbuild:UseIdp` and `Zabbix:UseIdp` runtime flags are not supported.
+Runtime Settings include CMDBuild/Zabbix endpoints, optional Zabbix API key, Kafka Events browser settings, and health/reload endpoints. Git Settings include only rules-file storage/read settings. `Cmdbuild:UseIdp` and `Zabbix:UseIdp` runtime flags are not supported.
 
 18.7. Checks
 
@@ -513,11 +526,14 @@ When inventory fields are present, `inventory_mode` must allow inventory. `-1` d
 20.4. Extended Rules Model
 
 Rules support reference/lookup/domain leaf paths, host profiles, selection rules, template conflict rules, extended host parameters, and monitoring suppression.
+`targetMode=dynamicFromLeaf` is supported only for `tagSelectionRules` and `groupSelectionRules`. The rule must contain `valueField`. Dynamic tags are emitted directly into `tags[]`; dynamic host groups are emitted as `groups[]` entries with name/createIfMissing before the Zabbix writer resolves them. After resolve/create, the Zabbix writer must substitute the found or created `groupid` into the same `host.create`/`host.update` payload so the current host is linked to the same host groups that came from the leaf.
 The maximum recursion depth for `domain`/`reference`/`lookup` paths is configured in Runtime settings by `Max recursion depth for domains&reference&lookups`. The allowed range is `2..5`, with default `2`. After changing it, the operator must logout and resync the CMDBuild catalog; until then, the UI can keep using the current session or old cache depth. Newly created source fields with `cmdbPath` must receive `resolve.maxDepth` matching the active catalog sync depth.
+
+The Zabbix writer must resolve dynamic host groups by `hostgroup.get` before `host.create/host.update`. If a group is missing and `Zabbix:AllowDynamicHostGroupCreate=true`, it must call `hostgroup.create` and substitute the returned `groupid` into the same host payload, so the current host immediately joins the created group. If creation is disabled, it must not call host.create/update and must return `auto_expand_disabled`. Dynamic behavior is not supported for templates, interfaces, inventory, or macros.
 
 20.5. UI Rules Management And Logical Control
 
-The UI supports iterative reference navigation, lookup leaf selection, domain navigation with class-end validation, add/modify/delete rule actions, group deletion trees, undo/redo, and browser save-as. Edit mode hides the lower three-column preview. The CMDBuild class selector must show hierarchy indentation, disable superclass/prototype classes, and replace a previously selected superclass with the nearest concrete subclass. Rule modification starts with no rule selected automatically; the operator can start from a rule, CMDBuild class, class attribute field, or conversion structure. The UI filters linked lists, and when a single matching rule remains it is selected automatically and loaded into the same editor form. Changing a class clears the dependent leaf field and Zabbix target; changing a field filters compatible structures; changing a structure filters fields and Zabbix targets. Save is disabled until the chain has an unambiguous leaf/source field and compatible Zabbix target. For `interfaceAddress`, the UI must reject semantic mode mismatches: IP-looking fields cannot be saved as DNS target `interfaces[].dns/useip=0`, DNS/FQDN-looking fields cannot be saved as IP target `interfaces[].ip/useip=1`, and fields with unconfirmed address type cannot be saved as interface addresses without an explicit name/source metadata or `validationRegex`. When adding or modifying a rule for a new concrete class, the UI must automatically create a minimal `hostProfiles[]` entry if the selected leaf is an IP/DNS field and no matching profile exists; if this cannot be done, the UI must block saving with a clear error. Green borders mean valid, red means required/conflicting, and yellow means loaded from the rule but not confirmed by the current catalog/filter. A Zabbix target loaded from a rule but missing from the current Zabbix catalog/options is inconsistent, red, and blocks saving; this is the same chain-link error class as a missing CMDBuild class/attribute. `Reset fields` clears the selected rule and all filters in modify mode and clears leaf/target in add mode. Scalar Zabbix targets block potentially multi-value domain fields unless the rules explicitly use `collectionMode=first`. Logical Control must treat a class in `source.entityClasses` without a matching `hostProfiles[]` as a rules error because the converter will skip events with `no_host_profile_matched`; it must offer `Create host profile` and keep the fix in the common undo/redo draft flow.
+The UI supports iterative reference navigation, lookup leaf selection, domain navigation with class-end validation, add/modify/delete rule actions, group deletion trees, undo/redo, and browser save-as. Edit mode hides the lower three-column preview. The CMDBuild class selector must show hierarchy indentation, disable superclass/prototype classes, and replace a previously selected superclass with the nearest concrete subclass. Rule modification starts with no rule selected automatically; the operator can start from a rule, CMDBuild class, class attribute field, or conversion structure. The UI filters linked lists, and when a single matching rule remains it is selected automatically and loaded into the same editor form. Changing a class clears the dependent leaf field and Zabbix target; changing a field filters compatible structures; changing a structure filters fields and Zabbix targets. Save is disabled until the chain has an unambiguous leaf/source field and compatible Zabbix target. For `interfaceAddress`, the UI must reject semantic mode mismatches: IP-looking fields cannot be saved as DNS target `interfaces[].dns/useip=0`, DNS/FQDN-looking fields cannot be saved as IP target `interfaces[].ip/useip=1`, and fields with unconfirmed address type cannot be saved as interface addresses without an explicit name/source metadata or `validationRegex`. For `Tag rule` and `Host group rule`, dynamic target from a CMDBuild leaf is available only when the matching runtime switch is enabled; for templates, interfaces, inventory, and macros, an empty target remains an error. For `Template rule`, the UI must use Zabbix Metadata and block saving when the selected template plus default/selected templates, after `templateConflictRules`, still leaves a duplicate item key, duplicate LLD rule key, or duplicate inventory link. When adding or modifying a rule for a new concrete class, the UI must automatically create a minimal `hostProfiles[]` entry if the selected leaf is an IP/DNS field and no matching profile exists; if this cannot be done, the UI must block saving with a clear error. Green borders mean valid, red means required/conflicting, and yellow means loaded from the rule but not confirmed by the current catalog/filter. A Zabbix target loaded from a rule but missing from the current Zabbix catalog/options is inconsistent, red, and blocks saving; this is the same chain-link error class as a missing CMDBuild class/attribute. `Reset fields` clears the selected rule and all filters in modify mode and clears leaf/target in add mode. Scalar Zabbix targets block potentially multi-value domain fields unless the rules explicitly use `collectionMode=first`. Logical Control must treat a class in `source.entityClasses` without a matching `hostProfiles[]` as a rules error because the converter will skip events with `no_host_profile_matched`; it must offer `Create host profile` and keep the fix in the common undo/redo draft flow. Logical Control must also show a critical error when a template rule leaves an incompatible final template set after `templateConflictRules`, including the conflicting key/link and the affected templates.
 
 Demo scripts:
 

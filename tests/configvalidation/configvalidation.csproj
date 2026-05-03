@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj" />
+    <ProjectReference Include="../../src/zabbixrequests2api/zabbixrequests2api.csproj" />
   </ItemGroup>
 
 </Project>

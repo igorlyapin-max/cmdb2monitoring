@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using CmdbKafka2Zabbix.Conversion;
 using CmdbKafka2Zabbix.Rules;
 using Microsoft.Extensions.Options;
+using ZabbixRequests2Api.Zabbix;
 
 var repositoryRoot = args.Length > 0
     ? Path.GetFullPath(args[0])
@@ -41,7 +42,9 @@ ValidateTopicChain(configs, "development", errors);
 ValidateRulesFile(repositoryRoot, errors);
 await ValidateRulesT4Rendering(repositoryRoot, errors);
 await ValidateC2MTestMultiProfileConversion(repositoryRoot, errors);
+await ValidateServerOsHostGroupConversion(repositoryRoot, errors);
 await ValidateMonitoringSuppressionConversion(repositoryRoot, errors);
+await ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(repositoryRoot, errors);
 ValidateArchitectureArtifacts(repositoryRoot, errors);
 
 foreach (var warning in warnings)
@@ -275,6 +278,26 @@ static void ValidateZabbix(JsonObject config, string context, List<string> error
     }
 
     RequirePositiveInt(config, "Zabbix:RequestTimeoutMs", context, errors);
+    foreach (var switchPath in new[]
+    {
+        "Zabbix:ValidateHostGroups",
+        "Zabbix:ValidateTemplates",
+        "Zabbix:ValidateTemplateGroups",
+        "Zabbix:ValidateTemplateCompatibility",
+        "Zabbix:AllowDynamicHostGroupCreate"
+    })
+    {
+        if (GetBool(config, switchPath) is null)
+        {
+            errors.Add($"{context} {switchPath} must be configured as a boolean switch.");
+        }
+    }
+
+    if (GetBool(config, "Zabbix:ValidateTemplates") == false
+        && GetBool(config, "Zabbix:ValidateTemplateCompatibility") == true)
+    {
+        warnings.Add($"{context} enables Zabbix:ValidateTemplateCompatibility, but Zabbix:ValidateTemplates is disabled.");
+    }
 
     if (IsOneOf(authMode ?? string.Empty, "Token")
         && string.IsNullOrWhiteSpace(GetString(config, "Zabbix:ApiToken")))
@@ -831,6 +854,174 @@ static async Task ValidateC2MTestMultiProfileConversion(string repositoryRoot, L
     }
 }
 
+static async Task ValidateServerOsHostGroupConversion(string repositoryRoot, List<string> errors)
+{
+    var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
+    ConversionRulesDocument? rules;
+    try
+    {
+        rules = JsonSerializer.Deserialize<ConversionRulesDocument>(
+            File.ReadAllText(rulesPath),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            });
+    }
+    catch (Exception ex)
+    {
+        errors.Add($"Rules Server OS host group validation cannot read rules document: {ex.Message}");
+        return;
+    }
+
+    if (rules is null)
+    {
+        errors.Add("Rules Server OS host group validation cannot read rules document.");
+        return;
+    }
+
+    var message = JsonSerializer.Serialize(new
+    {
+        source = "cmdbuild",
+        eventType = "create",
+        entityType = "Server",
+        entityId = "221156",
+        payload = new Dictionary<string, object?>
+        {
+            ["source"] = "cmdbuild",
+            ["eventType"] = "create",
+            ["className"] = "Server",
+            ["id"] = "221156",
+            ["code"] = "server15",
+            ["description"] = "Server1555",
+            ["ip_address"] = "192.168.1.1",
+            ["OS"] = "Windows",
+            ["zabbixTag"] = "tag1"
+        }
+    });
+
+    var reader = new CmdbEventReader();
+    var source = reader.Read(message, rules);
+    var renderer = new T4TemplateRenderer(Options.Create(new ConversionRulesOptions
+    {
+        AddDefaultDirectives = true
+    }));
+    var converter = new CmdbToZabbixConverter(
+        renderer,
+        Options.Create(new ConversionRulesOptions
+        {
+            AddDefaultDirectives = true
+        }));
+    var results = await converter.ConvertAsync(source, rules, CancellationToken.None);
+    var serverResult = results.FirstOrDefault(result => result.ShouldPublish && string.Equals(result.ProfileName, "server-main", StringComparison.OrdinalIgnoreCase));
+    if (serverResult?.Value is null)
+    {
+        errors.Add("Rules Server OS host group validation expected server-main host.create request for cmdb-server-server15.");
+        return;
+    }
+
+    using var document = JsonDocument.Parse(serverResult.Value);
+    if (!document.RootElement.TryGetProperty("params", out var parameters)
+        || !parameters.TryGetProperty("host", out var host)
+        || host.GetString() != "cmdb-server-server15")
+    {
+        errors.Add("Rules Server OS host group validation expected host name cmdb-server-server15.");
+        return;
+    }
+
+    if (!parameters.TryGetProperty("groups", out var groups)
+        || groups.ValueKind != JsonValueKind.Array
+        || !groups.EnumerateArray().Any(item =>
+            item.TryGetProperty("groupid", out var groupId)
+            && groupId.GetString() == "5"))
+    {
+        errors.Add("Rules Server OS host group validation expected Windows Server cmdb-server-server15 to map to host group Discovered hosts (groupid 5), not only fallback Linux servers.");
+    }
+
+    if (!parameters.TryGetProperty("templates", out var templates)
+        || templates.ValueKind != JsonValueKind.Array
+        || !templates.EnumerateArray().Any(item =>
+            item.TryGetProperty("templateid", out var templateId)
+            && templateId.GetString() == "10081"))
+    {
+        errors.Add("Rules Server OS host group validation expected Windows Server cmdb-server-server15 to map to Windows by Zabbix agent template (10081).");
+    }
+
+    if (!parameters.TryGetProperty("tags", out var tags)
+        || tags.ValueKind != JsonValueKind.Array
+        || !tags.EnumerateArray().Any(item =>
+            item.TryGetProperty("tag", out var tag)
+            && tag.GetString() == "cmdb.os"
+            && item.TryGetProperty("value", out var value)
+            && value.GetString() == "Windows"))
+    {
+        errors.Add("Rules Server OS host group validation expected cmdb.os tag with value Windows.");
+    }
+
+    var updateMessage = JsonSerializer.Serialize(new
+    {
+        source = "cmdbuild",
+        eventType = "update",
+        entityType = "Server",
+        entityId = "221156",
+        payload = new Dictionary<string, object?>
+        {
+            ["source"] = "cmdbuild",
+            ["eventType"] = "update",
+            ["cmdbuildEvent"] = "card_update_after",
+            ["className"] = "Server",
+            ["id"] = "221156",
+            ["code"] = "server15",
+            ["description"] = "Server1555",
+            ["ip_address"] = "192.168.1.1",
+            ["OS"] = "Windows",
+            ["zabbixTag"] = "tag1"
+        }
+    });
+
+    var updateSource = reader.Read(updateMessage, rules);
+    var updateResults = await converter.ConvertAsync(updateSource, rules, CancellationToken.None);
+    var updateResult = updateResults.FirstOrDefault(result => result.ShouldPublish && string.Equals(result.ProfileName, "server-main", StringComparison.OrdinalIgnoreCase));
+    if (updateResult?.Value is null)
+    {
+        errors.Add("Rules Server OS host group validation expected server-main host.update fallback request for cmdb-server-server15.");
+        return;
+    }
+
+    using var updateDocument = JsonDocument.Parse(updateResult.Value);
+    var updateRoot = updateDocument.RootElement;
+    if (!updateRoot.TryGetProperty("method", out var updateMethod) || updateMethod.GetString() != "host.get")
+    {
+        errors.Add("Rules Server OS host group validation expected update without hostid to render host.get fallback.");
+    }
+
+    if (!updateRoot.TryGetProperty("cmdb2monitoring", out var metadata)
+        || metadata.ValueKind != JsonValueKind.Object
+        || !metadata.TryGetProperty("fallbackUpdateParams", out var updateParams)
+        || updateParams.ValueKind != JsonValueKind.Object)
+    {
+        errors.Add("Rules Server OS host group validation expected update fallback metadata with fallbackUpdateParams.");
+        return;
+    }
+
+    if (!updateParams.TryGetProperty("groups", out var updateGroups)
+        || updateGroups.ValueKind != JsonValueKind.Array
+        || !updateGroups.EnumerateArray().Any(item =>
+            item.TryGetProperty("groupid", out var updateGroupId)
+            && updateGroupId.GetString() == "5"))
+    {
+        errors.Add("Rules Server OS host group validation expected fallbackUpdateParams.groups to include Discovered hosts (groupid 5).");
+    }
+
+    if (!updateParams.TryGetProperty("templates_clear", out var templatesClear)
+        || templatesClear.ValueKind != JsonValueKind.Array
+        || !templatesClear.EnumerateArray().Any(item =>
+            item.TryGetProperty("templateid", out var templateId)
+            && templateId.GetString() == "10001"))
+    {
+        errors.Add("Rules Server OS host group validation expected fallbackUpdateParams.templates_clear to remove Linux by Zabbix agent (10001) before adding Windows by Zabbix agent.");
+    }
+}
+
 static async Task ValidateMonitoringSuppressionConversion(string repositoryRoot, List<string> errors)
 {
     var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
@@ -921,6 +1112,262 @@ static async Task ValidateMonitoringSuppressionConversion(string repositoryRoot,
     if (!deleteResults.Any(result => result.ShouldPublish))
     {
         errors.Add("Rules monitoring suppression validation expected delete event to bypass suppression and publish cleanup/fallback request.");
+    }
+}
+
+static async Task ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(string repositoryRoot, List<string> errors)
+{
+    var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
+    ConversionRulesDocument? activeRules;
+    try
+    {
+        activeRules = JsonSerializer.Deserialize<ConversionRulesDocument>(
+            File.ReadAllText(rulesPath),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            });
+    }
+    catch (Exception ex)
+    {
+        errors.Add($"Dynamic leaf target validation cannot read active rules for T4 templates: {ex.Message}");
+        return;
+    }
+
+    if (activeRules is null)
+    {
+        errors.Add("Dynamic leaf target validation cannot read active rules for T4 templates.");
+        return;
+    }
+
+    var rules = new ConversionRulesDocument
+    {
+        SchemaVersion = activeRules.SchemaVersion,
+        RulesVersion = "configvalidation-dynamic-leaf",
+        Name = "Dynamic leaf fixture",
+        Source = new SourceRules
+        {
+            HostCreateEvents = ["create"],
+            Fields = new Dictionary<string, SourceFieldRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["code"] = new() { Source = "code" },
+                ["className"] = new() { Source = "className" },
+                ["ipAddress"] = new() { Source = "ip_address" },
+                ["dynamicHostGroups"] = new() { Source = "DynamicHostGroups" },
+                ["dynamicTags"] = new() { Source = "DynamicTags" }
+            }
+        },
+        Zabbix = new ZabbixRules
+        {
+            Method = "host.create"
+        },
+        Defaults = new ConversionDefaults
+        {
+            Host = new HostDefaults
+            {
+                Status = 0,
+                InventoryMode = -1
+            },
+            AgentInterface = new InterfaceSettings
+            {
+                Type = 1,
+                Main = 1,
+                UseIp = 1,
+                Port = "10050"
+            },
+            Templates =
+            [
+                new LookupItem
+                {
+                    Name = "ICMP Ping",
+                    TemplateId = "10564"
+                }
+            ]
+        },
+        EventRoutingRules =
+        [
+            new EventRoutingRule
+            {
+                EventType = "create",
+                Method = "host.create",
+                TemplateName = "hostCreateJsonRpcRequestLines",
+                RequiredFields = ["entityId", "className", "interfaceAddress"],
+                Publish = true
+            }
+        ],
+        HostProfiles =
+        [
+            new HostProfileRule
+            {
+                Name = "dynamic-main",
+                Priority = 10,
+                When = new RuleCondition { Always = true },
+                HostNameTemplate = "cmdb-dynamic-<#= Model.Code ?? Model.EntityId #>",
+                VisibleNameTemplate = "Dynamic <#= Model.Code ?? Model.EntityId #>",
+                InterfaceProfileRef = "agent",
+                Mode = "ip",
+                ValueField = "ipAddress"
+            }
+        ],
+        GroupSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "dynamic-groups-from-leaf",
+                Priority = 10,
+                TargetMode = "dynamicFromLeaf",
+                ValueField = "dynamicHostGroups",
+                CreateIfMissing = true,
+                When = new RuleCondition
+                {
+                    FieldExists = "dynamicHostGroups"
+                }
+            }
+        ],
+        TemplateSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "default-template",
+                Priority = 10,
+                TemplatesRef = "defaults.templates",
+                When = new RuleCondition { Always = true }
+            }
+        ],
+        TagSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "dynamic-tags-from-leaf",
+                Priority = 10,
+                TargetMode = "dynamicFromLeaf",
+                ValueField = "dynamicTags",
+                Tags =
+                [
+                    new TagDefinition
+                    {
+                        Tag = "cmdb.dynamic"
+                    }
+                ],
+                When = new RuleCondition
+                {
+                    FieldExists = "dynamicTags"
+                }
+            }
+        ],
+        T4Templates = activeRules.T4Templates
+    };
+
+    var message = JsonSerializer.Serialize(new
+    {
+        source = "cmdbuild",
+        eventType = "create",
+        entityType = "DynamicLeafCI",
+        entityId = "3001",
+        payload = new Dictionary<string, object?>
+        {
+            ["source"] = "cmdbuild",
+            ["eventType"] = "create",
+            ["className"] = "DynamicLeafCI",
+            ["id"] = "3001",
+            ["code"] = "DYNAMIC-LEAF-001",
+            ["ip_address"] = "192.168.210.10",
+            ["DynamicHostGroups"] = "CMDB/Dynamic/TeamA; CMDB/Dynamic/TeamB",
+            ["DynamicTags"] = "critical; owned-by-platform"
+        }
+    });
+
+    var reader = new CmdbEventReader();
+    var source = reader.Read(message, rules);
+    var renderer = new T4TemplateRenderer(Options.Create(new ConversionRulesOptions
+    {
+        AddDefaultDirectives = true
+    }));
+    var converter = new CmdbToZabbixConverter(
+        renderer,
+        Options.Create(new ConversionRulesOptions
+        {
+            AddDefaultDirectives = true
+        }));
+    var results = await converter.ConvertAsync(source, rules, CancellationToken.None);
+    var result = results.FirstOrDefault(item => item.ShouldPublish);
+    if (result?.Value is null)
+    {
+        errors.Add("Dynamic leaf target validation expected a host.create request.");
+        return;
+    }
+
+    using var beforeResolveDocument = JsonDocument.Parse(result.Value);
+    var beforeResolveParams = beforeResolveDocument.RootElement.GetProperty("params");
+    var beforeResolveGroups = beforeResolveParams.GetProperty("groups");
+    foreach (var groupName in new[] { "CMDB/Dynamic/TeamA", "CMDB/Dynamic/TeamB" })
+    {
+        if (!beforeResolveGroups.EnumerateArray().Any(item =>
+            string.Equals(ReadElementString(item, "name"), groupName, StringComparison.Ordinal)
+            && ReadElementBool(item, "createIfMissing")))
+        {
+            errors.Add($"Dynamic leaf target validation expected converter to render dynamic host group '{groupName}' with createIfMissing=true.");
+        }
+    }
+
+    var beforeResolveTags = beforeResolveParams.GetProperty("tags");
+    foreach (var tagValue in new[] { "critical", "owned-by-platform" })
+    {
+        if (!beforeResolveTags.EnumerateArray().Any(item =>
+            string.Equals(ReadElementString(item, "tag"), "cmdb.dynamic", StringComparison.Ordinal)
+            && string.Equals(ReadElementString(item, "value"), tagValue, StringComparison.Ordinal)))
+        {
+            errors.Add($"Dynamic leaf target validation expected dynamic tag cmdb.dynamic={tagValue}.");
+        }
+    }
+
+    var zabbixReader = new ZabbixRequestReader();
+    var zabbixRequest = zabbixReader.Read("3001", result.Value);
+    var zabbixClient = new FakeDynamicHostGroupZabbixClient(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["CMDB/Dynamic/TeamA"] = "91001",
+        ["CMDB/Dynamic/TeamB"] = "91002"
+    });
+    var resolver = new ZabbixDynamicHostGroupResolver(
+        zabbixClient,
+        Options.Create(new ZabbixOptions
+        {
+            AllowDynamicHostGroupCreate = true
+        }),
+        zabbixReader);
+
+    var resolvedRequest = await resolver.ResolveAsync(zabbixRequest, CancellationToken.None);
+    using var resolvedDocument = JsonDocument.Parse(resolvedRequest.ZabbixJson);
+    var resolvedParams = resolvedDocument.RootElement.GetProperty("params");
+    var resolvedGroups = resolvedParams.GetProperty("groups");
+    foreach (var groupId in new[] { "91001", "91002" })
+    {
+        if (!resolvedGroups.EnumerateArray().Any(item =>
+            string.Equals(ReadElementString(item, "groupid"), groupId, StringComparison.Ordinal)))
+        {
+            errors.Add($"Dynamic leaf target validation expected resolved Zabbix request to attach created host group id {groupId}.");
+        }
+    }
+
+    if (resolvedGroups.EnumerateArray().Any(item => !string.IsNullOrWhiteSpace(ReadElementString(item, "name"))))
+    {
+        errors.Add("Dynamic leaf target validation expected final Zabbix host payload to contain groupid objects, not unresolved group names.");
+    }
+
+    if (!zabbixClient.CreatedNames.SetEquals(new[] { "CMDB/Dynamic/TeamA", "CMDB/Dynamic/TeamB" }))
+    {
+        errors.Add("Dynamic leaf target validation expected first-seen host groups to be created before host.create/update.");
+    }
+
+    var resolvedTags = resolvedParams.GetProperty("tags");
+    foreach (var tagValue in new[] { "critical", "owned-by-platform" })
+    {
+        if (!resolvedTags.EnumerateArray().Any(item =>
+            string.Equals(ReadElementString(item, "tag"), "cmdb.dynamic", StringComparison.Ordinal)
+            && string.Equals(ReadElementString(item, "value"), tagValue, StringComparison.Ordinal)))
+        {
+            errors.Add($"Dynamic leaf target validation expected dynamic tag cmdb.dynamic={tagValue} to stay attached to the same host payload.");
+        }
     }
 }
 
@@ -1242,6 +1689,39 @@ static string Relative(string path)
     return Path.GetRelativePath(Directory.GetCurrentDirectory(), path);
 }
 
+static string? ReadElementString(JsonElement element, string propertyName)
+{
+    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+    {
+        return null;
+    }
+
+    return value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Number => value.GetRawText(),
+        JsonValueKind.True => bool.TrueString,
+        JsonValueKind.False => bool.FalseString,
+        _ => null
+    };
+}
+
+static bool ReadElementBool(JsonElement element, string propertyName)
+{
+    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+    {
+        return false;
+    }
+
+    return value.ValueKind switch
+    {
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
+        _ => false
+    };
+}
+
 internal enum ServiceKind
 {
     Webhook,
@@ -1250,3 +1730,51 @@ internal enum ServiceKind
 }
 
 internal sealed record ServiceDefinition(string Name, string RelativePath, ServiceKind Kind);
+
+internal sealed class FakeDynamicHostGroupZabbixClient(IReadOnlyDictionary<string, string> createdGroupIds) : IZabbixClient
+{
+    public HashSet<string> CreatedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<ZabbixApiCallResult> ExecuteAsync(
+        ZabbixRequestDocument request,
+        CancellationToken cancellationToken)
+    {
+        throw new NotSupportedException("The configvalidation fake client only resolves dynamic host groups.");
+    }
+
+    public Task<HashSet<string>> GetExistingHostGroupIdsAsync(
+        IReadOnlyCollection<string> groupIds,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    public Task<IReadOnlyDictionary<string, string>> GetHostGroupIdsByNameAsync(
+        IReadOnlyCollection<string> groupNames,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult<IReadOnlyDictionary<string, string>>(
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    public Task<string> CreateHostGroupAsync(
+        string groupName,
+        CancellationToken cancellationToken)
+    {
+        CreatedNames.Add(groupName);
+        if (!createdGroupIds.TryGetValue(groupName, out var groupId))
+        {
+            throw new InvalidOperationException($"Unexpected dynamic host group creation: {groupName}");
+        }
+
+        return Task.FromResult(groupId);
+    }
+
+    public Task<IReadOnlyDictionary<string, ZabbixTemplateInfo>> GetTemplateInfosAsync(
+        IReadOnlyCollection<string> templateIds,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult<IReadOnlyDictionary<string, ZabbixTemplateInfo>>(
+            new Dictionary<string, ZabbixTemplateInfo>(StringComparer.OrdinalIgnoreCase));
+    }
+}

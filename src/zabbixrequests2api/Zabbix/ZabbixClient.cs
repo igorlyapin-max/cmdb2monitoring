@@ -56,6 +56,97 @@ public sealed class ZabbixClient(
             .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
     }
 
+    public async Task<IReadOnlyDictionary<string, string>> GetHostGroupIdsByNameAsync(
+        IReadOnlyCollection<string> groupNames,
+        CancellationToken cancellationToken)
+    {
+        var names = groupNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (names.Length == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var request = JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            method = "hostgroup.get",
+            @params = new
+            {
+                output = new[] { "groupid", "name" },
+                filter = new
+                {
+                    name = names
+                }
+            },
+            id = 3
+        }, JsonOptions);
+
+        var response = await SendJsonRpcAsync(request, authenticated: true, cancellationToken);
+        if (!response.Success || string.IsNullOrWhiteSpace(response.ResponseJson))
+        {
+            throw new InvalidOperationException(response.ErrorMessage ?? "Failed to query Zabbix host groups by name.");
+        }
+
+        using var document = JsonDocument.Parse(response.ResponseJson);
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in document.RootElement.GetProperty("result").EnumerateArray())
+        {
+            var name = ReadString(item, "name");
+            var groupId = ReadString(item, "groupid");
+            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(groupId))
+            {
+                result[name] = groupId;
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<string> CreateHostGroupAsync(
+        string groupName,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(groupName))
+        {
+            throw new ArgumentException("Host group name is required.", nameof(groupName));
+        }
+
+        var request = JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            method = "hostgroup.create",
+            @params = new
+            {
+                name = groupName
+            },
+            id = 4
+        }, JsonOptions);
+
+        var response = await SendJsonRpcAsync(request, authenticated: true, cancellationToken);
+        if (!response.Success || string.IsNullOrWhiteSpace(response.ResponseJson))
+        {
+            throw new InvalidOperationException(response.ErrorMessage ?? $"Failed to create Zabbix host group '{groupName}'.");
+        }
+
+        using var document = JsonDocument.Parse(response.ResponseJson);
+        if (document.RootElement.TryGetProperty("result", out var result)
+            && result.TryGetProperty("groupids", out var groupIds)
+            && groupIds.ValueKind == JsonValueKind.Array
+            && groupIds.GetArrayLength() > 0)
+        {
+            var groupId = ReadScalar(groupIds[0]);
+            if (!string.IsNullOrWhiteSpace(groupId))
+            {
+                return groupId;
+            }
+        }
+
+        throw new InvalidOperationException($"Zabbix hostgroup.create did not return a groupid for '{groupName}'.");
+    }
+
     public async Task<IReadOnlyDictionary<string, ZabbixTemplateInfo>> GetTemplateInfosAsync(
         IReadOnlyCollection<string> templateIds,
         CancellationToken cancellationToken)
@@ -73,7 +164,9 @@ public sealed class ZabbixClient(
             {
                 output = new[] { "templateid", "host", "name" },
                 templateids = templateIds,
-                selectGroups = new[] { "groupid", "name" }
+                selectTemplateGroups = new[] { "groupid", "name" },
+                selectItems = new[] { "itemid", "key_", "name", "inventory_link" },
+                selectDiscoveryRules = new[] { "itemid", "key_", "name" }
             },
             id = 2
         }, JsonOptions);
@@ -94,7 +187,23 @@ public sealed class ZabbixClient(
                 continue;
             }
 
-            result[templateId] = new ZabbixTemplateInfo(templateId, ReadTemplateGroupIds(item));
+            var host = ReadString(item, "host") ?? string.Empty;
+            var name = ReadString(item, "name") ?? host;
+            var itemInfos = ReadItemInfos(item, "items");
+            result[templateId] = new ZabbixTemplateInfo(
+                templateId,
+                name,
+                host,
+                ReadTemplateGroupIds(item),
+                itemInfos
+                    .Select(info => info.Key)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+                ReadDiscoveryRuleKeys(item),
+                itemInfos
+                    .Where(info => !string.IsNullOrWhiteSpace(info.InventoryLink)
+                        && !string.Equals(info.InventoryLink, "0", StringComparison.OrdinalIgnoreCase))
+                    .ToArray());
         }
 
         return result;
@@ -230,16 +339,53 @@ public sealed class ZabbixClient(
 
     private static string[] ReadTemplateGroupIds(JsonElement template)
     {
-        if (!template.TryGetProperty("groups", out var groups) || groups.ValueKind != JsonValueKind.Array)
+        if (!template.TryGetProperty("templategroups", out var templateGroups) || templateGroups.ValueKind != JsonValueKind.Array)
         {
             return [];
         }
 
-        return groups
+        return templateGroups
             .EnumerateArray()
             .Select(group => ReadString(group, "groupid"))
             .Where(groupId => !string.IsNullOrWhiteSpace(groupId))
             .ToArray()!;
+    }
+
+    private static string[] ReadDiscoveryRuleKeys(JsonElement template)
+    {
+        return ReadItemKeys(template, "discoveryRules");
+    }
+
+    private static ZabbixTemplateItemInfo[] ReadItemInfos(JsonElement template, string propertyName)
+    {
+        if (!template.TryGetProperty(propertyName, out var items) || items.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return items
+            .EnumerateArray()
+            .Select(item => new ZabbixTemplateItemInfo(
+                ReadString(item, "key_") ?? string.Empty,
+                ReadString(item, "inventory_link") ?? "0"))
+            .Where(info => !string.IsNullOrWhiteSpace(info.Key))
+            .ToArray();
+    }
+
+    private static string[] ReadItemKeys(JsonElement template, string propertyName)
+    {
+        if (!template.TryGetProperty(propertyName, out var items) || items.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return items
+            .EnumerateArray()
+            .Select(item => ReadString(item, "key_"))
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Select(key => key!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string? ReadString(JsonElement element, string propertyName)
@@ -249,6 +395,11 @@ public sealed class ZabbixClient(
             return null;
         }
 
+        return ReadScalar(value);
+    }
+
+    private static string? ReadScalar(JsonElement value)
+    {
         return value.ValueKind switch
         {
             JsonValueKind.String => value.GetString(),

@@ -25,6 +25,20 @@ public sealed class GitConversionRulesProvider(
         return await LoadRulesAsync(forceReload: false, refreshStorage: false, cancellationToken);
     }
 
+    public async Task<ConversionRulesStatusResult> GetStatusAsync(CancellationToken cancellationToken)
+    {
+        var rules = await LoadRulesAsync(forceReload: false, refreshStorage: false, cancellationToken);
+        return new ConversionRulesStatusResult(
+            rules.Name,
+            rules.SchemaVersion,
+            rules.RulesVersion,
+            cachedLocation ?? ResolveRulesFilePath(),
+            cachedVersion,
+            options.Value.ReadFromGit,
+            cachedLastWriteTime,
+            DateTimeOffset.UtcNow);
+    }
+
     public async Task<ConversionRulesReloadResult> ReloadAsync(CancellationToken cancellationToken)
     {
         var rules = await LoadRulesAsync(

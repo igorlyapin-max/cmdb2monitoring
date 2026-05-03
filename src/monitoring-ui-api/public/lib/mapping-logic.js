@@ -54,6 +54,60 @@ export function minimalHostProfileInterfaceMode(fieldKey, fieldRule = {}, target
   return kind === 'dns' ? 'dns' : kind === 'ip' ? 'ip' : '';
 }
 
+export function dynamicZabbixTargetAllowed(type, runtimeSettings = {}) {
+  const zabbix = runtimeSettings?.zabbix ?? {};
+  if (type === 'tags') {
+    return Boolean(zabbix.allowDynamicTagsFromCmdbLeaf);
+  }
+  if (type === 'hostGroups') {
+    return Boolean(zabbix.allowDynamicHostGroupsFromCmdbLeaf);
+  }
+
+  return false;
+}
+
+export function isDynamicFromLeafTarget(target = {}) {
+  return String(target?.targetMode ?? '').toLowerCase() === 'dynamicfromleaf';
+}
+
+export function dynamicTargetForField(type, fieldKey) {
+  const valueField = fieldKey || 'value';
+  if (type === 'hostGroups') {
+    return {
+      targetMode: 'dynamicFromLeaf',
+      valueField,
+      createIfMissing: true,
+      nameTemplate: sourceFieldTemplate(valueField)
+    };
+  }
+  if (type === 'tags') {
+    return {
+      targetMode: 'dynamicFromLeaf',
+      valueField,
+      createIfMissing: true,
+      tag: dynamicTagNameForField(valueField),
+      valueTemplate: sourceFieldTemplate(valueField)
+    };
+  }
+
+  return {};
+}
+
+export function dynamicTagNameForField(fieldKey) {
+  const canonical = canonicalSourceField(fieldKey);
+  const readable = String(canonical || fieldKey || 'value')
+    .replace(/([a-z0-9])([A-Z])/g, '$1.$2');
+  const normalized = normalizeRuleName(readable)
+    .replace(/_/g, '.')
+    .replace(/-+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+  return `cmdb.${normalized || 'value'}`;
+}
+
+export function sourceFieldTemplate(fieldKey) {
+  return `<#= Model.Source("${escapeTemplateString(fieldKey || 'value')}") #>`;
+}
+
 export function classHasHostProfile(rules, className) {
   return (rules?.hostProfiles ?? []).some(profile => hostProfileAppliesToClass(profile, className));
 }
@@ -242,6 +296,10 @@ export function normalizeToken(value) {
 
 export function sameNormalized(left, right) {
   return normalizeToken(left) === normalizeToken(right);
+}
+
+function escapeTemplateString(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 function uniqueHostProfileName(rules, baseName) {

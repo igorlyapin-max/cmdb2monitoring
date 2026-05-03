@@ -127,7 +127,8 @@ async function routeApi(request, response, url, path) {
         provider: idpProvider(),
         roles: publicRoles(),
         usersFilePath: publicUsersFilePath()
-      }
+      },
+      runtime: publicRuntimeCapabilities()
     });
     return;
   }
@@ -365,6 +366,28 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'GET' && path === '/api/zabbix/metadata') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const catalog = await readCatalogCache(config.Zabbix.Catalog.CacheFilePath);
+    sendJson(response, 200, readZabbixMetadata(catalog));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/zabbix/metadata/sync') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const catalog = await syncZabbixCatalog(session);
+    sendJson(response, 200, readZabbixMetadata(catalog));
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/cmdbuild/catalog/status') {
     requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
@@ -448,6 +471,16 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'GET' && path === '/api/settings/runtime-capabilities') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, publicRuntimeCapabilities());
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/settings/runtime') {
     requireRole(session, response, ['admin']);
     if (response.writableEnded) {
@@ -466,6 +499,60 @@ async function routeApi(request, response, url, path) {
 
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
     sendJson(response, 200, await saveRuntimeSettings(payload));
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/api/settings/git') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, await publicGitSettings());
+    return;
+  }
+
+  if (request.method === 'PUT' && path === '/api/settings/git') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await saveGitSettings(payload));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/settings/git/check') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await checkGitSettings(payload));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/settings/git/load') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await loadGitRulesCopy(payload));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/settings/git/export') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await exportGitRulesCopy(payload));
     return;
   }
 
@@ -686,6 +773,7 @@ function applyEnvOverrides(target) {
     ZABBIX_API_TOKEN: ['Zabbix', 'ApiToken'],
     RULES_READ_FROM_GIT: ['Rules', 'ReadFromGit'],
     RULES_REPOSITORY_URL: ['Rules', 'RepositoryUrl'],
+    RULES_REPOSITORY_PATH: ['Rules', 'RepositoryPath'],
     RULES_FILE_PATH: ['Rules', 'RulesFilePath'],
     MONITORING_UI_SETTINGS_FILE: ['UiSettings', 'FilePath'],
     MONITORING_UI_USERS_FILE: ['Auth', 'UsersFilePath'],
@@ -1015,8 +1103,13 @@ function assertNewPassword(password) {
 
 async function readServicesHealth() {
   const items = [];
+  const managementRulesPromise = readManagementRulesStatus();
   await Promise.all((config.Services.HealthEndpoints ?? []).map(async endpoint => {
     const startedAt = Date.now();
+    const rulesStatusSupported = !isBlank(endpoint.RulesStatusUrl ?? endpoint.rulesStatusUrl);
+    const rulesStatusPromise = rulesStatusSupported
+      ? readServiceRulesStatus(endpoint)
+      : Promise.resolve(null);
     try {
       const result = await fetch(endpoint.Url, { signal: AbortSignal.timeout(2000) });
       items.push({
@@ -1026,6 +1119,8 @@ async function readServicesHealth() {
         statusCode: result.status,
         latencyMs: Date.now() - startedAt,
         rulesReloadSupported: !isBlank(endpoint.RulesReloadUrl ?? endpoint.rulesReloadUrl),
+        rulesStatusSupported,
+        rulesStatus: await rulesStatusPromise,
         body: await safeJson(result)
       });
     } catch (error) {
@@ -1036,13 +1131,81 @@ async function readServicesHealth() {
         statusCode: null,
         latencyMs: Date.now() - startedAt,
         rulesReloadSupported: !isBlank(endpoint.RulesReloadUrl ?? endpoint.rulesReloadUrl),
+        rulesStatusSupported,
+        rulesStatus: await rulesStatusPromise,
         error: error instanceof Error ? error.message : 'request_failed'
       });
     }
   }));
 
   items.sort((left, right) => left.name.localeCompare(right.name));
-  return { items };
+  return {
+    items,
+    managementRules: await managementRulesPromise
+  };
+}
+
+async function readServiceRulesStatus(endpoint) {
+  const statusUrl = endpoint.RulesStatusUrl ?? endpoint.rulesStatusUrl ?? '';
+  if (isBlank(statusUrl)) {
+    return null;
+  }
+
+  const token = endpoint.RulesStatusToken
+    ?? endpoint.rulesStatusToken
+    ?? endpoint.RulesReloadToken
+    ?? endpoint.rulesReloadToken
+    ?? '';
+  const startedAt = Date.now();
+  try {
+    const result = await fetch(statusUrl, {
+      headers: {
+        accept: 'application/json',
+        ...(isBlank(token) ? {} : { authorization: `Bearer ${token}` })
+      },
+      signal: AbortSignal.timeout(3000)
+    });
+    const payload = await safeJson(result);
+    return {
+      url: statusUrl,
+      ok: result.ok,
+      statusCode: result.status,
+      latencyMs: Date.now() - startedAt,
+      rules: payload?.rules ?? null,
+      body: payload,
+      error: result.ok ? null : (payload?.detail || payload?.title || payload?.message || `Rules status returned HTTP ${result.status}.`)
+    };
+  } catch (error) {
+    return {
+      url: statusUrl,
+      ok: false,
+      statusCode: null,
+      latencyMs: Date.now() - startedAt,
+      rules: null,
+      error: error instanceof Error ? error.message : 'request_failed'
+    };
+  }
+}
+
+async function readManagementRulesStatus() {
+  try {
+    const rules = await readCurrentRules();
+    return {
+      ok: true,
+      source: rules.source,
+      path: rules.path,
+      resolvedPath: rules.resolvedPath,
+      name: rules.name,
+      schemaVersion: rules.schemaVersion,
+      rulesVersion: rules.rulesVersion,
+      valid: Boolean(rules.validation?.valid)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'rules_read_failed'
+    };
+  }
 }
 
 async function reloadServiceRules(serviceName) {
@@ -1322,11 +1485,14 @@ function headersToObject(headers = {}) {
 }
 
 async function readCurrentRules() {
-  const path = resolveRepoPath(config.Rules.RulesFilePath);
+  const settings = publicRulesSettings();
+  const path = resolveRulesStoragePath(settings);
   const content = await readFile(path, 'utf8');
   const rules = JSON.parse(content);
   return {
-    path: config.Rules.RulesFilePath,
+    path: settings.rulesFilePath,
+    resolvedPath: path,
+    source: settings.readFromGit ? 'git' : 'disk',
     fileName: basename(path),
     schemaVersion: rules.schemaVersion,
     rulesVersion: rules.rulesVersion ?? '',
@@ -1885,6 +2051,7 @@ async function syncZabbixCatalog(session) {
   const credentials = requireZabbixSessionCredentials(session);
   const apiEndpoint = credentials.apiEndpoint || config.Zabbix.ApiEndpoint;
   const token = await resolveZabbixToken(apiEndpoint, credentials);
+  const zabbixVersion = await readZabbixVersion(apiEndpoint);
   const hostGroups = await zabbixCall(apiEndpoint, token, 'hostgroup.get', {
     output: ['groupid', 'name']
   });
@@ -1893,11 +2060,15 @@ async function syncZabbixCatalog(session) {
   });
   const templates = await zabbixCall(apiEndpoint, token, 'template.get', {
     output: ['templateid', 'host', 'name'],
-    selectGroups: ['groupid', 'name']
+    selectTemplateGroups: ['groupid', 'name'],
+    selectParentTemplates: ['templateid', 'host', 'name'],
+    selectItems: ['itemid', 'key_', 'name', 'inventory_link'],
+    selectDiscoveryRules: ['itemid', 'key_', 'name']
   });
   const hosts = await zabbixCallOptional(apiEndpoint, token, 'host.get', {
     output: ['hostid', 'host', 'name'],
-    selectTags: ['tag', 'value']
+    selectTags: ['tag', 'value'],
+    selectParentTemplates: ['templateid', 'host', 'name']
   });
   const tags = collectZabbixTags(hosts);
   const proxies = await zabbixCallOptional(apiEndpoint, token, 'proxy.get', {
@@ -1924,9 +2095,11 @@ async function syncZabbixCatalog(session) {
   const catalog = {
     syncedAt: new Date().toISOString(),
     zabbixEndpoint: apiEndpoint,
+    zabbixVersion,
     hostGroups,
     templateGroups,
     templates,
+    hosts,
     tags,
     proxies,
     proxyGroups,
@@ -1939,9 +2112,24 @@ async function syncZabbixCatalog(session) {
     tlsPskModes: zabbixTlsPskModes(),
     valueMaps
   };
+  catalog.templateCompatibility = buildZabbixTemplateCompatibility(catalog);
   await writeCatalogCache(config.Zabbix.Catalog.CacheFilePath, catalog);
 
   return catalog;
+}
+
+async function readZabbixVersion(apiEndpoint) {
+  try {
+    const result = await zabbixRawCall(apiEndpoint, null, {
+      jsonrpc: '2.0',
+      method: 'apiinfo.version',
+      params: {},
+      id: Date.now()
+    });
+    return result.result ?? '';
+  } catch {
+    return '';
+  }
 }
 
 async function syncCmdbuildCatalog(session) {
@@ -2009,17 +2197,25 @@ async function syncCmdbuildCatalog(session) {
 
   let domains = [];
   try {
-    domains = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/domains', credentials))
-      .map(item => ({
-        name: item.name ?? item._id ?? item.id ?? '',
-        description: item.description ?? item.label ?? item._description ?? '',
-        source: item.source ?? item.sourceClass ?? item._sourceType ?? item.sourceType ?? null,
-        destination: item.destination ?? item.destinationClass ?? item._destinationType ?? item.destinationType
-          ?? item.target ?? item.targetClass ?? item._targetType ?? item.targetType ?? null,
-        cardinality: item.cardinality ?? item.type ?? '',
-        raw: item
-      }))
-      .filter(item => !isBlank(item.name) || !isBlank(item.source) || !isBlank(item.destination));
+    const domainSummaries = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/domains', credentials));
+    for (const summary of domainSummaries.slice(0, 500)) {
+      const domainName = summary.name ?? summary._id ?? summary.id ?? '';
+      let item = summary;
+      if (!isBlank(domainName)) {
+        try {
+          item = normalizeCmdbuildItem(await cmdbuildGet(baseUrl, `/domains/${encodeURIComponent(domainName)}`, credentials)) ?? summary;
+        } catch (error) {
+          item = {
+            ...summary,
+            detailError: error instanceof Error ? error.message : 'request_failed'
+          };
+        }
+      }
+
+      domains.push(normalizeCmdbuildDomain(item));
+    }
+
+    domains = domains.filter(item => !isBlank(item.name) || !isBlank(item.source) || !isBlank(item.destination));
   } catch {
     domains = [];
   }
@@ -2036,6 +2232,18 @@ async function syncCmdbuildCatalog(session) {
   await writeCatalogCache(config.Cmdbuild.Catalog.CacheFilePath, catalog);
 
   return catalog;
+}
+
+function normalizeCmdbuildDomain(item = {}) {
+  return {
+    name: item.name ?? item._id ?? item.id ?? '',
+    description: item.description ?? item.label ?? item._description ?? '',
+    source: item.source ?? item.sourceClass ?? item._sourceType ?? item.sourceType ?? null,
+    destination: item.destination ?? item.destinationClass ?? item._destinationType ?? item.destinationType
+      ?? item.target ?? item.targetClass ?? item._targetType ?? item.targetType ?? null,
+    cardinality: item.cardinality ?? item.type ?? '',
+    raw: item
+  };
 }
 
 async function readCmdbuildWebhooks(session) {
@@ -2480,25 +2688,148 @@ async function saveRuntimeSettings(payload) {
   return publicRuntimeSettings();
 }
 
+async function publicGitSettings() {
+  return {
+    filePath: config.UiSettings?.FilePath ?? 'state/ui-settings.json',
+    rules: publicRulesSettings(),
+    status: await checkGitSettings({ rules: publicRulesSettings() })
+  };
+}
+
+function publicRulesSettings() {
+  const rules = config.Rules ?? {};
+  return {
+    rulesFilePath: rules.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json',
+    readFromGit: Boolean(rules.ReadFromGit),
+    repositoryUrl: rules.RepositoryUrl ?? '',
+    repositoryPath: rules.RepositoryPath ?? ''
+  };
+}
+
+async function saveGitSettings(payload = {}) {
+  const persisted = await readPersistedUiSettings();
+  const rules = normalizeRulesSettingsPayload(payload.rules ?? payload);
+
+  delete persisted.auth;
+  persisted.rules = rules;
+  await writePersistedUiSettings(persisted);
+  applyRuntimeSettings(config, { rules });
+
+  return publicGitSettings();
+}
+
+async function checkGitSettings(payload = {}) {
+  const rules = normalizeRulesSettingsPayload(payload.rules ?? payload);
+  const result = {
+    ok: false,
+    readMode: rules.readFromGit ? 'git' : 'disk',
+    rulesFilePath: rules.rulesFilePath,
+    repositoryUrl: rules.repositoryUrl,
+    repositoryPath: rules.repositoryPath,
+    resolvedRepositoryPath: '',
+    resolvedPath: '',
+    fileExists: false,
+    schemaVersion: '',
+    rulesVersion: '',
+    name: '',
+    message: ''
+  };
+
+  try {
+    const fullPath = resolveRulesStoragePath(rules);
+    result.resolvedRepositoryPath = resolveRulesStorageRoot(rules);
+    result.resolvedPath = fullPath;
+    result.fileExists = existsSync(fullPath);
+    if (!result.fileExists) {
+      result.message = `Rules file does not exist: ${rules.rulesFilePath}`;
+      return result;
+    }
+
+    const rulesDocument = JSON.parse(await readFile(fullPath, 'utf8'));
+    result.schemaVersion = rulesDocument.schemaVersion ?? '';
+    result.rulesVersion = rulesDocument.rulesVersion ?? '';
+    result.name = rulesDocument.name ?? '';
+    if (rules.readFromGit && isBlank(rules.repositoryUrl)) {
+      result.message = 'Git mode is enabled, but repository URL is empty.';
+      return result;
+    }
+
+    result.ok = true;
+    result.message = rules.readFromGit
+      ? 'Git settings are syntactically valid. The operator still publishes rules to git outside monitoring-ui-api.'
+      : 'Disk rules file is available.';
+    return result;
+  } catch (error) {
+    result.message = error instanceof Error ? error.message : String(error);
+    return result;
+  }
+}
+
+async function loadGitRulesCopy(payload = {}) {
+  const rules = normalizeRulesSettingsPayload(payload.rules ?? payload);
+  const status = await checkGitSettings({ rules });
+  if (!status.fileExists) {
+    return {
+      ...status,
+      content: null
+    };
+  }
+
+  const content = JSON.parse(await readFile(status.resolvedPath, 'utf8'));
+  return {
+    ...status,
+    content
+  };
+}
+
+async function exportGitRulesCopy(payload = {}) {
+  const rules = normalizeRulesSettingsPayload(payload.rules ?? payload);
+  const content = payload.content ?? payload.rulesDocument ?? null;
+  if (!content || typeof content !== 'object' || Array.isArray(content)) {
+    throw httpError(400, 'rules_content_required', 'Rules content is required for git export.');
+  }
+
+  const rulesPath = resolveRulesStoragePath(rules);
+  await mkdir(dirname(rulesPath), { recursive: true });
+  await writeFile(rulesPath, `${JSON.stringify(content, null, 2)}\n`, 'utf8');
+
+  const webhooksPath = webhookArtifactPathForRulesPath(rulesPath);
+  const webhooks = redactWebhookSecrets(payload.webhooks ?? {
+    generatedAt: new Date().toISOString(),
+    note: 'Webhook artifact was not supplied by the UI.'
+  });
+  await writeFile(webhooksPath, `${JSON.stringify(webhooks, null, 2)}\n`, 'utf8');
+
+  return {
+    ...(await checkGitSettings({ rules })),
+    written: {
+      rulesPath,
+      webhooksPath
+    },
+    note: 'Files were written to the configured local copy. Commit and push are intentionally not performed by monitoring-ui-api.'
+  };
+}
+
 function normalizeRuntimeSettingsPayload(payload = {}) {
   const cmdbuild = payload.cmdbuild ?? {};
   const zabbix = payload.zabbix ?? {};
-  const rules = payload.rules ?? {};
   const currentMaxTraversalDepth = cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth);
-
-  return {
+  const result = {
     cmdbuild: {
       baseUrl: cmdbuild.baseUrl ?? '',
       maxTraversalDepth: cmdbuildTraversalMaxDepth(cmdbuild.maxTraversalDepth ?? currentMaxTraversalDepth)
     },
     zabbix: {
       apiEndpoint: zabbix.apiEndpoint ?? '',
-      apiToken: zabbix.apiToken ?? zabbix.serviceAccount?.apiToken ?? ''
-    },
-    rules: {
-      rulesFilePath: stringOrDefault(rules.rulesFilePath, config.Rules?.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json'),
-      readFromGit: Boolean(rules.readFromGit),
-      repositoryUrl: rules.repositoryUrl ?? ''
+      apiToken: zabbix.apiToken ?? zabbix.serviceAccount?.apiToken ?? '',
+      allowDynamicTagsFromCmdbLeaf: booleanSettingOrDefault(
+        zabbix,
+        'allowDynamicTagsFromCmdbLeaf',
+        Boolean(config.Zabbix.AllowDynamicTagsFromCmdbLeaf)),
+      allowDynamicHostGroupsFromCmdbLeaf: booleanSettingOrDefault(
+        zabbix,
+        'allowDynamicHostGroupsFromCmdbLeaf',
+        Boolean(config.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf))
     },
     eventBrowser: {
       enabled: Boolean(payload.eventBrowser?.enabled),
@@ -2514,6 +2845,73 @@ function normalizeRuntimeSettingsPayload(payload = {}) {
       topics: normalizeEventTopics(payload.eventBrowser?.topics)
     }
   };
+  if (payload.rules !== undefined) {
+    result.rules = normalizeRulesSettingsPayload(payload.rules);
+  }
+  return result;
+}
+
+function normalizeRulesSettingsPayload(rules = {}) {
+  return {
+    rulesFilePath: stringOrDefault(rules.rulesFilePath, config.Rules?.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json'),
+    readFromGit: Boolean(rules.readFromGit),
+    repositoryUrl: rules.repositoryUrl ?? '',
+    repositoryPath: stringOrDefault(rules.repositoryPath, config.Rules?.RepositoryPath ?? '')
+  };
+}
+
+function resolveRulesStorageRoot(rules) {
+  if (!rules.readFromGit || isBlank(rules.repositoryPath)) {
+    return repositoryRoot;
+  }
+
+  return resolveRepoPath(rules.repositoryPath);
+}
+
+function resolveRulesStoragePath(rules) {
+  const root = resolveRulesStorageRoot(rules);
+  const fullPath = resolve(root, rules.rulesFilePath);
+  if (!isPathInside(root, fullPath)) {
+    throw httpError(400, 'invalid_rules_path', 'Rules file path escapes configured storage root.');
+  }
+
+  return fullPath;
+}
+
+function webhookArtifactPathForRulesPath(rulesPath) {
+  const extension = extname(rulesPath) || '.json';
+  return join(dirname(rulesPath), `${basename(rulesPath, extension)}.webhooks.json`);
+}
+
+function redactWebhookSecrets(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactWebhookSecrets);
+  }
+  if (!value || typeof value !== 'object') {
+    return redactSecretString(value);
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    key,
+    isSecretKey(key) ? 'XXXXX' : redactWebhookSecrets(nested)
+  ]));
+}
+
+function redactSecretString(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  return value.replace(/Bearer\s+[-._~+/=A-Za-z0-9]+/gi, 'Bearer XXXXX');
+}
+
+function isSecretKey(key) {
+  const normalized = normalizeToken(key);
+  return normalized.includes('authorization')
+    || normalized.includes('token')
+    || normalized.includes('password')
+    || normalized.includes('secret')
+    || normalized.includes('apikey');
 }
 
 function applyRuntimeSettings(target, persisted = {}) {
@@ -2534,6 +2932,14 @@ function applyRuntimeSettings(target, persisted = {}) {
       ?? target.Zabbix.ApiToken
       ?? target.Zabbix.ServiceAccount?.ApiToken
       ?? '';
+    target.Zabbix.AllowDynamicTagsFromCmdbLeaf = booleanSettingOrDefault(
+      persisted.zabbix,
+      'allowDynamicTagsFromCmdbLeaf',
+      target.Zabbix.AllowDynamicTagsFromCmdbLeaf);
+    target.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf = booleanSettingOrDefault(
+      persisted.zabbix,
+      'allowDynamicHostGroupsFromCmdbLeaf',
+      target.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf);
     delete target.Zabbix.UseIdp;
     delete target.Zabbix.ServiceAccount;
   }
@@ -2545,6 +2951,7 @@ function applyRuntimeSettings(target, persisted = {}) {
       target.Rules.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json');
     target.Rules.ReadFromGit = Boolean(persisted.rules.readFromGit);
     target.Rules.RepositoryUrl = persisted.rules.repositoryUrl ?? target.Rules.RepositoryUrl ?? '';
+    target.Rules.RepositoryPath = persisted.rules.repositoryPath ?? target.Rules.RepositoryPath ?? '';
   }
 
   if (persisted.eventBrowser) {
@@ -3209,7 +3616,9 @@ function publicRuntimeSettings() {
     },
     zabbix: {
       apiEndpoint: config.Zabbix.ApiEndpoint ?? '',
-      apiToken: currentZabbixApiToken(null)
+      apiToken: currentZabbixApiToken(null),
+      allowDynamicTagsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicTagsFromCmdbLeaf),
+      allowDynamicHostGroupsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf)
     },
     rules: {
       rulesFilePath: rules.RulesFilePath ?? 'rules/cmdbuild-to-zabbix-host-create.json',
@@ -3228,6 +3637,15 @@ function publicRuntimeSettings() {
       maxMessages: eventBrowser.MaxMessages ?? 50,
       readTimeoutMs: eventBrowser.ReadTimeoutMs ?? 2500,
       topics: publicEventTopics()
+    }
+  };
+}
+
+function publicRuntimeCapabilities() {
+  return {
+    zabbix: {
+      allowDynamicTagsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicTagsFromCmdbLeaf),
+      allowDynamicHostGroupsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf)
     }
   };
 }
@@ -3937,13 +4355,227 @@ function withCatalogDefaults(catalog) {
     return catalog;
   }
 
-  return {
+  const withDefaults = {
     ...catalog,
     inventoryFields: catalog.inventoryFields ?? zabbixInventoryFields(),
     interfaceProfiles: catalog.interfaceProfiles ?? zabbixInterfaceProfiles(),
     hostStatuses: catalog.hostStatuses ?? zabbixHostStatuses(),
     tlsPskModes: catalog.tlsPskModes ?? zabbixTlsPskModes()
   };
+  withDefaults.templateCompatibility ??= buildZabbixTemplateCompatibility(withDefaults);
+  return withDefaults;
+}
+
+function readZabbixMetadata(catalog) {
+  const normalized = withCatalogDefaults(catalog) ?? {};
+  const templates = normalizeZabbixTemplateMetadata(normalized.templates ?? []);
+  const hosts = normalizeZabbixHostTemplateMetadata(normalized.hosts ?? []);
+  const compatibility = normalized.templateCompatibility ?? buildZabbixTemplateCompatibility(normalized);
+  return {
+    syncedAt: normalized.syncedAt ?? null,
+    zabbixEndpoint: normalized.zabbixEndpoint ?? null,
+    zabbixVersion: normalized.zabbixVersion ?? '',
+    templateCount: templates.length,
+    hostCount: hosts.length,
+    hostGroupCount: Array.isArray(normalized.hostGroups) ? normalized.hostGroups.length : 0,
+    conflictCount: compatibility.conflicts?.length ?? 0,
+    templates,
+    hosts,
+    conflicts: compatibility.conflicts ?? [],
+    indexes: compatibility.indexes ?? {}
+  };
+}
+
+function buildZabbixTemplateCompatibility(catalog = {}) {
+  const templates = normalizeZabbixTemplateMetadata(catalog.templates ?? []);
+  const conflicts = [
+    ...duplicateTemplateMetadataConflicts(templates, 'itemKey', template => template.itemKeys),
+    ...duplicateTemplateMetadataConflicts(templates, 'discoveryRuleKey', template => template.discoveryRuleKeys),
+    ...duplicateTemplateInventoryConflicts(templates)
+  ].sort((left, right) => compareText(left.type, right.type) || compareText(left.key, right.key));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    conflicts,
+    indexes: {
+      templatesByItemKey: metadataIndexByTemplateKeys(templates, template => template.itemKeys),
+      templatesByDiscoveryRuleKey: metadataIndexByTemplateKeys(templates, template => template.discoveryRuleKeys),
+      templatesByInventoryLink: metadataIndexByTemplateInventory(templates)
+    }
+  };
+}
+
+function normalizeZabbixTemplateMetadata(templates) {
+  return (Array.isArray(templates) ? templates : [])
+    .map(template => {
+      const itemInfos = normalizeZabbixItems(template.items);
+      return {
+        templateid: template.templateid ?? '',
+        host: template.host ?? '',
+        name: template.name ?? template.host ?? template.templateid ?? '',
+        groups: template.templategroups ?? template.groups ?? [],
+        parentTemplates: template.parentTemplates ?? [],
+        itemKeys: uniqueStrings(itemInfos.map(item => item.key)),
+        discoveryRuleKeys: uniqueStrings(normalizeZabbixItems(template.discoveryRules).map(item => item.key)),
+        inventoryLinks: itemInfos
+          .filter(item => !isBlank(item.inventoryLink) && item.inventoryLink !== '0')
+          .map(item => ({
+            inventoryLink: item.inventoryLink,
+            itemKey: item.key,
+            itemName: item.name
+          }))
+      };
+    })
+    .filter(template => !isBlank(template.templateid));
+}
+
+function normalizeZabbixItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map(item => ({
+      key: item.key_ ?? item.key ?? '',
+      name: item.name ?? '',
+      inventoryLink: String(item.inventory_link ?? item.inventoryLink ?? '0')
+    }))
+    .filter(item => !isBlank(item.key));
+}
+
+function normalizeZabbixHostTemplateMetadata(hosts) {
+  return (Array.isArray(hosts) ? hosts : [])
+    .map(host => ({
+      hostid: host.hostid ?? '',
+      host: host.host ?? '',
+      name: host.name ?? host.host ?? host.hostid ?? '',
+      parentTemplates: (host.parentTemplates ?? []).map(templateConflictOwner)
+    }))
+    .filter(host => !isBlank(host.hostid));
+}
+
+function duplicateTemplateMetadataConflicts(templates, type, keySelector) {
+  const ownersByKey = new Map();
+  for (const template of templates) {
+    for (const key of keySelector(template)) {
+      if (isBlank(key)) {
+        continue;
+      }
+      const owners = ownersByKey.get(key) ?? [];
+      owners.push(templateConflictOwner(template));
+      ownersByKey.set(key, owners);
+    }
+  }
+
+  return [...ownersByKey.entries()]
+    .filter(([, owners]) => uniqueStrings(owners.map(owner => owner.templateid)).length > 1)
+    .map(([key, owners]) => ({
+      type,
+      key,
+      templates: uniqueTemplateOwners(owners),
+      message: templateConflictMessage(type, key, owners)
+    }));
+}
+
+function duplicateTemplateInventoryConflicts(templates) {
+  const ownersByInventoryLink = new Map();
+  for (const template of templates) {
+    for (const link of template.inventoryLinks ?? []) {
+      const owners = ownersByInventoryLink.get(link.inventoryLink) ?? [];
+      owners.push({
+        ...templateConflictOwner(template),
+        itemKey: link.itemKey,
+        itemName: link.itemName
+      });
+      ownersByInventoryLink.set(link.inventoryLink, owners);
+    }
+  }
+
+  return [...ownersByInventoryLink.entries()]
+    .filter(([, owners]) => uniqueStrings(owners.map(owner => owner.templateid)).length > 1)
+    .map(([key, owners]) => ({
+      type: 'inventoryLink',
+      key,
+      templates: uniqueTemplateOwners(owners),
+      items: owners.map(owner => ({
+        templateid: owner.templateid,
+        templateName: owner.name,
+        itemKey: owner.itemKey,
+        itemName: owner.itemName
+      })),
+      message: templateConflictMessage('inventoryLink', key, owners)
+    }));
+}
+
+function templateConflictOwner(template) {
+  return {
+    templateid: template.templateid,
+    name: template.name || template.host || template.templateid,
+    host: template.host
+  };
+}
+
+function uniqueTemplateOwners(owners) {
+  const seen = new Set();
+  const result = [];
+  for (const owner of owners) {
+    const key = normalizeToken(owner.templateid);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push({
+      templateid: owner.templateid,
+      name: owner.name,
+      host: owner.host
+    });
+  }
+  return result;
+}
+
+function templateConflictMessage(type, key, owners) {
+  const names = uniqueTemplateOwners(owners)
+    .map(owner => `${owner.name || owner.host || owner.templateid} (${owner.templateid})`)
+    .join(', ');
+  const label = {
+    itemKey: 'duplicate item key',
+    discoveryRuleKey: 'duplicate LLD rule key',
+    inventoryLink: 'duplicate inventory link'
+  }[type] ?? type;
+  return `${label} ${key}: ${names}`;
+}
+
+function metadataIndexByTemplateKeys(templates, keySelector) {
+  const index = {};
+  for (const template of templates) {
+    for (const key of keySelector(template)) {
+      if (isBlank(key)) {
+        continue;
+      }
+      index[key] ??= [];
+      index[key].push(templateConflictOwner(template));
+    }
+  }
+  return index;
+}
+
+function metadataIndexByTemplateInventory(templates) {
+  const index = {};
+  for (const template of templates) {
+    for (const link of template.inventoryLinks ?? []) {
+      if (isBlank(link.inventoryLink)) {
+        continue;
+      }
+      index[link.inventoryLink] ??= [];
+      index[link.inventoryLink].push({
+        ...templateConflictOwner(template),
+        itemKey: link.itemKey
+      });
+    }
+  }
+  return index;
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values
+    .map(value => String(value ?? '').trim())
+    .filter(Boolean))];
 }
 
 function readCatalogCollection(catalog, name) {
@@ -3978,12 +4610,19 @@ function readZabbixMappingCatalog(catalog) {
     templateid: template.templateid,
     host: template.host,
     name: template.name,
-    groups: template.groups
+    groups: template.templategroups ?? template.groups ?? [],
+    itemKeys: normalizeZabbixItems(template.items).map(item => item.key),
+    discoveryRuleKeys: normalizeZabbixItems(template.discoveryRules).map(item => item.key),
+    inventoryLinks: normalizeZabbixItems(template.items)
+      .filter(item => !isBlank(item.inventoryLink) && item.inventoryLink !== '0')
+      .map(item => ({ inventoryLink: item.inventoryLink, itemKey: item.key }))
   }));
 
   return {
     syncedAt: catalog?.syncedAt ?? null,
     zabbixEndpoint: catalog?.zabbixEndpoint ?? null,
+    zabbixVersion: catalog?.zabbixVersion ?? '',
+    templateCompatibility: catalog?.templateCompatibility ?? buildZabbixTemplateCompatibility(catalog ?? {}),
     hostGroups: collection('hostGroups'),
     templateGroups: collection('templateGroups'),
     templates: compactTemplates,
@@ -4147,6 +4786,22 @@ function normalizeCmdbuildList(result) {
   return [];
 }
 
+function normalizeCmdbuildItem(result) {
+  if (Array.isArray(result)) {
+    return result[0] ?? null;
+  }
+
+  if (isPlainObject(result?.data)) {
+    return result.data;
+  }
+
+  if (isPlainObject(result?.item)) {
+    return result.item;
+  }
+
+  return isPlainObject(result) ? result : null;
+}
+
 function collectLookupIds(value, idPropertyName, result = new Set()) {
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -4298,11 +4953,16 @@ function resolveServicePath(path, directoryOnly) {
 
 function resolveRepoPath(path) {
   const fullPath = resolve(repositoryRoot, path);
-  if (!fullPath.startsWith(repositoryRoot)) {
+  if (!isPathInside(repositoryRoot, fullPath)) {
     throw httpError(400, 'invalid_path', 'Configured path escapes repository root.');
   }
 
   return fullPath;
+}
+
+function isPathInside(root, path) {
+  const relativePath = relative(root, path);
+  return relativePath === '' || (!relativePath.startsWith('..') && !relativePath.startsWith('/'));
 }
 
 function resolveUiSettingsFile(target) {
@@ -4325,6 +4985,12 @@ function withoutTrailingSlash(value) {
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function booleanSettingOrDefault(source, key, defaultValue) {
+  return Object.prototype.hasOwnProperty.call(source ?? {}, key)
+    ? Boolean(source[key])
+    : Boolean(defaultValue);
 }
 
 function isBlank(value) {
@@ -4632,6 +5298,10 @@ function preferredSamlBindingLocation(services) {
 
 function equalsIgnoreCase(left, right) {
   return String(left ?? '').toLowerCase() === String(right ?? '').toLowerCase();
+}
+
+function compareText(left, right) {
+  return String(left ?? '').localeCompare(String(right ?? ''), undefined, { sensitivity: 'base' });
 }
 
 function normalizeToken(value) {

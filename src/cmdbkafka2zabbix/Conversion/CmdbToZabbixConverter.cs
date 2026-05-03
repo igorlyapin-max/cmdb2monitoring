@@ -212,7 +212,7 @@ public sealed class CmdbToZabbixConverter(
             InventoryMode = rules.Defaults.Host.InventoryMode,
             Interface = firstInterface,
             Interfaces = interfaces,
-            Groups = SelectGroups(source, rules),
+            Groups = SelectGroups(source, rules, renderModel),
             Templates = templateSelection.Templates,
             TemplatesToClear = templateSelection.TemplatesToClear,
             Tags = BuildTags(source, rules, renderModel),
@@ -467,14 +467,17 @@ public sealed class CmdbToZabbixConverter(
         return $"{source.ClassName ?? source.EntityType ?? "Host"} {source.Code ?? source.EntityId}".Trim();
     }
 
-    private List<ZabbixGroupModel> SelectGroups(CmdbSourceEvent source, ConversionRulesDocument rules)
+    private List<ZabbixGroupModel> SelectGroups(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        ZabbixHostCreateModel model)
     {
-        var matched = new List<LookupItem>();
+        var matched = new List<ZabbixGroupModel>();
         foreach (var rule in rules.GroupSelectionRules.Where(rule => !rule.Fallback).OrderBy(rule => rule.Priority))
         {
             if (Matches(source, rule.When))
             {
-                matched.AddRange(ResolveGroups(rule, rules));
+                matched.AddRange(ResolveGroups(rule, rules, source, model));
             }
         }
 
@@ -484,15 +487,15 @@ public sealed class CmdbToZabbixConverter(
             {
                 if (Matches(source, rule.When))
                 {
-                    matched.AddRange(ResolveGroups(rule, rules));
+                    matched.AddRange(ResolveGroups(rule, rules, source, model));
                 }
             }
         }
 
         return matched
-            .Where(item => !string.IsNullOrWhiteSpace(item.GroupId))
-            .GroupBy(item => item.GroupId, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new ZabbixGroupModel(group.First().Name, group.Key))
+            .Where(item => !string.IsNullOrWhiteSpace(item.GroupId) || !string.IsNullOrWhiteSpace(item.Name))
+            .GroupBy(GroupKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
             .ToList();
     }
 
@@ -846,7 +849,7 @@ public sealed class CmdbToZabbixConverter(
             .Where(rule => !rule.Fallback)
             .OrderBy(rule => rule.Priority)
             .Where(rule => Matches(source, rule.When))
-            .SelectMany(rule => ResolveTags(rule, rules))
+            .SelectMany(rule => ResolveTags(rule, rules, source, model))
             .ToArray();
         if (matched.Length > 0)
         {
@@ -858,18 +861,22 @@ public sealed class CmdbToZabbixConverter(
                 .Where(rule => rule.Fallback)
                 .OrderBy(rule => rule.Priority)
                 .Where(rule => Matches(source, rule.When))
-                .SelectMany(rule => ResolveTags(rule, rules)));
+                .SelectMany(rule => ResolveTags(rule, rules, source, model)));
         }
 
         return tags
             .Where(tag => !string.IsNullOrWhiteSpace(tag.Tag))
-            .Select(tag => new ZabbixTagModel(
-                tag.Tag,
-                !string.IsNullOrWhiteSpace(tag.Value)
-                    ? tag.Value
-                    : templateRenderer.RenderSimple(tag.ValueTemplate, model)))
-            .GroupBy(tag => tag.Tag, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.Last())
+            .Select(tag => new
+            {
+                tag.AllowMultipleValues,
+                Model = new ZabbixTagModel(
+                    tag.Tag,
+                    !string.IsNullOrWhiteSpace(tag.Value)
+                        ? tag.Value
+                        : templateRenderer.RenderSimple(tag.ValueTemplate, model))
+            })
+            .GroupBy(tag => tag.AllowMultipleValues ? $"{tag.Model.Tag}\u001f{tag.Model.Value}" : tag.Model.Tag, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last().Model)
             .ToList();
     }
 
@@ -1135,16 +1142,84 @@ public sealed class CmdbToZabbixConverter(
         return builder.ToString();
     }
 
-    private static LookupItem[] ResolveGroups(SelectionRule rule, ConversionRulesDocument rules)
+    private ZabbixGroupModel[] ResolveGroups(
+        SelectionRule rule,
+        ConversionRulesDocument rules,
+        CmdbSourceEvent source,
+        ZabbixHostCreateModel model)
     {
-        if (rule.HostGroups.Length > 0)
+        if (IsDynamicFromLeaf(rule))
         {
-            return rule.HostGroups;
+            return ResolveDynamicGroups(rule, source, model);
         }
 
-        return string.Equals(rule.HostGroupsRef, "defaults.hostGroups", StringComparison.OrdinalIgnoreCase)
+        var groups = rule.HostGroups.Length > 0
+            ? rule.HostGroups
+            : string.Equals(rule.HostGroupsRef, "defaults.hostGroups", StringComparison.OrdinalIgnoreCase)
             ? rules.Defaults.HostGroups
             : [];
+
+        return groups.Select(group => new ZabbixGroupModel(
+                group.Name,
+                group.GroupId,
+                group.CreateIfMissing || rule.CreateIfMissing))
+            .ToArray();
+    }
+
+    private ZabbixGroupModel[] ResolveDynamicGroups(
+        SelectionRule rule,
+        CmdbSourceEvent source,
+        ZabbixHostCreateModel model)
+    {
+        var valueField = DynamicValueField(rule);
+        var template = rule.HostGroups.FirstOrDefault()?.NameTemplate;
+        var rawValue = !string.IsNullOrWhiteSpace(template)
+            ? templateRenderer.RenderSimple(template, model)
+            : ReadField(source, valueField);
+
+        return SplitDynamicLeafValues(rawValue)
+            .Select(value => new ZabbixGroupModel(
+                value,
+                string.Empty,
+                rule.CreateIfMissing || rule.HostGroups.Any(group => group.CreateIfMissing)))
+            .ToArray();
+    }
+
+    private static bool IsDynamicFromLeaf(SelectionRule rule)
+    {
+        return string.Equals(rule.TargetMode, "dynamicFromLeaf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DynamicValueField(SelectionRule rule)
+    {
+        if (!string.IsNullOrWhiteSpace(rule.ValueField))
+        {
+            return rule.ValueField;
+        }
+
+        return rule.When.AllRegex
+            .Concat(rule.When.AnyRegex)
+            .Select(regex => regex.Field)
+            .FirstOrDefault(field => !string.IsNullOrWhiteSpace(field)
+                && !string.Equals(CanonicalFieldName(field), "className", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(CanonicalFieldName(field), "eventType", StringComparison.OrdinalIgnoreCase))
+            ?? string.Empty;
+    }
+
+    private static string[] SplitDynamicLeafValues(string? value)
+    {
+        return (value ?? string.Empty)
+            .Split(new[] { '\n', ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string GroupKey(ZabbixGroupModel group)
+    {
+        return !string.IsNullOrWhiteSpace(group.GroupId)
+            ? $"id:{group.GroupId}"
+            : $"name:{group.Name}";
     }
 
     private static LookupItem[] ResolveTemplates(SelectionRule rule, ConversionRulesDocument rules)
@@ -1174,8 +1249,17 @@ public sealed class CmdbToZabbixConverter(
         };
     }
 
-    private static TagDefinition[] ResolveTags(SelectionRule rule, ConversionRulesDocument rules)
+    private TagDefinition[] ResolveTags(
+        SelectionRule rule,
+        ConversionRulesDocument rules,
+        CmdbSourceEvent source,
+        ZabbixHostCreateModel model)
     {
+        if (IsDynamicFromLeaf(rule))
+        {
+            return ResolveDynamicTags(rule, source, model);
+        }
+
         if (rule.Tags.Length > 0)
         {
             return rule.Tags;
@@ -1184,6 +1268,36 @@ public sealed class CmdbToZabbixConverter(
         return string.Equals(rule.TagsRef, "defaults.tags", StringComparison.OrdinalIgnoreCase)
             ? rules.Defaults.Tags
             : [];
+    }
+
+    private TagDefinition[] ResolveDynamicTags(
+        SelectionRule rule,
+        CmdbSourceEvent source,
+        ZabbixHostCreateModel model)
+    {
+        var valueField = DynamicValueField(rule);
+        var configuredTag = rule.Tags.FirstOrDefault();
+        var tagName = configuredTag?.Tag;
+        if (string.IsNullOrWhiteSpace(tagName))
+        {
+            var suffix = ToSnakeCase(valueField).Replace('_', '.');
+            tagName = $"cmdb.{(string.IsNullOrWhiteSpace(suffix) ? "value" : suffix)}";
+        }
+
+        var rawValue = !string.IsNullOrWhiteSpace(configuredTag?.Value)
+            ? configuredTag.Value
+            : !string.IsNullOrWhiteSpace(configuredTag?.ValueTemplate)
+                ? templateRenderer.RenderSimple(configuredTag.ValueTemplate, model)
+                : ReadField(source, valueField);
+
+        return SplitDynamicLeafValues(rawValue)
+            .Select(value => new TagDefinition
+            {
+                Tag = tagName,
+                Value = value,
+                AllowMultipleValues = true
+            })
+            .ToArray();
     }
 
     private static ProxyDefinition[] ResolveProxies(SelectionRule rule, ConversionRulesDocument rules)

@@ -54,6 +54,7 @@ This file records mandatory project development rules. If a rule conflicts with 
 
 - Conversion rules are stored as Git-managed JSON.
 - Current demo rules file: `rules/cmdbuild-to-zabbix-host-create.json`.
+- `monitoring-ui-api` does not commit or push rules. `Git Settings` may only read/write a local working copy and neighboring `*.webhooks.json`; secrets in webhook artifacts must be masked as `XXXXX`.
 - Regex is used both for validation and for selecting groups, templates, interfaces, and tags.
 - Rules must support extended Zabbix host parameters without code changes: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances, and value maps.
 - Rules must support `hostProfiles[]`: one CMDB object can produce one Zabbix host with multiple `interfaces[]` or multiple Zabbix hosts through fan-out.
@@ -63,6 +64,7 @@ This file records mandatory project development rules. If a rule conflicts with 
 - For lookup source fields, the normal value before regex/T4 is lookup `code`; numeric ids are only fallback values when the CMDBuild resolver is not configured.
 - For multiple Zabbix interfaces of the same type in one host, exactly one interface must have `main=1`; the rest must have `main=0`.
 - Incompatible Zabbix templates must be handled through `templateConflictRules`; update fallback passes already linked conflicting templates through `templates_clear`.
+- Dynamic host groups from a CMDBuild leaf must not only be created/resolved in Zabbix; their `groupid` must be substituted into the same `host.create`/`host.update` payload. Dynamic tags are sent directly in `params.tags[]` of the current host payload.
 - New T4 templates must use `Model.Interfaces`; `Model.Interface` is kept only for backward compatibility with the first interface.
 - Final JSON-RPC payload is rendered by T4 templates from the rules file.
 - After changing a rules file, run `./scripts/test-configs.sh` and build affected `.csproj` files through `./scripts/dotnet build <project>.csproj -v minimal`.

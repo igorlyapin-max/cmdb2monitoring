@@ -8,6 +8,14 @@ public interface IZabbixClient
         IReadOnlyCollection<string> groupIds,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyDictionary<string, string>> GetHostGroupIdsByNameAsync(
+        IReadOnlyCollection<string> groupNames,
+        CancellationToken cancellationToken);
+
+    Task<string> CreateHostGroupAsync(
+        string groupName,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyDictionary<string, ZabbixTemplateInfo>> GetTemplateInfosAsync(
         IReadOnlyCollection<string> templateIds,
         CancellationToken cancellationToken);

@@ -11,6 +11,7 @@ public sealed class KafkaZabbixRequestWorker(
     IOptions<ProcessingOptions> processingOptions,
     ZabbixRequestReader requestReader,
     ZabbixRequestValidator requestValidator,
+    ZabbixDynamicHostGroupResolver dynamicHostGroupResolver,
     IZabbixClient zabbixClient,
     IZabbixResponsePublisher responsePublisher,
     IProcessingStateStore stateStore,
@@ -217,6 +218,7 @@ public sealed class KafkaZabbixRequestWorker(
         ZabbixRequestDocument request,
         CancellationToken cancellationToken)
     {
+        request = await dynamicHostGroupResolver.ResolveAsync(request, cancellationToken);
         var validation = await requestValidator.ValidateAsync(request, cancellationToken);
         if (!validation.IsValid)
         {
@@ -336,6 +338,7 @@ public sealed class KafkaZabbixRequestWorker(
             lookupRequest,
             hostInfo);
         var updateRequest = requestReader.Read(lookupRequest.EntityId, updateRequestJson, lookupRequest.Host);
+        updateRequest = await dynamicHostGroupResolver.ResolveAsync(updateRequest, cancellationToken);
         var updateValidation = await requestValidator.ValidateAsync(updateRequest, cancellationToken);
         if (!updateValidation.IsValid)
         {
@@ -405,6 +408,7 @@ public sealed class KafkaZabbixRequestWorker(
             updateRequest.Params,
             hostInfo);
         var mergedUpdateRequest = requestReader.Read(updateRequest.EntityId, mergedUpdateRequestJson, updateRequest.Host);
+        mergedUpdateRequest = await dynamicHostGroupResolver.ResolveAsync(mergedUpdateRequest, cancellationToken);
         var mergedValidation = await requestValidator.ValidateAsync(mergedUpdateRequest, cancellationToken);
         if (!mergedValidation.IsValid)
         {
@@ -438,6 +442,7 @@ public sealed class KafkaZabbixRequestWorker(
 
         var createRequestJson = BuildHostCreateRequestJson(lookupRequest);
         var createRequest = requestReader.Read(lookupRequest.EntityId, createRequestJson, lookupRequest.Host);
+        createRequest = await dynamicHostGroupResolver.ResolveAsync(createRequest, cancellationToken);
         var createValidation = await requestValidator.ValidateAsync(createRequest, cancellationToken);
         if (!createValidation.IsValid)
         {
@@ -659,7 +664,7 @@ public sealed class KafkaZabbixRequestWorker(
                 if (string.Equals(property.Name, "tags", StringComparison.OrdinalIgnoreCase)
                     && property.Value.ValueKind == JsonValueKind.Array)
                 {
-                    WriteMergedObjectArrayByKey(writer, "tags", property.Value, hostInfo.Tags, "tag", false);
+                    WriteMergedTags(writer, property.Value, hostInfo.Tags);
                     continue;
                 }
 
@@ -940,6 +945,50 @@ public sealed class KafkaZabbixRequestWorker(
         writer.WriteEndArray();
     }
 
+    private static void WriteMergedTags(
+        Utf8JsonWriter writer,
+        JsonElement desiredTags,
+        IReadOnlyCollection<JsonElement> existingTags)
+    {
+        var desiredByKey = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        var desiredKeyOrder = new List<string>();
+        foreach (var desired in desiredTags.EnumerateArray())
+        {
+            var key = TagKey(desired);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                key = $"raw:{desired.GetRawText()}";
+            }
+
+            if (!desiredByKey.ContainsKey(key))
+            {
+                desiredKeyOrder.Add(key);
+            }
+
+            desiredByKey[key] = desired.Clone();
+        }
+
+        writer.WritePropertyName("tags");
+        writer.WriteStartArray();
+        foreach (var existing in existingTags)
+        {
+            var key = TagKey(existing);
+            if (string.IsNullOrWhiteSpace(key) || desiredByKey.ContainsKey(key))
+            {
+                continue;
+            }
+
+            existing.WriteTo(writer);
+        }
+
+        foreach (var key in desiredKeyOrder)
+        {
+            desiredByKey[key].WriteTo(writer);
+        }
+
+        writer.WriteEndArray();
+    }
+
     private static void WriteMergedObject(
         Utf8JsonWriter writer,
         string propertyName,
@@ -1060,6 +1109,17 @@ public sealed class KafkaZabbixRequestWorker(
         }
 
         return index == 0 ? existingInterfaces.FirstOrDefault()?.InterfaceId : null;
+    }
+
+    private static string TagKey(JsonElement tag)
+    {
+        var tagName = ReadString(tag, "tag");
+        if (string.IsNullOrWhiteSpace(tagName))
+        {
+            return string.Empty;
+        }
+
+        return $"{tagName}\u001f{ReadString(tag, "value") ?? string.Empty}";
     }
 
     private static bool SameScalar(string? left, string? right)

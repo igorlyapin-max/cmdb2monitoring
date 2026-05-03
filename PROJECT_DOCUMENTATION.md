@@ -1,6 +1,6 @@
 # Документация проекта cmdb2monitoring
 
-Версия документации: `0.6.2`.
+Версия документации: `0.7.0`.
 Дата актуализации: 2026-05-03.
 
 ## Назначение
@@ -17,7 +17,9 @@
 - раздел `Настройка webhooks`: загрузка текущих CMDBuild webhooks, анализ rules, план create/update/delete и применение выбранных операций в CMDBuild для ролей `editor`/`admin`;
 - просмотр последних сообщений Kafka topics на вкладке Events;
 - синхронизация справочников Zabbix и CMDBuild;
+- раздел `Метаданные Zabbix`: templates, item keys, LLD rule keys, inventory bindings и индекс конфликтов templates для редактора и логического контроля;
 - подменю `Runtime-настройки` для endpoint/topic параметров;
+- подменю `Настройка git` для параметров чтения файла правил с диска или из git working copy;
 - подменю `Авторизация` для локального входа, MS AD и IdP;
 - выбор русского или английского языка интерфейса на экране входа; меню, Help и базовые подсказки должны использовать выбранный язык;
 - local login;
@@ -78,7 +80,7 @@ http://192.168.202.100:5080/webhooks/cmdbuild
 - Zabbix предоставляет JSON-RPC `/api_jsonrpc.php` с методами и payload structures, которые используют rules/T4;
 - Kafka topics созданы внешней инфраструктурой, а broker доступен по настроенному protocol/security.
 
-Ожидаемо совместимые версии: CMDBuild `4.x` с REST v3, Zabbix `7.0.x LTS`, Kafka `3.x`. Все остальные major/minor переходы требуют отдельного smoke: health, catalog sync, rules dry-run и create/update/delete цепочка.
+Ожидаемо совместимые версии: CMDBuild `4.x` с REST v3, Zabbix `7.0.x LTS` и более новые 7.x версии, сохраняющие `template.get` subselects `selectTemplateGroups`, `selectItems`, `selectDiscoveryRules`, Kafka `3.x`. Все остальные major/minor переходы требуют отдельного smoke: health, catalog sync, rules dry-run и create/update/delete цепочка.
 
 ## Kafka topics
 
@@ -163,6 +165,7 @@ Rules-файл отвечает за:
 - regex validation;
 - lookup/reference/domain path conversion: `source.fields[].cmdbPath` хранит путь CMDBuild, а `resolve` задает, нужно ли поднять leaf через REST;
 - выбор host profiles, host groups/templates/interfaces/tags;
+- динамическое расширение только для `tags` и `hostGroups`: rule с `targetMode=dynamicFromLeaf` читает выбранный CMDBuild leaf через `valueField`; для tags формируется `tags[]`, для host groups формируется `groups[]` с name/createIfMissing до этапа Zabbix writer, а после resolve/create текущий host payload получает те же группы уже как `groupid`;
 - выбор proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps;
 - `monitoringSuppressionRules` для случаев, когда по атрибутам CMDBuild-карточки объект не должен ставиться на мониторинг;
 - T4 templates для JSON-RPC;
@@ -179,13 +182,19 @@ Rules-файл отвечает за:
 
 Rules reload:
 - `POST /admin/reload-rules` в `cmdbkafka2zabbix` перечитывает conversion rules через `IConversionRulesProvider`;
+- `GET /admin/rules-status` возвращает текущие `name`, `schemaVersion`, `rulesVersion`, location и git/version текущего provider без reload;
 - endpoint не содержит Git-логики: текущий provider делает `git pull --ff-only` только если включены `ConversionRules:ReadFromGit=true` и `ConversionRules:PullOnReload=true`;
 - авторизация endpoint выполняется через `Authorization: Bearer <Service:RulesReloadToken>`;
-- `monitoring-ui-api` вызывает этот endpoint из dashboard-карточки `cmdbkafka2zabbix` кнопкой `Перечитать правила конвертации` для ролей `editor` и `admin`;
+- `monitoring-ui-api` вызывает этот endpoint из dashboard-карточки `cmdbkafka2zabbix` кнопкой `Перечитать правила конвертации` для ролей `editor` и `admin`; рядом с кнопкой показываются две версии: `rulesVersion/schemaVersion` на микросервисе из `GET /admin/rules-status` и `rulesVersion/schemaVersion` текущего rules-файла, который читает система управления;
 - при смене места хранения правил нужно заменить/настроить provider, не меняя HTTP-контракт кнопки и BFF.
 
-Публикация rules выполняется вне `monitoring-ui-api`: оператор сохраняет JSON через браузер, проверяет diff, кладет файл в выбранный git repository и после публикации нажимает `Перечитать правила конвертации`.
-В `Runtime-настройки` UI отображаются `RulesFilePath`, галка `Читать из git` и `Git repository URL` с примером URL. Для нашей dev/test системы режим по умолчанию - читать с диска, файл `rules/cmdbuild-to-zabbix-host-create.json`. При включении чтения из git внутри repository ожидается файл правил по тому же пути или по пути, явно указанному в `RulesFilePath`. Эти поля управляют runtime-настройками UI/BFF для чтения локального файла правил. Для converter-сервиса аналогичный переключатель находится в `src/cmdbkafka2zabbix/appsettings*.json` в секции `ConversionRules`; именно эта секция определяет, будет ли микросервис читать локальный файл как есть или перед reload/startup выполнять git pull из уже подготовленной working copy.
+Публикация rules выполняется вне `monitoring-ui-api`: оператор сохраняет JSON через браузер или через `Настройка git` записывает локальную копию, проверяет diff, кладет файл в выбранный git repository и после публикации нажимает `Перечитать правила конвертации`.
+В `Настройка git` UI отображаются `RulesFilePath`, галка `Использовать git как источник данных конвертации`, `RepositoryPath` локальной working copy и `Git repository URL` с примером URL. Для нашей dev/test системы режим по умолчанию - читать с диска, файл `rules/cmdbuild-to-zabbix-host-create.json`. При включении чтения из git внутри repository ожидается файл правил по тому же пути или по пути, явно указанному в `RulesFilePath`; рядом с ним UI может записать согласованный webhook artifact `*.webhooks.json`. Этот artifact строится из текущих rules и CMDBuild catalog/current webhooks, но все token/password/secret/API key/Authorization значения заменяются на `XXXXX`. Эти поля управляют настройками UI/BFF для чтения локального файла правил и проверки `schemaVersion`/`rulesVersion`; приложение не выполняет commit/push. Для converter-сервиса аналогичный переключатель находится в `src/cmdbkafka2zabbix/appsettings*.json` в секции `ConversionRules`; именно эта секция определяет, будет ли микросервис читать локальный файл как есть или перед reload/startup выполнять git pull из уже подготовленной working copy.
+`rulesVersion` должен включать дату и время изменения в человекочитаемом виде, например `2026.05.03-2027-serveri-webhook-fix`, чтобы в Панели и git diff было видно не только назначение редакции, но и момент выпуска файла.
+
+В `Runtime-настройки` также есть две независимые галки для редактора правил: `Разрешить динамическое расширение Zabbix Tags из CMDBuild leaf` и `Разрешить динамическое создание Zabbix Host groups из CMDBuild leaf`. При выключенной галке редактор требует выбрать существующий Zabbix target. При включенной галке для соответствующей conversion structure появляется явный target `Создавать/расширять из выбранного CMDBuild leaf`; сохраненный rule содержит `targetMode=dynamicFromLeaf`, `valueField` и `createIfMissing`. Этот режим намеренно не распространяется на templates, interfaces, inventory и macros; macros остаются возможностью развития. Для host groups это означает не только создание/поиск справочника: при первом появлении leaf-значения writer создает отсутствующую group, подставляет полученный `groupid` в тот же `host.create`/`host.update` payload и тем самым сразу привязывает текущий host к этой group. Динамическое расширение нужно включать только после анализа разнообразия leaf-значений: неконтролируемые изменения атрибутов CMDBuild, по которым выполняется mapping, дадут такой же объем динамических изменений в Zabbix.
+
+Раздел `Метаданные Zabbix` доступен ролям `editor` и `admin`. Он строится из Zabbix catalog sync и хранит templates с `itemKeys`, `discoveryRuleKeys`, `inventoryLinks`, linked parent templates, существующие host templates, версию Zabbix и индекс конфликтов templates. Конфликтом считается совпадающий item key, LLD rule key или `inventory_link` у двух и более templates. `Управление правилами конвертации` использует эти данные до сохранения rule и подсвечивает конфликтующий template target красным. `Логический контроль правил конвертации` показывает существующие rules, итоговый template set которых остается несовместимым после применения `templateConflictRules`. Runtime-проверка в `zabbixrequests2api` остается обязательной и блокирует отправку `host.create/update`, если UI/catalog устарел или rules изменили вне интерфейса.
 
 При наличии блока `inventory` в Zabbix payload `inventory_mode` должен быть `0` или другим разрешенным режимом inventory. Значение `-1` отключает inventory и несовместимо с передачей inventory fields.
 
@@ -193,7 +202,7 @@ Rules reload:
 
 Webhook payload остается плоским. Для reference-полей CMDBuild webhook передает только numeric id первого reference attribute, например `АтрибутReference: 12345`; полный путь хранится в rules как `cmdbPath`, например `Класс.АтрибутReference.АтрибутLeaf`. `cmdbkafka2zabbix` по этому пути итеративно читает карточки CMDBuild REST и подставляет leaf-значение перед применением regex/T4. Для lookup leaf применяется тот же механизм, но результатом по умолчанию становится lookup `code`.
 
-Для CMDBuild domains, включая N:N связи без attribute в карточке, используется специальный сегмент `Класс.{domain:СвязанныйКласс}.АтрибутLeaf`: `Класс` - имя класса текущей карточки, `domain` - ключевое слово, `СвязанныйКласс` - класс второго конца связи, `АтрибутLeaf` - leaf attribute связанной карточки. Converter читает `/classes/{class}/cards/{id}/relations`, проверяет принадлежность связи текущему классу и классу второго конца, затем поднимает leaf тем же reference/lookup resolver. Если найдено несколько связанных карточек, по умолчанию значения склеиваются через `resolve.collectionSeparator` (`; `); для скалярного Zabbix target в UI такие fields не предлагаются, кроме явно настроенного `resolve.collectionMode=first`.
+Для CMDBuild domains, включая N:N связи без attribute в карточке, используется специальный сегмент `Класс.{domain:СвязанныйКласс}.АтрибутLeaf`: `Класс` - имя класса текущей карточки, `domain` - ключевое слово, `СвязанныйКласс` - класс второго конца связи, `АтрибутLeaf` - leaf attribute связанной карточки. UI catalog sync читает не только `/domains`, но и detailed `/domains/{domain}`, потому что список domains в CMDBuild может не содержать `source`/`destination`, без которых редактор не может предложить N:N domain path. Converter читает `/classes/{class}/cards/{id}/relations`, проверяет принадлежность связи текущему классу и классу второго конца, затем поднимает leaf тем же reference/lookup resolver. Если найдено несколько связанных карточек, по умолчанию значения склеиваются через `resolve.collectionSeparator` (`; `); для скалярного Zabbix target в UI такие fields не предлагаются, кроме явно настроенного `resolve.collectionMode=first`.
 
 Максимальная глубина итеративного раскрытия `domain`/`reference`/`lookup` путей задается в `Runtime-настройки` как `Максимальная глубина рекурсии domains&reference&lookups`, диапазон `2..5`, значение по умолчанию `2`. Изменение параметра применяется к UI после logout и пересинхронизации CMDBuild catalog; новый sync записывает глубину в catalog cache, а новые `cmdbPath` fields получают соответствующий `resolve.maxDepth`.
 
@@ -220,6 +229,7 @@ Webhook payload остается плоским. Для reference-полей CMD
 | `Zabbix:ApiToken` | Token для production, через secret/env |
 | `Zabbix:User` / `Zabbix:Password` | Login credentials, только dev или secret/env |
 | `Zabbix:Validate*` | Проверки host groups/templates/template groups до API call |
+| `Zabbix:AllowDynamicHostGroupCreate` | Разрешение Zabbix writer создавать отсутствующие host groups, пришедшие из dynamic `targetMode=dynamicFromLeaf` rules; в поставляемых конфигах включено |
 | `Processing` | Gentle delay, retries и retry delay |
 | `ProcessingState` | State-файл последнего обработанного объекта |
 
@@ -228,6 +238,8 @@ Webhook payload остается плоским. Для reference-полей CMD
 `ProcessingState` работает по тому же правилу, что и во втором сервисе: state-файл хранит последний успешно обработанный input offset, а consumer при старте начинает с `lastInputOffset + 1`.
 
 `zabbixrequests2api` валидирует не только базовые `host.create/update/delete`, но и расширенные host поля, используемые rules: `status`, `macros`, `inventory`, TLS/PSK параметры. Также зарезервирована обработка Zabbix API methods для следующих задач: `maintenance.*`, `usermacro.*`, `proxy.*`, `valuemap.*`.
+
+Для dynamic host groups writer перед `host.create/host.update` ищет group по имени через `hostgroup.get`. Если group уже существует, в payload подставляется `groupid`. Если group отсутствует и `Zabbix:AllowDynamicHostGroupCreate=true`, writer вызывает `hostgroup.create`, затем подставляет новый `groupid` в тот же запрос, поэтому host сразу попадает в newly created group. Если group отсутствует, но создание выключено, запрос не отправляется в Zabbix и возвращается явная ошибка `auto_expand_disabled`. Для tags отдельного Zabbix-справочника нет: dynamic tag сразу попадает в `params.tags[]` текущего host payload.
 
 ## monitoring-ui-api
 
@@ -277,7 +289,7 @@ Local users and roles:
 - при первом старте `monitoring-ui-api` создает `src/monitoring-ui-api/state/users.json` рядом с `ui-settings.json`;
 - стартовые пользователи: `viewer/viewer`, `editor/editor`, `admin/admin`;
 - пароли хранятся только как PBKDF2-SHA256 hash/salt, plaintext в state-файл не пишется;
-- роли: `viewer` видит только `Панель` и `События`; `editor` видит все кроме `Авторизация` и `Runtime-настройки`; `admin` видит все;
+- роли: `viewer` видит только `Панель` и `События`; `editor` видит все кроме `Авторизация`, `Runtime-настройки` и `Настройка git`; `admin` видит все;
 - пользователь может сменить свой пароль в UI, а администратор может сбросить пароль в подменю `Авторизация`.
 - если выбран режим `MS AD` или `IdP`, блок локальных пользователей в UI становится неактивным; локальный users-файл остается аварийным/служебным механизмом и не участвует в назначении ролей внешним пользователям.
 - для deployment начальные UI-пароли меняются после первого входа или через заранее подготовленный/mounted `state/users.json`; CMDBuild/Zabbix default passwords не задаются.
@@ -285,7 +297,8 @@ Local users and roles:
 Runtime settings:
 - подменю `Runtime-настройки` читает текущие значения из merged config и runtime-файла;
 - `Save runtime` пишет overrides в `src/monitoring-ui-api/state/ui-settings.json`;
-- настройки UI разделены на два admin-подменю: `Авторизация` и `Runtime-настройки`;
+- настройки UI разделены на три admin-подменю: `Авторизация`, `Runtime-настройки` и `Настройка git`;
+- `Настройка git` пишет только настройки `rules` в `src/monitoring-ui-api/state/ui-settings.json`, показывает resolved path, `schemaVersion`, `rulesVersion` текущего файла и при включенном git-режиме может записать rules JSON плюс соседний `*.webhooks.json` в локальную working copy без commit/push;
 - runtime-файл и файл пользователей не коммитятся и могут содержать dev secrets;
 - dev config не заполняет CMDBuild/Zabbix пароли по умолчанию;
 - текущий dev `EventBrowser` смотрит Kafka `localhost:9092` и topics `*.dev`.
@@ -303,8 +316,8 @@ CMDBuild/Zabbix credentials:
 - CMDBuild user для `Настройка webhooks` должен иметь read-доступ к ETL/webhook records через REST v3 `/etl/webhook/?detailed=true` для `Загрузить из CMDB` и анализа текущего состояния.
 - CMDBuild user, который нажимает `Загрузить в CMDB`, дополнительно должен иметь create/update/delete или эквивалентные modify-права на ETL/webhook records REST v3 `/etl/webhook/`. Эти права нужны только оператору, который реально применяет webhook-план в CMDBuild; они не нужны viewer и не нужны для обычного catalog sync.
 - Backend ограничивает запись managed-префиксом `cmdbwebhooks2kafka-*`, но это защитное ограничение приложения, а не замена правам CMDBuild. CMDBuild service account все равно должен быть ограничен на уровне CMDBuild настолько узко, насколько позволяет модель прав.
-- Zabbix user/API token для UI/catalog sync должен иметь API access и read-only доступ к используемым host groups, template groups, templates, hosts/tags и справочникам, которые UI читает через `*.get` методы (`hostgroup.get`, `templategroup.get`, `template.get`, `host.get`, optional `proxy*.get`, `globalmacro.get`, `usermacro.get`, `maintenance.get`, `valuemap.get`); host create/update/delete для чтения каталогов не нужны.
-- Отдельный сервис `zabbixrequests2api`, который реально применяет мониторинг, требует уже write-права на host create/update/delete и чтение связанных groups/templates.
+- Zabbix user/API token для UI/catalog sync должен иметь API access и read-only доступ к используемым host groups, template groups, templates, hosts/tags и справочникам, которые UI читает через `*.get` методы (`hostgroup.get`, `templategroup.get`, `template.get` с subselects item keys/LLD/inventory/template groups, `host.get`, optional `proxy*.get`, `globalmacro.get`, `usermacro.get`, `maintenance.get`, `valuemap.get`); host create/update/delete для чтения каталогов не нужны.
+- Отдельный сервис `zabbixrequests2api`, который реально применяет мониторинг, требует уже write-права на host create/update/delete и чтение связанных groups/templates. Так как `Zabbix:AllowDynamicHostGroupCreate` в поставляемых конфигах включен, этому API user также нужно право на `hostgroup.create`.
 
 Events:
 - вкладка Events читает Kafka topics только через BFF;
@@ -331,6 +344,8 @@ Events:
 - модификация правила начинается без автоматически выбранного rule; оператор может начать с rule, CMDBuild class, class attribute field или conversion structure, связанные списки фильтруются, а если найден единственный matching rule, он выбирается автоматически и загружается в ту же форму;
 - при изменении class зависимый leaf field и Zabbix target очищаются до нового однозначного выбора; при изменении field фильтруются совместимые conversion structures, при изменении conversion structure фильтруются fields и Zabbix targets, а несовместимые значения подсвечиваются красной рамкой;
 - для `interfaceAddress` редактор проверяет семантику target: IP-looking CMDBuild attribute нельзя сохранить в DNS target `interfaces[].dns/useip=0`, DNS/FQDN-looking attribute нельзя сохранить в IP target `interfaces[].ip/useip=1`, а неподтвержденное адресное поле нужно явно описать именем/source metadata или `validationRegex`;
+- для `Правило tag` и `Правило host group` редактор может сохранять dynamic target из CMDBuild leaf только если соответствующая runtime-галка включена; в UI это отдельный вариант target, а не пустое поле. Для templates, interfaces, inventory и macros пустой target остается ошибкой;
+- для `Правило template` редактор использует `Метаданные Zabbix` и блокирует сохранение, если выбранный template вместе с defaults/выбранными templates после применения `templateConflictRules` оставляет duplicate item key, duplicate LLD rule key или duplicate inventory link;
 - кнопка `Сбросить поля` в модификации очищает выбранное rule и все фильтры, возвращая форму к пустому старту, а в добавлении очищает leaf field и target; зеленая рамка означает совместимость, красная - обязательный выбор или конфликт, желтая - значение из rule не подтверждено текущим catalog/filter, но доступно для осознанного редактирования;
 - `Current rule target / отсутствует в Zabbix catalog` считается неконсистентной второй стороной цепочки, подсвечивается красным и блокирует сохранение так же, как отсутствующий class/attribute на стороне CMDBuild;
 - удаление правила показывает tree-группировки `Дерево CMDBuild`, `Дерево Zabbix` и `Дерево rules`; группы закрыты через `+`, а checkbox на группе отмечает все rules внутри;
@@ -348,6 +363,7 @@ Events:
 - интерактивно не строит цепочки, а подсвечивает только отсутствующие элементы в CMDBuild/Zabbix источниках;
 - для отсутствующих элементов выводятся checkbox;
 - если класс есть в `source.entityClasses`, но не имеет применимого `hostProfiles[]`, раздел показывает это как ошибку rules и предлагает действие `Создать host profile`;
+- если template rule оставляет несовместимый набор Zabbix templates после применения `templateConflictRules`, раздел показывает критическую ошибку по этому rule и подсвечивает конфликтующие Zabbix templates;
 - кнопка `Применить выбранное` формирует исправленный rules JSON в памяти; для удалений используется проверка mixed rule, а создание недостающего `hostProfile` добавляется в общий undo/redo поток;
 - backend rules-файл и git при этом не изменяются.
 - этот раздел не предназначен для интерактивной подсветки связей, а только для поиска отсутствующих классов, атрибутов и Zabbix-ссылок.
@@ -368,7 +384,7 @@ Events:
 - удаление по умолчанию не выбирается автоматически, чтобы оператор явно подтвердил снятие старых managed webhooks;
 - `Undo`/`Redo` работают с выбором операций в текущей browser-сессии;
 - `Undo`/`Redo` не откатывают уже выполненную команду `Загрузить в CMDB`, потому что она меняет управляемую систему;
-- `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git;
+- `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git; token/password/secret/API key/Authorization значения в export заменяются на `XXXXX`;
 - `Загрузить в CMDB` применяет только выбранные операции и действительно меняет CMDBuild records через REST v3 `/etl/webhook/`; backend ограничивает операции managed-префиксом `cmdbwebhooks2kafka-`.
 
 Поддержанные env vars:
@@ -457,7 +473,9 @@ Webhook body для этой demo-схемы остается плоским: `i
 Дополнительные SNMP interfaces используют порт `:161`; `main` с дополнительными SNMP interfaces получает `HP iLO by SNMP`, а отдельные `separate-profile-1`/`separate-profile-2` получают `Generic by SNMP`. Блок `templateConflictRules` в rules-файле удаляет `ICMP Ping` и agent-шаблоны, если выбран `HP iLO by SNMP` или `Generic by SNMP`, потому что эти SNMP-шаблоны уже содержат item key `icmpping` и заполняют inventory field `Name`.
 На update через `host.get` микросервис передает `templates_clear`; `zabbixrequests2api` читает текущие linked templates через `selectParentTemplates` и очищает только реально привязанные конфликтующие templateid.
 
-При `host.update` поля `groups[]`, `templates[]`, `tags[]`, `macros[]` и `inventory` применяются как слияние с текущим состоянием Zabbix host. `zabbixrequests2api` сначала читает текущий host, сохраняет внешние значения, которых нет в rules payload, и добавляет или переопределяет только значения, пришедшие из rules: группы по `groupid`, шаблоны по `templateid`, tags по `tag`, macros по `macro`, inventory по имени поля. `templates_clear` остается явной операцией удаления конфликтующих шаблонов и отфильтровывается только по реально привязанным templateid. `interfaces[]` специально не переводятся в режим слияния: их состав остается результатом правил, а writer только подставляет существующие `interfaceid` для корректного update.
+При `host.update` поля `groups[]`, `templates[]`, `tags[]`, `macros[]` и `inventory` применяются как слияние с текущим состоянием Zabbix host. `zabbixrequests2api` сначала читает текущий host, сохраняет внешние значения, которых нет в rules payload, и добавляет или переопределяет только значения, пришедшие из rules: группы по `groupid`, шаблоны по `templateid`, tags по паре `tag/value`, macros по `macro`, inventory по имени поля. `templates_clear` остается явной операцией удаления конфликтующих шаблонов и отфильтровывается только по реально привязанным templateid. `interfaces[]` специально не переводятся в режим слияния: их состав остается результатом правил, а writer только подставляет существующие `interfaceid` для корректного update.
+
+Совместимость шаблонов Zabbix. Перед `host.create` и перед фактическим `host.update` после merge/fallback `zabbixrequests2api` при `Zabbix:ValidateTemplateCompatibility=true` читает выбранные templates через Zabbix `template.get` с `selectTemplateGroups`, `selectItems` и `selectDiscoveryRules`. Это 7+ контракт без deprecated subselects. Если итоговый набор templates содержит одинаковый item key, одинаковый LLD rule key или одинаковую inventory-привязку `inventory_link` в двух и более шаблонах, сервис возвращает ошибку `template_conflict`, ставит `zabbixRequestSent=false` и не вызывает `host.create/update`. В `errorMessage` перечисляются конфликтующий key или inventory link, имена/templateid шаблонов, действие по исправлению и ссылка на этот раздел: `PROJECT_DOCUMENTATION.md` / `PROJECT_DOCUMENTATION.en.md`, section `Zabbix template compatibility`. Исправление выполняется в rules: выбрать другой набор templates, добавить/исправить `templateConflictRules`, передать конфликтующий template в `templates_clear` для update или изменить сами templates в Zabbix.
 
 Пример несовместимости templates: существующий Zabbix host `cmdb-server-srv13` имел agent-шаблон `Windows by Zabbix agent`, а update добавил `HP iLO by SNMP` для дополнительного SNMP interface. Zabbix отклонил `host.update`, потому что оба шаблона заполняют inventory field `Name` (`system.hostname` и `system.name`). Поэтому rules выбирают SNMP template как целевой и передают agent template в `templates_clear` для update fallback.
 

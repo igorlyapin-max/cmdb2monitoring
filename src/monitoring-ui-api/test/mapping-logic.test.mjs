@@ -3,10 +3,15 @@ import test from 'node:test';
 
 import {
   classHasHostProfile,
+  dynamicTagNameForField,
+  dynamicTargetForField,
+  dynamicZabbixTargetAllowed,
   ensureMinimalHostProfileForClass,
   hostProfileAppliesToClass,
   interfaceAddressCompatibilityIssue,
+  isDynamicFromLeafTarget,
   minimalHostProfileInterfaceMode,
+  sourceFieldTemplate,
   sourceFieldAddressKind,
   sourceFieldMayReturnMultiple
 } from '../public/lib/mapping-logic.js';
@@ -129,4 +134,42 @@ test('hostProfileAppliesToClass supports class regex alternatives and global pro
 
 test('minimalHostProfileInterfaceMode returns empty mode for non-address leaves', () => {
   assert.equal(minimalHostProfileInterfaceMode('Location', { source: 'Room' }, {}), '');
+});
+
+test('dynamicZabbixTargetAllowed is explicit for tags and host groups only', () => {
+  const runtime = {
+    zabbix: {
+      allowDynamicTagsFromCmdbLeaf: true,
+      allowDynamicHostGroupsFromCmdbLeaf: false
+    }
+  };
+
+  assert.equal(dynamicZabbixTargetAllowed('tags', runtime), true);
+  assert.equal(dynamicZabbixTargetAllowed('hostGroups', runtime), false);
+  assert.equal(dynamicZabbixTargetAllowed('templates', runtime), false);
+  assert.equal(dynamicZabbixTargetAllowed('interfaces', runtime), false);
+});
+
+test('dynamicTargetForField serializes explicit dynamic targets', () => {
+  assert.deepEqual(dynamicTargetForField('hostGroups', 'environment'), {
+    targetMode: 'dynamicFromLeaf',
+    valueField: 'environment',
+    createIfMissing: true,
+    nameTemplate: '<#= Model.Source("environment") #>'
+  });
+
+  assert.deepEqual(dynamicTargetForField('tags', 'lifecycleState'), {
+    targetMode: 'dynamicFromLeaf',
+    valueField: 'lifecycleState',
+    createIfMissing: true,
+    tag: 'cmdb.lifecycle.state',
+    valueTemplate: '<#= Model.Source("lifecycleState") #>'
+  });
+});
+
+test('dynamic target helpers identify dynamicFromLeaf and escape templates', () => {
+  assert.equal(isDynamicFromLeafTarget({ targetMode: 'dynamicFromLeaf' }), true);
+  assert.equal(isDynamicFromLeafTarget({ targetMode: 'static' }), false);
+  assert.equal(dynamicTagNameForField('Address State'), 'cmdb.address.state');
+  assert.equal(sourceFieldTemplate('quoted"field'), '<#= Model.Source("quoted\\"field") #>');
 });

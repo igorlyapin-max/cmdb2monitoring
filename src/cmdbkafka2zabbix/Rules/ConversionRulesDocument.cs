@@ -240,9 +240,13 @@ public sealed class LookupItem
 {
     public string Name { get; init; } = string.Empty;
 
+    public string NameTemplate { get; init; } = string.Empty;
+
     public string GroupId { get; init; } = string.Empty;
 
     public string TemplateId { get; init; } = string.Empty;
+
+    public bool CreateIfMissing { get; init; }
 }
 
 public sealed class TemplateConflictRule
@@ -304,6 +308,8 @@ public sealed class TagDefinition
     public string Value { get; init; } = string.Empty;
 
     public string ValueTemplate { get; init; } = string.Empty;
+
+    public bool AllowMultipleValues { get; init; }
 }
 
 public sealed class ProxyDefinition
@@ -422,6 +428,12 @@ public sealed class SelectionRule
     public int Priority { get; init; } = 1000;
 
     public bool Fallback { get; init; }
+
+    public string TargetMode { get; init; } = string.Empty;
+
+    public string ValueField { get; init; } = string.Empty;
+
+    public bool CreateIfMissing { get; init; }
 
     public RuleCondition When { get; init; } = new();
 

@@ -17,6 +17,7 @@ builder.Services.AddOptions<ServiceOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.Name), "Service name is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.HealthRoute), "Service health route is required.")
     .Validate(options => string.IsNullOrWhiteSpace(options.RulesReloadRoute) || options.RulesReloadRoute.StartsWith('/'), "Rules reload route must start with '/'.")
+    .Validate(options => string.IsNullOrWhiteSpace(options.RulesStatusRoute) || options.RulesStatusRoute.StartsWith('/'), "Rules status route must start with '/'.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<KafkaOptions>()
@@ -139,6 +140,41 @@ if (!string.IsNullOrWhiteSpace(serviceOptions.RulesReloadRoute))
                     version = result.Version,
                     storageRefreshed = result.StorageRefreshed,
                     reloadedAt = result.ReloadedAt
+                }
+            });
+        });
+}
+
+if (!string.IsNullOrWhiteSpace(serviceOptions.RulesStatusRoute))
+{
+    app.MapGet(
+        serviceOptions.RulesStatusRoute,
+        async (HttpContext context, IConversionRulesProvider rulesProvider, IOptions<ServiceOptions> options, CancellationToken cancellationToken) =>
+        {
+            var currentOptions = options.Value;
+            var statusToken = string.IsNullOrWhiteSpace(currentOptions.RulesStatusToken)
+                ? currentOptions.RulesReloadToken
+                : currentOptions.RulesStatusToken;
+            if (!string.IsNullOrWhiteSpace(statusToken) && !IsBearerTokenValid(context.Request, statusToken))
+            {
+                return Results.Unauthorized();
+            }
+
+            var result = await rulesProvider.GetStatusAsync(cancellationToken);
+            return Results.Ok(new
+            {
+                service = currentOptions.Name,
+                status = "ok",
+                rules = new
+                {
+                    name = result.RuleName,
+                    schemaVersion = result.SchemaVersion,
+                    rulesVersion = result.RulesVersion,
+                    location = result.Location,
+                    version = result.Version,
+                    readFromGit = result.ReadFromGit,
+                    lastWriteTime = result.LastWriteTime,
+                    checkedAt = result.CheckedAt
                 }
             });
         });

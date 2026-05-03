@@ -73,11 +73,13 @@
 - Zabbix templates не являются JSON-файлами проекта. В JSON передаются только ссылки `templateid` на существующие шаблоны Zabbix.
 - Если в Zabbix payload передается объект `inventory`, `inventory_mode` не должен быть `-1`, потому что `-1` отключает inventory и Zabbix отклоняет inventory fields.
 - При `host.update` поля `groups[]`, `templates[]`, `tags[]`, `macros[]` и `inventory` должны сохранять внешние значения Zabbix, если rules их явно не заменяют; `interfaces[]` остаются authoritative и задаются rules.
+- Dynamic host groups из CMDBuild leaf должны не только создаваться/находиться в Zabbix, но и подставляться как `groupid` в тот же `host.create`/`host.update` payload; dynamic tags сразу передаются в `params.tags[]` текущего host payload.
 
 ## Rules и T4
 
 - Правила конвертации хранятся в Git-managed JSON.
 - Текущий файл правил: `rules/cmdbuild-to-zabbix-host-create.json`.
+- `monitoring-ui-api` не выполняет commit/push rules. Раздел `Настройка git` может только читать/записывать локальную working copy и соседний `*.webhooks.json`; секреты в webhook artifact должны быть замаскированы как `XXXXX`.
 - Regex используется не только для валидации, но и для выбора groups/templates/interfaces/tags.
 - Rules должны поддерживать расширенные Zabbix host параметры без правки кода: proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps.
 - Rules должны поддерживать `hostProfiles[]`: один CMDB object может формировать один Zabbix host с несколькими `interfaces[]` или несколько Zabbix hosts через fan-out.

@@ -22,6 +22,10 @@ public sealed class ZabbixOptions
 
     public bool ValidateTemplateGroups { get; init; } = true;
 
+    public bool ValidateTemplateCompatibility { get; init; } = true;
+
+    public bool AllowDynamicHostGroupCreate { get; init; } = true;
+
     public bool HasValidAuthMode()
     {
         return string.Equals(AuthMode, "None", StringComparison.OrdinalIgnoreCase)

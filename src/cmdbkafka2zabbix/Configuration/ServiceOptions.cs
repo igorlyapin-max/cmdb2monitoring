@@ -11,4 +11,8 @@ public sealed class ServiceOptions
     public string RulesReloadRoute { get; init; } = string.Empty;
 
     public string RulesReloadToken { get; init; } = string.Empty;
+
+    public string RulesStatusRoute { get; init; } = string.Empty;
+
+    public string RulesStatusToken { get; init; } = string.Empty;
 }

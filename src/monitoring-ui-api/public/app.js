@@ -2,9 +2,12 @@ import {
   canonicalSourceField,
   classHasHostProfile,
   cmdbPathIncludesDomain,
+  dynamicTargetForField,
+  dynamicZabbixTargetAllowed,
   ensureMinimalHostProfileForClass,
   escapeRegex,
   interfaceAddressCompatibilityIssue,
+  isDynamicFromLeafTarget,
   minimalHostProfileInterfaceMode,
   normalizeRuleName,
   normalizeToken,
@@ -27,6 +30,7 @@ const state = {
   mappingHistoryIndex: -1,
   mappingCmdbuildCatalog: null,
   mappingZabbixCatalog: null,
+  mappingZabbixMetadata: null,
   mappingEditorFieldOptions: new Map(),
   mappingEditorFieldOptionStates: new Map(),
   mappingEditorTargetOptionStates: new Map(),
@@ -36,6 +40,7 @@ const state = {
   validateMappingHistory: [],
   validateMappingHistoryIndex: -1,
   validateMappingZabbixCatalog: null,
+  validateMappingZabbixMetadata: null,
   validateMappingCmdbuildCatalog: null,
   validationRuleDialog: null,
   webhooksLoaded: false,
@@ -58,7 +63,24 @@ const state = {
   authenticated: false,
   user: null,
   users: [],
-  credentialPrompt: null
+  credentialPrompt: null,
+  runtimeSettingsSnapshot: '',
+  runtimeSettingsDirty: false,
+  runtimeSettingsStatus: null,
+  gitSettingsSnapshot: '',
+  gitSettingsDirty: false,
+  gitSettingsStatus: null,
+  gitSettings: null,
+  zabbixCatalog: null,
+  cmdbuildCatalog: null,
+  zabbixMetadata: null,
+  sessionIndicators: {
+    webhooks: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
+    zabbixCatalog: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
+    cmdbuildCatalog: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
+    gitRules: { status: 'idle', textKey: 'sessionTraffic.notRead' },
+    zabbixMetadata: { status: 'idle', textKey: 'sessionTraffic.notLoaded' }
+  }
 };
 
 const $ = selector => document.querySelector(selector);
@@ -70,11 +92,18 @@ const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
 const roleViews = {
   viewer: ['dashboard', 'events'],
-  editor: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'about', 'help'],
-  admin: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'cmdbuild', 'authSettings', 'runtimeSettings', 'about', 'help']
+  editor: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'about', 'help'],
+  admin: ['dashboard', 'events', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
 const defaultCmdbuildWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
+const sessionIndicatorDefinitions = [
+  { key: 'webhooks', labelKey: 'sessionTraffic.webhooks' },
+  { key: 'zabbixCatalog', labelKey: 'sessionTraffic.zabbixCatalog' },
+  { key: 'cmdbuildCatalog', labelKey: 'sessionTraffic.cmdbuildCatalog' },
+  { key: 'gitRules', labelKey: 'sessionTraffic.gitRules' },
+  { key: 'zabbixMetadata', labelKey: 'sessionTraffic.zabbixMetadata' }
+];
 let helpShowTimer = null;
 let pendingHelpTarget = null;
 const zabbixCatalogSections = [
@@ -299,6 +328,11 @@ const translations = {
     'login.zabbixPassword': 'Zabbix пароль',
     'login.submit': 'Войти',
     'dashboard.reloadRules': 'Перечитать правила конвертации',
+    'dashboard.rulesVersionMicroservice': 'На микросервисе',
+    'dashboard.rulesVersionManagement': 'В системе управления',
+    'dashboard.rulesVersionUnavailable': 'версия недоступна',
+    'dashboard.rulesVersionSchema': 'schema',
+    'dashboard.serviceHelp': 'Проверка сервиса "{name}". Показывает HTTP-статус, задержку, проверяемый URL и версии rules, если сервис их отдает.',
     'account.changePassword': 'Сменить пароль',
     'account.currentPassword': 'Текущий пароль',
     'account.newPassword': 'Новый пароль',
@@ -383,10 +417,12 @@ const translations = {
     'nav.validateMapping': 'Логический контроль правил конвертации',
     'nav.webhooks': 'Настройка webhooks',
     'nav.zabbix': 'Каталог Zabbix',
+    'nav.zabbixMetadata': 'Метаданные Zabbix',
     'nav.cmdbuild': 'Каталог CMDBuild',
     'nav.settings': 'Настройки',
     'nav.authSettings': 'Авторизация',
     'nav.runtimeSettings': 'Runtime-настройки',
+    'nav.gitSettings': 'Настройка git',
     'nav.about': 'About',
     'nav.help': 'Справка',
     'nav.logout': 'Выйти',
@@ -398,16 +434,62 @@ const translations = {
     'settings.maxTraversalDepthNote': 'Изменение заработает только после logout и пересинхронизации CMDBuild catalog.',
     'settings.zabbixApi': 'Zabbix API',
     'settings.zabbixApiKey': 'Zabbix API key',
+    'settings.zabbixDynamicTargets': 'Динамическое расширение Zabbix из CMDBuild leaf',
+    'settings.allowDynamicTagsFromCmdbLeaf': 'Разрешить динамическое расширение Zabbix Tags из CMDBuild leaf',
+    'settings.allowDynamicHostGroupsFromCmdbLeaf': 'Разрешить динамическое создание Zabbix Host groups из CMDBuild leaf',
+    'settings.dynamicTargetsNote': 'Галки разрешают редактору правил сохранять targetMode=dynamicFromLeaf только для Tags и Host groups. Для Host groups Zabbix writer при разрешенном создании подставит созданный groupid в тот же host payload. Используйте функцию после анализа разнообразия leaf-значений: неконтролируемые изменения этих атрибутов в CMDBuild приведут к такому же объему динамических изменений в Zabbix.',
     'settings.rulesStorage': 'Файл правил конвертации',
     'settings.rulesFilePath': 'Путь к файлу правил',
     'settings.rulesFilePathPlaceholder': 'rules/cmdbuild-to-zabbix-host-create.json',
-    'settings.rulesReadFromGit': 'Читать из git',
+    'settings.rulesReadFromGit': 'Использовать git как источник данных конвертации',
     'settings.rulesRepositoryUrl': 'Git repository URL',
     'settings.rulesRepositoryUrlPlaceholder': 'https://git.example.org/cmdb2monitoring/conversion-rules.git',
+    'settings.rulesRepositoryPath': 'Путь к локальной git working copy',
+    'settings.rulesRepositoryPathPlaceholder': 'rules-git-working-copy',
     'settings.rulesReadModeDisk': 'Для нашей тестовой системы: читать с диска, файл {path}.',
     'settings.rulesReadModeGit': 'Режим git: URL указывает на repository, внутри него ожидается файл {path}.',
     'settings.rulesGitFileNote': 'При включении git внутри repository ожидается файл правил по пути, указанному выше.',
     'settings.rulesStorageNote': 'UI сохраняет rules через браузер; публикация в git выполняется оператором вне приложения.',
+    'gitSettings.rulesStorage': 'Хранение файла правил конвертации',
+    'gitSettings.currentState': 'Текущее состояние',
+    'gitSettings.check': 'Проверить доступ',
+    'gitSettings.loadSettings': 'Загрузить настройки',
+    'gitSettings.loadFromDisk': 'Загрузить с диска',
+    'gitSettings.loadFromGit': 'Загрузить с git',
+    'gitSettings.saveToGit': 'Сохранить в git',
+    'gitSettings.saveSettings': 'Сохранить настройки',
+    'gitSettings.save': 'Сохранить настройки',
+    'gitSettings.scopeNote': 'Настройка микросервиса по конвертации, который использует файл конвертации, не зависит от настроек ниже, здесь управляется только копиями, размещение которых в продуктивных местах хранение лежит в области ответственности администратора системы.',
+    'gitSettings.resolvedPath': 'Resolved path',
+    'gitSettings.readMode': 'Режим чтения',
+    'gitSettings.schemaVersion': 'schemaVersion',
+    'gitSettings.rulesVersion': 'rulesVersion',
+    'gitSettings.loaded': 'Git-настройки загружены.',
+    'gitSettings.saved': 'Git-настройки сохранены.',
+    'gitSettings.dirty': 'Есть несохраненные git-настройки.',
+    'gitSettings.checkOk': 'Загрузка выполнена: {message}',
+    'gitSettings.checkFailed': 'Загрузка завершилась ошибкой: {message}',
+    'gitSettings.exported': 'Файлы записаны в git-копию: {rulesPath}; webhook artifact: {webhooksPath}. Commit/push не выполнялись.',
+    'zabbixMetadata.conflicts': 'Конфликты templates',
+    'zabbixMetadata.type': 'Тип',
+    'zabbixMetadata.key': 'Key',
+    'zabbixMetadata.templates': 'Templates',
+    'zabbixMetadata.name': 'Name',
+    'zabbixMetadata.hosts': 'Хосты',
+    'zabbixMetadata.host': 'Host',
+    'zabbixMetadata.linkedTemplates': 'Привязанные templates',
+    'zabbixMetadata.items': 'Items',
+    'zabbixMetadata.discoveryRules': 'LLD',
+    'zabbixMetadata.inventoryLinks': 'Inventory',
+    'zabbixMetadata.summary': 'Zabbix {version}. Синхронизация: {syncedAt}. Templates: {templates}. Hosts: {hosts}. Host groups: {hostGroups}. Конфликтов: {conflicts}.',
+    'zabbixMetadata.noConflicts': 'Конфликты templates не найдены.',
+    'zabbixMetadata.loaded': 'Метаданные Zabbix загружены.',
+    'zabbixMetadata.synced': 'Метаданные Zabbix синхронизированы.',
+    'zabbixMetadata.conflictRuleHelp': 'Назначение конфликтующих templates заблокировано метаданными Zabbix. Добавьте или исправьте templateConflictRules, чтобы явно очистить несовместимый template перед отправкой в Zabbix.',
+    'zabbixMetadata.conflictEditor': 'Несовместимые Zabbix templates: {message}',
+    'catalog.zabbixSummary': 'Получено: {syncedAt}. Zabbix {version}. Host groups: {hostGroups}. Templates: {templates}. Template groups: {templateGroups}. Hosts: {hosts}. Tags: {tags}.',
+    'catalog.cmdbuildSummary': 'Получено: {syncedAt}. Classes: {classes}. Attributes: {attributes}. Domains: {domains}. Lookups: {lookups}.',
+    'catalog.notLoaded': 'Каталог еще не загружен.',
     'settings.kafkaEvents': 'Kafka Events',
     'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
     'settings.authModeTitle': 'Режим авторизации',
@@ -442,8 +524,26 @@ const translations = {
     'toast.rulesValidationFailed': 'Rules после правки не прошли проверку',
     'toast.validationDraftChanged': 'Rules изменены в памяти. Используйте "Сохранить файл как", когда закончите правки.',
     'rules.createEmpty': 'Создать пустой',
+    'rules.sourceStatus': 'Источник правил: {mode}; версия: {version}',
+    'rules.sourceStatusHelp': 'Источник правил: {mode}; версия: {version}; файл: {path}; resolved path: {resolvedPath}',
+    'rules.sourceDisk': 'диск',
+    'rules.sourceGit': 'git',
+    'rules.sourceUnknown': 'не определен',
     'toast.emptyRulesCreated': 'Пустой starter правил создан в окне загрузки',
     'toast.emptyRulesFailed': 'Не удалось создать пустой starter правил',
+    'common.running': 'Выполняется...',
+    'action.status.running': 'Выполняется: {label}',
+    'action.status.done': 'Готово: {label}',
+    'action.status.cancelled': 'Отменено: {label}',
+    'action.status.failed': 'Не выполнено: {label}. {message}',
+    'settings.runtimeStatusLoaded': 'Runtime-настройки загружены. Несохраненных изменений нет.',
+    'settings.runtimeStatusSaved': 'Runtime-настройки сохранены. Изменения применены в UI/API.',
+    'settings.runtimeStatusSavedResyncRequired': 'Runtime-настройки сохранены. Изменения применены в UI/API; новая глубина заработает после logout и пересинхронизации CMDBuild catalog.',
+    'settings.runtimeStatusDirty': 'Есть несохраненные Runtime-настройки. Нажмите "Сохранить runtime", чтобы применить изменения, или "Загрузить", чтобы вернуть значения из файла.',
+    'settings.runtimeStatusSaveFailed': 'Runtime-настройки не сохранены: {message}',
+    'settings.runtimeStatusLoadFailed': 'Runtime-настройки не загружены: {message}',
+    'settings.runtimeUnsavedConfirm': 'Есть несохраненные Runtime-настройки. Покинуть страницу без сохранения?',
+    'settings.runtimeDiscardConfirm': 'Есть несохраненные Runtime-настройки. Загрузить значения из файла и сбросить текущие изменения?',
     'about.title': 'About',
     'about.text': 'Спроектировано и овеществлено Игорем Ляпиным email:igor.lyapin@gmail.com 2026\nПод лицензией GNU GPLv3.',
     'common.clearSelection': 'Снять выделение',
@@ -528,6 +628,7 @@ const translations = {
     'mapping.status.leafSelected': 'Leaf/source field выбран.',
     'mapping.status.structureCompatible': 'Conversion structure совместима с выбранным field.',
     'mapping.status.targetSelected': 'Zabbix target выбран.',
+    'mapping.status.dynamicTargetSelected': 'Dynamic target из CMDBuild leaf выбран.',
     'mapping.status.prioritySet': 'Priority задан.',
     'mapping.status.regexSaved': 'Regex будет сохранен в rule condition.',
     'mapping.status.ruleNameSetOrAuto': 'Rule name задан или будет сгенерирован автоматически.',
@@ -590,12 +691,27 @@ const translations = {
     'mapping.option.profilePrefix': 'Профиль: {name}',
     'mapping.option.newHostMacro': 'Новый host macro из class attribute field',
     'mapping.option.inventoryFromField': 'Inventory field из class attribute field',
+    'mapping.option.dynamicHostGroupFromLeaf': 'Создавать/расширять host group из выбранного CMDBuild leaf',
+    'mapping.option.dynamicTagFromLeaf': 'Расширять tag из выбранного CMDBuild leaf',
     'mapping.target.hostGroups': 'Правило host group',
     'mapping.target.templates': 'Правило template',
     'mapping.target.tags': 'Правило tag',
     'mapping.target.interfaceAddress': 'Правило адреса interface',
     'mapping.target.interface': 'Правило interface',
     'mapping.target.monitoringSuppression': 'Правило исключения из мониторинга',
+    'sessionTraffic.webhooks': 'Webhooks',
+    'sessionTraffic.zabbixCatalog': 'Zabbix',
+    'sessionTraffic.cmdbuildCatalog': 'CMDBuild',
+    'sessionTraffic.gitRules': 'Правила',
+    'sessionTraffic.zabbixMetadata': 'Метаданные',
+    'sessionTraffic.notLoaded': 'Не загружено',
+    'sessionTraffic.notRead': 'Не прочитано',
+    'sessionTraffic.loaded': 'Загружено',
+    'sessionTraffic.synced': 'Sync',
+    'sessionTraffic.readDisk': 'Прочитано с диска',
+    'sessionTraffic.readGit': 'Прочитано из git',
+    'sessionTraffic.savedGit': 'Записано в git-копию',
+    'sessionTraffic.error': 'Ошибка',
     'session.notAuthenticated': 'не авторизован',
     'help.general.title': 'Общий принцип',
     'help.general.1': 'Браузер работает только с monitoring-ui-api; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.',
@@ -629,11 +745,13 @@ const translations = {
     'help.mapping.15': 'Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.',
     'help.mapping.16': 'Domain path вида Класс.{domain:СвязанныйКласс}.Атрибут читает связанные карточки через CMDBuild relations; поля, которые могут вернуть несколько значений, недоступны для скалярных Zabbix structures.',
     'help.mapping.17': 'monitoringSuppressionRules используется, когда атрибуты экземпляра означают осознанный отказ от постановки на мониторинг; create/update пропускаются, delete не блокируется.',
+    'help.mapping.18': 'Правило template проверяется по Метаданные Zabbix: конфликт item key, LLD rule key или inventory link подсвечивается красным и блокирует сохранение до исправления templateConflictRules или выбора совместимого template set.',
     'help.validate.title': 'Логический контроль правил конвертации',
     'help.validate.1': 'Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.',
     'help.validate.2': 'Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.',
     'help.validate.3': 'Checkbox над отсутствующим элементом включает его в удаление из rules JSON.',
     'help.validate.4': 'Delete спрашивает подтверждение, сохраняет предыдущую версию и исправляет выбранные ссылки в правилах.',
+    'help.validate.5': 'Несовместимые Zabbix templates из Метаданные Zabbix считаются критичной ошибкой rules: исправьте templateConflictRules, выберите совместимые templates или удалите ошибочное rule из draft.',
     'help.webhooks.title': 'Настройка webhooks',
     'help.webhooks.1': 'Страница доступна ролям Редактирование правил и Администрирование.',
     'help.webhooks.2': 'Загрузить из CMDB читает текущие CMDBuild webhooks через backend; браузер не подключается к CMDBuild напрямую.',
@@ -646,9 +764,12 @@ const translations = {
     'help.catalogs.title': 'Каталоги и настройки',
     'help.catalogs.1': 'Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.',
     'help.catalogs.2': 'CMDBuild Catalog загружает классы, атрибуты, domains и lookup-значения.',
-    'help.catalogs.3': 'Runtime-настройки сохраняют подключения и Events Kafka browser; Авторизация сохраняет локальный режим, MS AD, IdP/SAML2/OAuth2 и привязку AD-групп к ролям.',
+    'help.catalogs.3': 'Runtime-настройки сохраняют подключения и Events Kafka browser; Настройка git сохраняет параметры файла правил; Авторизация сохраняет локальный режим, MS AD, IdP/SAML2/OAuth2 и привязку AD-групп к ролям.',
     'help.catalogs.4': 'Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.',
     'help.catalogs.5': 'Для тестовой системы rules читаются с диска из rules/cmdbuild-to-zabbix-host-create.json; если включено чтение из git, этот файл ожидается внутри repository по тому же пути.',
+    'help.catalogs.6': 'Галки Динамическое расширение Zabbix из CMDBuild leaf разрешают создавать или расширять только Tags и Host groups по значениям выбранного leaf. Эту функцию нужно применять ответственно: перед включением проанализируйте разнообразие содержимого атрибутов, по которым выполняется mapping, потому что неконтролируемые изменения этих атрибутов в CMDBuild дадут такой же объем динамических изменений в Zabbix. Для Host groups микросервис Zabbix writer дополнительно должен разрешать создание групп в своей конфигурации; созданный или найденный groupid подставляется в тот же host.create/host.update payload.',
+    'help.catalogs.7': 'Метаданные Zabbix строятся из catalog sync и показывают template item keys, LLD rule keys, inventory links, existing host templates и конфликты templates.',
+    'help.catalogs.8': 'Настройка git отделена от Runtime-настроек: UI показывает путь файла правил, локальную repository path, режим чтения, repository URL, schemaVersion и rulesVersion. UI может записать rules и соседний webhook artifact в локальную working copy, но не выполняет commit/push; секреты в webhook artifact заменяются на XXXXX.',
     'tooltip.brand': 'Название приложения cmdb2monitoring.',
     'tooltip.sessionSummary': 'Текущий пользователь и способ авторизации.',
     'tooltip.idpLoginButton': 'Запускает вход через выбранный внешний IdP.',
@@ -662,8 +783,9 @@ const translations = {
     'tooltip.createEmptyRules': 'Создает чистый starter правил с базовым наполнением текущего окружения. Требует загруженные CMDBuild и Zabbix catalog cache; файл сохраняется только через браузер.',
     'tooltip.rulesFile': 'Выбор локального JSON-файла правил для проверки, dry-run или сохранения через браузер.',
     'tooltip.rulesFilePath': 'Для тестовой системы: rules/cmdbuild-to-zabbix-host-create.json. При чтении из git этот же путь ожидается внутри repository checkout.',
-    'tooltip.rulesReadFromGit': 'Переключает режим отображения storage: выключено - читать с диска; включено - читать из git working copy при соответствующей настройке converter-сервиса.',
+    'tooltip.rulesReadFromGit': 'Переключает источник рабочей копии правил: выключено - читать с диска проекта, включено - читать из локальной git working copy.',
     'tooltip.rulesRepositoryUrl': 'URL repository с правилами. Внутри ожидается файл rules/cmdbuild-to-zabbix-host-create.json или путь, указанный в поле "Путь к файлу правил".',
+    'tooltip.rulesRepositoryPath': 'Локальный путь к working copy repository, куда UI может записать rules и согласованный webhook artifact без commit/push.',
     'tooltip.dryRunPayload': 'Тестовый CMDBuild payload для dry-run конвертации.',
     'tooltip.dryRunRules': 'Выполняет пробную конвертацию без сохранения правил.',
     'tooltip.saveRulesAs': 'Сохраняет текущий JSON правил через браузер. Backend rules-файл, git commit и git push не выполняются.',
@@ -691,9 +813,15 @@ const translations = {
     'tooltip.webhooksClear': 'Снимает выбор со всех операций плана webhooks.',
     'tooltip.syncZabbix': 'Обновляет каталог Zabbix из API Zabbix.',
     'tooltip.loadZabbix': 'Загружает сохраненный каталог Zabbix.',
+    'tooltip.syncZabbixMetadata': 'Обновляет каталог Zabbix и перестраивает метаданные совместимости templates.',
+    'tooltip.loadZabbixMetadata': 'Загружает сохраненные метаданные Zabbix из cache каталога.',
     'tooltip.syncCmdbuild': 'Обновляет каталог CMDBuild через API CMDBuild.',
     'tooltip.loadCmdbuild': 'Загружает сохраненный каталог CMDBuild.',
     'tooltip.loadRuntimeSettings': 'Загружает runtime-настройки из внешнего файла.',
+    'tooltip.loadGitSettings': 'Загружает git-настройки файла правил из внешнего файла UI.',
+    'tooltip.checkGitSettings': 'Загружает файл правил из выбранного источника и показывает schemaVersion/rulesVersion.',
+    'tooltip.saveGitWorkingCopy': 'Записывает текущие rules и согласованный webhook artifact в локальную git working copy. Commit и push не выполняются.',
+    'tooltip.saveGitSettings': 'Сохраняет настройки чтения rules с диска или из git working copy.',
     'tooltip.loadAuthSettings': 'Загружает настройки авторизации и локальных пользователей.',
     'tooltip.saveRuntimeSettings': 'Сохраняет runtime-настройки во внешний файл.',
     'tooltip.saveIdp': 'Сохраняет режим авторизации, IdP/MS AD параметры и соответствие ролей группам.',
@@ -715,6 +843,11 @@ const translations = {
     'login.zabbixPassword': 'Zabbix password',
     'login.submit': 'Login',
     'dashboard.reloadRules': 'Reload conversion rules',
+    'dashboard.rulesVersionMicroservice': 'On microservice',
+    'dashboard.rulesVersionManagement': 'In management system',
+    'dashboard.rulesVersionUnavailable': 'version unavailable',
+    'dashboard.rulesVersionSchema': 'schema',
+    'dashboard.serviceHelp': 'Service "{name}" probe. Shows HTTP status, latency, checked URL, and rules versions when the service exposes them.',
     'account.changePassword': 'Change password',
     'account.currentPassword': 'Current password',
     'account.newPassword': 'New password',
@@ -799,10 +932,12 @@ const translations = {
     'nav.validateMapping': 'Conversion Rules Logical Control',
     'nav.webhooks': 'Webhook Setup',
     'nav.zabbix': 'Zabbix Catalog',
+    'nav.zabbixMetadata': 'Zabbix Metadata',
     'nav.cmdbuild': 'CMDBuild Catalog',
     'nav.settings': 'Settings',
     'nav.authSettings': 'Authorization',
     'nav.runtimeSettings': 'Runtime settings',
+    'nav.gitSettings': 'Git Settings',
     'nav.about': 'About',
     'nav.help': 'Help',
     'nav.logout': 'Logout',
@@ -814,16 +949,61 @@ const translations = {
     'settings.maxTraversalDepthNote': 'The change takes effect only after logout and CMDBuild catalog resync.',
     'settings.zabbixApi': 'Zabbix API',
     'settings.zabbixApiKey': 'Zabbix API key',
+    'settings.zabbixDynamicTargets': 'Dynamic Zabbix expansion from CMDBuild leaf',
+    'settings.allowDynamicTagsFromCmdbLeaf': 'Allow dynamic Zabbix Tags expansion from a CMDBuild leaf',
+    'settings.allowDynamicHostGroupsFromCmdbLeaf': 'Allow dynamic Zabbix Host groups creation from a CMDBuild leaf',
+    'settings.dynamicTargetsNote': 'The switches let the rule editor save targetMode=dynamicFromLeaf only for Tags and Host groups. For Host groups, when creation is allowed, the Zabbix writer substitutes the created groupid into the same host payload. Use this only after analyzing leaf-value variety: uncontrolled CMDBuild changes will produce the same amount of dynamic change in Zabbix.',
     'settings.rulesStorage': 'Conversion rules file',
     'settings.rulesFilePath': 'Rules file path',
     'settings.rulesFilePathPlaceholder': 'rules/cmdbuild-to-zabbix-host-create.json',
-    'settings.rulesReadFromGit': 'Read from git',
+    'settings.rulesReadFromGit': 'Use git as the conversion data source',
     'settings.rulesRepositoryUrl': 'Git repository URL',
     'settings.rulesRepositoryUrlPlaceholder': 'https://git.example.org/cmdb2monitoring/conversion-rules.git',
+    'settings.rulesRepositoryPath': 'Local git working copy path',
+    'settings.rulesRepositoryPathPlaceholder': 'rules-git-working-copy',
     'settings.rulesReadModeDisk': 'For the test system: read from disk, file {path}.',
     'settings.rulesReadModeGit': 'Git mode: the URL points to the repository, and file {path} is expected inside it.',
     'settings.rulesGitFileNote': 'When git is enabled, the rules file is expected inside the repository at the path shown above.',
     'settings.rulesStorageNote': 'The UI saves rules through the browser; publishing to git is done by the operator outside the application.',
+    'gitSettings.rulesStorage': 'Conversion rules file storage',
+    'gitSettings.currentState': 'Current state',
+    'gitSettings.loadSettings': 'Load settings',
+    'gitSettings.loadFromDisk': 'Load from disk',
+    'gitSettings.loadFromGit': 'Load from git',
+    'gitSettings.saveToGit': 'Save to git',
+    'gitSettings.saveSettings': 'Save settings',
+    'gitSettings.save': 'Save settings',
+    'gitSettings.scopeNote': 'Converter microservice settings, which use the conversion file, do not depend on the settings below; this page only manages copies, and production placement of those copies is the system administrator responsibility.',
+    'gitSettings.resolvedPath': 'Resolved path',
+    'gitSettings.readMode': 'Read mode',
+    'gitSettings.schemaVersion': 'schemaVersion',
+    'gitSettings.rulesVersion': 'rulesVersion',
+    'gitSettings.loaded': 'Git settings loaded.',
+    'gitSettings.saved': 'Git settings saved.',
+    'gitSettings.dirty': 'Git settings have unsaved changes.',
+    'gitSettings.checkOk': 'Rules load completed: {message}',
+    'gitSettings.checkFailed': 'Rules load failed: {message}',
+    'gitSettings.exported': 'Files were written to the git copy: {rulesPath}; webhook artifact: {webhooksPath}. Commit/push were not performed.',
+    'zabbixMetadata.conflicts': 'Template conflicts',
+    'zabbixMetadata.type': 'Type',
+    'zabbixMetadata.key': 'Key',
+    'zabbixMetadata.templates': 'Templates',
+    'zabbixMetadata.name': 'Name',
+    'zabbixMetadata.hosts': 'Hosts',
+    'zabbixMetadata.host': 'Host',
+    'zabbixMetadata.linkedTemplates': 'Linked templates',
+    'zabbixMetadata.items': 'Items',
+    'zabbixMetadata.discoveryRules': 'LLD',
+    'zabbixMetadata.inventoryLinks': 'Inventory',
+    'zabbixMetadata.summary': 'Zabbix {version}. Synced: {syncedAt}. Templates: {templates}. Hosts: {hosts}. Host groups: {hostGroups}. Conflicts: {conflicts}.',
+    'zabbixMetadata.noConflicts': 'No template conflicts found.',
+    'zabbixMetadata.loaded': 'Zabbix metadata loaded.',
+    'zabbixMetadata.synced': 'Zabbix metadata synced.',
+    'zabbixMetadata.conflictRuleHelp': 'The Zabbix metadata blocks assignment of conflicting templates. Add or fix templateConflictRules so the incompatible template is cleared before sending data to Zabbix.',
+    'zabbixMetadata.conflictEditor': 'Incompatible Zabbix templates: {message}',
+    'catalog.zabbixSummary': 'Obtained: {syncedAt}. Zabbix {version}. Host groups: {hostGroups}. Templates: {templates}. Template groups: {templateGroups}. Hosts: {hosts}. Tags: {tags}.',
+    'catalog.cmdbuildSummary': 'Obtained: {syncedAt}. Classes: {classes}. Attributes: {attributes}. Domains: {domains}. Lookups: {lookups}.',
+    'catalog.notLoaded': 'Catalog is not loaded yet.',
     'settings.kafkaEvents': 'Kafka Events',
     'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
     'settings.authModeTitle': 'Authorization mode',
@@ -858,8 +1038,26 @@ const translations = {
     'toast.rulesValidationFailed': 'Rules did not pass validation after the edit',
     'toast.validationDraftChanged': 'Rules were changed in memory. Use "Save file as" when edits are finished.',
     'rules.createEmpty': 'Create empty',
+    'rules.sourceStatus': 'Rules source: {mode}; version: {version}',
+    'rules.sourceStatusHelp': 'Rules source: {mode}; version: {version}; file: {path}; resolved path: {resolvedPath}',
+    'rules.sourceDisk': 'disk',
+    'rules.sourceGit': 'git',
+    'rules.sourceUnknown': 'unknown',
     'toast.emptyRulesCreated': 'Empty rules starter created in the local file area',
     'toast.emptyRulesFailed': 'Could not create empty rules starter',
+    'common.running': 'Running...',
+    'action.status.running': 'Running: {label}',
+    'action.status.done': 'Done: {label}',
+    'action.status.cancelled': 'Cancelled: {label}',
+    'action.status.failed': 'Failed: {label}. {message}',
+    'settings.runtimeStatusLoaded': 'Runtime settings loaded. There are no unsaved changes.',
+    'settings.runtimeStatusSaved': 'Runtime settings saved. Changes are applied in the UI/API.',
+    'settings.runtimeStatusSavedResyncRequired': 'Runtime settings saved. Changes are applied in the UI/API; the new depth takes effect after logout and CMDBuild catalog resync.',
+    'settings.runtimeStatusDirty': 'There are unsaved Runtime settings. Click "Save runtime" to apply changes, or "Load" to restore values from the file.',
+    'settings.runtimeStatusSaveFailed': 'Runtime settings were not saved: {message}',
+    'settings.runtimeStatusLoadFailed': 'Runtime settings were not loaded: {message}',
+    'settings.runtimeUnsavedConfirm': 'There are unsaved Runtime settings. Leave this page without saving?',
+    'settings.runtimeDiscardConfirm': 'There are unsaved Runtime settings. Load values from the file and discard current changes?',
     'about.title': 'About',
     'about.text': 'Designed and materialized by Igor Lyapin email:igor.lyapin@gmail.com 2026\nLicensed under GNU GPLv3.',
     'common.clearSelection': 'Clear selection',
@@ -944,6 +1142,7 @@ const translations = {
     'mapping.status.leafSelected': 'Leaf/source field is selected.',
     'mapping.status.structureCompatible': 'Conversion structure is compatible with the selected field.',
     'mapping.status.targetSelected': 'Zabbix target is selected.',
+    'mapping.status.dynamicTargetSelected': 'Dynamic target from CMDBuild leaf is selected.',
     'mapping.status.prioritySet': 'Priority is set.',
     'mapping.status.regexSaved': 'Regex will be saved in the rule condition.',
     'mapping.status.ruleNameSetOrAuto': 'Rule name is set or will be generated automatically.',
@@ -1006,12 +1205,27 @@ const translations = {
     'mapping.option.profilePrefix': 'Profile: {name}',
     'mapping.option.newHostMacro': 'New host macro from class attribute field',
     'mapping.option.inventoryFromField': 'Inventory field from class attribute field',
+    'mapping.option.dynamicHostGroupFromLeaf': 'Create/expand host group from selected CMDBuild leaf',
+    'mapping.option.dynamicTagFromLeaf': 'Expand tag from selected CMDBuild leaf',
     'mapping.target.hostGroups': 'Host group rule',
     'mapping.target.templates': 'Template rule',
     'mapping.target.tags': 'Tag rule',
     'mapping.target.interfaceAddress': 'Interface address rule',
     'mapping.target.interface': 'Interface rule',
     'mapping.target.monitoringSuppression': 'Monitoring suppression rule',
+    'sessionTraffic.webhooks': 'Webhooks',
+    'sessionTraffic.zabbixCatalog': 'Zabbix',
+    'sessionTraffic.cmdbuildCatalog': 'CMDBuild',
+    'sessionTraffic.gitRules': 'Rules',
+    'sessionTraffic.zabbixMetadata': 'Metadata',
+    'sessionTraffic.notLoaded': 'Not loaded',
+    'sessionTraffic.notRead': 'Not read',
+    'sessionTraffic.loaded': 'Loaded',
+    'sessionTraffic.synced': 'Sync',
+    'sessionTraffic.readDisk': 'Read from disk',
+    'sessionTraffic.readGit': 'Read from git',
+    'sessionTraffic.savedGit': 'Saved to git copy',
+    'sessionTraffic.error': 'Error',
     'session.notAuthenticated': 'not authenticated',
     'help.general.title': 'General Principle',
     'help.general.1': 'The browser works only with monitoring-ui-api; it does not connect directly to CMDBuild, Zabbix, or Kafka.',
@@ -1045,11 +1259,13 @@ const translations = {
     'help.mapping.15': 'Regex rules show which class attribute fields select groups, templates, tags, and extended Zabbix objects.',
     'help.mapping.16': 'A domain path such as Class.{domain:RelatedClass}.Attribute reads related cards through CMDBuild relations; fields that may return multiple values are unavailable for scalar Zabbix structures.',
     'help.mapping.17': 'monitoringSuppressionRules is used when instance attributes intentionally block monitoring; create/update are skipped, while delete is not blocked.',
+    'help.mapping.18': 'Template rules are checked against Zabbix Metadata: an item key, LLD rule key, or inventory link conflict is marked red and blocks saving until templateConflictRules are fixed or a compatible template set is selected.',
     'help.validate.title': 'Conversion Rules Logical Control',
     'help.validate.1': 'The page does not build an interactive chain; it highlights only missing entities.',
     'help.validate.2': 'Red marks classes and attributes missing from the CMDBuild catalog, as well as Zabbix references missing from the Zabbix catalog.',
     'help.validate.3': 'A checkbox above a missing item includes it in removal from the rules JSON.',
     'help.validate.4': 'Delete asks for confirmation, saves the previous version, and fixes the selected references in rules.',
+    'help.validate.5': 'Incompatible Zabbix templates from Zabbix Metadata are critical rules errors: fix templateConflictRules, choose compatible templates, or remove the bad rule from the draft.',
     'help.webhooks.title': 'Webhook Setup',
     'help.webhooks.1': 'The page is available to the Editor and Administrator roles.',
     'help.webhooks.2': 'Load from CMDB reads current CMDBuild webhooks through the backend; the browser does not connect to CMDBuild directly.',
@@ -1062,9 +1278,12 @@ const translations = {
     'help.catalogs.title': 'Catalogs And Settings',
     'help.catalogs.1': 'Zabbix Catalog loads templates, host groups, template groups, tags, and extended Zabbix catalogs.',
     'help.catalogs.2': 'CMDBuild Catalog loads classes, attributes, domains, and lookup values.',
-    'help.catalogs.3': 'Runtime settings saves connections and the Events Kafka browser; Authorization saves local mode, MS AD, IdP/SAML2/OAuth2, and AD group-to-role mapping.',
+    'help.catalogs.3': 'Runtime settings saves connections and the Events Kafka browser; Git Settings saves rules-file parameters; Authorization saves local mode, MS AD, IdP/SAML2/OAuth2, and AD group-to-role mapping.',
     'help.catalogs.4': 'Source catalogs should usually be changed in CMDBuild/Zabbix, while conversion behavior is changed in JSON rules.',
     'help.catalogs.5': 'For the test system, rules are read from disk at rules/cmdbuild-to-zabbix-host-create.json; when git reading is enabled, the same file is expected inside the repository at that path.',
+    'help.catalogs.6': 'The Dynamic Zabbix expansion from CMDBuild leaf switches allow creating or expanding only Tags and Host groups from selected leaf values. Use this function responsibly: before enabling it, analyze the variety of attribute contents used for mapping, because uncontrolled CMDBuild changes will produce the same amount of dynamic change in Zabbix. For Host groups, the Zabbix writer microservice must also allow group creation in its own configuration; the created or resolved groupid is substituted into the same host.create/host.update payload.',
+    'help.catalogs.7': 'Zabbix Metadata is built from catalog sync and shows template item keys, LLD rule keys, inventory links, existing host templates, and template conflicts.',
+    'help.catalogs.8': 'Git Settings is separate from Runtime Settings: the UI shows the rules file path, local repository path, read mode, repository URL, schemaVersion, and rulesVersion. It can write rules and a neighboring webhook artifact to a local working copy, but it does not commit or push; secrets in the webhook artifact are replaced with XXXXX.',
     'tooltip.brand': 'Application name: cmdb2monitoring.',
     'tooltip.sessionSummary': 'Current user and authentication method.',
     'tooltip.idpLoginButton': 'Starts login through the selected external IdP.',
@@ -1078,8 +1297,9 @@ const translations = {
     'tooltip.createEmptyRules': 'Creates a clean rules starter with current-environment baseline data. Loaded CMDBuild and Zabbix catalog caches are required; it is saved only through the browser.',
     'tooltip.rulesFile': 'Selects a local rules JSON file for validation, dry-run, or browser save.',
     'tooltip.rulesFilePath': 'For the test system: rules/cmdbuild-to-zabbix-host-create.json. When reading from git, the same path is expected inside the repository checkout.',
-    'tooltip.rulesReadFromGit': 'Switches the displayed storage mode: off means read from disk; on means read from a git working copy when the converter service is configured accordingly.',
+    'tooltip.rulesReadFromGit': 'Switches the rules copy source: off means read from the project disk, on means read from a local git working copy.',
     'tooltip.rulesRepositoryUrl': 'Repository URL with rules. The expected file inside it is rules/cmdbuild-to-zabbix-host-create.json, or the path configured in Rules file path.',
+    'tooltip.rulesRepositoryPath': 'Local repository working copy where the UI can write rules and a consistent webhook artifact without commit/push.',
     'tooltip.dryRunPayload': 'Test CMDBuild payload for dry-run conversion.',
     'tooltip.dryRunRules': 'Runs a trial conversion without saving rules.',
     'tooltip.saveRulesAs': 'Saves the current rules JSON through the browser. The backend rules file, git commit, and git push are not changed.',
@@ -1107,9 +1327,15 @@ const translations = {
     'tooltip.webhooksClear': 'Clears all webhook plan operation selections.',
     'tooltip.syncZabbix': 'Refreshes the Zabbix catalog from the Zabbix API.',
     'tooltip.loadZabbix': 'Loads the saved Zabbix catalog.',
+    'tooltip.syncZabbixMetadata': 'Refreshes the Zabbix catalog and rebuilds template compatibility metadata.',
+    'tooltip.loadZabbixMetadata': 'Loads saved Zabbix metadata from the catalog cache.',
     'tooltip.syncCmdbuild': 'Refreshes the CMDBuild catalog through the CMDBuild API.',
     'tooltip.loadCmdbuild': 'Loads the saved CMDBuild catalog.',
     'tooltip.loadRuntimeSettings': 'Loads runtime settings from the external file.',
+    'tooltip.loadGitSettings': 'Loads conversion-rules git settings from the external UI settings file.',
+    'tooltip.checkGitSettings': 'Loads the rules file from the selected source and shows schemaVersion/rulesVersion.',
+    'tooltip.saveGitWorkingCopy': 'Writes current rules and a consistent webhook artifact to the local git working copy. Commit and push are not performed.',
+    'tooltip.saveGitSettings': 'Saves settings for reading rules from disk or from a git working copy.',
     'tooltip.loadAuthSettings': 'Loads authorization settings and local users.',
     'tooltip.saveRuntimeSettings': 'Saves runtime settings to the external file.',
     'tooltip.saveIdp': 'Saves authorization mode, IdP/MS AD parameters, and role-to-group mapping.',
@@ -1130,9 +1356,11 @@ const viewDescriptions = {
     validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
     webhooks: 'Пользоваться этим пунктом не обязательно: можно самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации. Здесь можно загрузить текущие CMDBuild webhooks, построить план create/update/delete по rules и явно загрузить выбранные операции в CMDBuild. Undo/Redo не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
     zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
+    zabbixMetadata: 'Показывает метаданные Zabbix templates, конфликтующие item keys, LLD rule keys и inventory fields. Эти данные используются редактором и логическим контролем правил.',
     cmdbuild: 'Показывает классы, атрибуты, domains и lookup-справочники, загруженные из CMDBuild.',
     authSettings: 'Управляет режимом авторизации: локальная, MS AD или IdP. В IdP режиме MS AD используется для сопоставления групп с ролями.',
     runtimeSettings: 'Содержит runtime-настройки подключений, Zabbix API key и Kafka Events.',
+    gitSettings: 'Настройка микросервиса по конвертации, который использует файл конвертации, не зависит от настроек ниже, здесь управляется только копиями, размещение которых в продуктивных местах хранение лежит в области ответственности администратора системы.',
     about: 'Информация об авторстве и свободном использовании.',
     help: 'Содержит справку по разделам интерфейса, управлению правилами конвертации, логическому контролю правил конвертации и настройкам.'
   },
@@ -1144,9 +1372,11 @@ const viewDescriptions = {
     validateMapping: 'Validates rules against Zabbix and CMDBuild catalogs; only missing source entities are highlighted.',
     webhooks: 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved with the conversion rules file. This page loads current CMDBuild webhooks, builds a create/update/delete plan from rules, and explicitly loads selected operations into CMDBuild. Undo/Redo does not roll back configuration already loaded into CMDBuild.',
     zabbix: 'Shows templates, host groups, template groups, tags, and extended Zabbix catalogs.',
+    zabbixMetadata: 'Shows Zabbix template metadata, conflicting item keys, LLD rule keys, and inventory fields. The rule editor and logical control use this data.',
     cmdbuild: 'Shows classes, attributes, domains, and lookup catalogs loaded from CMDBuild.',
     authSettings: 'Manages authorization mode: local, MS AD, or IdP. In IdP mode, MS AD is used for group-to-role mapping.',
     runtimeSettings: 'Contains runtime connection settings, Zabbix API key, and Kafka Events.',
+    gitSettings: 'Converter microservice settings, which use the conversion file, do not depend on the settings below; this page only manages copies, and production placement of those copies is the system administrator responsibility.',
     about: 'Authorship and free-use information.',
     help: 'Contains help for UI sections, Conversion Rules Management, Conversion Rules Logical Control, and settings.'
   }
@@ -1187,6 +1417,7 @@ async function initialize() {
   if (status.authenticated) {
     await loadDashboard();
     if (canUseRules()) {
+      await loadRuntimeCapabilities();
       await loadRules();
     }
     if (currentRole() === 'admin') {
@@ -1199,6 +1430,10 @@ function bindNavigation() {
   $$('.nav-item[data-view]').forEach(button => {
     button.addEventListener('click', async () => {
       if (!canView(button.dataset.view)) {
+        return;
+      }
+
+      if (!canLeaveCurrentView(button.dataset.view)) {
         return;
       }
 
@@ -1215,11 +1450,140 @@ function bindNavigation() {
       if (button.dataset.view === 'runtimeSettings') {
         await loadRuntimeSettings();
       }
+      if (button.dataset.view === 'gitSettings') {
+        await loadGitSettings();
+      }
+      if (button.dataset.view === 'zabbixMetadata') {
+        await loadZabbixMetadata();
+      }
       if (button.dataset.view === 'authSettings') {
         await loadAuthSettings();
       }
     });
   });
+
+  window.addEventListener('beforeunload', event => {
+    if (!state.runtimeSettingsDirty && !state.gitSettingsDirty) {
+      return;
+    }
+    event.preventDefault();
+    event.returnValue = '';
+  });
+}
+
+function bindAction(selector, action, options = {}) {
+  const button = $(selector);
+  if (!button) {
+    return;
+  }
+
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    runUiAction(button, () => action(event), options);
+  });
+}
+
+async function runUiAction(button, action, options = {}) {
+  const label = actionButtonLabel(button);
+  const statusNode = actionStatusNode(button, options.statusSelector);
+  const originalText = button.textContent;
+  const originalDisabled = button.disabled;
+  const i18nKey = button.dataset.i18n;
+
+  button.disabled = true;
+  button.classList.add('is-busy');
+  button.setAttribute('aria-busy', 'true');
+  button.textContent = t('common.running');
+  setActionStatus(statusNode, tf('action.status.running', { label }), 'running');
+  let failed = false;
+  let cancelled = false;
+
+  try {
+    const result = await action();
+    if (isActionCancelled(result)) {
+      cancelled = true;
+      setActionStatus(statusNode, tf('action.status.cancelled', { label }), 'warning');
+      return result;
+    }
+
+    if (options.success !== false) {
+      setActionStatus(statusNode, actionSuccessMessage(label, result, options), 'success');
+    }
+    return result;
+  } catch (error) {
+    failed = true;
+    const message = tf('action.status.failed', { label, message: error.message ?? String(error) });
+    setActionStatus(statusNode, message, 'error');
+    toast(message);
+    return null;
+  } finally {
+    button.classList.remove('is-busy');
+    button.removeAttribute('aria-busy');
+    if (options.restoreDisabled !== false || failed || cancelled) {
+      button.disabled = originalDisabled;
+    }
+    button.textContent = i18nKey ? t(i18nKey) : originalText;
+  }
+}
+
+function actionButtonLabel(button) {
+  const i18nKey = button.dataset.i18n;
+  return (i18nKey ? t(i18nKey) : button.textContent).trim();
+}
+
+function actionSuccessMessage(label, result, options) {
+  if (typeof options.successMessage === 'function') {
+    return options.successMessage(result, label);
+  }
+  if (typeof options.successMessage === 'string') {
+    return options.successMessage;
+  }
+  if (options.successKey) {
+    return tf(options.successKey, { label });
+  }
+  return tf('action.status.done', { label });
+}
+
+function isActionCancelled(result) {
+  return result === false || result?.cancelled === true;
+}
+
+function actionStatusNode(button, explicitSelector = '') {
+  if (explicitSelector) {
+    return $(explicitSelector);
+  }
+
+  const viewId = button.closest('.view')?.id ?? '';
+  const selectors = {
+    dashboard: '#dashboardActionStatus',
+    events: '#eventsActionStatus',
+    rules: '#rulesActionStatus',
+    mapping: '#mappingActionStatus',
+    validateMapping: '#validateMappingActionStatus',
+    webhooks: '#webhooksStatus',
+    zabbix: '#zabbixActionStatus',
+    zabbixMetadata: '#zabbixMetadataStatus',
+    cmdbuild: '#cmdbuildActionStatus',
+    runtimeSettings: '#runtimeSettingsStatus',
+    gitSettings: '#gitSettingsStatus',
+    authSettings: '#authSettingsStatus'
+  };
+  return selectors[viewId] ? $(selectors[viewId]) : null;
+}
+
+function setActionStatus(node, message, level = 'info') {
+  if (!node) {
+    if (level === 'error' || level === 'success') {
+      toast(message);
+    }
+    return;
+  }
+
+  node.textContent = message;
+  node.classList.toggle('is-running', level === 'running');
+  node.classList.toggle('is-warning', level === 'warning');
+  node.classList.toggle('is-error', level === 'error');
+  node.classList.toggle('is-success', level === 'success');
 }
 
 function showView(viewId) {
@@ -1227,6 +1591,36 @@ function showView(viewId) {
   $$('.nav-item[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === targetView));
   $$('.view').forEach(view => view.classList.toggle('active', view.id === targetView));
   updateViewDescription(targetView);
+}
+
+function canLeaveCurrentView(nextView) {
+  const activeView = $('.view.active')?.id ?? '';
+  const guards = {
+    runtimeSettings: {
+      dirty: state.runtimeSettingsDirty,
+      confirmKey: 'settings.runtimeUnsavedConfirm',
+      status: () => setRuntimeSettingsStatus('settings.runtimeStatusDirty', 'warning'),
+      toastKey: 'settings.runtimeStatusDirty'
+    },
+    gitSettings: {
+      dirty: state.gitSettingsDirty,
+      confirmKey: 'settings.runtimeUnsavedConfirm',
+      status: () => setGitSettingsStatus('gitSettings.dirty', 'warning'),
+      toastKey: 'gitSettings.dirty'
+    }
+  };
+  const guard = guards[activeView];
+  if (!guard || nextView === activeView || !guard.dirty) {
+    return true;
+  }
+
+  if (window.confirm(t(guard.confirmKey))) {
+    return true;
+  }
+
+  guard.status();
+  toast(t(guard.toastKey));
+  return false;
 }
 
 function applyRoleAccess() {
@@ -1361,7 +1755,9 @@ function applyLanguage() {
   });
   $$('.view').forEach(ensureViewDescription);
   updateSessionSummary();
+  renderSessionTraffic();
   updateLocalizedDynamicUi();
+  renderRuntimeSettingsStatus();
   applyHelpText();
 }
 
@@ -1377,7 +1773,20 @@ function tf(key, values = {}) {
 
 function updateLocalizedDynamicUi() {
   updateMappingEditorControls();
-  updateRuntimeRulesUiState();
+  updateGitRulesUiState();
+  renderGitSettingsStatus();
+  renderRulesSourceStatus('#rulesSourceStatus', state.currentRules);
+  renderRulesSourceStatus('#mappingRulesSourceStatus', state.mappingLoaded ? state.currentRules : null);
+  renderRulesSourceStatus('#validateMappingRulesSourceStatus', state.validateMappingLoaded ? state.currentRules : null);
+  if (state.zabbixCatalog) {
+    renderZabbixCatalogSummary(state.zabbixCatalog);
+  }
+  if (state.cmdbuildCatalog) {
+    renderCmdbuildCatalogSummary(state.cmdbuildCatalog);
+  }
+  if (state.zabbixMetadata) {
+    renderZabbixMetadata(state.zabbixMetadata);
+  }
   if (state.mappingLoaded && state.mappingMode === 'edit') {
     refreshMappingEditorLocalizedControls();
     setMappingEditorStatusForDraft(mappingEditorActionStatus());
@@ -1422,6 +1831,40 @@ function updateSessionSummary() {
     : t('session.notAuthenticated');
 
   $('#changePasswordOpen')?.classList.toggle('hidden', !state.authenticated || state.user?.authMethod !== 'local');
+  renderSessionTraffic();
+}
+
+function setSessionIndicator(key, status, textKey, detail = '') {
+  if (!state.sessionIndicators[key]) {
+    return;
+  }
+
+  state.sessionIndicators[key] = { status, textKey, detail };
+  renderSessionTraffic();
+}
+
+function renderSessionTraffic() {
+  const container = $('#sessionTraffic');
+  if (!container) {
+    return;
+  }
+
+  if (!state.authenticated) {
+    container.replaceChildren();
+    return;
+  }
+
+  const items = sessionIndicatorDefinitions.map(definition => {
+    const indicator = state.sessionIndicators[definition.key] ?? {};
+    const label = t(definition.labelKey);
+    const text = t(indicator.textKey ?? 'sessionTraffic.notLoaded');
+    const node = document.createElement('span');
+    node.className = `session-light session-light-${indicator.status ?? 'idle'}`;
+    node.textContent = `${label}: ${text}`;
+    node.title = indicator.detail ? `${label}: ${text}. ${indicator.detail}` : `${label}: ${text}`;
+    return node;
+  });
+  container.replaceChildren(...items);
 }
 
 function bindForms() {
@@ -1449,6 +1892,7 @@ function bindForms() {
       renderAuth({ authenticated: true, user: result.user });
       await loadDashboard();
       if (canUseRules()) {
+        await loadRuntimeCapabilities();
         await loadRules();
       }
     } catch (error) {
@@ -1465,12 +1909,12 @@ function bindForms() {
     location.reload();
   });
 
-  $('#refreshDashboard').addEventListener('click', loadDashboard);
-  $('#refreshEvents').addEventListener('click', loadEvents);
+  bindAction('#refreshDashboard', loadDashboard);
+  bindAction('#refreshEvents', loadEvents);
   $('#eventsTopic').addEventListener('change', loadEvents);
-  $('#loadRules').addEventListener('click', loadRules);
-  $('#createEmptyRules').addEventListener('click', createEmptyRulesStarter);
-  $('#loadMapping').addEventListener('click', loadMapping);
+  bindAction('#loadRules', loadRules);
+  bindAction('#createEmptyRules', createEmptyRulesStarter);
+  bindAction('#loadMapping', () => loadMapping({ throwOnError: true }));
   $('#mappingClearSelection').addEventListener('click', () => clearMappingHighlight($('#mapping')));
   $('#mappingMode').addEventListener('change', updateMappingMode);
   $('#mappingEditAction').addEventListener('change', updateMappingEditorAction);
@@ -1487,7 +1931,7 @@ function bindForms() {
   });
   $('#mappingUndo').addEventListener('click', undoMappingEdit);
   $('#mappingRedo').addEventListener('click', redoMappingEdit);
-  $('#mappingSaveAs').addEventListener('click', saveMappingDraftAsFile);
+  bindAction('#mappingSaveAs', saveMappingDraftAsFile, { statusSelector: '#mappingActionStatus' });
   $('#mappingEditTargetType').addEventListener('change', handleMappingEditorStructureChange);
   $('#mappingEditClass').addEventListener('change', handleMappingEditorClassChange);
   $('#mappingEditField').addEventListener('change', handleMappingEditorFieldChange);
@@ -1511,43 +1955,44 @@ function bindForms() {
       setMappingDeleteGroupSelection(event.target);
     }
   });
-  $('#loadValidateMapping').addEventListener('click', loadValidateMapping);
+  bindAction('#loadValidateMapping', loadValidateMapping);
   $('#validateMappingUndo')?.addEventListener('click', undoValidateMappingEdit);
   $('#validateMappingRedo')?.addEventListener('click', redoValidateMappingEdit);
-  $('#validateMappingSaveAs')?.addEventListener('click', saveValidateMappingDraftAsFile);
+  bindAction('#validateMappingSaveAs', saveValidateMappingDraftAsFile);
   $('#webhooksUndo')?.addEventListener('click', undoWebhooksEdit);
   $('#webhooksRedo')?.addEventListener('click', redoWebhooksEdit);
-  $('#webhooksAnalyze')?.addEventListener('click', analyzeCmdbuildWebhooks);
-  $('#webhooksLoadCmdb')?.addEventListener('click', loadCmdbuildWebhooks);
-  $('#webhooksSaveAs')?.addEventListener('click', saveWebhooksAsFile);
-  $('#webhooksApplyCmdb')?.addEventListener('click', applyCmdbuildWebhooks);
+  bindAction('#webhooksAnalyze', analyzeCmdbuildWebhooks);
+  bindAction('#webhooksLoadCmdb', loadCmdbuildWebhooks);
+  bindAction('#webhooksSaveAs', saveWebhooksAsFile);
+  bindAction('#webhooksApplyCmdb', applyCmdbuildWebhooks, { restoreDisabled: false });
   $('#webhooksSelectAll')?.addEventListener('click', () => setWebhookOperationsSelection(true));
   $('#webhooksClear')?.addEventListener('click', () => setWebhookOperationsSelection(false));
-  $('#deleteValidateMappingSelected').addEventListener('click', deleteSelectedValidationFixes);
-  $('#validateRules').addEventListener('click', validateRules);
-  $('#dryRunRules').addEventListener('click', dryRunRules);
-  $('#saveRulesAs').addEventListener('click', saveRulesAsFile);
-  $('#syncZabbix').addEventListener('click', syncZabbix);
-  $('#loadZabbix').addEventListener('click', loadZabbix);
-  $('#syncCmdbuild').addEventListener('click', syncCmdbuild);
-  $('#loadCmdbuild').addEventListener('click', loadCmdbuild);
-  $('#loadRuntimeSettings').addEventListener('click', loadRuntimeSettings);
-  $('#loadAuthSettings').addEventListener('click', loadAuthSettings);
-  $('#saveRuntimeSettings').addEventListener('click', saveRuntimeSettings);
-  $('#saveIdp').addEventListener('click', saveIdp);
+  bindAction('#deleteValidateMappingSelected', deleteSelectedValidationFixes, { restoreDisabled: false });
+  bindAction('#validateRules', validateRules);
+  bindAction('#dryRunRules', dryRunRules);
+  bindAction('#saveRulesAs', saveRulesAsFile);
+  bindAction('#syncZabbix', syncZabbix);
+  bindAction('#loadZabbix', loadZabbix);
+  bindAction('#syncZabbixMetadata', syncZabbixMetadata, { success: false });
+  bindAction('#loadZabbixMetadata', loadZabbixMetadata, { success: false });
+  bindAction('#syncCmdbuild', syncCmdbuild);
+  bindAction('#loadCmdbuild', loadCmdbuild);
+  bindAction('#loadRuntimeSettings', loadRuntimeSettingsFromButton, { success: false });
+  bindAction('#loadAuthSettings', loadAuthSettings);
+  bindAction('#saveRuntimeSettings', saveRuntimeSettings, { success: false });
+  bindAction('#checkGitSettings', checkGitSettingsFromButton, { success: false });
+  bindAction('#saveGitWorkingCopy', saveGitWorkingCopy, { success: false });
+  bindAction('#saveGitSettings', saveGitSettings, { success: false });
+  bindAction('#saveIdp', saveIdp);
   $('#idpForm')?.addEventListener('change', event => {
     if (event.target.matches('[name="authMode"], [name="provider"]')) {
       updateIdpUiState();
     }
   });
-  $('#runtimeSettingsForm')?.addEventListener('change', event => {
-    if (event.target.matches('[name="cmdbuildMaxTraversalDepth"]')) {
-      toast(t('toast.maxTraversalDepthChanged'));
-    }
-    if (event.target.matches('[name="rulesReadFromGit"], [name="rulesFilePath"]')) {
-      updateRuntimeRulesUiState();
-    }
-  });
+  $('#runtimeSettingsForm')?.addEventListener('change', handleRuntimeSettingsChange);
+  $('#runtimeSettingsForm')?.addEventListener('input', handleRuntimeSettingsInput);
+  $('#gitSettingsForm')?.addEventListener('change', handleGitSettingsChange);
+  $('#gitSettingsForm')?.addEventListener('input', handleGitSettingsInput);
   $('#changePasswordOpen')?.addEventListener('click', openPasswordDialog);
   $('#passwordCancel')?.addEventListener('click', closePasswordDialog);
   $('#passwordForm')?.addEventListener('submit', changeOwnPassword);
@@ -1558,8 +2003,8 @@ function bindForms() {
   $('#validationRuleCancel')?.addEventListener('click', cancelValidationRuleDialog);
   $('#webhookEditApply')?.addEventListener('click', applyWebhookEditDialog);
   $('#webhookEditCancel')?.addEventListener('click', closeWebhookEditDialog);
-  $('#loadUsers')?.addEventListener('click', loadUsers);
-  $('#resetUserPassword')?.addEventListener('click', resetUserPassword);
+  bindAction('#loadUsers', loadUsers);
+  bindAction('#resetUserPassword', resetUserPassword);
   $('#rulesFile').addEventListener('change', async event => {
     const file = event.target.files?.[0];
     state.uploadedRulesText = file ? await file.text() : null;
@@ -1617,6 +2062,9 @@ function bindForms() {
 function renderAuth(status) {
   state.auth = status.auth ?? {};
   state.idp = status.idp ?? null;
+  if (status.runtime) {
+    state.runtimeSettings = mergeRuntimeSettings(state.runtimeSettings, status.runtime);
+  }
   state.authenticated = Boolean(status.authenticated);
   state.user = status.user ?? null;
   $('#loginView').classList.toggle('hidden', status.authenticated);
@@ -1650,40 +2098,63 @@ async function loadDashboard() {
       el('div', 'metric-detail', `${item.statusCode ?? '-'} | ${item.latencyMs} ms | ${item.url}`)
     );
     if (item.rulesReloadSupported && canUseRules()) {
-      const actions = el('div', 'metric-actions', '');
+      const actions = el('div', 'metric-actions rules-actions', '');
       const reloadButton = el('button', 'secondary', t('dashboard.reloadRules'));
       reloadButton.type = 'button';
       reloadButton.addEventListener('click', () => reloadConversionRules(item.name, reloadButton));
-      actions.append(reloadButton);
+      actions.append(reloadButton, renderDashboardRulesVersions(item.rulesStatus, health.managementRules));
       node.append(actions);
     }
-    setHelp(node, `Проверка сервиса "${item.name}". Показывает HTTP-статус, задержку и проверяемый URL.`);
+    setHelp(node, tf('dashboard.serviceHelp', { name: item.name }));
     grid.append(node);
   }
+  return health;
 }
 
 async function reloadConversionRules(serviceName, button) {
-  const originalText = button?.textContent ?? '';
-  if (button) {
-    button.disabled = true;
-    button.textContent = '...';
-  }
-
-  try {
-    await api(`/api/services/${encodeURIComponent(serviceName)}/reload-rules`, {
+  return runUiAction(button, async () => {
+    const result = await api(`/api/services/${encodeURIComponent(serviceName)}/reload-rules`, {
       method: 'POST',
       body: {}
     });
     toast(t('toast.rulesReloaded'));
     await loadDashboard();
-  } catch (error) {
-    toast(error.message);
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
+    return result;
+  }, { statusSelector: '#dashboardActionStatus' });
+}
+
+function renderDashboardRulesVersions(serviceRulesStatus, managementRules) {
+  const container = el('div', 'rules-version-summary', '');
+  container.append(
+    renderDashboardRulesVersionRow(t('dashboard.rulesVersionMicroservice'), serviceRulesStatus?.rules, serviceRulesStatus),
+    renderDashboardRulesVersionRow(t('dashboard.rulesVersionManagement'), managementRules, managementRules)
+  );
+  return container;
+}
+
+function renderDashboardRulesVersionRow(label, rules, status) {
+  const row = el('div', 'rules-version-row', '');
+  const value = formatDashboardRulesVersion(rules, status);
+  const valueNode = el('strong', status?.ok === false ? 'rules-version-value status-bad' : 'rules-version-value', value);
+  valueNode.title = value;
+  row.append(
+    el('span', 'rules-version-label', label),
+    valueNode
+  );
+  return row;
+}
+
+function formatDashboardRulesVersion(rules, status) {
+  const rulesVersion = rules?.rulesVersion ?? '';
+  const schemaVersion = rules?.schemaVersion ?? '';
+  if (!rulesVersion && !schemaVersion) {
+    return status?.error ? t('dashboard.rulesVersionUnavailable') : '-';
   }
+
+  const versionText = rulesVersion || '-';
+  return schemaVersion
+    ? `${versionText} / ${t('dashboard.rulesVersionSchema')} ${schemaVersion}`
+    : versionText;
 }
 
 async function loadEvents() {
@@ -1713,6 +2184,7 @@ async function loadEvents() {
     eventDetailsNode(item),
     eventValueNode(item.value)
   ]);
+  return events;
 }
 
 function compareEventsByNewestTimestamp(left, right) {
@@ -1817,12 +2289,65 @@ async function loadRules() {
   state.currentRules = await api('/api/rules/current');
   renderDefinitionList($('#rulesSummary'), {
     path: state.currentRules.path,
+    source: rulesSourceModeLabel(state.currentRules),
+    resolvedPath: state.currentRules.resolvedPath ?? state.currentRules.path,
     name: state.currentRules.name,
     schemaVersion: state.currentRules.schemaVersion,
     rulesVersion: state.currentRules.rulesVersion,
     valid: state.currentRules.validation.valid
   });
+  renderRulesSourceStatus('#rulesSourceStatus', state.currentRules);
   $('#rulesPreview').textContent = JSON.stringify(state.currentRules.content, null, 2);
+  setSessionIndicator(
+    'gitRules',
+    'read',
+    state.currentRules.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    rulesVersionLabel(state.currentRules)
+  );
+  return state.currentRules;
+}
+
+function renderRulesSourceStatus(selector, rulesDocument) {
+  const node = typeof selector === 'string' ? $(selector) : selector;
+  if (!node) {
+    return;
+  }
+
+  if (!rulesDocument) {
+    node.textContent = '';
+    return;
+  }
+
+  const values = {
+    mode: rulesSourceModeLabel(rulesDocument),
+    version: rulesVersionLabel(rulesDocument),
+    path: rulesDocument.path ?? '',
+    resolvedPath: rulesDocument.resolvedPath ?? rulesDocument.path ?? ''
+  };
+  const text = tf('rules.sourceStatus', {
+    mode: values.mode,
+    version: values.version
+  });
+  node.textContent = text;
+  setHelp(node, tf('rules.sourceStatusHelp', values));
+}
+
+function rulesVersionLabel(rulesDocument) {
+  return rulesDocument?.rulesVersion
+    ?? rulesDocument?.content?.rulesVersion
+    ?? rulesDocument?.fileName
+    ?? rulesDocument?.path
+    ?? '-';
+}
+
+function rulesSourceModeLabel(rulesDocument) {
+  if (rulesDocument?.source === 'git') {
+    return t('rules.sourceGit');
+  }
+  if (rulesDocument?.source === 'disk') {
+    return t('rules.sourceDisk');
+  }
+  return t('rules.sourceUnknown');
 }
 
 async function validateRules() {
@@ -1831,6 +2356,7 @@ async function validateRules() {
     : { content: state.currentRules?.content };
   const result = await api('/api/rules/validate', { method: 'POST', body: payload });
   $('#rulesResult').textContent = JSON.stringify(result, null, 2);
+  return result;
 }
 
 async function createEmptyRulesStarter() {
@@ -1848,12 +2374,14 @@ async function createEmptyRulesStarter() {
       next: 'Review generated JSON, then use Save file as and publish it to the rules git repository outside the application.'
     }, null, 2);
     toast(t('toast.emptyRulesCreated'));
+    return result;
   } catch (error) {
     $('#rulesResult').textContent = JSON.stringify(error.payload ?? {
       error: 'starter_failed',
       message: error.message
     }, null, 2);
     toast(`${t('toast.emptyRulesFailed')}: ${error.message}`);
+    throw error;
   }
 }
 
@@ -1864,6 +2392,7 @@ async function dryRunRules() {
     : { payload };
   const result = await api('/api/rules/dry-run', { method: 'POST', body });
   $('#rulesResult').textContent = JSON.stringify(result, null, 2);
+  return result;
 }
 
 async function saveRulesAsFile() {
@@ -1872,7 +2401,7 @@ async function saveRulesAsFile() {
     : state.currentRules?.content;
   if (!rules) {
     toast('Rules JSON is not loaded');
-    return;
+    return false;
   }
 
   const validation = await api('/api/rules/validate', {
@@ -1887,7 +2416,7 @@ async function saveRulesAsFile() {
   if (!validation.valid) {
     const confirmed = window.confirm('Rules JSON has validation errors. Save file anyway?');
     if (!confirmed) {
-      return;
+      return false;
     }
   }
 
@@ -1897,19 +2426,141 @@ async function saveRulesAsFile() {
   if (!result.cancelled) {
     toast(`Rules file saved: ${result.name}`);
   }
+  return result;
 }
 
 async function syncZabbix() {
   const result = await api('/api/zabbix/catalog/sync', { method: 'POST', body: {} });
   renderZabbix(result);
+  setSessionIndicator('zabbixCatalog', 'synced', 'sessionTraffic.synced');
   toast('Zabbix catalog synced');
+  return result;
 }
 
 async function loadZabbix() {
-  renderZabbix(await api('/api/zabbix/catalog'));
+  const catalog = await api('/api/zabbix/catalog');
+  renderZabbix(catalog);
+  setSessionIndicator('zabbixCatalog', 'loaded', 'sessionTraffic.loaded');
+  return catalog;
+}
+
+async function syncZabbixMetadata() {
+  const metadata = await api('/api/zabbix/metadata/sync', { method: 'POST', body: {} });
+  state.zabbixMetadata = metadata;
+  renderZabbixMetadata(metadata);
+  setSessionIndicator('zabbixMetadata', 'synced', 'sessionTraffic.synced');
+  setActionStatus($('#zabbixMetadataStatus'), t('zabbixMetadata.synced'), 'success');
+  toast(t('zabbixMetadata.synced'));
+  return metadata;
+}
+
+async function loadZabbixMetadata() {
+  const metadata = await api('/api/zabbix/metadata');
+  state.zabbixMetadata = metadata;
+  renderZabbixMetadata(metadata);
+  setSessionIndicator('zabbixMetadata', 'loaded', 'sessionTraffic.loaded');
+  setActionStatus($('#zabbixMetadataStatus'), t('zabbixMetadata.loaded'), 'success');
+  return metadata;
+}
+
+function renderZabbixMetadata(metadata = {}) {
+  renderZabbixMetadataSummary(metadata);
+  renderZabbixMetadataConflicts(metadata.conflicts ?? []);
+  renderZabbixMetadataTemplates(metadata.templates ?? []);
+  renderZabbixMetadataHosts(metadata.hosts ?? []);
+}
+
+function renderZabbixMetadataSummary(metadata = {}) {
+  const container = $('#zabbixMetadataSummary');
+  if (!container) {
+    return;
+  }
+
+  clear(container);
+  container.append(
+    el('div', 'validation-summary-line', tf('zabbixMetadata.summary', {
+      version: metadata.zabbixVersion || '-',
+      syncedAt: metadata.syncedAt || '-',
+      templates: metadata.templateCount ?? 0,
+      hosts: metadata.hostCount ?? 0,
+      hostGroups: metadata.hostGroupCount ?? 0,
+      conflicts: metadata.conflictCount ?? (metadata.conflicts?.length ?? 0)
+    })),
+    el('div', 'validation-summary-detail', (metadata.conflicts?.length ?? 0) === 0
+      ? t('zabbixMetadata.noConflicts')
+      : t('zabbixMetadata.conflictRuleHelp'))
+  );
+}
+
+function renderZabbixMetadataConflicts(conflicts = []) {
+  const tbody = $('#zabbixMetadataConflicts');
+  if (!tbody) {
+    return;
+  }
+
+  clear(tbody);
+  const items = [...conflicts].sort((left, right) => compareText(left.type, right.type) || compareText(left.key, right.key));
+  if (items.length === 0) {
+    const row = document.createElement('tr');
+    const cell = el('td', '', t('zabbixMetadata.noConflicts'));
+    cell.colSpan = 3;
+    row.append(cell);
+    tbody.append(row);
+    return;
+  }
+
+  for (const conflict of items) {
+    const row = document.createElement('tr');
+    const templates = (conflict.templates ?? [])
+      .map(template => `${template.name || template.host || template.templateid} (${template.templateid})`)
+      .join(', ');
+    row.append(
+      el('td', '', conflict.type ?? ''),
+      el('td', '', conflict.key ?? ''),
+      el('td', '', templates)
+    );
+    setHelp(row, conflict.message || t('zabbixMetadata.conflictRuleHelp'));
+    tbody.append(row);
+  }
+}
+
+function renderZabbixMetadataTemplates(templates = []) {
+  const tbody = $('#zabbixMetadataTemplates');
+  if (!tbody) {
+    return;
+  }
+
+  const items = [...templates].sort((left, right) => compareText(left.name || left.host, right.name || right.host));
+  renderRows(tbody, items, template => [
+    template.templateid,
+    template.name || template.host || '',
+    template.itemKeys?.length ?? 0,
+    template.discoveryRuleKeys?.length ?? 0,
+    (template.inventoryLinks ?? [])
+      .map(link => `${link.inventoryLink}:${link.itemKey}`)
+      .join(', ')
+  ]);
+}
+
+function renderZabbixMetadataHosts(hosts = []) {
+  const tbody = $('#zabbixMetadataHosts');
+  if (!tbody) {
+    return;
+  }
+
+  const items = [...hosts].sort((left, right) => compareText(left.name || left.host, right.name || right.host));
+  renderRows(tbody, items, host => [
+    host.hostid,
+    host.name || host.host || '',
+    (host.parentTemplates ?? [])
+      .map(template => `${template.name || template.host || template.templateid} (${template.templateid})`)
+      .join(', ')
+  ]);
 }
 
 function renderZabbix(catalog) {
+  state.zabbixCatalog = catalog;
+  renderZabbixCatalogSummary(catalog);
   const menu = $('#zabbixCatalogMenu');
   const content = $('#zabbixCatalogContent');
   clear(menu);
@@ -1920,6 +2571,31 @@ function renderZabbix(catalog) {
     menu.append(zabbixCatalogMenuItem(definition, items.length));
     content.append(zabbixCatalogSection(definition, items));
   }
+}
+
+function renderZabbixCatalogSummary(catalog = {}) {
+  const container = $('#zabbixCatalogSummary');
+  if (!container) {
+    return;
+  }
+
+  clear(container);
+  if (catalog.exists === false) {
+    container.append(el('div', 'validation-summary-line', t('catalog.notLoaded')));
+    return;
+  }
+
+  const text = tf('catalog.zabbixSummary', {
+    syncedAt: catalog.syncedAt || '-',
+    version: catalog.zabbixVersion || '-',
+    hostGroups: catalog.hostGroups?.length ?? 0,
+    templates: catalog.templates?.length ?? 0,
+    templateGroups: catalog.templateGroups?.length ?? 0,
+    hosts: catalog.hosts?.length ?? 0,
+    tags: catalog.tags?.length ?? 0
+  });
+  container.append(el('div', 'validation-summary-line', text));
+  setHelp(container, text);
 }
 
 function zabbixCatalogMenuItem(definition, count) {
@@ -2009,14 +2685,21 @@ function hostMacroHost(item) {
 async function syncCmdbuild() {
   const result = await api('/api/cmdbuild/catalog/sync', { method: 'POST', body: {} });
   renderCmdbuild(result);
+  setSessionIndicator('cmdbuildCatalog', 'synced', 'sessionTraffic.synced');
   toast('CMDBuild catalog synced');
+  return result;
 }
 
 async function loadCmdbuild() {
-  renderCmdbuild(await api('/api/cmdbuild/catalog'));
+  const catalog = await api('/api/cmdbuild/catalog');
+  renderCmdbuild(catalog);
+  setSessionIndicator('cmdbuildCatalog', 'loaded', 'sessionTraffic.loaded');
+  return catalog;
 }
 
 function renderCmdbuild(catalog) {
+  state.cmdbuildCatalog = catalog;
+  renderCmdbuildCatalogSummary(catalog);
   renderRows($('#cmdbClasses'), catalog.classes ?? [], item => [
     item.name,
     item.active === false ? 'false' : 'true',
@@ -2034,22 +2717,60 @@ function renderCmdbuild(catalog) {
   ]);
 }
 
-async function loadMapping() {
+function renderCmdbuildCatalogSummary(catalog = {}) {
+  const container = $('#cmdbuildCatalogSummary');
+  if (!container) {
+    return;
+  }
+
+  clear(container);
+  if (catalog.exists === false) {
+    container.append(el('div', 'validation-summary-line', t('catalog.notLoaded')));
+    return;
+  }
+
+  const attributeCount = (catalog.attributes ?? [])
+    .reduce((sum, item) => sum + (item.items?.length ?? 0), 0);
+  const text = tf('catalog.cmdbuildSummary', {
+    syncedAt: catalog.syncedAt || '-',
+    classes: catalog.classes?.length ?? 0,
+    attributes: attributeCount,
+    domains: catalog.domains?.length ?? 0,
+    lookups: catalog.lookups?.length ?? 0
+  });
+  container.append(el('div', 'validation-summary-line', text));
+  setHelp(container, text);
+}
+
+async function loadMapping(options = {}) {
   renderMappingLoading();
   let rulesDocument;
   let cmdbuildCatalog;
   try {
-    [rulesDocument, cmdbuildCatalog] = await Promise.all([
+    const result = await Promise.all([
+      loadRuntimeCapabilities(),
       api('/api/rules/current'),
       api('/api/cmdbuild/catalog')
     ]);
+    rulesDocument = result[1];
+    cmdbuildCatalog = result[2];
   } catch (error) {
     renderMappingLoadError(error);
     state.mappingLoaded = false;
-    return;
+    if (options.throwOnError) {
+      throw error;
+    }
+    return false;
   }
 
   state.currentRules = rulesDocument;
+  renderRulesSourceStatus('#mappingRulesSourceStatus', rulesDocument);
+  setSessionIndicator(
+    'gitRules',
+    'read',
+    rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    rulesVersionLabel(rulesDocument)
+  );
   state.mappingCmdbuildCatalog = cmdbuildCatalog;
   state.mappingZabbixCatalog = null;
   initializeMappingDraft(rulesDocument.content);
@@ -2057,13 +2778,19 @@ async function loadMapping() {
   state.mappingLoaded = true;
   updateMappingEditor();
   window.setTimeout(() => loadMappingZabbix(), 200);
+  return { rulesDocument, cmdbuildCatalog };
 }
 
 async function loadMappingZabbix() {
   const zabbixContainer = $('#mappingZabbix');
   try {
-    const zabbixCatalog = await api('/api/zabbix/catalog/mapping');
+    const [zabbixCatalog, zabbixMetadata] = await Promise.all([
+      api('/api/zabbix/catalog/mapping'),
+      api('/api/zabbix/metadata')
+    ]);
+    zabbixCatalog.templateCompatibility ??= { conflicts: zabbixMetadata.conflicts ?? [] };
     state.mappingZabbixCatalog = zabbixCatalog;
+    state.mappingZabbixMetadata = zabbixMetadata;
     const rules = currentMappingRules();
     window.setTimeout(() => {
       renderMappingColumn(zabbixContainer, 'Zabbix', () => renderMappingZabbix(zabbixContainer, rules, zabbixCatalog));
@@ -2281,7 +3008,9 @@ async function loadCmdbuildWebhooks() {
   state.webhooksSelectedIndex = -1;
   state.webhooksDetailRow = { kind: '', index: -1 };
   state.webhooksLoaded = true;
+  setSessionIndicator('webhooks', 'loaded', 'sessionTraffic.loaded');
   renderWebhooks(tf('webhooks.statusLoaded', { count: state.webhooksCurrent.length }));
+  return result;
 }
 
 async function analyzeCmdbuildWebhooks() {
@@ -2292,6 +3021,7 @@ async function analyzeCmdbuildWebhooks() {
     const result = await api('/api/cmdbuild/webhooks');
     state.webhooksCurrent = result.items ?? [];
     state.webhooksLoaded = true;
+    setSessionIndicator('webhooks', 'loaded', 'sessionTraffic.loaded');
   }
   if (!state.webhooksCmdbuildCatalog) {
     state.webhooksCmdbuildCatalog = await api('/api/cmdbuild/catalog');
@@ -2304,6 +3034,7 @@ async function analyzeCmdbuildWebhooks() {
   );
   initializeWebhooksHistory(operations);
   renderWebhooks(tf('webhooks.statusAnalyzed', { count: operations.length }));
+  return operations;
 }
 
 function initializeWebhooksHistory(operations) {
@@ -2905,24 +3636,25 @@ async function saveWebhooksAsFile() {
     note: 'This file is exported by the browser only. Apply to CMDBuild from the UI or review and apply manually.',
     operations: state.webhooksOperations
   };
-  const content = `${JSON.stringify(plan, null, 2)}\n`;
+  const content = `${JSON.stringify(redactWebhookSecrets(plan), null, 2)}\n`;
   const result = await saveTextAsFile(content, 'cmdbuild-webhooks-plan.json', 'CMDBuild webhooks plan', {
     'application/json': ['.json']
   });
   if (!result.cancelled) {
     toast(tf('toast.rulesFileSaved', { name: result.name }));
   }
+  return result;
 }
 
 async function applyCmdbuildWebhooks() {
   const operations = selectedWebhookOperations();
   if (operations.length === 0) {
     toast(t('webhooks.confirmNoSelection'));
-    return;
+    return false;
   }
 
   if (!window.confirm(tf('webhooks.confirmApply', { count: operations.length }))) {
-    return;
+    return false;
   }
 
   const result = await api('/api/cmdbuild/webhooks/apply', {
@@ -2932,6 +3664,7 @@ async function applyCmdbuildWebhooks() {
   toast(tf('webhooks.statusApplied', { count: result.count ?? operations.length }));
   await loadCmdbuildWebhooks();
   await analyzeCmdbuildWebhooks();
+  return result;
 }
 
 function buildCmdbuildWebhookOperations(rules, cmdbuildCatalog, currentHooks) {
@@ -3010,7 +3743,10 @@ function buildDesiredCmdbuildWebhooks(rules, cmdbuildCatalog, currentHooks) {
     for (const event of events) {
       const code = cmdbuildWebhookCode(className, event.eventType);
       const current = currentByCode.get(normalizeWebhookCode(code));
-      const prefix = currentWebhookPlaceholderPrefix(current) || defaults.placeholderPrefix;
+      const currentPrefix = currentWebhookPlaceholderPrefix(current);
+      const prefix = webhookPlaceholderPrefixMatchesClass(currentPrefix, className)
+        ? currentPrefix
+        : cmdbuildPlaceholderPrefixForClass(className) || defaults.placeholderPrefix;
       desired.push(normalizeWebhookItem({
         code,
         description: current?.description || `cmdb2monitoring ${className} ${event.eventType}`,
@@ -3038,8 +3774,17 @@ function currentWebhookDefaults(currentHooks) {
     url: sample.url || defaultCmdbuildWebhookUrl,
     headers: sample.headers ?? {},
     language: sample.language ?? '',
-    placeholderPrefix: currentWebhookPlaceholderPrefix(sample) || 'server'
+    placeholderPrefix: currentWebhookPlaceholderPrefix(sample) || 'card'
   };
+}
+
+function webhookPlaceholderPrefixMatchesClass(prefix, className) {
+  return !isBlank(prefix)
+    && (normalizeToken(prefix) === 'card' || normalizeToken(prefix) === normalizeToken(className));
+}
+
+function cmdbuildPlaceholderPrefixForClass(className) {
+  return 'card';
 }
 
 function webhookBodyForClassEventCmdb(rules, cmdbuildCatalog, className, event, prefix, baseBody = {}) {
@@ -3056,7 +3801,12 @@ function webhookBodyForClassEventCmdb(rules, cmdbuildCatalog, className, event, 
 
   for (const [fieldKey, field] of Object.entries(rules.source?.fields ?? {})) {
     const bodyKey = webhookBodyKeyForField(fieldKey, field);
-    if (!bodyKey || webhookBodyHasField(body, fieldKey, field)) {
+    if (!bodyKey) {
+      continue;
+    }
+    if (field.cmdbPath) {
+      removeWebhookBodyAliasFields(body, bodyKey, fieldKey, field);
+    } else if (webhookBodyHasField(body, fieldKey, field)) {
       continue;
     }
     if (!webhookSourceFieldIsUsed(usedFields, fieldKey) && !field.required) {
@@ -3073,6 +3823,23 @@ function webhookBodyForClassEventCmdb(rules, cmdbuildCatalog, className, event, 
   }
 
   return body;
+}
+
+function removeWebhookBodyAliasFields(body, bodyKey, fieldKey, field) {
+  const candidates = uniqueTokens([
+    fieldKey,
+    canonicalSourceField(fieldKey),
+    ...sourceFieldSources(field),
+    ...sourceFieldCatalogSources(field)
+  ].filter(Boolean));
+  for (const key of Object.keys(plainObjectOrEmpty(body))) {
+    if (equalsIgnoreCase(key, bodyKey)) {
+      continue;
+    }
+    if (candidates.some(candidate => equalsIgnoreCase(key, candidate) || normalizeToken(key) === normalizeToken(candidate))) {
+      delete body[key];
+    }
+  }
 }
 
 function webhookSourceFieldsForClass(rules, className) {
@@ -4471,9 +5238,13 @@ async function populateMappingEditorTargets(options = {}) {
 }
 
 function mappingEditorTargetOptions(type, rules) {
+  const dynamicOption = mappingEditorDynamicTargetOption(type);
   if (type === 'hostGroups') {
-    return uniqueMappingObjects(state.mappingZabbixCatalog?.hostGroups ?? [], item => item.groupid || item.name)
-      .map(item => optionFromPayload(item.name || item.groupid, item));
+    return [
+      ...dynamicOption,
+      ...uniqueMappingObjects(state.mappingZabbixCatalog?.hostGroups ?? [], item => item.groupid || item.name)
+        .map(item => optionFromPayload(item.name || item.groupid, item))
+    ];
   }
 
   if (type === 'templates') {
@@ -4482,12 +5253,15 @@ function mappingEditorTargetOptions(type, rules) {
   }
 
   if (type === 'tags') {
-    return uniqueMappingObjects([
-      ...(state.mappingZabbixCatalog?.tags ?? []),
-      ...(rules.defaults?.tags ?? []),
-      ...(rules.tagSelectionRules ?? []).flatMap(rule => rule.tags ?? [])
-    ], item => `${item.tag}:${item.value ?? ''}`)
-      .map(item => optionFromPayload(`${item.tag}${item.value ? `=${item.value}` : ''}`, item));
+    return [
+      ...dynamicOption,
+      ...uniqueMappingObjects([
+        ...(state.mappingZabbixCatalog?.tags ?? []),
+        ...(rules.defaults?.tags ?? []),
+        ...(rules.tagSelectionRules ?? []).flatMap(rule => rule.tags ?? [])
+      ], item => `${item.tag}:${item.value ?? ''}`)
+        .map(item => optionFromPayload(`${item.tag}${item.value ? `=${item.value}` : ''}`, item))
+    ];
   }
 
   if (type === 'interfaceAddress') {
@@ -4518,6 +5292,24 @@ function mappingEditorTargetOptions(type, rules) {
   }
 
   return [];
+}
+
+function mappingEditorDynamicTargetOption(type) {
+  if (!dynamicZabbixTargetAllowed(type, state.runtimeSettings)) {
+    return [];
+  }
+
+  const field = $('#mappingEditField')?.value ?? '';
+  if (!field || !['hostGroups', 'tags'].includes(type)) {
+    return [];
+  }
+
+  return [optionFromPayload(
+    type === 'hostGroups'
+      ? t('mapping.option.dynamicHostGroupFromLeaf')
+      : t('mapping.option.dynamicTagFromLeaf'),
+    dynamicTargetForField(type, field)
+  )];
 }
 
 function mappingEditorEditableExtensionDefinitions() {
@@ -4904,6 +5696,15 @@ function mappingEditorFormValidation() {
   } else if (state.mappingEditorTargetOptionStates?.get(targetValue) === 'stale') {
     controls['#mappingEditZabbixObject'] = { level: 'stale', message: t('mapping.status.targetStale') };
     staleMessages.push(t('mapping.status.targetStaleShort'));
+  } else if (isDynamicFromLeafTarget(target)) {
+    controls['#mappingEditZabbixObject'] = { level: 'valid', message: t('mapping.status.dynamicTargetSelected') };
+  } else {
+    const templateConflicts = mappingEditorTemplateConflicts(type, target);
+    if (templateConflicts.length > 0) {
+      const message = tf('zabbixMetadata.conflictEditor', { message: templateConflictDisplay(templateConflicts[0]) });
+      controls['#mappingEditZabbixObject'] = { level: 'invalid', message };
+      messages.push(message);
+    }
   }
 
   if (!Number.isFinite(priority) || priority < 1) {
@@ -5393,6 +6194,20 @@ function mappingRuleRegexForField(rule, field) {
 function mappingRuleTargetForForm(item) {
   const rule = item.rule;
   const type = item.collection.type;
+  if (String(rule.targetMode ?? '').toLowerCase() === 'dynamicfromleaf') {
+    const fields = mappingDeleteSourceFieldsForItem(rule)
+      .filter(field => !['className', 'eventType', 'zabbixHostId'].includes(canonicalSourceField(field)));
+    const target = dynamicTargetForField(type, rule.valueField || fields[0] || '');
+    if (type === 'tags' && rule.tags?.[0]) {
+      target.tag = rule.tags[0].tag ?? target.tag;
+      target.valueTemplate = rule.tags[0].valueTemplate ?? target.valueTemplate;
+    }
+    if (type === 'hostGroups' && rule.hostGroups?.[0]) {
+      target.nameTemplate = rule.hostGroups[0].nameTemplate ?? target.nameTemplate;
+      target.createIfMissing = rule.hostGroups[0].createIfMissing ?? target.createIfMissing;
+    }
+    return target;
+  }
   if (type === 'hostGroups') {
     return rule.hostGroups?.[0] ?? {};
   }
@@ -5514,11 +6329,32 @@ function buildMappingEditorRule({ type, className, field, regex, priority, targe
   };
 
   if (type === 'hostGroups') {
-    rule.hostGroups = [{ name: target.name ?? '', groupid: target.groupid ?? '' }];
+    if (isDynamicFromLeafTarget(target)) {
+      rule.targetMode = 'dynamicFromLeaf';
+      rule.valueField = field;
+      rule.createIfMissing = true;
+      rule.hostGroups = [{
+        nameTemplate: target.nameTemplate || dynamicTargetForField('hostGroups', field).nameTemplate,
+        createIfMissing: true
+      }];
+    } else {
+      rule.hostGroups = [{ name: target.name ?? '', groupid: target.groupid ?? '' }];
+    }
   } else if (type === 'templates') {
     rule.templates = [{ name: target.name ?? target.host ?? '', templateid: target.templateid ?? '' }];
   } else if (type === 'tags') {
-    rule.tags = [{ tag: target.tag ?? 'cmdb.mapping', value: target.value ?? '' }];
+    if (isDynamicFromLeafTarget(target)) {
+      rule.targetMode = 'dynamicFromLeaf';
+      rule.valueField = field;
+      rule.createIfMissing = true;
+      rule.tags = [{
+        tag: target.tag ?? dynamicTargetForField('tags', field).tag,
+        valueTemplate: target.valueTemplate || dynamicTargetForField('tags', field).valueTemplate,
+        allowMultipleValues: true
+      }];
+    } else {
+      rule.tags = [{ tag: target.tag ?? 'cmdb.mapping', value: target.value ?? '' }];
+    }
   } else if (type === 'interfaceAddress') {
     rule.mode = target.mode ?? 'ip';
     rule.valueField = field || target.valueField || 'ipAddress';
@@ -6072,6 +6908,7 @@ function buildMappingRuleName(type, className, field, target) {
     || target.maintenanceId
     || target.valueMapId
     || target.valueField
+    || target.targetMode
     || target.interfaceRef
     || target.interfaceProfileRef
     || 'target';
@@ -6093,7 +6930,7 @@ function updateMappingEditorSuggestedName() {
 
 async function saveMappingDraftAsFile() {
   if (!state.mappingDraftRules) {
-    return;
+    return false;
   }
 
   const validation = validateMappingDraftBeforeSave(state.mappingDraftRules, state.mappingCmdbuildCatalog);
@@ -6110,7 +6947,7 @@ async function saveMappingDraftAsFile() {
     ].filter(Boolean).join('\n'));
     if (!confirmed) {
       setMappingEditorStatus(t('mapping.status.saveCancelledFixIpDns'));
-      return;
+      return false;
     }
   }
 
@@ -6123,13 +6960,13 @@ async function saveMappingDraftAsFile() {
   const rulesResult = await saveTextAsFile(content, defaultName, 'JSON rules', { 'application/json': ['.json'] });
   if (rulesResult.cancelled) {
     setMappingEditorStatus(t('mapping.status.saveCancelled'));
-    return;
+    return rulesResult;
   }
 
   const webhookResult = await saveTextAsFile(webhookBodies, webhookBodiesName, 'Webhook bodies', { 'text/plain': ['.txt'] });
   if (webhookResult.cancelled) {
     setMappingEditorStatus(tf('mapping.status.rulesFileSavedWebhookNotSaved', { name: rulesResult.name }));
-    return;
+    return webhookResult;
   }
 
   const warningText = validation.issues.length > 0
@@ -6140,13 +6977,14 @@ async function saveMappingDraftAsFile() {
     webhookName: webhookResult.name,
     warning: warningText
   }));
+  return { rulesResult, webhookResult };
 }
 
 async function saveValidateMappingDraftAsFile() {
   const rules = state.validateMappingRules ?? state.currentRules?.content;
   if (!rules) {
     toast('Rules JSON is not loaded');
-    return;
+    return false;
   }
 
   const validation = await api('/api/rules/validate', {
@@ -6162,7 +7000,7 @@ async function saveValidateMappingDraftAsFile() {
   if (!validation.valid) {
     const confirmed = window.confirm('Rules JSON has validation errors. Save file anyway?');
     if (!confirmed) {
-      return;
+      return false;
     }
   }
 
@@ -6175,6 +7013,7 @@ async function saveValidateMappingDraftAsFile() {
   if (!result.cancelled) {
     toast(tf('toast.rulesFileSaved', { name: result.name }));
   }
+  return result;
 }
 
 async function saveTextAsFile(content, defaultName, description, accept) {
@@ -6497,7 +7336,7 @@ function buildWebhookBodiesFile(rules, cmdbuildCatalog, validation, changes) {
     '#',
     '# Назначение: заготовки Body для webhook-записей CMDBuild, которые отправляют события в cmdbwebhooks2kafka.',
     '# Файл формируется только по добавленным и удаленным в текущей UI-сессии правилам.',
-    '# Authorization: Bearer <token> нужно взять и согласовать с настройками микросервиса, если это первая настройка.',
+    '# Authorization: Bearer XXXXX нужно заменить согласованным токеном микросервиса при ручной настройке.',
     '# Если рядом уже есть рабочие webhook-записи, можно взять из них блок Authorization и использовать тот же подход.',
     '# Method в CMDBuild выбирайте POST. Он должен совпадать с HTTP-интерфейсом микросервиса: POST /webhooks/cmdbuild.',
     '# Dev URL сейчас обычно: http://192.168.202.100:5080/webhooks/cmdbuild. Для другого окружения замените URL.',
@@ -6631,7 +7470,7 @@ function appendWebhookBodiesForClass(lines, rules, cmdbuildCatalog, className, e
       '# Action: ADD or UPDATE CMDBuild webhook Body',
       '# Method: POST',
       '# URL: http://192.168.202.100:5080/webhooks/cmdbuild',
-      '# Headers: Authorization: Bearer <token>',
+      '# Headers: Authorization: Bearer XXXXX',
       ...pathComments,
       JSON.stringify(body, null, 2),
       ''
@@ -6940,19 +7779,30 @@ function compareText(left, right) {
 }
 
 async function loadValidateMapping() {
-  const [rulesDocument, zabbixCatalog, cmdbuildCatalog] = await Promise.all([
+  const [rulesDocument, zabbixCatalog, zabbixMetadata, cmdbuildCatalog] = await Promise.all([
     api('/api/rules/current'),
     api('/api/zabbix/catalog'),
+    api('/api/zabbix/metadata'),
     api('/api/cmdbuild/catalog')
   ]);
+  zabbixCatalog.templateCompatibility ??= { conflicts: zabbixMetadata.conflicts ?? [] };
 
   state.currentRules = rulesDocument;
   state.currentRules.content = cloneJson(rulesDocument.content ?? {});
+  renderRulesSourceStatus('#validateMappingRulesSourceStatus', rulesDocument);
+  setSessionIndicator(
+    'gitRules',
+    'read',
+    rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    rulesVersionLabel(rulesDocument)
+  );
   initializeValidateMappingHistory(state.currentRules.content);
   state.validateMappingZabbixCatalog = zabbixCatalog;
+  state.validateMappingZabbixMetadata = zabbixMetadata;
   state.validateMappingCmdbuildCatalog = cmdbuildCatalog;
   renderValidateMapping(state.validateMappingRules, zabbixCatalog, cmdbuildCatalog);
   state.validateMappingLoaded = true;
+  return { rulesDocument, zabbixCatalog, cmdbuildCatalog };
 }
 
 function renderValidateMapping(rules, zabbixCatalog, cmdbuildCatalog) {
@@ -7345,13 +8195,13 @@ async function deleteSelectedValidationFixes() {
   const operations = selectedValidationFixes();
   if (operations.length === 0) {
     toast(t('toast.validationSelectMissing'));
-    return;
+    return false;
   }
 
   const sourceRules = state.validateMappingRules ?? state.currentRules?.content;
   if (!sourceRules) {
     toast(t('validation.review.noRules'));
-    return;
+    return false;
   }
 
   const rules = cloneJson(sourceRules);
@@ -7384,14 +8234,13 @@ async function deleteSelectedValidationFixes() {
   if (plan.autoDelete.length === 0 && plan.review.length === 0) {
     if (changes.length > 0) {
       await saveValidationRulesFixResult(rules, changes);
-      return;
+      return { changes };
     }
     if (deleteOperations.length === 0) {
       toast(t('toast.rulesNotChanged'));
-      return;
+      return false;
     }
-    await deleteSelectedValidationReferences(deleteOperations);
-    return;
+    return await deleteSelectedValidationReferences(deleteOperations);
   }
 
   const edits = new Map();
@@ -7400,7 +8249,7 @@ async function deleteSelectedValidationFixes() {
     const decision = await openValidationRuleDialog(item);
     if (decision.action === 'cancel') {
       toast(t('validation.review.cancelled'));
-      return;
+      return false;
     }
     if (decision.action === 'delete') {
       deletes.set(item.key, item);
@@ -7423,16 +8272,17 @@ async function deleteSelectedValidationFixes() {
 
   if (changes.length === 0) {
     toast(t('toast.rulesNotChanged'));
-    return;
+    return false;
   }
 
   await saveValidationRulesFixResult(rules, changes);
+  return { changes };
 }
 
 async function deleteSelectedValidationReferences(operations) {
   const confirmed = window.confirm(tf('validation.confirmDeleteSelected', { count: operations.length }));
   if (!confirmed) {
-    return;
+    return false;
   }
 
   const result = await api('/api/rules/fix-mapping', {
@@ -7445,10 +8295,11 @@ async function deleteSelectedValidationReferences(operations) {
     state.currentRules = { ...(state.currentRules ?? {}), content: state.validateMappingRules };
     renderValidateMapping(state.validateMappingRules, state.validateMappingZabbixCatalog ?? {}, state.validateMappingCmdbuildCatalog ?? {});
     toast(t('toast.validationDraftChanged'));
-    return;
+    return result;
   }
 
   toast(t('toast.rulesNotChanged'));
+  return false;
 }
 
 function buildValidationRuleDeletePlan(rules, operations, catalogs) {
@@ -7651,6 +8502,87 @@ function removeValidationRule(rules, item) {
   return true;
 }
 
+function mappingEditorTemplateConflicts(type, target) {
+  if (type !== 'templates' || !target?.templateid) {
+    return [];
+  }
+
+  const rules = currentMappingRules();
+  const selectedIds = templateIdsForItems([
+    ...(rules.defaults?.templates ?? []),
+    target
+  ]);
+  const activeIds = applyTemplateConflictRulesToIds(selectedIds, rules);
+  return templateCompatibilityConflictsForIds(activeIds, state.mappingZabbixMetadata ?? state.mappingZabbixCatalog);
+}
+
+function templateRuleCompatibilityConflicts(rules, rule, metadata) {
+  const selectedIds = templateIdsForItems([
+    ...(rules.defaults?.templates ?? []),
+    ...selectionItemsForRule(rules, rule, 'templates')
+  ]);
+  const activeIds = applyTemplateConflictRulesToIds(selectedIds, rules);
+  return templateCompatibilityConflictsForIds(activeIds, metadata);
+}
+
+function templateIdsForItems(items = []) {
+  return uniqueTokens((Array.isArray(items) ? items : [])
+    .map(item => item?.templateid ?? item?.templateId ?? item?.id));
+}
+
+function applyTemplateConflictRulesToIds(templateIds, rules = {}) {
+  const selected = new Set((templateIds ?? []).map(normalizeToken).filter(Boolean));
+  for (const rule of rules.templateConflictRules ?? []) {
+    const whenIds = (rule.whenTemplateIds ?? [])
+      .map(normalizeToken)
+      .filter(Boolean);
+    if (whenIds.length === 0 || !whenIds.some(id => selected.has(id))) {
+      continue;
+    }
+
+    for (const id of rule.removeTemplateIds ?? []) {
+      selected.delete(normalizeToken(id));
+    }
+  }
+  return selected;
+}
+
+function templateCompatibilityConflictsForIds(templateIds, metadata = {}) {
+  const selected = templateIds instanceof Set
+    ? templateIds
+    : new Set((templateIds ?? []).map(normalizeToken).filter(Boolean));
+  const conflicts = zabbixTemplateCompatibilityConflicts(metadata);
+  return conflicts.filter(conflict => templateConflictIds(conflict)
+    .filter(id => selected.has(id)).length > 1);
+}
+
+function zabbixTemplateCompatibilityConflicts(metadata = {}) {
+  return metadata?.templateCompatibility?.conflicts
+    ?? metadata?.conflicts
+    ?? [];
+}
+
+function templateConflictIds(conflict = {}) {
+  return (conflict.templates ?? [])
+    .map(template => normalizeToken(template.templateid ?? template.templateId ?? template.id))
+    .filter(Boolean);
+}
+
+function templateConflictDisplay(conflict = {}) {
+  return conflict.message
+    || [conflict.type, conflict.key].filter(Boolean).join(' ')
+    || 'template conflict';
+}
+
+function zabbixTemplateConflictTokens(rules, conflict = {}) {
+  return uniqueTokens((conflict.templates ?? []).flatMap(template => zabbixItemTokens(
+    rules,
+    'templates',
+    template.templateid,
+    template.name || template.host
+  )));
+}
+
 function cleanupValidationSelectedReferences(rules, operations) {
   const changes = [];
   for (const operation of operations) {
@@ -7773,6 +8705,20 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
         message: `Zabbix template отсутствует: ${template.name || template.host || template.templateid}`,
         tokens: zabbixItemTokens(rules, 'templates', template.templateid, template.name || template.host),
         help: 'Правило ссылается на template, которого нет в Zabbix. Создайте шаблон, импортируйте его или замените templateid/name в JSON правил.'
+      });
+    }
+  }
+
+  for (const rule of rules.templateSelectionRules ?? []) {
+    for (const conflict of templateRuleCompatibilityConflicts(rules, rule, zabbixCatalog)) {
+      addIssue({
+        source: 'zabbix',
+        message: `Несовместимые Zabbix templates в rule "${ruleDisplayName(rule)}": ${templateConflictDisplay(conflict)}`,
+        tokens: [
+          ruleValidationToken(rule, 'templates'),
+          ...zabbixTemplateConflictTokens(rules, conflict)
+        ],
+        help: t('zabbixMetadata.conflictRuleHelp')
       });
     }
   }
@@ -7975,7 +8921,9 @@ function referencedHostGroups(rules) {
   return uniqueById([
     ...(rules.lookups?.hostGroups ?? []),
     ...(rules.defaults?.hostGroups ?? []),
-    ...(rules.groupSelectionRules ?? []).flatMap(rule => rule.hostGroups ?? [])
+    ...(rules.groupSelectionRules ?? [])
+      .filter(rule => String(rule.targetMode ?? '').toLowerCase() !== 'dynamicfromleaf')
+      .flatMap(rule => rule.hostGroups ?? [])
   ], 'groupid');
 }
 
@@ -9935,25 +10883,96 @@ function findCatalogAttribute(attributes, sourceName, fieldKey) {
 }
 
 async function loadRuntimeSettings() {
-  state.runtimeSettings = await api('/api/settings/runtime');
-  fillRuntimeSettingsForm(state.runtimeSettings);
-  renderEventTopics(state.runtimeSettings.eventBrowser?.topics ?? [], $('#eventsTopic').value);
-  $('#eventsMaxMessages').value ||= String(defaultEventMaxMessages);
+  try {
+    state.runtimeSettings = await api('/api/settings/runtime');
+    fillRuntimeSettingsForm(state.runtimeSettings, { statusKey: 'settings.runtimeStatusLoaded' });
+    renderEventTopics(state.runtimeSettings.eventBrowser?.topics ?? [], $('#eventsTopic').value);
+    $('#eventsMaxMessages').value ||= String(defaultEventMaxMessages);
+    return state.runtimeSettings;
+  } catch (error) {
+    setRuntimeSettingsStatus('settings.runtimeStatusLoadFailed', 'error', { message: error.message });
+    toast(tf('settings.runtimeStatusLoadFailed', { message: error.message }));
+    throw error;
+  }
+}
+
+async function loadRuntimeSettingsFromButton() {
+  if (state.runtimeSettingsDirty && !window.confirm(t('settings.runtimeDiscardConfirm'))) {
+    setRuntimeSettingsStatus('settings.runtimeStatusDirty', 'warning');
+    return null;
+  }
+
+  return loadRuntimeSettings();
+}
+
+async function loadRuntimeCapabilities() {
+  if (!canUseRules()) {
+    return state.runtimeSettings;
+  }
+
+  let capabilities;
+  try {
+    capabilities = await api('/api/settings/runtime-capabilities');
+  } catch (error) {
+    if (error.status !== 404) {
+      throw error;
+    }
+    capabilities = {
+      zabbix: {
+        allowDynamicTagsFromCmdbLeaf: false,
+        allowDynamicHostGroupsFromCmdbLeaf: false
+      }
+    };
+  }
+  state.runtimeSettings = mergeRuntimeSettings(state.runtimeSettings, capabilities);
   return state.runtimeSettings;
+}
+
+function mergeRuntimeSettings(current = {}, update = {}) {
+  return {
+    ...(current ?? {}),
+    ...(update ?? {}),
+    zabbix: {
+      ...(current?.zabbix ?? {}),
+      ...(update?.zabbix ?? {})
+    },
+    cmdbuild: {
+      ...(current?.cmdbuild ?? {}),
+      ...(update?.cmdbuild ?? {})
+    },
+    rules: {
+      ...(current?.rules ?? {}),
+      ...(update?.rules ?? {})
+    },
+    eventBrowser: {
+      ...(current?.eventBrowser ?? {}),
+      ...(update?.eventBrowser ?? {})
+    }
+  };
 }
 
 async function saveRuntimeSettings() {
   const previousDepth = clampNumber(state.runtimeSettings?.cmdbuild?.maxTraversalDepth, 2, 2, 5);
-  const body = readRuntimeSettingsForm();
-  const result = await api('/api/settings/runtime', {
-    method: 'PUT',
-    body
-  });
-  state.runtimeSettings = result;
-  fillRuntimeSettingsForm(result);
-  renderEventTopics(result.eventBrowser?.topics ?? [], $('#eventsTopic').value);
-  const nextDepth = clampNumber(result.cmdbuild?.maxTraversalDepth, 2, 2, 5);
-  toast(nextDepth !== previousDepth ? t('toast.runtimeSavedResyncRequired') : t('toast.runtimeSaved'));
+  try {
+    const body = readRuntimeSettingsForm();
+    const result = await api('/api/settings/runtime', {
+      method: 'PUT',
+      body
+    });
+    state.runtimeSettings = result;
+    const nextDepth = clampNumber(result.cmdbuild?.maxTraversalDepth, 2, 2, 5);
+    const statusKey = nextDepth !== previousDepth
+      ? 'settings.runtimeStatusSavedResyncRequired'
+      : 'settings.runtimeStatusSaved';
+    fillRuntimeSettingsForm(result, { statusKey, statusLevel: 'success' });
+    renderEventTopics(result.eventBrowser?.topics ?? [], $('#eventsTopic').value);
+    toast(nextDepth !== previousDepth ? t('toast.runtimeSavedResyncRequired') : t('toast.runtimeSaved'));
+    return result;
+  } catch (error) {
+    setRuntimeSettingsStatus('settings.runtimeStatusSaveFailed', 'error', { message: error.message });
+    toast(tf('settings.runtimeStatusSaveFailed', { message: error.message }));
+    return null;
+  }
 }
 
 async function loadAuthSettings() {
@@ -9971,23 +10990,22 @@ async function loadAuthSettings() {
   return result;
 }
 
-function fillRuntimeSettingsForm(settings) {
+function fillRuntimeSettingsForm(settings, options = {}) {
   const form = $('#runtimeSettingsForm');
   const cmdbuild = settings.cmdbuild ?? {};
   const zabbix = settings.zabbix ?? {};
-  const rules = settings.rules ?? {};
   const eventBrowser = settings.eventBrowser ?? {};
 
-  form.elements.filePath.value = settings.filePath ?? '';
+  if (form.elements.filePath) {
+    form.elements.filePath.value = settings.filePath ?? '';
+  }
   form.elements.usersFilePath.value = settings.usersFilePath ?? '';
   form.elements.cmdbuildBaseUrl.value = cmdbuild.baseUrl ?? '';
   form.elements.cmdbuildMaxTraversalDepth.value = clampNumber(cmdbuild.maxTraversalDepth, 2, 2, 5);
   form.elements.zabbixApiEndpoint.value = zabbix.apiEndpoint ?? '';
   form.elements.zabbixApiToken.value = zabbix.apiToken ?? '';
-  form.elements.rulesFilePath.value = rules.rulesFilePath || defaultConversionRulesFilePath;
-  form.elements.rulesReadFromGit.checked = Boolean(rules.readFromGit);
-  form.elements.rulesRepositoryUrl.value = rules.repositoryUrl ?? '';
-  updateRuntimeRulesUiState();
+  form.elements.allowDynamicTagsFromCmdbLeaf.checked = Boolean(zabbix.allowDynamicTagsFromCmdbLeaf);
+  form.elements.allowDynamicHostGroupsFromCmdbLeaf.checked = Boolean(zabbix.allowDynamicHostGroupsFromCmdbLeaf);
   updateIdpUiState();
 
   form.elements.eventsEnabled.checked = Boolean(eventBrowser.enabled);
@@ -10001,10 +11019,66 @@ function fillRuntimeSettingsForm(settings) {
   form.elements.eventsMaxMessages.value = eventBrowser.maxMessages ?? 50;
   form.elements.eventsReadTimeoutMs.value = eventBrowser.readTimeoutMs ?? 2500;
   form.elements.eventsTopics.value = JSON.stringify(eventBrowser.topics ?? [], null, 2);
+  resetRuntimeSettingsDirtyState(
+    options.statusKey ?? 'settings.runtimeStatusLoaded',
+    options.statusLevel ?? 'info'
+  );
 }
 
-function updateRuntimeRulesUiState() {
-  const form = $('#runtimeSettingsForm');
+function handleRuntimeSettingsChange(event) {
+  if (event.target.matches('[name="cmdbuildMaxTraversalDepth"]')) {
+    toast(t('toast.maxTraversalDepthChanged'));
+  }
+  markRuntimeSettingsDirty();
+}
+
+function handleRuntimeSettingsInput() {
+  markRuntimeSettingsDirty();
+}
+
+function resetRuntimeSettingsDirtyState(statusKey, statusLevel = 'info') {
+  state.runtimeSettingsSnapshot = runtimeSettingsFormSnapshot();
+  state.runtimeSettingsDirty = false;
+  setRuntimeSettingsStatus(statusKey, statusLevel);
+}
+
+function markRuntimeSettingsDirty() {
+  const snapshot = runtimeSettingsFormSnapshot();
+  state.runtimeSettingsDirty = Boolean(state.runtimeSettingsSnapshot) && snapshot !== state.runtimeSettingsSnapshot;
+  setRuntimeSettingsStatus(
+    state.runtimeSettingsDirty ? 'settings.runtimeStatusDirty' : 'settings.runtimeStatusLoaded',
+    state.runtimeSettingsDirty ? 'warning' : 'info'
+  );
+}
+
+function runtimeSettingsFormSnapshot() {
+  try {
+    return JSON.stringify(readRuntimeSettingsForm());
+  } catch {
+    return '';
+  }
+}
+
+function setRuntimeSettingsStatus(key, level = 'info', params = {}) {
+  state.runtimeSettingsStatus = key ? { key, level, params } : null;
+  renderRuntimeSettingsStatus();
+}
+
+function renderRuntimeSettingsStatus() {
+  const node = $('#runtimeSettingsStatus');
+  if (!node) {
+    return;
+  }
+
+  const status = state.runtimeSettingsStatus;
+  node.textContent = status ? tf(status.key, status.params ?? {}) : '';
+  node.classList.toggle('is-warning', status?.level === 'warning');
+  node.classList.toggle('is-error', status?.level === 'error');
+  node.classList.toggle('is-success', status?.level === 'success');
+}
+
+function updateGitRulesUiState() {
+  const form = $('#gitSettingsForm');
   if (!form) {
     return;
   }
@@ -10014,14 +11088,312 @@ function updateRuntimeRulesUiState() {
   if (form.elements.rulesRepositoryUrl) {
     form.elements.rulesRepositoryUrl.readOnly = !enabled;
   }
-  const note = $('#rulesReadModeNote');
+  if (form.elements.rulesRepositoryPath) {
+    form.elements.rulesRepositoryPath.readOnly = !enabled;
+  }
+  $$('.git-only-field').forEach(node => {
+    node.classList.toggle('is-muted', !enabled);
+  });
+  const loadButton = $('#checkGitSettings');
+  if (loadButton) {
+    loadButton.dataset.i18n = enabled ? 'gitSettings.loadFromGit' : 'gitSettings.loadFromDisk';
+    loadButton.textContent = t(loadButton.dataset.i18n);
+  }
+  const saveButton = $('#saveGitWorkingCopy');
+  if (saveButton) {
+    saveButton.classList.toggle('hidden', !enabled);
+    saveButton.disabled = !enabled;
+  }
+  const note = $('#gitRulesReadModeNote');
   if (note) {
     note.textContent = tf(enabled ? 'settings.rulesReadModeGit' : 'settings.rulesReadModeDisk', { path: rulesPath });
   }
 }
 
+async function loadGitSettings() {
+  const result = await api('/api/settings/git');
+  state.gitSettings = result;
+  fillGitSettingsForm(result, { statusKey: 'gitSettings.loaded', statusLevel: 'info' });
+  return result;
+}
+
+function fillGitSettingsForm(settings = {}, options = {}) {
+  const form = $('#gitSettingsForm');
+  if (!form) {
+    return;
+  }
+
+  const rules = settings.rules ?? {};
+  if (form.elements.filePath) {
+    form.elements.filePath.value = settings.filePath ?? '';
+  }
+  form.elements.rulesFilePath.value = rules.rulesFilePath || defaultConversionRulesFilePath;
+  form.elements.rulesReadFromGit.checked = Boolean(rules.readFromGit);
+  form.elements.rulesRepositoryPath.value = rules.repositoryPath ?? '';
+  form.elements.rulesRepositoryUrl.value = rules.repositoryUrl ?? '';
+  fillGitSettingsStatusFields(settings.status ?? {});
+  updateGitRulesUiState();
+  resetGitSettingsDirtyState(
+    options.statusKey ?? 'gitSettings.loaded',
+    options.statusLevel ?? 'info',
+    options.statusParams ?? {}
+  );
+}
+
+function fillGitSettingsStatusFields(status = {}) {
+  const form = $('#gitSettingsForm');
+  if (!form) {
+    return;
+  }
+
+  form.elements.resolvedPath.value = status.resolvedPath ?? '';
+  form.elements.readMode.value = status.readMode ?? '';
+  form.elements.schemaVersion.value = status.schemaVersion ?? '';
+  form.elements.rulesVersion.value = status.rulesVersion ?? '';
+}
+
+function handleGitSettingsChange(event) {
+  if (event.target.matches('[name="rulesReadFromGit"], [name="rulesFilePath"], [name="rulesRepositoryPath"]')) {
+    updateGitRulesUiState();
+  }
+  markGitSettingsDirty();
+}
+
+function handleGitSettingsInput(event) {
+  if (event.target.matches('[name="rulesFilePath"], [name="rulesRepositoryPath"]')) {
+    updateGitRulesUiState();
+  }
+  markGitSettingsDirty();
+}
+
+function resetGitSettingsDirtyState(statusKey, statusLevel = 'info', params = {}) {
+  state.gitSettingsSnapshot = gitSettingsFormSnapshot();
+  state.gitSettingsDirty = false;
+  setGitSettingsStatus(statusKey, statusLevel, params);
+}
+
+function markGitSettingsDirty() {
+  const snapshot = gitSettingsFormSnapshot();
+  state.gitSettingsDirty = Boolean(state.gitSettingsSnapshot) && snapshot !== state.gitSettingsSnapshot;
+  setGitSettingsStatus(
+    state.gitSettingsDirty ? 'gitSettings.dirty' : 'gitSettings.loaded',
+    state.gitSettingsDirty ? 'warning' : 'info'
+  );
+}
+
+function gitSettingsFormSnapshot() {
+  try {
+    return JSON.stringify(readGitSettingsForm());
+  } catch {
+    return '';
+  }
+}
+
+function setGitSettingsStatus(key, level = 'info', params = {}) {
+  state.gitSettingsStatus = key ? { key, level, params } : null;
+  renderGitSettingsStatus();
+}
+
+function renderGitSettingsStatus() {
+  const node = $('#gitSettingsStatus');
+  if (!node) {
+    return;
+  }
+
+  const status = state.gitSettingsStatus;
+  node.textContent = status ? tf(status.key, status.params ?? {}) : '';
+  node.classList.toggle('is-warning', status?.level === 'warning');
+  node.classList.toggle('is-error', status?.level === 'error');
+  node.classList.toggle('is-success', status?.level === 'success');
+}
+
+function readGitSettingsForm() {
+  const formNode = $('#gitSettingsForm');
+  const form = new FormData(formNode);
+  const elements = formNode.elements;
+  return {
+    rules: {
+      rulesFilePath: String(form.get('rulesFilePath') || '').trim() || defaultConversionRulesFilePath,
+      readFromGit: Boolean(elements.rulesReadFromGit?.checked),
+      repositoryPath: String(form.get('rulesRepositoryPath') || '').trim(),
+      repositoryUrl: form.get('rulesRepositoryUrl')
+    }
+  };
+}
+
+async function checkGitSettingsFromButton() {
+  try {
+    const result = await api('/api/settings/git/load', {
+      method: 'POST',
+      body: readGitSettingsForm()
+    });
+    fillGitSettingsStatusFields(result);
+    if (result.content) {
+      state.currentRules = {
+        ...(state.currentRules ?? {}),
+        content: result.content,
+        path: result.resolvedPath,
+        source: result.readMode
+      };
+      if (state.mappingLoaded) {
+        initializeMappingDraft(result.content);
+        renderMapping(result.content, state.mappingZabbixCatalog, state.mappingCmdbuildCatalog);
+        updateMappingEditor();
+      }
+    }
+
+    const key = result.ok ? 'gitSettings.checkOk' : 'gitSettings.checkFailed';
+    const level = result.ok ? 'success' : 'warning';
+    setGitSettingsStatus(key, level, { message: result.message ?? '' });
+    setSessionIndicator(
+      'gitRules',
+      result.ok ? 'read' : 'error',
+      result.ok
+        ? (result.readMode === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk')
+        : 'sessionTraffic.error',
+      result.rulesVersion || result.resolvedPath || result.message || ''
+    );
+    toast(tf(key, { message: result.message ?? '' }));
+    return result;
+  } catch (error) {
+    setSessionIndicator('gitRules', 'error', 'sessionTraffic.error', error.message ?? String(error));
+    throw error;
+  }
+}
+
+async function saveGitWorkingCopy() {
+  try {
+    const rules = await currentRulesContentForGitExport();
+    const webhooks = await buildWebhookArtifactForGitExport(rules);
+    const result = await api('/api/settings/git/export', {
+      method: 'POST',
+      body: {
+        ...readGitSettingsForm(),
+        content: rules,
+        webhooks
+      }
+    });
+    fillGitSettingsStatusFields(result);
+    const rulesPath = result.written?.rulesPath ?? result.resolvedPath ?? '';
+    const webhooksPath = result.written?.webhooksPath ?? '';
+    setGitSettingsStatus('gitSettings.exported', 'success', { rulesPath, webhooksPath });
+    setSessionIndicator('gitRules', 'saved', 'sessionTraffic.savedGit', rules.rulesVersion ?? rulesPath);
+    toast(tf('gitSettings.exported', { rulesPath, webhooksPath }));
+    return result;
+  } catch (error) {
+    setSessionIndicator('gitRules', 'error', 'sessionTraffic.error', error.message ?? String(error));
+    throw error;
+  }
+}
+
+async function saveGitSettings() {
+  const result = await api('/api/settings/git', {
+    method: 'PUT',
+    body: readGitSettingsForm()
+  });
+  state.gitSettings = result;
+  fillGitSettingsForm(result, { statusKey: 'gitSettings.saved', statusLevel: 'success' });
+  toast(t('gitSettings.saved'));
+  return result;
+}
+
+async function currentRulesContentForGitExport() {
+  if (!state.currentRules?.content) {
+    state.currentRules = await api('/api/rules/current');
+  }
+
+  const rules = state.mappingLoaded
+    ? currentMappingRules()
+    : (state.validateMappingLoaded && state.validateMappingRules ? state.validateMappingRules : state.currentRules?.content);
+  if (!rules) {
+    throw new Error('Rules JSON is not loaded');
+  }
+
+  return cloneJson(rules);
+}
+
+async function buildWebhookArtifactForGitExport(rules) {
+  if (!state.webhooksCmdbuildCatalog) {
+    state.webhooksCmdbuildCatalog = await api('/api/cmdbuild/catalog');
+    setSessionIndicator('cmdbuildCatalog', 'loaded', 'sessionTraffic.loaded');
+  }
+  if (!state.webhooksLoaded) {
+    const result = await api('/api/cmdbuild/webhooks');
+    state.webhooksCurrent = result.items ?? [];
+    state.webhooksLoaded = true;
+    setSessionIndicator('webhooks', 'loaded', 'sessionTraffic.loaded');
+  }
+
+  const desired = buildDesiredCmdbuildWebhooks(
+    rules,
+    state.webhooksCmdbuildCatalog ?? {},
+    state.webhooksCurrent ?? []
+  );
+  const operations = buildCmdbuildWebhookOperations(
+    rules,
+    state.webhooksCmdbuildCatalog ?? {},
+    state.webhooksCurrent ?? []
+  ).map(operation => ({
+    action: operation.action,
+    selected: operation.selected,
+    code: operation.code,
+    target: operation.target,
+    event: operation.event,
+    eventType: operation.eventType,
+    reasonKey: operation.reasonKey,
+    diff: operation.diff ?? []
+  }));
+
+  return redactWebhookSecrets({
+    generatedAt: new Date().toISOString(),
+    note: 'Generated from current conversion rules for storage next to the rules file. Tokens are redacted; commit/push are not performed by monitoring-ui-api.',
+    managedPrefix: managedWebhookPrefix,
+    rules: {
+      name: rules.name ?? '',
+      schemaVersion: rules.schemaVersion ?? '',
+      rulesVersion: rules.rulesVersion ?? ''
+    },
+    desired,
+    operations
+  });
+}
+
+function redactWebhookSecrets(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactWebhookSecrets);
+  }
+  if (!value || typeof value !== 'object') {
+    return redactSecretString(value);
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
+    key,
+    isWebhookSecretKey(key) ? 'XXXXX' : redactWebhookSecrets(nested)
+  ]));
+}
+
+function redactSecretString(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  return value.replace(/Bearer\s+[-._~+/=A-Za-z0-9]+/gi, 'Bearer XXXXX');
+}
+
+function isWebhookSecretKey(key) {
+  const normalized = normalizeToken(key);
+  return normalized.includes('authorization')
+    || normalized.includes('token')
+    || normalized.includes('password')
+    || normalized.includes('secret')
+    || normalized.includes('apikey');
+}
+
 function readRuntimeSettingsForm() {
-  const form = new FormData($('#runtimeSettingsForm'));
+  const formNode = $('#runtimeSettingsForm');
+  const form = new FormData(formNode);
+  const elements = formNode.elements;
+  const checked = name => Boolean(elements[name]?.checked);
   const cmdbuildBaseUrl = form.get('cmdbuildBaseUrl');
   const zabbixApiEndpoint = form.get('zabbixApiEndpoint');
   return {
@@ -10031,22 +11403,19 @@ function readRuntimeSettingsForm() {
     },
     zabbix: {
       apiEndpoint: zabbixApiEndpoint,
-      apiToken: form.get('zabbixApiToken')
-    },
-    rules: {
-      rulesFilePath: String(form.get('rulesFilePath') || '').trim() || defaultConversionRulesFilePath,
-      readFromGit: form.get('rulesReadFromGit') === 'on',
-      repositoryUrl: form.get('rulesRepositoryUrl')
+      apiToken: form.get('zabbixApiToken'),
+      allowDynamicTagsFromCmdbLeaf: checked('allowDynamicTagsFromCmdbLeaf'),
+      allowDynamicHostGroupsFromCmdbLeaf: checked('allowDynamicHostGroupsFromCmdbLeaf')
     },
     eventBrowser: {
-      enabled: form.get('eventsEnabled') === 'on',
+      enabled: checked('eventsEnabled'),
       bootstrapServers: form.get('eventsBootstrapServers'),
       clientId: form.get('eventsClientId'),
       securityProtocol: form.get('eventsSecurityProtocol'),
       saslMechanism: form.get('eventsSaslMechanism'),
       username: form.get('eventsUsername'),
       password: form.get('eventsPassword'),
-      sslRejectUnauthorized: form.get('eventsSslRejectUnauthorized') === 'on',
+      sslRejectUnauthorized: checked('eventsSslRejectUnauthorized'),
       maxMessages: Number(form.get('eventsMaxMessages')),
       readTimeoutMs: Number(form.get('eventsReadTimeoutMs')),
       topics: JSON.parse(form.get('eventsTopics') || '[]')
@@ -10129,6 +11498,7 @@ async function saveIdp() {
   state.auth.provider = normalizeIdpProvider(result.provider);
   updateIdpUiState();
   toast(t('toast.idpSaved'));
+  return result;
 }
 
 function fillIdpForm(idp) {
@@ -10328,7 +11698,7 @@ async function resetUserPassword() {
   const newPassword = String(form.get('newPassword') ?? '');
   if (!newPassword) {
     toast(state.language === 'ru' ? 'Введите новый пароль' : 'Enter a new password');
-    return;
+    return false;
   }
 
   const result = await api('/api/users/reset-password', {
@@ -10343,6 +11713,7 @@ async function resetUserPassword() {
   renderUsers(state.users);
   $('#userAdminForm').elements.newPassword.value = '';
   toast(state.language === 'ru' ? 'Пароль сброшен' : 'Password reset');
+  return result;
 }
 
 function promptSessionCredentials(details) {
@@ -10494,13 +11865,19 @@ function applyHelpText() {
     '#webhooksClear': 'tooltip.webhooksClear',
     '#syncZabbix': 'tooltip.syncZabbix',
     '#loadZabbix': 'tooltip.loadZabbix',
+    '#syncZabbixMetadata': 'tooltip.syncZabbixMetadata',
+    '#loadZabbixMetadata': 'tooltip.loadZabbixMetadata',
     '#syncCmdbuild': 'tooltip.syncCmdbuild',
     '#loadCmdbuild': 'tooltip.loadCmdbuild',
     '#loadRuntimeSettings': 'tooltip.loadRuntimeSettings',
+    '#checkGitSettings': 'tooltip.checkGitSettings',
+    '#saveGitWorkingCopy': 'tooltip.saveGitWorkingCopy',
+    '#saveGitSettings': 'tooltip.saveGitSettings',
     '#loadAuthSettings': 'tooltip.loadAuthSettings',
     '#saveRuntimeSettings': 'tooltip.saveRuntimeSettings',
     '[name="rulesFilePath"]': 'tooltip.rulesFilePath',
     '[name="rulesReadFromGit"]': 'tooltip.rulesReadFromGit',
+    '[name="rulesRepositoryPath"]': 'tooltip.rulesRepositoryPath',
     '[name="rulesRepositoryUrl"]': 'tooltip.rulesRepositoryUrl',
     '#saveIdp': 'tooltip.saveIdp',
     '#loadUsers': 'tooltip.loadUsers',

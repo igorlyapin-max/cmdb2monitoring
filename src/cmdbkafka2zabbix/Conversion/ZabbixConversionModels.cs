@@ -131,7 +131,7 @@ public sealed class ZabbixInterfaceDetailsModel
     public bool Enabled => Version.HasValue || Bulk.HasValue || !string.IsNullOrWhiteSpace(Community);
 }
 
-public sealed record ZabbixGroupModel(string Name, string GroupId);
+public sealed record ZabbixGroupModel(string Name, string GroupId, bool CreateIfMissing = false);
 
 public sealed record ZabbixTemplateModel(string Name, string TemplateId);
 

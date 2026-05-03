@@ -15,7 +15,7 @@
 | IF-009 | Browser | monitoring-ui-api `:5090` | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
 | IF-010 | monitoring-ui-api `:5090` | IdP/SAML2/OAuth2 и MS AD LDAP/LDAPS `:443/:80/:636/:389` | Redirect/POST SAML2, OAuth2 Authorization Code, LDAP bind/search | AuthnRequest, SAMLResponse, metadata, OAuth2 code/token/userinfo, LDAP user/groups |
 | IF-011 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP | Classes, attributes, lookup types, optional session credentials |
-| IF-012 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC | Templates, host groups, template groups, known tags |
+| IF-012 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC | Templates, host groups, template groups, known tags, template item keys/LLD/inventory metadata, existing host templates |
 | IF-013 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
 | IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json`, `state/users.json` | Catalog cache, persisted UI settings и local users; runtime/state-файлы не попадают в git |
 | IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
@@ -81,6 +81,8 @@
 Если передается `inventory`, `inventory_mode` не должен быть `-1`.
 
 Для `host.update` поля `groups`, `templates`, `tags`, `macros` и `inventory` являются merge-полями на стороне `zabbixrequests2api`: текущие значения Zabbix host сохраняются, если rules не передают значение с тем же ключом. `templates_clear` явно удаляет конфликтующие linked templates. `interfaces` остаются authoritative по rules, writer только переносит существующие `interfaceid`.
+
+Zabbix template metadata из IF-012 хранится рядом с catalog cache и содержит `itemKeys`, `discoveryRuleKeys`, `inventoryLinks`, parent templates, existing host templates и индекс конфликтов. UI использует индекс для предупреждений и блокировок в редакторе rules и Logical Control, а `zabbixrequests2api` повторяет проверку непосредственно перед `host.create/update`.
 
 ### Zabbix response
 

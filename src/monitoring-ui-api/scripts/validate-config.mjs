@@ -41,6 +41,7 @@ required(config, 'Cmdbuild.BaseUrl');
 required(config, 'Cmdbuild.Catalog.MaxTraversalDepth');
 required(config, 'Zabbix.ApiEndpoint');
 required(config, 'Rules.ReadFromGit');
+required(config, 'Rules.RepositoryPath');
 required(config, 'Rules.RulesFilePath');
 required(config, 'EventBrowser.BootstrapServers');
 required(config, 'EventBrowser.ClientId');

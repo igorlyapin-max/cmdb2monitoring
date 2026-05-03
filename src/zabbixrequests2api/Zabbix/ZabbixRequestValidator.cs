@@ -7,6 +7,9 @@ public sealed class ZabbixRequestValidator(
     IZabbixClient zabbixClient,
     IOptions<ZabbixOptions> options)
 {
+    private const string TemplateCompatibilityReadMore =
+        "Read PROJECT_DOCUMENTATION.md or PROJECT_DOCUMENTATION.en.md, section 'Zabbix template compatibility'.";
+
     public async Task<ZabbixValidationResult> ValidateAsync(
         ZabbixRequestDocument request,
         CancellationToken cancellationToken)
@@ -15,6 +18,15 @@ public sealed class ZabbixRequestValidator(
         if (!result.IsValid)
         {
             return result;
+        }
+
+        if (ShouldValidateHostGroups(request.Method))
+        {
+            ValidateHostGroupShape(request.Params, result);
+            if (!result.IsValid)
+            {
+                return result;
+            }
         }
 
         if (ShouldValidateHostGroups(request.Method) && options.Value.ValidateHostGroups)
@@ -320,6 +332,51 @@ public sealed class ZabbixRequestValidator(
         }
     }
 
+    private void ValidateHostGroupShape(JsonElement parameters, ZabbixValidationResult result)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty("groups", out var groups)
+            || groups.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var group in groups.EnumerateArray())
+        {
+            if (group.ValueKind != JsonValueKind.Object)
+            {
+                result.AddError("invalid_host_group", "Each host group must be an object.");
+                return;
+            }
+
+            var groupId = ReadString(group, "groupid");
+            if (!string.IsNullOrWhiteSpace(groupId))
+            {
+                continue;
+            }
+
+            var name = ReadString(group, "name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                result.AddError("missing_host_group", "Host group must contain groupid or dynamic name.");
+                return;
+            }
+
+            if (ReadBool(group, "createIfMissing") && !options.Value.AllowDynamicHostGroupCreate)
+            {
+                result.AddError(
+                    "auto_expand_disabled",
+                    $"Dynamic host group '{name}' is not present in Zabbix and AllowDynamicHostGroupCreate is disabled.");
+                return;
+            }
+
+            result.AddError(
+                "missing_host_group",
+                $"Dynamic host group '{name}' is not present in Zabbix and createIfMissing is not enabled.");
+            return;
+        }
+    }
+
     private async Task ValidateTemplatesAsync(
         ZabbixRequestDocument request,
         ZabbixValidationResult result,
@@ -350,12 +407,152 @@ public sealed class ZabbixRequestValidator(
             result.AddError("missing_template", $"Missing Zabbix template ids: {string.Join(", ", result.MissingTemplates)}.");
         }
 
+        if (options.Value.ValidateTemplateCompatibility && result.MissingTemplates.Count == 0)
+        {
+            ValidateTemplateCompatibility(templateIds, templates, result);
+        }
+
         if (result.MissingTemplateGroups.Count > 0)
         {
             result.AddError(
                 "missing_template_group",
                 $"Zabbix templates without template group ids: {string.Join(", ", result.MissingTemplateGroups)}.");
         }
+    }
+
+    private static void ValidateTemplateCompatibility(
+        string[] templateIds,
+        IReadOnlyDictionary<string, ZabbixTemplateInfo> templates,
+        ZabbixValidationResult result)
+    {
+        var selectedTemplates = templateIds
+            .Select(templateId => templates.TryGetValue(templateId, out var template) ? template : null)
+            .OfType<ZabbixTemplateInfo>()
+            .ToArray();
+
+        var conflicts = FindDuplicateKeyConflicts(selectedTemplates, template => template.ItemKeys, "item key")
+            .Concat(FindDuplicateKeyConflicts(selectedTemplates, template => template.DiscoveryRuleKeys, "LLD rule key"))
+            .Concat(FindDuplicateInventoryLinkConflicts(selectedTemplates))
+            .ToArray();
+        if (conflicts.Length == 0)
+        {
+            return;
+        }
+
+        var shownConflicts = conflicts.Take(6).ToArray();
+        var details = string.Join(" ", shownConflicts);
+        if (conflicts.Length > shownConflicts.Length)
+        {
+            details = $"{details} Plus {conflicts.Length - shownConflicts.Length} more conflict(s).";
+        }
+
+        result.AddError(
+            "template_conflict",
+            "Zabbix template compatibility conflict was detected before the Zabbix API call. "
+            + "The write request was not sent to Zabbix. "
+            + details
+            + " Resolve it by changing conversion rules/templates or by sending templates_clear for templates that must be removed during update. "
+            + TemplateCompatibilityReadMore);
+    }
+
+    private static IEnumerable<string> FindDuplicateKeyConflicts(
+        IReadOnlyCollection<ZabbixTemplateInfo> templates,
+        Func<ZabbixTemplateInfo, IReadOnlyCollection<string>> keySelector,
+        string keyType)
+    {
+        var ownersByKey = new Dictionary<string, HashSet<TemplateKeyOwner>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in templates)
+        {
+            foreach (var key in keySelector(template).Where(key => !string.IsNullOrWhiteSpace(key)))
+            {
+                if (!ownersByKey.TryGetValue(key, out var owners))
+                {
+                    owners = [];
+                    ownersByKey[key] = owners;
+                }
+
+                owners.Add(new TemplateKeyOwner(template.TemplateId, ResolveTemplateName(template)));
+            }
+        }
+
+        return ownersByKey
+            .Where(item => item.Value.Count > 1)
+            .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => FormatTemplateConflict(keyType, item.Key, item.Value));
+    }
+
+    private static IEnumerable<string> FindDuplicateInventoryLinkConflicts(
+        IReadOnlyCollection<ZabbixTemplateInfo> templates)
+    {
+        var ownersByInventoryLink = new Dictionary<string, HashSet<TemplateInventoryOwner>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in templates)
+        {
+            foreach (var item in template.InventoryLinkedItems)
+            {
+                if (string.IsNullOrWhiteSpace(item.InventoryLink)
+                    || string.Equals(item.InventoryLink, "0", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!ownersByInventoryLink.TryGetValue(item.InventoryLink, out var owners))
+                {
+                    owners = [];
+                    ownersByInventoryLink[item.InventoryLink] = owners;
+                }
+
+                owners.Add(new TemplateInventoryOwner(
+                    template.TemplateId,
+                    ResolveTemplateName(template),
+                    item.Key));
+            }
+        }
+
+        return ownersByInventoryLink
+            .Where(item => item.Value.Select(owner => owner.TemplateId).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => FormatInventoryLinkConflict(item.Key, item.Value));
+    }
+
+    private static string FormatTemplateConflict(
+        string keyType,
+        string key,
+        IReadOnlyCollection<TemplateKeyOwner> owners)
+    {
+        var ownerList = owners
+            .OrderBy(owner => owner.TemplateName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(owner => owner.TemplateId, StringComparer.OrdinalIgnoreCase)
+            .Select(owner => $"{owner.TemplateName} ({owner.TemplateId})");
+
+        return $"Duplicate {keyType} '{key}' is present in templates {string.Join(", ", ownerList)}.";
+    }
+
+    private static string FormatInventoryLinkConflict(
+        string inventoryLink,
+        IReadOnlyCollection<TemplateInventoryOwner> owners)
+    {
+        var ownerList = owners
+            .OrderBy(owner => owner.TemplateName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(owner => owner.TemplateId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(owner => owner.ItemKey, StringComparer.OrdinalIgnoreCase)
+            .Select(owner => $"item '{owner.ItemKey}' in template {owner.TemplateName} ({owner.TemplateId})");
+
+        return $"Duplicate inventory link '{inventoryLink}' is filled by {string.Join(", ", ownerList)}.";
+    }
+
+    private static string ResolveTemplateName(ZabbixTemplateInfo template)
+    {
+        if (!string.IsNullOrWhiteSpace(template.Name))
+        {
+            return template.Name;
+        }
+
+        if (!string.IsNullOrWhiteSpace(template.Host))
+        {
+            return template.Host;
+        }
+
+        return template.TemplateId;
     }
 
     private static bool ShouldValidateHostGroups(string method)
@@ -429,4 +626,24 @@ public sealed class ZabbixRequestValidator(
         result = 0;
         return false;
     }
+
+    private static bool ReadBool(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+        {
+            return false;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
+            _ => false
+        };
+    }
+
+    private sealed record TemplateKeyOwner(string TemplateId, string TemplateName);
+
+    private sealed record TemplateInventoryOwner(string TemplateId, string TemplateName, string ItemKey);
 }

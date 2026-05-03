@@ -10,15 +10,16 @@ Reduce regression risk in the core chain `CMDBuild catalog -> UI draft -> conver
 
 | Block | Scenario count |
 | --- | ---: |
-| JS unit/regression tests for mapping/rules logic | 12+ |
+| JS unit/regression tests for mapping/rules logic | 15+ |
 | .NET unit tests for `cmdbkafka2zabbix` | 15 |
-| .NET unit tests for `zabbixrequests2api` | 5 |
-| JSON contract / fixture tests | 9 |
+| .NET unit tests for `zabbixrequests2api` | 8 |
+| JSON contract / fixture tests | 10 |
 | Playwright UI tests for Mapping | 20 |
 | Playwright UI tests for Webhooks | 10 |
+| Playwright UI tests for Zabbix template compatibility | 5 |
 | UI no-silent-action regression | 7 |
 | Live E2E smoke for the latest defect class | 2 |
-| **Total** | **80+** |
+| **Total** | **92+** |
 
 ## First Package
 
@@ -34,7 +35,7 @@ The first package should catch the highest-risk regressions without requiring th
 
 The first JS unit/regression subpackage has started:
 
-- pure mapping/rules logic moved from `public/app.js` to `public/lib/mapping-logic.mjs`;
+- pure mapping/rules logic moved from `public/app.js` to `public/lib/mapping-logic.js`;
 - tests added in `src/monitoring-ui-api/test/mapping-logic.test.mjs`;
 - run from `src/monitoring-ui-api` with `npm test` or `npm run test:mapping`.
 
@@ -54,6 +55,35 @@ Covered starter scenarios:
 12. Existing matching profile is not duplicated.
 13. Disabled profile is not treated as matching and can be replaced.
 14. Regex alternatives and global profile match classes correctly.
+15. Dynamic target is allowed only for `tags` and `hostGroups` when explicit runtime switches are enabled.
+16. Dynamic target is serialized as `targetMode=dynamicFromLeaf`, not as an empty Zabbix target.
+17. Dynamic tag/host group helpers build explicit `valueField`, `createIfMissing`, and T4 value/name templates.
+
+Next dynamic-target subpackage:
+
+- Playwright Mapping: with switches disabled, empty target for `Tag rule`/`Host group rule` cannot be saved; with switches enabled, the explicit `Create/expand from CMDBuild leaf` mode appears;
+- JSON contract: dynamic rules without `valueField` or with an unsupported conversion structure are invalid;
+- configvalidation converter fixture: dynamic tag is emitted into `tags[]`, dynamic host group is emitted into `groups[]` as name/createIfMissing before the Zabbix writer;
+- configvalidation Zabbix writer fixture: when a leaf group appears for the first time, `hostgroup.create` returns `groupid`, and that `groupid` is written into the same `host.create/update` payload; dynamic tags remain in the same host payload;
+- live smoke: an existing host group is resolved by name, a missing one is created only with `AllowDynamicHostGroupCreate=true`, and disabled creation returns `auto_expand_disabled`.
+
+Next Zabbix writer validation subpackage:
+
+- .NET unit: duplicate item key in two templates returns `template_conflict`, `zabbixRequestSent=false`, and does not call `ExecuteAsync`;
+- .NET unit: duplicate LLD rule key in two templates returns `template_conflict`;
+- .NET unit: duplicate `inventory_link` in two templates returns `template_conflict`;
+- .NET unit: update fallback validates compatibility after merging current and target templates with `templates_clear`;
+- JSON contract: a `template_conflict` response contains the conflicting key or inventory link, template names/templateids, and the reading location `PROJECT_DOCUMENTATION.md` / `PROJECT_DOCUMENTATION.en.md`, section `Zabbix template compatibility`.
+
+Next UI validation subpackage for incompatible Zabbix templates:
+
+- Playwright Mapping: trying to add a template rule that creates an item key, LLD rule key, or `inventory_link` conflict inside one final host profile highlights the chain in red, blocks save, and shows the conflicting templates;
+- Playwright Mapping: when the conflict is resolved through `templateConflictRules`/`templates_clear` or by choosing a compatible template set, the red state is cleared, save becomes available, and `Undo`/`Redo` reflect the draft change;
+- Playwright Logical Control: an existing rules file with an incompatible final template set shows a critical inconsistency and offers `Edit`, `Delete`, and `Cancel` actions without a silent no-op;
+- Playwright Zabbix metadata: UI uses metadata from the Zabbix catalog/template metadata, not hardcoded template pairs, and separately displays item key, LLD rule key, and `inventory_link` conflicts;
+- Playwright Zabbix metadata: `Sync` and `Load` update tables/summary/status, show the Zabbix version, and do not produce a silent no-op when the cache is empty;
+- Playwright Git Settings: `Read from git`, `RulesFilePath`, and `Git repository URL` are saved separately from Runtime Settings, `Check access` shows resolved path, `schemaVersion`, and `rulesVersion`, and leaving the page with unsaved changes warns the operator;
+- UI response view/Event status: a response with `errorCode=template_conflict` and `zabbixRequestSent=false` is visible to the operator with the conflicting key/template names and the reading location `PROJECT_DOCUMENTATION.md` / `PROJECT_DOCUMENTATION.en.md`, section `Zabbix template compatibility`.
 
 ## UI Regression: No Silent Actions
 

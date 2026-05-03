@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1",
-  "rulesVersion": "2026.05.02-c2m-test-dynamic-class-smoke",
+  "rulesVersion": "2026.05.03-2027-serveri-webhook-fix",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
   "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
@@ -15,7 +15,8 @@
     ],
     "entityClasses": [
       "C2MTestCI",
-      "Server"
+      "Server",
+      "serveri"
     ],
     "fields": {
       "entityId": {
@@ -56,6 +57,28 @@
           "description",
           "Description"
         ],
+        "required": false
+      },
+      "os": {
+        "source": "OS",
+        "sources": [
+          "OS",
+          "os"
+        ],
+        "cmdbAttribute": "OS",
+        "type": "lookup",
+        "lookupType": "OS",
+        "required": false
+      },
+      "zabbixTag": {
+        "source": "zabbixTag",
+        "sources": [
+          "zabbixTag",
+          "ZabbixTag"
+        ],
+        "cmdbAttribute": "zabbixTag",
+        "type": "lookup",
+        "lookupType": "zabbixTag",
         "required": false
       },
       "lifecycleState": {
@@ -162,6 +185,42 @@
           "maxDepth": 2
         },
         "required": false
+      },
+      "ipaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "serveri.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "hostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "serveri.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "domainISName": {
+        "source": "id",
+        "cmdbAttribute": "{domain:IS}.Name",
+        "cmdbPath": "serveri.{domain:IS}.Name",
+        "type": "string",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "collectionMode": "join",
+          "collectionSeparator": "; ",
+          "maxDepth": 2
+        }
       }
     }
   },
@@ -756,6 +815,44 @@
           }
         }
       ]
+    },
+    {
+      "name": "serveri-main",
+      "priority": 40,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^serveri$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "serveri-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "ipaddressIpAddr",
+          "when": {
+            "fieldExists": "ipaddressIpAddr"
+          }
+        },
+        {
+          "name": "serveri-main-agent-dns",
+          "priority": 20,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "hostname",
+          "when": {
+            "fieldExists": "hostname"
+          },
+          "fallback": true
+        }
+      ]
     }
   ],
   "selectionPolicy": {
@@ -791,6 +888,50 @@
       ]
     },
     {
+      "name": "server-os-windows-hosts",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "os",
+            "pattern": "(?i)^windows"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Discovered hosts",
+          "groupid": "5"
+        }
+      ]
+    },
+    {
+      "name": "server-os-vmware-hosts",
+      "priority": 110,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "os",
+            "pattern": "(?i)^(vmware|esxi|vsphere)"
+          }
+        ]
+      },
+      "hostGroups": [
+        {
+          "name": "Hypervisors",
+          "groupid": "7"
+        }
+      ]
+    },
+    {
       "name": "default-linux",
       "priority": 1000,
       "fallback": true,
@@ -798,6 +939,56 @@
         "always": true
       },
       "hostGroupsRef": "defaults.hostGroups"
+    },
+    {
+      "name": "hostgroups-server-description-description",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "description",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"description\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-serveri-domainisname-domainisname",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^serveri$"
+          },
+          {
+            "field": "domainISName",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "domainISName",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"domainISName\") #>",
+          "createIfMissing": true
+        }
+      ]
     }
   ],
   "templateSelectionRules": [
@@ -902,6 +1093,58 @@
       ]
     },
     {
+      "name": "server-os-windows-agent",
+      "priority": 25,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "os",
+            "pattern": "(?i)^windows"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Windows by Zabbix agent",
+          "templateid": "10081"
+        }
+      ]
+    },
+    {
+      "name": "server-os-vmware-agent",
+      "priority": 26,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "os",
+            "pattern": "(?i)^(vmware|esxi|vsphere)"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        },
+        {
+          "name": "Zabbix agent",
+          "templateid": "10561"
+        }
+      ]
+    },
+    {
       "name": "default-linux-agent",
       "priority": 1000,
       "fallback": true,
@@ -939,6 +1182,30 @@
         "10562"
       ],
       "reason": "Generic by SNMP already contains item key icmpping and populates inventory field Name; keeping ICMP Ping or agent templates with it makes Zabbix reject host.create/host.update."
+    },
+    {
+      "name": "windows-agent-removes-conflicting-agent-templates",
+      "whenTemplateIds": [
+        "10081"
+      ],
+      "removeTemplateIds": [
+        "10001",
+        "10561",
+        "10562"
+      ],
+      "reason": "Windows by Zabbix agent conflicts with Linux/Zabbix agent templates on host.update when CMDBuild OS changes or an existing host was created by fallback rules."
+    },
+    {
+      "name": "zabbix-agent-removes-conflicting-os-agent-templates",
+      "whenTemplateIds": [
+        "10561"
+      ],
+      "removeTemplateIds": [
+        "10001",
+        "10081",
+        "10562"
+      ],
+      "reason": "Plain Zabbix agent template conflicts with OS-specific agent templates on host.update."
     }
   ],
   "interfaceAddressRules": [
@@ -979,6 +1246,44 @@
       },
       "mode": "ip",
       "valueField": "ipAddress"
+    },
+    {
+      "name": "interfaceaddress-serveri-ipaddressipaddr-ipaddress",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^serveri$"
+          },
+          {
+            "field": "ipaddressIpAddr",
+            "pattern": "(?i).*"
+          }
+        ],
+        "fieldExists": "ipaddressIpAddr"
+      },
+      "mode": "ip",
+      "valueField": "ipaddressIpAddr"
+    },
+    {
+      "name": "interfaceaddress-serveri-hostname-dnsname",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^serveri$"
+          },
+          {
+            "field": "hostname",
+            "pattern": "(?i).*"
+          }
+        ],
+        "fieldExists": "hostname"
+      },
+      "mode": "dns",
+      "valueField": "hostname"
     }
   ],
   "interfaceSelectionRules": [
@@ -1134,6 +1439,50 @@
         {
           "tag": "cmdb.deepReference.lookup",
           "valueTemplate": "<#= Model.Field(\"c2mDeepReferenceLookup\") #>"
+        }
+      ]
+    },
+    {
+      "name": "server-os-tag",
+      "priority": 70,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "os",
+            "pattern": ".+"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.os",
+          "valueTemplate": "<#= Model.Field(\"os\") #>"
+        }
+      ]
+    },
+    {
+      "name": "server-zabbix-tag",
+      "priority": 80,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "zabbixTag",
+            "pattern": ".+"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "tag": "cmdb.zabbixTag",
+          "valueTemplate": "<#= Model.Field(\"zabbixTag\") #>"
         }
       ]
     },
@@ -1298,7 +1647,7 @@
       "    ],",
       "    \"groups\": [",
       "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
-      "      { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "      { <# if (!string.IsNullOrWhiteSpace(Model.Groups[i].GroupId)) { #>\"groupid\": \"<#= Model.Groups[i].GroupId #>\"<# } else { #>\"name\": \"<#= Model.Groups[i].Name #>\", \"createIfMissing\": <#= Model.Groups[i].CreateIfMissing ? \"true\" : \"false\" #><# } #> }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
       "      <# } #>",
       "    ],",
       "    \"templates\": [",
@@ -1381,7 +1730,7 @@
       "    ],",
       "    \"groups\": [",
       "      <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
-      "      { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "      { <# if (!string.IsNullOrWhiteSpace(Model.Groups[i].GroupId)) { #>\"groupid\": \"<#= Model.Groups[i].GroupId #>\"<# } else { #>\"name\": \"<#= Model.Groups[i].Name #>\", \"createIfMissing\": <#= Model.Groups[i].CreateIfMissing ? \"true\" : \"false\" #><# } #> }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
       "      <# } #>",
       "    ],",
       "    \"templates\": [",
@@ -1480,7 +1829,7 @@
       "      ],",
       "      \"groups\": [",
       "        <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
-      "        { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "        { <# if (!string.IsNullOrWhiteSpace(Model.Groups[i].GroupId)) { #>\"groupid\": \"<#= Model.Groups[i].GroupId #>\"<# } else { #>\"name\": \"<#= Model.Groups[i].Name #>\", \"createIfMissing\": <#= Model.Groups[i].CreateIfMissing ? \"true\" : \"false\" #><# } #> }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
       "        <# } #>",
       "      ],",
       "      \"templates\": [",
@@ -1550,7 +1899,7 @@
       "      ],",
       "      \"groups\": [",
       "        <# for (var i = 0; i < Model.Groups.Count; i++) { #>",
-      "        { \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
+      "        { <# if (!string.IsNullOrWhiteSpace(Model.Groups[i].GroupId)) { #>\"groupid\": \"<#= Model.Groups[i].GroupId #>\"<# } else { #>\"name\": \"<#= Model.Groups[i].Name #>\", \"createIfMissing\": <#= Model.Groups[i].CreateIfMissing ? \"true\" : \"false\" #><# } #> }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #>",
       "        <# } #>",
       "      ],",
       "      \"templates\": [",

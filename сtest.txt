@@ -1,0 +1,42 @@
+В CMDBuild Сдлеать:
+суперкласс ZabbixMonitoring
+с атрибутом zabbix_hostid string
+
+Внутри
+класс ip address
+атрибуты Descrition переименовать в ipAddr
+Завести атрибут MACaddress
+
+Завести Lookup Env списком Dev ITtest Btest Pord
+Завести Lookup OSyste списком Windows Windows server Linux AIX VMWARE Other
+Завести Lookup Maint списком утром вечером никогда
+Завести Lookup ModelVendorNames списком Cisco HP Huawai IBM
+
+
+Завести класс Maintance
+Завести атрибут Name
+Завести атрибут Time lookup Maint
+
+
+Класс ИС
+Завести атрибут Name
+Завести атрибут Окружение используя Lookup Env
+
+Завести класс ServerI
+Завести атрибут hostname string
+Завести атрибут ipaddress reference на ip address
+Завести атрибут interface1 reference на ip address
+Завести атрибут interface2 reference на ip address
+Завести атрибут iLo reference на ip address
+Завести атрибут mgmt reference на ip address
+Завести атрибут serialnum
+Завести атрибут обслуживание reference на Maintance
+
+Завести класс Netman
+Завести атрибут hostname string
+Завести атрибут ipaddress reference на ip address
+Завести атрибут mgmt reference на ip address
+Завести атрибут serialnum
+
+Завести domain N:N ИС к ServerI
+Завести domain N:N ИС к Netman

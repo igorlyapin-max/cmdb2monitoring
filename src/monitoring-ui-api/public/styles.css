@@ -48,6 +48,11 @@ button:disabled {
   opacity: 0.55;
 }
 
+button.is-busy {
+  cursor: progress;
+  opacity: 0.78;
+}
+
 button.secondary {
   background: #fff;
   color: var(--accent-strong);
@@ -107,10 +112,10 @@ label span {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 56px;
+  min-height: 56px;
   border-bottom: 1px solid var(--line);
   background: #fff;
-  padding: 0 18px;
+  padding: 8px 18px;
 }
 
 .brand {
@@ -136,10 +141,60 @@ label span {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
   color: var(--muted);
   font-size: 12px;
   text-align: right;
+}
+
+.session-traffic {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(760px, 55vw);
+}
+
+.session-light {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 2px 7px;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.session-light::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.session-light-loaded::before,
+.session-light-read::before,
+.session-light-saved::before,
+.session-light-synced::before {
+  background: #16a34a;
+}
+
+.session-light-error::before {
+  background: #dc2626;
+}
+
+.session-light-idle::before {
+  background: #94a3b8;
+}
+
+.is-muted {
+  opacity: 0.62;
 }
 
 .hidden {
@@ -689,6 +744,26 @@ h2 {
 .mapping-editor-status.is-warning {
   color: #9a3412;
   font-weight: 700;
+}
+
+.mapping-editor-status.is-running {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.mapping-editor-status.is-error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.mapping-editor-status.is-success {
+  color: #047857;
+  font-weight: 700;
+}
+
+.rules-source-status {
+  color: #334155;
+  font-weight: 600;
 }
 
 .mapping-editor-form-state {
@@ -1277,8 +1352,51 @@ fieldset.settings-stack {
   margin-top: 12px;
 }
 
+.metric-actions.rules-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
 .metric-actions button {
   width: 100%;
+}
+
+.rules-version-summary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rules-version-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rules-version-value {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.rules-version-label {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .status-ok {

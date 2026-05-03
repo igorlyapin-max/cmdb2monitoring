@@ -433,10 +433,33 @@ paths:
                 additionalProperties: true
   /api/zabbix/catalog/sync:
     post:
-      summary: Synchronize Zabbix templates, host groups, template groups, and known tags
+      summary: Synchronize Zabbix catalog and template metadata
       responses:
         "200":
           description: Synced catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/zabbix/metadata:
+    get:
+      summary: Read Zabbix template compatibility metadata
+      description: Returns template item keys, LLD rule keys, inventory links, existing host templates, Zabbix version, and conflict index from the Zabbix catalog cache.
+      responses:
+        "200":
+          description: Zabbix metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/zabbix/metadata/sync:
+    post:
+      summary: Synchronize Zabbix catalog and return metadata
+      responses:
+        "200":
+          description: Synced Zabbix metadata.
           content:
             application/json:
               schema:
@@ -600,6 +623,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuntimeSettings"
+  /api/settings/git:
+    get:
+      summary: Read conversion-rules Git settings
+      responses:
+        "200":
+          description: Rules storage settings and current file status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitSettings"
+    put:
+      summary: Save conversion-rules Git settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitSettings"
+      responses:
+        "200":
+          description: Saved rules storage settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitSettings"
+  /api/settings/git/check:
+    post:
+      summary: Check conversion-rules file settings
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitSettings"
+      responses:
+        "200":
+          description: File existence and rules version metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/settings/git/load:
+    post:
+      summary: Load conversion rules from disk or local git working copy
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitSettings"
+      responses:
+        "200":
+          description: File status plus rules document content when the file exists.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/settings/git/export:
+    post:
+      summary: Write rules and redacted webhook artifact to the configured local copy
+      description: Commit and push are intentionally not performed by monitoring-ui-api.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Written file paths and current rules metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
 components:
   securitySchemes:
     sessionCookie:
@@ -717,9 +818,14 @@ components:
       properties:
         items:
           type: array
+          description: Health probes for configured microservices. Items can include rulesStatus for services that expose rules status.
           items:
             type: object
             additionalProperties: true
+        managementRules:
+          type: object
+          description: Current conversion-rules version read by monitoring-ui-api.
+          additionalProperties: true
     EventList:
       type: object
       required:
@@ -769,6 +875,28 @@ components:
               type: string
               format: password
         eventBrowser:
+          type: object
+          additionalProperties: true
+    GitSettings:
+      type: object
+      properties:
+        filePath:
+          type: string
+        rules:
+          type: object
+          properties:
+            rulesFilePath:
+              type: string
+              example: rules/cmdbuild-to-zabbix-host-create.json
+            readFromGit:
+              type: boolean
+            repositoryPath:
+              type: string
+              example: rules-git-working-copy
+            repositoryUrl:
+              type: string
+              example: https://git.example.org/cmdb2monitoring/conversion-rules.git
+        status:
           type: object
           additionalProperties: true
     CmdbuildWebhookList:
@@ -867,6 +995,11 @@ components:
       properties:
         path:
           type: string
+        resolvedPath:
+          type: string
+        source:
+          type: string
+          enum: [disk, git]
         fileName:
           type: string
         schemaVersion:

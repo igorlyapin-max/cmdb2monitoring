@@ -72,7 +72,7 @@ public sealed class T4TemplateRenderer(IOptions<ConversionRulesOptions> options)
 
         return Regex.Replace(
             rendered,
-            "<#=\\s*Model\\.Field\\([\"'](?<name>[^\"']+)[\"']\\)\\s*#>",
+            "<#=\\s*Model\\.(?:Field|Source)\\([\"'](?<name>[^\"']+)[\"']\\)\\s*#>",
             match => model.Field(match.Groups["name"].Value),
             RegexOptions.CultureInvariant,
             TimeSpan.FromMilliseconds(500));

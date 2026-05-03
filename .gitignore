@@ -28,6 +28,7 @@ Thumbs.db
 state/
 src/monitoring-ui-api/data/
 rules/.backup/
+rules-git-working-copy/
 node_modules/
 
 # Local runtime secrets and Codex workspace metadata
