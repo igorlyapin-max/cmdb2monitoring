@@ -302,6 +302,9 @@ const translations = {
     'mapping.loadErrorHelp': 'Ошибка показана здесь, чтобы не искать ее в console браузера.',
     'validation.deleteFromRules': 'Удалить из правил',
     'validation.deleteFromRulesHelp': 'Отметьте, чтобы удалить эту отсутствующую ссылку из JSON правил.',
+    'validation.createHostProfile': 'Создать host profile',
+    'validation.createHostProfileHelp': 'Отметьте, чтобы автоматически добавить минимальный host profile для этого класса в draft JSON.',
+    'validation.applySelected': 'Применить выбранное',
     'validation.confirmDeleteSelected': 'Удалить выбранные элементы из JSON правил ({count}) и сохранить исправленный файл через браузер? Backend rules-файл не изменится.',
     'validation.review.title': 'Проверка удаления правила',
     'validation.review.message': 'Правило "{name}" содержит одновременно консистентные и неконсистентные части. Проверьте JSON: можно сохранить правку, удалить правило целиком или отказаться.',
@@ -497,7 +500,9 @@ const translations = {
     'mapping.status.classFieldMissing': 'В классе "{className}" нет атрибута для "{field}". Добавьте атрибут в CMDBuild или выберите существующий class attribute field.',
     'mapping.status.multiValueScalarNotAllowed': 'Поле "{field}" может вернуть несколько значений через CMDBuild domain path. Для скалярной Zabbix structure "{target}" выберите обычный scalar/reference leaf или настройте source field с resolve.collectionMode=first.',
     'mapping.status.addedRule': 'Добавлено правило "{name}".',
+    'mapping.status.addedRuleWithProfile': 'Добавлено правило "{name}". Автоматически создан host profile "{profile}" для класса "{className}".',
     'mapping.status.modifiedRule': 'Изменено правило "{name}".',
+    'mapping.status.modifiedRuleWithProfile': 'Изменено правило "{name}". Автоматически создан host profile "{profile}" для класса "{className}".',
     'mapping.status.modifyRuleMissing': 'Выбранное правило больше не найдено в draft JSON.',
     'mapping.status.readyButStale': 'Можно редактировать, но {details}',
     'mapping.status.ruleForModifySelected': 'Правило для модификации выбрано.',
@@ -520,6 +525,7 @@ const translations = {
     'mapping.status.ipFieldForDnsTarget': 'Атрибут "{field}" выглядит как IP-адрес, поэтому его нельзя использовать для DNS interface (interfaces[].dns/useip=0). Выберите IP target или DNS/FQDN атрибут.',
     'mapping.status.dnsFieldForIpTarget': 'Атрибут "{field}" выглядит как DNS/FQDN, поэтому его нельзя использовать для IP interface (interfaces[].ip/useip=1). Выберите DNS target или IP атрибут.',
     'mapping.status.lookupFieldForInterfaceTarget': 'Lookup/reference value "{field}" нельзя напрямую использовать как адрес Zabbix interface. Выберите scalar IP/DNS leaf field или другую structure.',
+    'mapping.status.unknownFieldForInterfaceTarget': 'Не удалось подтвердить, что "{field}" является адресом типа {target}. Для Zabbix interface выберите IP/DNS leaf field с явным именем, типом или validationRegex.',
     'mapping.status.fieldStale': 'Field "{field}" загружен из rule, но не подтвержден текущим catalog/filter.',
     'mapping.status.fieldStaleShort': 'Field "{field}" не подтвержден текущим catalog/filter.',
     'mapping.status.chooseStructure': 'Выберите conversion structure.',
@@ -712,6 +718,9 @@ const translations = {
     'mapping.loadErrorHelp': 'The error is shown here so you do not have to look for it in the browser console.',
     'validation.deleteFromRules': 'Remove from rules',
     'validation.deleteFromRulesHelp': 'Check this to remove the missing reference from the rules JSON.',
+    'validation.createHostProfile': 'Create host profile',
+    'validation.createHostProfileHelp': 'Check this to automatically add a minimal host profile for this class to the draft JSON.',
+    'validation.applySelected': 'Apply selected',
     'validation.confirmDeleteSelected': 'Remove selected items from rules JSON ({count}) and save the fixed file through the browser? The backend rules file will not change.',
     'validation.review.title': 'Rule Deletion Review',
     'validation.review.message': 'Rule "{name}" contains both consistent and inconsistent parts. Review the JSON: you can save an edit, delete the whole rule anyway, or cancel.',
@@ -907,7 +916,9 @@ const translations = {
     'mapping.status.classFieldMissing': 'Class "{className}" has no attribute for "{field}". Add the attribute in CMDBuild or choose an existing class attribute field.',
     'mapping.status.multiValueScalarNotAllowed': 'Field "{field}" can return multiple values through a CMDBuild domain path. For scalar Zabbix structure "{target}", choose a regular scalar/reference leaf or configure the source field with resolve.collectionMode=first.',
     'mapping.status.addedRule': 'Added rule "{name}".',
+    'mapping.status.addedRuleWithProfile': 'Added rule "{name}". Automatically created host profile "{profile}" for class "{className}".',
     'mapping.status.modifiedRule': 'Modified rule "{name}".',
+    'mapping.status.modifiedRuleWithProfile': 'Modified rule "{name}". Automatically created host profile "{profile}" for class "{className}".',
     'mapping.status.modifyRuleMissing': 'The selected rule is no longer found in the draft JSON.',
     'mapping.status.readyButStale': 'Ready to edit, but {details}',
     'mapping.status.ruleForModifySelected': 'Rule to modify is selected.',
@@ -930,6 +941,7 @@ const translations = {
     'mapping.status.ipFieldForDnsTarget': 'Attribute "{field}" looks like an IP address, so it cannot be used for a DNS interface (interfaces[].dns/useip=0). Choose the IP target or a DNS/FQDN attribute.',
     'mapping.status.dnsFieldForIpTarget': 'Attribute "{field}" looks like DNS/FQDN, so it cannot be used for an IP interface (interfaces[].ip/useip=1). Choose the DNS target or an IP attribute.',
     'mapping.status.lookupFieldForInterfaceTarget': 'Lookup/reference value "{field}" cannot be used directly as a Zabbix interface address. Choose a scalar IP/DNS leaf field or another structure.',
+    'mapping.status.unknownFieldForInterfaceTarget': 'Could not confirm that "{field}" is a {target} address. For a Zabbix interface, choose an IP/DNS leaf field with an explicit name, type, or validationRegex.',
     'mapping.status.fieldStale': 'Field "{field}" was loaded from the rule but is not confirmed by the current catalog/filter.',
     'mapping.status.fieldStaleShort': 'Field "{field}" is not confirmed by the current catalog/filter.',
     'mapping.status.chooseStructure': 'Choose a conversion structure.',
@@ -4922,8 +4934,17 @@ function mappingEditorFormHasChanges() {
     return false;
   }
 
-  return selected.collection.key !== candidate.rulesKey
-    || stableJson(selected.rule) !== stableJson(candidate.rule);
+  if (selected.collection.key !== candidate.rulesKey || stableJson(selected.rule) !== stableJson(candidate.rule)) {
+    return true;
+  }
+
+  const rules = currentMappingRules();
+  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass')?.value ?? '');
+  const field = $('#mappingEditField')?.value ?? '';
+  const target = readMappingEditorTarget();
+  const fieldRule = rules?.source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {};
+  return !classHasHostProfile(rules, className)
+    && ['ip', 'dns'].includes(minimalHostProfileInterfaceMode(field, fieldRule, target));
 }
 
 function mappingEditorRuleCandidate() {
@@ -4997,12 +5018,16 @@ function addMappingConversionRule() {
 
   ensureMappingEditorClass(rules, className);
   ensureMappingEditorSourceField(rules, field);
+  const fieldRuleForProfile = rules.source?.fields?.[field] ?? selectedFieldRule;
+  const profileResult = ensureMinimalHostProfileForClass(rules, className, field, fieldRuleForProfile, target);
   const rulesKey = mappingRulesKey(type, target);
   rules[rulesKey] = Array.isArray(rules[rulesKey]) ? rules[rulesKey] : [];
   rules[rulesKey].push(rule);
   pushMappingHistory(rules);
   $('#mappingEditRuleName').value = '';
-  rerenderMappingDraft(tf('mapping.status.addedRule', { name: ruleName }));
+  rerenderMappingDraft(profileResult.created
+    ? tf('mapping.status.addedRuleWithProfile', { name: ruleName, profile: profileResult.profileName, className })
+    : tf('mapping.status.addedRule', { name: ruleName }));
 }
 
 function populateMappingModifyRules(options = {}) {
@@ -5431,9 +5456,11 @@ function modifyMappingConversionRule() {
   const rule = buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName });
   ensureMappingEditorClass(rules, className);
   ensureMappingEditorSourceField(rules, field);
+  const fieldRuleForProfile = rules.source?.fields?.[field] ?? selectedFieldRule;
+  const profileResult = ensureMinimalHostProfileForClass(rules, className, field, fieldRuleForProfile, target);
 
   const newRulesKey = mappingRulesKey(type, target);
-  if (selected.collection.key === newRulesKey && stableJson(selected.rule) === stableJson(rule)) {
+  if (selected.collection.key === newRulesKey && stableJson(selected.rule) === stableJson(rule) && !profileResult.created) {
     setMappingEditorStatus(t('mapping.status.noRuleChanges'), 'warning');
     updateMappingEditorFormState();
     return;
@@ -5449,7 +5476,9 @@ function modifyMappingConversionRule() {
   rules[newRulesKey] = Array.isArray(rules[newRulesKey]) ? rules[newRulesKey] : [];
   rules[newRulesKey].push(rule);
   pushMappingHistory(rules);
-  rerenderMappingDraft(tf('mapping.status.modifiedRule', { name: ruleName }));
+  rerenderMappingDraft(profileResult.created
+    ? tf('mapping.status.modifiedRuleWithProfile', { name: ruleName, profile: profileResult.profileName, className })
+    : tf('mapping.status.modifiedRule', { name: ruleName }));
 }
 
 function readMappingEditorTarget() {
@@ -5524,6 +5553,106 @@ function ensureMappingEditorSourceField(rules, field) {
   const attribute = mappingEditorClassAttributes($('#mappingEditClass').value)
     .find(item => equalsIgnoreCase(item.name, field));
   rules.source.fields[field] = sourceFieldRuleForDirectAttribute(catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass').value), attribute, field);
+}
+
+function ensureMinimalHostProfileForClass(rules, className, fieldKey, fieldRule = {}, target = {}) {
+  if (!rules || !className || !fieldKey || classHasHostProfile(rules, className)) {
+    return { created: false };
+  }
+
+  const mode = minimalHostProfileInterfaceMode(fieldKey, fieldRule, target);
+  if (!['ip', 'dns'].includes(mode)) {
+    return { created: false };
+  }
+
+  rules.hostProfiles = Array.isArray(rules.hostProfiles) ? rules.hostProfiles : [];
+  const baseName = `${normalizeRuleName(className)}-main`;
+  const profileName = uniqueHostProfileName(rules, baseName);
+  const nextPriority = Math.max(0, ...rules.hostProfiles.map(profile => Number(profile.priority) || 0)) + 10;
+  const profile = {
+    name: profileName,
+    priority: nextPriority,
+    createOnUpdateWhenMissing: true,
+    when: {
+      allRegex: [
+        {
+          field: 'className',
+          pattern: `(?i)^${escapeRegex(className)}$`
+        }
+      ]
+    },
+    hostNameTemplate: 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>',
+    visibleNameTemplate: '<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>',
+    interfaces: [
+      {
+        name: `${profileName}-agent-${mode}`,
+        priority: 10,
+        interfaceProfileRef: 'agent',
+        mode,
+        valueField: fieldKey,
+        when: {
+          fieldExists: fieldKey
+        }
+      }
+    ]
+  };
+
+  rules.hostProfiles.push(profile);
+  return { created: true, profileName, profile };
+}
+
+function minimalHostProfileInterfaceMode(fieldKey, fieldRule = {}, target = {}) {
+  const targetMode = String(target?.mode ?? '').toLowerCase();
+  if (targetMode === 'ip' || targetMode === 'dns') {
+    return targetMode;
+  }
+
+  const kind = sourceFieldAddressKind(fieldKey, fieldRule);
+  return kind === 'dns' ? 'dns' : kind === 'ip' ? 'ip' : '';
+}
+
+function uniqueHostProfileName(rules, baseName) {
+  const existing = new Set((rules.hostProfiles ?? []).map(profile => normalizeRuleName(profile.name)));
+  let candidate = baseName || 'class-main';
+  let index = 2;
+  while (existing.has(normalizeRuleName(candidate))) {
+    candidate = `${baseName}-${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+function classHasHostProfile(rules, className) {
+  return (rules?.hostProfiles ?? []).some(profile => hostProfileAppliesToClass(profile, className));
+}
+
+function hostProfileAppliesToClass(profile, className) {
+  if (!profile || profile.enabled === false) {
+    return false;
+  }
+
+  const classes = ruleClassConditions(profile);
+  return classes.length === 0 || classes.some(item => sameNormalized(item, className));
+}
+
+function hostProfileFixFieldForClass(rules, cmdbuildCatalog, className) {
+  const catalogClass = findCatalogClass(cmdbuildCatalog ?? {}, className);
+  if (!catalogClass || isCmdbCatalogSuperclass(cmdbuildCatalog ?? {}, catalogClass)) {
+    return null;
+  }
+
+  const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass);
+  const candidates = addressCandidatesForClass(rules, attributes);
+  if (candidates.length > 0) {
+    const candidate = candidates[0];
+    return {
+      fieldKey: candidate.fieldKey,
+      fieldRule: rules.source?.fields?.[candidate.fieldKey] ?? { source: candidate.fieldKey },
+      mode: candidate.mode
+    };
+  }
+
+  return null;
 }
 
 function mappingEditorCatalogFieldOptions(className, sourceFields) {
@@ -5905,6 +6034,9 @@ function mappingFieldTargetCompatibilityMessage(fieldKey, fieldRule = {}, target
   }
   if (mode === 'ip' && kind === 'dns') {
     return tf('mapping.status.dnsFieldForIpTarget', { field: fieldKey });
+  }
+  if (kind === 'unknown') {
+    return tf('mapping.status.unknownFieldForInterfaceTarget', { field: fieldKey, target: mode.toUpperCase() });
   }
 
   return '';
@@ -6404,6 +6536,10 @@ function validateMappingDraftBeforeSave(rules, cmdbuildCatalog) {
     }
 
     const displayName = catalogClassDisplayName(cmdbuildCatalog ?? {}, className);
+    if (!classHasHostProfile(rules, className)) {
+      issues.push(`Класс ${displayName}: нет hostProfiles[] с условием className для создания или обновления Zabbix host.`);
+    }
+
     const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass);
     const candidates = addressCandidatesForClass(rules, attributes);
     if (candidates.length === 0) {
@@ -7128,15 +7264,18 @@ function renderValidateMappingRules(container, rules, cmdbuildCatalog, validatio
   appendValidationSection(container, 'Entity classes', (rules.source?.entityClasses ?? []).map(className => {
     const tokens = [`class:${normalizeToken(className)}`, `match:className:${normalizeToken(className)}`, ...sourceFieldTokens('className')];
     const displayName = catalogClassDisplayName(cmdbuildCatalog ?? {}, className);
-    return mappingNode({
+    const status = validationStatus(tokens, validation);
+    const node = mappingNode({
       label: displayName,
       meta: displayName !== className ? `configured / rules: ${className}` : 'configured',
       tokens,
       level: 1,
       kind: 'source',
-      status: 'normal',
+      status,
       help: 'Класс источника из JSON правил. Он должен существовать в CMDBuild, иначе события этого класса нельзя корректно обработать.'
     });
+    const hostProfileIssue = validationIssueForClassHostProfile(validation, className);
+    return hostProfileIssue?.fix ? validationFixNode(node, hostProfileIssue.fix) : node;
   }));
 
   appendValidationSection(container, 'Class attribute fields', Object.entries(rules.source?.fields ?? {}).map(([fieldKey, field]) => {
@@ -7226,6 +7365,17 @@ function validationRuleItem(rules, collectionKey, rule, index) {
   };
 }
 
+function validationIssueForClassHostProfile(validation, className) {
+  const key = normalizeToken(className);
+  if (!key) {
+    return null;
+  }
+
+  return (validation?.issues ?? []).find(issue =>
+    issue.fix?.action === 'createHostProfile'
+    && normalizeToken(issue.fix.className) === key) ?? null;
+}
+
 function renderValidateMappingCmdbuild(container, rules, catalog, validation) {
   clear(container);
   const classes = rules.source?.entityClasses ?? [];
@@ -7313,9 +7463,11 @@ function validationFixNode(node, fix) {
   checkbox.className = 'validation-fix-checkbox';
   checkbox.dataset.validationScope = fix.scope;
   checkbox.dataset.fix = JSON.stringify(fix);
-  setHelpKey(checkbox, 'validation.deleteFromRulesHelp');
-  const label = el('span', '', t('validation.deleteFromRules'));
-  label.dataset.i18n = 'validation.deleteFromRules';
+  const labelKey = fix.action === 'createHostProfile' ? 'validation.createHostProfile' : 'validation.deleteFromRules';
+  const helpKey = fix.action === 'createHostProfile' ? 'validation.createHostProfileHelp' : 'validation.deleteFromRulesHelp';
+  setHelpKey(checkbox, helpKey);
+  const label = el('span', '', t(labelKey));
+  label.dataset.i18n = labelKey;
   row.append(checkbox, label);
   wrapper.append(row, node);
   return wrapper;
@@ -7364,9 +7516,38 @@ async function deleteSelectedValidationFixes() {
     zabbix: state.validateMappingZabbixCatalog ?? {},
     cmdbuild: state.validateMappingCmdbuildCatalog ?? {}
   };
-  const plan = buildValidationRuleDeletePlan(rules, operations, catalogs);
+  const changes = [];
+  const createProfileOperations = operations.filter(operation => operation.action === 'createHostProfile');
+  for (const operation of createProfileOperations) {
+    const fieldRule = rules.source?.fields?.[operation.fieldKey] ?? { source: operation.fieldKey };
+    const result = ensureMinimalHostProfileForClass(
+      rules,
+      operation.className,
+      operation.fieldKey,
+      fieldRule,
+      { mode: operation.mode });
+    if (result.created) {
+      changes.push({
+        action: 'createHostProfile',
+        className: operation.className,
+        fieldKey: operation.fieldKey,
+        profile: result.profileName
+      });
+    }
+  }
+
+  const deleteOperations = operations.filter(operation => operation.action !== 'createHostProfile');
+  const plan = buildValidationRuleDeletePlan(rules, deleteOperations, catalogs);
   if (plan.autoDelete.length === 0 && plan.review.length === 0) {
-    await deleteSelectedValidationReferences(operations);
+    if (changes.length > 0) {
+      await saveValidationRulesFixResult(rules, changes);
+      return;
+    }
+    if (deleteOperations.length === 0) {
+      toast(t('toast.rulesNotChanged'));
+      return;
+    }
+    await deleteSelectedValidationReferences(deleteOperations);
     return;
   }
 
@@ -7385,7 +7566,6 @@ async function deleteSelectedValidationFixes() {
     }
   }
 
-  const changes = [];
   for (const { item, rule } of edits.values()) {
     if (replaceValidationRule(rules, item, rule)) {
       changes.push({ action: 'editRule', collection: item.collection.key, name: ruleDisplayName(rule) });
@@ -7396,7 +7576,7 @@ async function deleteSelectedValidationFixes() {
       changes.push({ action: 'deleteRule', collection: item.collection.key, name: ruleDisplayName(item.rule) });
     }
   }
-  changes.push(...cleanupValidationSelectedReferences(rules, operations));
+  changes.push(...cleanupValidationSelectedReferences(rules, deleteOperations));
 
   if (changes.length === 0) {
     toast(t('toast.rulesNotChanged'));
@@ -7728,7 +7908,8 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
     source: issue.source,
     message: issue.message,
     tokens: uniqueTokens(issue.tokens ?? []),
-    help: issue.help
+    help: issue.help,
+    fix: issue.fix
   });
 
   for (const group of referencedHostGroups(rules)) {
@@ -7804,6 +7985,7 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
   };
 
   for (const className of rules.source?.entityClasses ?? []) {
+    const key = normalizeToken(className);
     const catalogClass = findCatalogClass(cmdbuildCatalog, className);
     if (!catalogClass) {
       addMissingCmdbClassIssue(className);
@@ -7811,6 +7993,31 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
     }
     if (isCmdbCatalogSuperclass(cmdbuildCatalog, catalogClass)) {
       continue;
+    }
+
+    if (!classHasHostProfile(rules, className)) {
+      const profileFixField = hostProfileFixFieldForClass(rules, cmdbuildCatalog, className);
+      addIssue({
+        source: 'rules',
+        message: `Для CMDBuild class не найден hostProfile: ${catalogClassDisplayName(cmdbuildCatalog, className)}`,
+        tokens: [
+          `class:${key}`,
+          `match:className:${key}`,
+          'target:hostProfiles',
+          'target:interfaces',
+          ...sourceFieldTokens('className'),
+          ...(profileFixField ? sourceFieldTokens(profileFixField.fieldKey) : [])
+        ],
+        help: 'События этого класса будут приняты, но converter пропустит их с no_host_profile_matched. Добавьте hostProfiles[] для класса или примените автоматическое исправление.',
+        fix: profileFixField ? {
+          action: 'createHostProfile',
+          scope: 'rules',
+          kind: 'hostProfile',
+          className: catalogClassRuleName(cmdbuildCatalog, className),
+          fieldKey: profileFixField.fieldKey,
+          mode: profileFixField.mode
+        } : null
+      });
     }
 
     const attributes = catalogAttributesForClass(cmdbuildCatalog, catalogClass);

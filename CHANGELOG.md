@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - 2026-05-03
+
+### Changed
+
+- Conversion Rules Management now auto-creates a minimal `hostProfiles[]` entry when adding or modifying a rule for a new concrete CMDBuild class with an IP/DNS leaf.
+- Conversion Rules Management now blocks unconfirmed address fields for IP/DNS `interfaceAddress` targets until the field has explicit IP/DNS metadata or validation.
+- Conversion Rules Logical Control now detects `source.entityClasses` entries without a matching `hostProfiles[]` as `no_host_profile_matched` risks and can create the missing host profile in the in-session draft.
+- Config validation now requires every active source entity class to have a matching host profile instead of banning specific historical demo class names.
+
 ## 0.5.0 - 2026-05-02
 
 ### Changed

@@ -1,7 +1,7 @@
 # Документация проекта cmdb2monitoring
 
-Версия документации: `0.5.0`.
-Дата актуализации: 2026-05-02.
+Версия документации: `0.6.0`.
+Дата актуализации: 2026-05-03.
 
 ## Назначение
 
@@ -330,7 +330,7 @@ Events:
 - добавление правила выбирает CMDBuild class, class attribute field, conversion structure, Zabbix object/payload, priority и regex;
 - модификация правила начинается без автоматически выбранного rule; оператор может начать с rule, CMDBuild class, class attribute field или conversion structure, связанные списки фильтруются, а если найден единственный matching rule, он выбирается автоматически и загружается в ту же форму;
 - при изменении class зависимый leaf field и Zabbix target очищаются до нового однозначного выбора; при изменении field фильтруются совместимые conversion structures, при изменении conversion structure фильтруются fields и Zabbix targets, а несовместимые значения подсвечиваются красной рамкой;
-- для `interfaceAddress` редактор проверяет семантику target: IP-looking CMDBuild attribute нельзя сохранить в DNS target `interfaces[].dns/useip=0`, а DNS/FQDN-looking attribute нельзя сохранить в IP target `interfaces[].ip/useip=1`;
+- для `interfaceAddress` редактор проверяет семантику target: IP-looking CMDBuild attribute нельзя сохранить в DNS target `interfaces[].dns/useip=0`, DNS/FQDN-looking attribute нельзя сохранить в IP target `interfaces[].ip/useip=1`, а неподтвержденное адресное поле нужно явно описать именем/source metadata или `validationRegex`;
 - кнопка `Сбросить поля` в модификации очищает выбранное rule и все фильтры, возвращая форму к пустому старту, а в добавлении очищает leaf field и target; зеленая рамка означает совместимость, красная - обязательный выбор или конфликт, желтая - значение из rule не подтверждено текущим catalog/filter, но доступно для осознанного редактирования;
 - `Current rule target / отсутствует в Zabbix catalog` считается неконсистентной второй стороной цепочки, подсвечивается красным и блокирует сохранение так же, как отсутствующий class/attribute на стороне CMDBuild;
 - удаление правила показывает tree-группировки `Дерево CMDBuild`, `Дерево Zabbix` и `Дерево rules`; группы закрыты через `+`, а checkbox на группе отмечает все rules внутри;
@@ -340,13 +340,15 @@ Events:
 - undo/redo работают только с draft текущей browser-сессии;
 - `Save file as` сохраняет draft JSON и второй текстовый файл с CMDBuild webhook Body/DELETE-инструкциями только по добавленным и удаленным в текущей сессии rules/classes/source fields;
 - webhook-инструкции показывают path metadata, но сам CMDBuild Body остается плоским и содержит только source key со значением/id;
-- перед сохранением проверяется, что каждый мониторинговый класс из `source.entityClasses` или `className` regex имеет IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
+- перед сохранением проверяется, что каждый мониторинговый класс из `source.entityClasses` или `className` regex имеет IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`, и применимый `hostProfiles[]`, иначе converter примет событие, но пропустит его с `no_host_profile_matched`;
+- при добавлении или модификации правила для нового конкретного класса редактор автоматически добавляет минимальный `hostProfiles[]`, если выбранный leaf является IP/DNS field и для класса еще нет подходящего profile;
 - имена классов CMDBuild нормализуются для UI: например, `NetworkDevice` и `Network device` считаются одним классом, а отображение предпочитает имя/описание из CMDBuild catalog.
 
 Логический контроль правил конвертации:
 - интерактивно не строит цепочки, а подсвечивает только отсутствующие элементы в CMDBuild/Zabbix источниках;
 - для отсутствующих элементов выводятся checkbox;
-- кнопка удаления спрашивает подтверждение, формирует исправленный rules JSON в памяти и сохраняет его через браузер;
+- если класс есть в `source.entityClasses`, но не имеет применимого `hostProfiles[]`, раздел показывает это как ошибку rules и предлагает действие `Создать host profile`;
+- кнопка `Применить выбранное` формирует исправленный rules JSON в памяти; для удалений используется проверка mixed rule, а создание недостающего `hostProfile` добавляется в общий undo/redo поток;
 - backend rules-файл и git при этом не изменяются.
 - этот раздел не предназначен для интерактивной подсветки связей, а только для поиска отсутствующих классов, атрибутов и Zabbix-ссылок.
 
@@ -489,6 +491,7 @@ Webhook body для этой demo-схемы остается плоским: `i
 - класс в CMDBuild catalog и webhook-записи на нужные события;
 - добавление класса в `source.entityClasses` или rule condition по `className`;
 - обязательная связь IP/DNS class attribute field с Zabbix interface structure;
+- применимый `hostProfiles[]` с условием на этот класс; без него событие будет пропущено converter как `no_host_profile_matched`;
 - актуализированный CMDBuild catalog cache в UI через `CMDBuild Catalog -> Sync`.
 
 Без переписывания микросервисов можно менять JSON rules:
@@ -543,7 +546,7 @@ node scripts/cmdbuild-demo-e2e.mjs --apply
 
 Базовый live E2E проверяет host payload, который реально применяется текущим create/update runner. `proxy`/`proxy group` требуют отдельной подготовки proxy objects в Zabbix, а `maintenance` и `value maps` требуют dedicated Zabbix API operations или отдельного catalog setup, поэтому они остаются отдельными тестовыми сценариями.
 
-Файл `rules/cmdbuild-to-zabbix-host-create.json` остается demo/e2e-набором правил, использованным для проверки, и активный `RulesFilePath` по умолчанию указывает именно на него. Чистый production starter лежит рядом: `rules/cmdbuild-to-zabbix-host-create.production-empty.json`. Чистый dev starter лежит рядом: `rules/cmdbuild-to-zabbix-host-create.dev-empty.json`; он создан из пустого installation profile, но уже указывает `cmdbuild.webhooks.dev` и `http://localhost:8081/api_jsonrpc.php`. Оба starter-файла безопасны для запуска как no-op: routes имеют `publish=false`, а оператор должен заполнить классы, source fields, host profiles, Zabbix catalog IDs, T4 templates и включить публикацию только после проверки. Чтобы работать именно с пустым dev starter, его нужно загрузить в UI или указать в `Rules.RulesFilePath` через config/env или `Runtime-настройки`.
+Файл `rules/cmdbuild-to-zabbix-host-create.json` остается demo/e2e-набором правил, использованным для проверки, и активный `RulesFilePath` по умолчанию указывает именно на него. Базовый dev-набор построен вокруг абстрактной тестовой модели `C2MTest*`, но в ходе проверки в него можно добавлять любые конкретные классы текущего CMDBuild catalog: это не ограничение продукта и не признак жесткой привязки к именам модели. Для каждого такого класса должны быть заполнены `source.entityClasses`, source field для IP/DNS leaf, применимый `hostProfiles[]` и webhooks. Чистый production starter лежит рядом: `rules/cmdbuild-to-zabbix-host-create.production-empty.json`. Чистый dev starter лежит рядом: `rules/cmdbuild-to-zabbix-host-create.dev-empty.json`; он создан из пустого installation profile, но уже указывает `cmdbuild.webhooks.dev` и `http://localhost:8081/api_jsonrpc.php`. Оба starter-файла безопасны для запуска как no-op: routes имеют `publish=false`, а оператор должен заполнить классы, source fields, host profiles, Zabbix catalog IDs, T4 templates и включить публикацию только после проверки. Чтобы работать именно с пустым dev starter, его нужно загрузить в UI или указать в `Rules.RulesFilePath` через config/env или `Runtime-настройки`.
 
 В UI раздела `Правила` кнопка `Создать пустой` формирует такой starter из текущего окружения: endpoint Zabbix, topic CMDBuild events, справочники Zabbix и компактный снимок CMDBuild metadata берутся из runtime config/catalog cache. Если CMDBuild cache не содержит классы/атрибуты или Zabbix cache не содержит host groups/templates, backend возвращает ошибку и starter не создается. Сгенерированный JSON попадает в область локального файла и сохраняется только через браузер; публикация в git выполняется оператором вне приложения.
 

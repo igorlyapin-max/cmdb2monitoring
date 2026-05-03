@@ -368,8 +368,11 @@ Separate status scenario:
 19. Verify draft JSON: `source.fields[].cmdbPath`, `resolve.mode`, lookup metadata, and `collectionMode`.
 20. Verify negative scenarios: a domain multi-value field must not be available for scalar targets.
 21. Create or verify `monitoringSuppressionRules` for `MonitoringPolicy=do_not_monitor`.
-22. Run Logical Control of Conversion Rules.
-23. Run `Save file as` and verify that webhook body remains flat while path metadata is stored next to the source key.
+22. Verify the interface-address negative scenario: an unconfirmed address field must not be saved as an IP/DNS interface until it has an explicit IP/DNS name/source metadata or `validationRegex`.
+23. Add a rule for a new concrete CMDBuild class from the current catalog that has no `hostProfiles[]` entry yet: choose an IP or DNS leaf, save the rule, and verify that draft JSON receives `source.entityClasses`, `source.fields`, the selection rule, and a minimal `hostProfiles[]` with a `className` condition.
+24. Remove or temporarily disable that `hostProfiles[]` only in draft JSON and run Logical Control of Conversion Rules: the class must be highlighted as a rules error with the `Create host profile` action, and applying it must restore the profile through the shared undo/redo flow.
+25. Run Logical Control of Conversion Rules.
+26. Run `Save file as` and verify that webhook body remains flat while path metadata is stored next to the source key.
 
 ## Acceptance Criteria
 
@@ -386,6 +389,7 @@ The following prohibitions must also be confirmed:
 - superclass/prototype class cannot be selected as the rule class;
 - the first rule is not selected automatically when entering `Modify rule`;
 - modification can start from a rule, CMDBuild class, class attribute field, or conversion structure; linked lists are filtered, and a single matching rule is selected automatically;
+- a new concrete CMDBuild class must not remain only in `source.entityClasses`: a matching `hostProfiles[]` is created or clearly diagnosed, otherwise the converter would skip the event with `no_host_profile_matched`;
 - the webhook plan is empty after synchronization, and adding a new class or attribute changes only the corresponding managed webhooks;
 - webhook payloads for existing classes do not receive source keys of the new class or attribute;
 - CMDBuild events arrive in `cmdbuild.webhooks.dev` after webhooks are applied and continue to Zabbix request/response topics;

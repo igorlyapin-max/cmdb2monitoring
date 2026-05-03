@@ -368,8 +368,11 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 19. Проверить draft JSON: `source.fields[].cmdbPath`, `resolve.mode`, lookup metadata, `collectionMode`.
 20. Проверить negative-сценарии: domain multi-value field не должен быть доступен для scalar targets.
 21. Создать или проверить `monitoringSuppressionRules` для `MonitoringPolicy=do_not_monitor`.
-22. Запустить логический контроль правил конвертации.
-23. Выполнить `Save file as` и проверить, что webhook body остается плоским, а path metadata сохраняется рядом с source key.
+22. Проверить negative-сценарий interface address: неподтвержденный адресный field не должен сохраняться как IP/DNS interface, пока не задано явное IP/DNS имя/source metadata или `validationRegex`.
+23. Добавить rule для нового конкретного CMDBuild класса из текущего catalog, у которого в правилах еще нет `hostProfiles[]`: выбрать IP или DNS leaf, сохранить rule и проверить, что draft JSON получил `source.entityClasses`, `source.fields`, selection rule и минимальный `hostProfiles[]` с condition по `className`.
+24. Удалить или временно отключить этот `hostProfiles[]` только в draft JSON и запустить логический контроль правил конвертации: класс должен подсветиться как ошибка rules с действием `Создать host profile`, а применение выбранного действия должно восстановить profile через общий undo/redo поток.
+25. Запустить логический контроль правил конвертации.
+26. Выполнить `Save file as` и проверить, что webhook body остается плоским, а path metadata сохраняется рядом с source key.
 
 ## Критерий приемки
 
@@ -386,6 +389,7 @@ CMDBuild catalog -> Mapping editor option -> Add/Modify rule -> draft JSON -> va
 - superclass/prototype class не выбирается как class правила;
 - первое rule не выбирается автоматически при входе в `Модификация правила`;
 - модификацию можно начать с rule, CMDBuild class, class attribute field или conversion structure; связанные списки фильтруются, единственный matching rule выбирается автоматически;
+- новый конкретный CMDBuild class не остается только в `source.entityClasses`: для него создается или явно диагностируется недостающий `hostProfiles[]`, иначе converter пропустил бы событие с `no_host_profile_matched`;
 - webhook-план после синхронизации пуст, а добавление нового класса или атрибута меняет только соответствующие managed webhooks;
 - webhook payload старых классов не получает source keys нового класса или атрибута;
 - CMDBuild события после применения webhooks приходят в `cmdbuild.webhooks.dev` и проходят дальше до Zabbix request/response topics;

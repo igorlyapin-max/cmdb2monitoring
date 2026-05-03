@@ -1,8 +1,8 @@
 {
   "schemaVersion": "0.1",
-  "rulesVersion": "2026.05.02-c2m-test",
+  "rulesVersion": "2026.05.02-c2m-test-dynamic-class-smoke",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
-  "description": "Clean demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
+  "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
     "topic": "cmdbuild.webhooks.dev",
     "supportedEvents": [
@@ -14,7 +14,8 @@
       "create"
     ],
     "entityClasses": [
-      "C2MTestCI"
+      "C2MTestCI",
+      "Server"
     ],
     "fields": {
       "entityId": {
@@ -656,6 +657,33 @@
       ]
     },
     {
+      "name": "server-main",
+      "priority": 15,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "server-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "ipAddress",
+          "when": {
+            "fieldExists": "ipAddress"
+          }
+        }
+      ]
+    },
+    {
       "name": "separate-profile-1",
       "priority": 20,
       "createOnUpdateWhenMissing": true,
@@ -932,6 +960,25 @@
       "when": {
         "fieldExists": "dnsName"
       }
+    },
+    {
+      "name": "interfaceaddress-server-ipaddress-ipaddress",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "ipAddress",
+            "pattern": "(?i).*"
+          }
+        ],
+        "fieldExists": "ipAddress"
+      },
+      "mode": "ip",
+      "valueField": "ipAddress"
     }
   ],
   "interfaceSelectionRules": [

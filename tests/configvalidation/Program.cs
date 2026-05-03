@@ -365,7 +365,8 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
     RequireObject(rules, "source:fields:lifecycleState", "rules", errors);
     RequireObject(rules, "source:fields:monitoringPolicy", "rules", errors);
     RequireArray(rules, "templateConflictRules", "rules", errors);
-    ValidateNoLegacyDemoModelInActiveRules(rules, errors);
+    ValidateHostProfilesForEntityClasses(rules, errors);
+    ValidateDemoSourceFieldMetadata(rules, errors);
     ValidateCmdbPathSourceFields(rules, errors);
 
     var hostProfiles = GetArray(rules, "hostProfiles");
@@ -923,38 +924,82 @@ static async Task ValidateMonitoringSuppressionConversion(string repositoryRoot,
     }
 }
 
-static void ValidateNoLegacyDemoModelInActiveRules(JsonObject rules, List<string> errors)
+static void ValidateHostProfilesForEntityClasses(JsonObject rules, List<string> errors)
 {
-    foreach (var oldClassName in new[] { "Computer", "Notebook", "PC", "Server", "tk" })
+    var hostProfiles = GetArray(rules, "hostProfiles").OfType<JsonObject>().ToArray();
+    foreach (var className in GetArray(rules, "source:entityClasses")
+        .Select(item => item?.GetValue<string>())
+        .Where(item => !string.IsNullOrWhiteSpace(item)))
     {
-        if (GetArray(rules, "source:entityClasses").Any(item => string.Equals(item?.GetValue<string>(), oldClassName, StringComparison.Ordinal)))
+        if (!hostProfiles.Any(profile => HostProfileCanMatchClass(profile, className!)))
         {
-            errors.Add($"Active rules file must not contain old demo class '{oldClassName}'.");
+            errors.Add($"Rules file source entity class '{className}' has no matching hostProfiles entry.");
         }
     }
+}
 
-    foreach (var oldFieldName in new[]
+static bool HostProfileCanMatchClass(JsonObject profile, string className)
+{
+    if (GetBool(profile, "enabled") == false)
     {
-        "profileIpAddress",
-        "profile2IpAddress",
-        "profileDnsName",
-        "interfaceIpAddress",
-        "interface2IpAddress",
-        "managementIpAddress",
-        "management2IpAddress",
-        "managementDnsName",
-        "iloIpAddress",
-        "ilo2IpAddress",
-        "os",
-        "zabbixTag"
-    })
-    {
-        if (GetNode(rules, $"source:fields:{oldFieldName}") is not null)
-        {
-            errors.Add($"Active rules file must not contain old demo source field '{oldFieldName}'.");
-        }
+        return false;
     }
 
+    var patterns = GetArray(profile, "when:allRegex")
+        .Concat(GetArray(profile, "when:anyRegex"))
+        .OfType<JsonObject>()
+        .Where(matcher => string.Equals(GetString(matcher, "field"), "className", StringComparison.OrdinalIgnoreCase))
+        .Select(matcher => GetString(matcher, "pattern"))
+        .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+        .ToArray();
+    if (patterns.Length == 0)
+    {
+        return true;
+    }
+
+    return patterns.Any(pattern => RegexPatternCanMatchClass(pattern!, className)
+        || RegexLiteralValues(pattern!).Any(value =>
+            string.Equals(NormalizeRuleName(value), NormalizeRuleName(className), StringComparison.OrdinalIgnoreCase)));
+}
+
+static bool RegexPatternCanMatchClass(string pattern, string className)
+{
+    try
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            className,
+            pattern,
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+    catch (ArgumentException)
+    {
+        return false;
+    }
+}
+
+static IEnumerable<string> RegexLiteralValues(string pattern)
+{
+    var cleaned = pattern
+        .Replace("(?i)", "", StringComparison.OrdinalIgnoreCase)
+        .Replace("\\b", "", StringComparison.Ordinal)
+        .Trim('^', '$')
+        .Replace("(", "", StringComparison.Ordinal)
+        .Replace(")", "", StringComparison.Ordinal);
+
+    return cleaned
+        .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(item => item.Replace("\\", "", StringComparison.Ordinal))
+        .Select(item => new string(item.Where(char.IsLetterOrDigit).ToArray()))
+        .Where(item => item.Length > 0);
+}
+
+static string NormalizeRuleName(string? value)
+{
+    return new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+}
+
+static void ValidateDemoSourceFieldMetadata(JsonObject rules, List<string> errors)
+{
     foreach (var (fieldName, expectedAttribute) in new Dictionary<string, string>
     {
         ["ipAddress"] = "PrimaryIp",
