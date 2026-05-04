@@ -6,6 +6,10 @@
 
 - Renamed the audit placeholder menu to `Аудит` / `Audit` and allowed the `administrator` role alias to resolve to `admin` access.
 - Added `cmdbresolver` regression tests for update events that must reread CMDBuild lookup, reference, and domain leaf values, including the dynamic host group JSON-RPC output built from a domain leaf.
+- Added a dedicated Conversion Rules Management block for creating, modifying, and deleting monitoring `hostProfiles[]`; normal rule add/modify no longer creates profiles implicitly.
+- Webhook Setup now derives desired CMDBuild webhooks from explicit rule-based webhook requirements and shows the rules that require missing payload fields.
+- Added unit coverage for webhook requirement generation, including reference leaves, domain leaves, foreign-root paths, virtual fields, and obsolete managed hooks.
+- Conversion Rules Management now has an explicit selected-`hostProfile` scope checkbox for add/modify rules, so template/group/tag assignments can keep a normal condition such as `description` while still counting as assignments to an additional profile.
 
 ### Fixed
 
@@ -24,6 +28,8 @@
 
 - Added the `Аудит систем` / `Systems Audit` menu placeholder for `editor` and `admin` roles.
 - Added explicit Webhook Setup reminders for CMDBuild webhook payload fields that are required by current rules but missing from loaded CMDBuild webhooks.
+- Fixed Webhook Setup analysis to reload the current rules file and CMDBuild catalog each time before building the create/update/delete plan, so newly added reference/domain leaf fields are proposed for webhook payload updates without requiring a UI reload.
+- Added a Webhook Setup `Удалить выбранные` / `Delete selected` action that applies only selected CMDBuild webhook delete operations.
 - Added current `serveri.serialnum` source mapping and `inventory.serialno_a` demo rule so the webhook plan exposes the missing `serialnum` payload field before converter processing.
 
 ## 0.7.0 - 2026-05-03

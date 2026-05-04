@@ -273,10 +273,11 @@ Create webhooks through the UI:
 4. Click `Analyze rules`.
 5. Verify that classes from current rules get `Create` operations for the required `create/update/delete` events.
 6. Verify that `Update` operations are absent for classes that were not changed, and unmanaged webhooks are not proposed for update or deletion.
-7. Expand payload and `Details` for several rows: body must remain flat and must not contain duplicate keys with another case or alias.
-8. Click `Load into CMDB` and confirm apply.
-9. Click `Load from CMDB` and `Analyze rules` again.
-10. Expected result: the plan is empty or contains only deliberate changes for the current scenario; records just created must not be proposed again as `Update`.
+7. Verify the `Webhook requirements from rules` summary: class and payload-field counts must follow rules, not all CMDBuild catalog attributes.
+8. Expand payload and `Details` for several rows: body must remain flat and must not contain duplicate keys with another case or alias; details must show `webhook requirements from rules` and, when payload is incomplete, `missing payload requirements` with rule names.
+9. Click `Load into CMDB` and confirm apply.
+10. Click `Load from CMDB` and `Analyze rules` again.
+11. Expected result: the plan is empty or contains only deliberate changes for the current scenario; records just created must not be proposed again as `Update`.
 
 Verify data arrival:
 
@@ -305,6 +306,15 @@ Regression: attribute added to an existing class:
 6. For every other class the plan is empty: there must be no `NewAttribute`, lookup/reference/domain path, or any unrelated source field added.
 7. After `Load into CMDB`, create or update a `ClassA` card and verify that the new source key arrives in `cmdbuild.webhooks.dev`.
 8. Create or update a card of another class and verify that the new source key is absent from that webhook payload.
+
+Regression: leaf through reference/domain:
+
+1. Add a source field `ClassA.ReferenceAttribute.LeafAttribute` to rules and add a rule that really uses that field.
+2. Run `Load from CMDB` and `Analyze rules`.
+3. Expected result for a reference/lookup path: payload adds only that field source key with value `{card:ReferenceAttribute}`; the final leaf is not added as a separate webhook placeholder.
+4. Add a source field `ClassA.{domain:ClassB}.LeafAttribute` to rules and add a rule that uses it.
+5. Expected result for a domain path: payload adds that field source key with value `{card:Id}`, while `cmdbPath` remains metadata for the converter.
+6. In `Logical Control of Conversion Rules`, when CMDBuild webhooks are already loaded, warnings must appear if a managed webhook is missing or does not send payload fields required by rules.
 
 ## Attribute-Based Do Not Monitor Scenario
 
@@ -373,9 +383,10 @@ Separate status scenario:
 22. Verify the interface-address negative scenario: an unconfirmed address field must not be saved as an IP/DNS interface until it has an explicit IP/DNS name/source metadata or `validationRegex`.
 23. Add a rule for a new concrete CMDBuild class from the current catalog that has no `hostProfiles[]` entry yet: choose an IP or DNS leaf, save the rule, and verify that draft JSON receives `source.entityClasses`, `source.fields`, the selection rule, and a minimal `hostProfiles[]` with a `className` condition.
 24. Add a `Template rule` with the virtual `hostProfile` field, a regex matching the fan-out profile name, and a selected template; verify that the rule condition uses `hostProfile` and `source.fields.hostProfile` is not added to draft JSON.
-25. Remove or temporarily disable that `hostProfiles[]` only in draft JSON and run Logical Control of Conversion Rules: the class must be highlighted as a rules error with the `Create host profile` action, and applying it must restore the profile through the shared undo/redo flow.
-26. Run Logical Control of Conversion Rules.
-27. Run `Save file as` and verify that webhook body remains flat while path metadata is stored next to the source key.
+25. For an additional profile, select it in the `Monitoring profiles` block, add a `Template rule` whose primary condition uses a normal class attribute field such as `description` with regex `(?i).*`, enable `Limit rule to selected hostProfile`, and save. Verify that the profile `Assignments` counter increases and the rule contains both `description` and `hostProfile` conditions.
+26. Remove or temporarily disable that `hostProfiles[]` only in draft JSON and run Logical Control of Conversion Rules: the class must be highlighted as a rules error with the `Create host profile` action, and applying it must restore the profile through the shared undo/redo flow.
+27. Run Logical Control of Conversion Rules.
+28. Run `Save file as` and verify that webhook body remains flat while path metadata is stored next to the source key.
 
 ## Acceptance Criteria
 

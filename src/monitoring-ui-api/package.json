@@ -6,9 +6,10 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "NODE_ENV=Development node server.mjs",
-    "test": "npm run test:config && npm run test:mapping",
+    "test": "npm run test:config && npm run test:mapping && npm run test:webhooks",
     "test:config": "node scripts/validate-config.mjs",
-    "test:mapping": "node test/mapping-logic.test.mjs"
+    "test:mapping": "node test/mapping-logic.test.mjs",
+    "test:webhooks": "node test/webhook-logic.test.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,190 @@
+# CMDBuild webhook Body snippets
+#
+# Назначение: заготовки Body для webhook-записей CMDBuild, которые отправляют события в cmdbwebhooks2kafka.
+# Файл формируется только по добавленным и удаленным в текущей UI-сессии правилам.
+# Authorization: Bearer XXXXX нужно заменить согласованным токеном микросервиса при ручной настройке.
+# Если рядом уже есть рабочие webhook-записи, можно взять из них блок Authorization и использовать тот же подход.
+# Method в CMDBuild выбирайте POST. Он должен совпадать с HTTP-интерфейсом микросервиса: POST /webhooks/cmdbuild.
+# Dev URL сейчас обычно: http://192.168.202.100:5080/webhooks/cmdbuild. Для другого окружения замените URL.
+# Content-Type вручную лучше не добавлять в headers CMDBuild: CMDBuild сам выставляет его для JSON body.
+#
+# Save validation: критичных предупреждений по IP/DNS -> Zabbix interface binding нет.
+
+## ADD class attribute field mgmtIpAddr / Server / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "Server",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{IPAddress}}"
+}
+
+## ADD class attribute field mgmtIpAddr / Server / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "Server",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{IPAddress}}"
+}
+
+## ADD class attribute field mgmtIpAddr / Server / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "Server",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{IPAddress}}"
+}
+
+## ADD class attribute field mgmtIpAddr / serveri / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "serveri",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}",
+  "hostname": "{{hostname}}"
+}
+
+## ADD class attribute field mgmtIpAddr / serveri / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "serveri",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}",
+  "hostname": "{{hostname}}"
+}
+
+## ADD class attribute field mgmtIpAddr / serveri / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "serveri",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}",
+  "hostname": "{{hostname}}"
+}
+
+## ADD rule / Host profiles / serveri-main
+# Rule collection: hostProfiles
+# Affected class rules: serveri
+
+## ADD rule / Host profiles / serveri-mgmt
+# Rule collection: hostProfiles
+# Affected class rules: serveri
+
+## ADD rule / Group rules / hostgroups-serveri-description-description
+# Rule collection: groupSelectionRules
+# Affected class rules: serveri
+
+## ADD rule / Group rules / hostgroups-serveri-description-description
+# Rule collection: groupSelectionRules
+# Affected class rules: serveri
+
+## ADD rule / Group rules / hostgroups-serveri-description-description
+# Rule collection: groupSelectionRules
+# Affected class rules: serveri
+
+## ADD rule / Inventory fields rules / inventoryfields-serveri-serialnum-serialno_a
+# Rule collection: inventorySelectionRules
+# Affected class rules: serveri
+
+## DELETE rule / Host profiles / serveri-main
+# Action: DELETE/disable related rule handling
+# Rule collection: hostProfiles
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule serveri-main / serveri
+# Action: DELETE or disable CMDBuild webhook records.
+# Body для удаления не нужен. Удалите/отключите webhook-записи со следующими событиями:
+# - create: card_create_after
+# - update: card_update_after
+# - delete: card_delete_after
+# Method у удаляемых записей: POST
+# URL у удаляемых записей: http://192.168.202.100:5080/webhooks/cmdbuild
+
+## DELETE rule / Host profiles / serveri-ilo
+# Action: DELETE/disable related rule handling
+# Rule collection: hostProfiles
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule / Group rules / hostgroups-serveri-domainisname-domainisname
+# Action: DELETE/disable related rule handling
+# Rule collection: groupSelectionRules
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule / Template rules / templates-serveri-hostprofile-aix-by-zabbix-agent
+# Action: DELETE/disable related rule handling
+# Rule collection: templateSelectionRules
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule / Правила выбора адреса интерфейса / interfaceaddress-serveri-ipaddressipaddr-ipaddress
+# Action: DELETE/disable related rule handling
+# Rule collection: interfaceAddressRules
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule / Правила выбора адреса интерфейса / interfaceaddress-serveri-hostname-dnsname
+# Action: DELETE/disable related rule handling
+# Rule collection: interfaceAddressRules
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule / Inventory fields rules / serveri-serialnum-inventory-serialno-a
+# Action: DELETE/disable related rule handling
+# Rule collection: inventorySelectionRules
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+## DELETE rule / Inventory fields rules / inventoryfields-serveri-serialnum-serialno_b
+# Action: DELETE/disable related rule handling
+# Rule collection: inventorySelectionRules
+# Affected class rules: serveri
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.

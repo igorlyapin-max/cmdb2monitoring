@@ -723,6 +723,93 @@ h2 {
   margin-top: 8px;
 }
 
+.mapping-profiles-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.mapping-profiles-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mapping-profiles-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.mapping-profiles-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mapping-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.mapping-profile-grid .wide-field {
+  grid-column: span 2;
+}
+
+.mapping-profile-create-on-update {
+  align-self: center;
+  margin-bottom: 2px;
+}
+
+.mapping-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mapping-profiles-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mapping-profile-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) minmax(120px, 0.8fr) minmax(180px, 1.2fr) minmax(120px, 0.7fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px;
+}
+
+.mapping-profile-row.is-selected {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.16);
+}
+
+.mapping-profile-title {
+  font-weight: 700;
+}
+
+.mapping-profile-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mapping-profile-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .mapping-editor-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -733,6 +820,42 @@ h2 {
 .mapping-editor-grid .wide-field {
   margin-top: 0;
   grid-column: span 2;
+}
+
+.mapping-additional-profile-options {
+  display: grid;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.mapping-checkbox-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.mapping-checkbox-row input[type="checkbox"] {
+  width: auto;
+  min-height: auto;
+  margin: 3px 0 0;
+}
+
+.mapping-checkbox-row span {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.mapping-additional-profile-name {
+  display: block;
+}
+
+.mapping-additional-profile-options .settings-note {
+  margin: 0;
 }
 
 .mapping-editor-status {
@@ -1521,12 +1644,19 @@ th {
     grid-template-columns: 1fr;
   }
 
-  .mapping-editor-grid {
+  .mapping-editor-grid,
+  .mapping-profile-grid,
+  .mapping-profile-row {
     grid-template-columns: 1fr;
   }
 
-  .mapping-editor-grid .wide-field {
+  .mapping-editor-grid .wide-field,
+  .mapping-profile-grid .wide-field {
     grid-column: auto;
+  }
+
+  .mapping-profile-row-actions {
+    justify-content: flex-start;
   }
 
   .login-heading-row {

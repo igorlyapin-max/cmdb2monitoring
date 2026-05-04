@@ -112,6 +112,52 @@ test('ensureMinimalHostProfileForClass does not create a profile when one alread
   assert.equal(rules.hostProfiles.length, 1);
 });
 
+test('ensureMinimalHostProfileForClass can explicitly create an additional profile', () => {
+  const rules = {
+    hostProfiles: [
+      {
+        name: 'serveri-main',
+        when: { allRegex: [{ field: 'className', pattern: '(?i)^serveri$' }] }
+      }
+    ]
+  };
+
+  const result = ensureMinimalHostProfileForClass(
+    rules,
+    'serveri',
+    'mgmtIpAddr',
+    { cmdbPath: 'serveri.mgmt.ipAddr', type: 'ipAddress' },
+    { mode: 'ip' },
+    { forceAdditional: true, profileName: 'serveri-mgmt' });
+
+  assert.equal(result.created, true);
+  assert.equal(result.additional, true);
+  assert.equal(result.profileName, 'serveri-mgmt');
+  assert.equal(rules.hostProfiles.length, 2);
+  assert.equal(rules.hostProfiles[1].hostNameTemplate, 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-<#= Model.HostProfileName #>');
+  assert.deepEqual(rules.hostProfiles[1].when.anyRegex, [
+    { field: 'mgmtIpAddr', pattern: '.+' },
+    { field: 'eventType', pattern: '(?i)^delete$' }
+  ]);
+  assert.equal(rules.hostProfiles[1].interfaces[0].valueField, 'mgmtIpAddr');
+});
+
+test('ensureMinimalHostProfileForClass uses selected interface profile options', () => {
+  const rules = { hostProfiles: [] };
+  const result = ensureMinimalHostProfileForClass(
+    rules,
+    'NetworkDevice',
+    'mgmtDns',
+    { source: 'FQDN' },
+    { mode: 'dns' },
+    { profileName: 'network-device-mgmt', interfaceProfileRef: 'snmp', createOnUpdateWhenMissing: false });
+
+  assert.equal(result.created, true);
+  assert.equal(rules.hostProfiles[0].createOnUpdateWhenMissing, false);
+  assert.equal(rules.hostProfiles[0].interfaces[0].name, 'network-device-mgmt-snmp-dns');
+  assert.equal(rules.hostProfiles[0].interfaces[0].interfaceProfileRef, 'snmp');
+});
+
 test('disabled profiles do not satisfy class matching and can be replaced', () => {
   const rules = {
     hostProfiles: [

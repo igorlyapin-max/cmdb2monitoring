@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CmdbKafka2Zabbix.Rules;
@@ -62,7 +63,7 @@ public sealed class CmdbToZabbixConverter(
             }
 
             var model = BuildModel(profiledSource, rules, methodName, fallbackForMethod, profile, zabbixHostId);
-            var validationError = Validate(profiledSource, rules, route.RequiredFields, model.Interfaces);
+            var validationError = Validate(profiledSource, rules, route.RequiredFields, model.Interfaces, profile);
             if (!string.IsNullOrWhiteSpace(validationError))
             {
                 results.Add(ZabbixConversionResult.Skipped(profiledSource, methodName, validationError, profileName));
@@ -228,7 +229,8 @@ public sealed class CmdbToZabbixConverter(
         CmdbSourceEvent source,
         ConversionRulesDocument rules,
         string[] requiredFields,
-        IReadOnlyCollection<ZabbixInterfaceModel> interfaces)
+        IReadOnlyCollection<ZabbixInterfaceModel> interfaces,
+        HostProfileRule profile)
     {
         foreach (var requiredField in requiredFields)
         {
@@ -241,24 +243,30 @@ public sealed class CmdbToZabbixConverter(
             {
                 return $"missing_{requiredField.ToLowerInvariant()}";
             }
+
+            var requiredFieldValidationError = ValidateSourceField(source, rules, requiredField);
+            if (!string.IsNullOrWhiteSpace(requiredFieldValidationError))
+            {
+                return requiredFieldValidationError;
+            }
         }
 
-        foreach (var (fieldName, fieldRule) in rules.Source.Fields)
+        foreach (var fieldName in ProfileInterfaceValueFields(source, profile))
         {
-            if (string.IsNullOrWhiteSpace(fieldRule.ValidationRegex))
+            var profileFieldValidationError = ValidateSourceField(source, rules, fieldName);
+            if (!string.IsNullOrWhiteSpace(profileFieldValidationError))
             {
-                continue;
+                return profileFieldValidationError;
             }
+        }
 
-            var value = ReadField(source, fieldName);
-            if (string.IsNullOrWhiteSpace(value))
+        foreach (var zabbixInterface in interfaces)
+        {
+            if (zabbixInterface.UseIp == 1
+                && !string.IsNullOrWhiteSpace(zabbixInterface.Ip)
+                && !IsValidInterfaceIp(zabbixInterface.Ip))
             {
-                continue;
-            }
-
-            if (!Regex.IsMatch(value, fieldRule.ValidationRegex, RegexOptions.CultureInvariant, RegexTimeout))
-            {
-                return $"invalid_{ToSnakeCase(fieldName)}";
+                return "invalid_interface_ip";
             }
         }
 
@@ -268,6 +276,60 @@ public sealed class CmdbToZabbixConverter(
         }
 
         return string.Empty;
+    }
+
+    private static string ValidateSourceField(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        string fieldName)
+    {
+        if (!rules.Source.Fields.TryGetValue(fieldName, out var fieldRule)
+            || string.IsNullOrWhiteSpace(fieldRule.ValidationRegex))
+        {
+            return string.Empty;
+        }
+
+        var value = ReadField(source, fieldName);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return Regex.IsMatch(value, fieldRule.ValidationRegex, RegexOptions.CultureInvariant, RegexTimeout)
+            ? string.Empty
+            : $"invalid_{ToSnakeCase(fieldName)}";
+    }
+
+    private static IEnumerable<string> ProfileInterfaceValueFields(CmdbSourceEvent source, HostProfileRule profile)
+    {
+        var profileInterfaces = SelectProfileInterfaceRules(source, profile);
+        if (profileInterfaces.Count > 0)
+        {
+            foreach (var profileInterface in profileInterfaces)
+            {
+                var valueField = string.IsNullOrWhiteSpace(profileInterface.ValueField)
+                    ? profile.ValueField
+                    : profileInterface.ValueField;
+                if (!string.IsNullOrWhiteSpace(valueField))
+                {
+                    yield return valueField;
+                }
+            }
+
+            yield break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.ValueField))
+        {
+            yield return profile.ValueField;
+        }
+    }
+
+    private static bool IsValidInterfaceIp(string value)
+    {
+        const string ipv4Pattern = "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$";
+        return Regex.IsMatch(value, ipv4Pattern, RegexOptions.CultureInvariant, RegexTimeout)
+            || (value.Contains(':', StringComparison.Ordinal) && IPAddress.TryParse(value, out _));
     }
 
     private static bool RequiresInterfaceAddress(string[] requiredFields)

@@ -1,5 +1,6 @@
-export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fieldRule = {}, target = {}) {
-  if (!rules || !className || !fieldKey || classHasHostProfile(rules, className)) {
+export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fieldRule = {}, target = {}, options = {}) {
+  const forceAdditional = Boolean(options.forceAdditional);
+  if (!rules || !className || !fieldKey || (!forceAdditional && classHasHostProfile(rules, className))) {
     return { created: false };
   }
 
@@ -9,28 +10,52 @@ export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fie
   }
 
   rules.hostProfiles = Array.isArray(rules.hostProfiles) ? rules.hostProfiles : [];
-  const baseName = `${normalizeRuleName(className)}-main`;
+  const requestedProfileName = normalizeRuleName(options.profileName ?? '');
+  const baseName = requestedProfileName || (forceAdditional
+    ? `${normalizeRuleName(className)}-${normalizeRuleName(fieldKey)}`
+    : `${normalizeRuleName(className)}-main`);
   const profileName = uniqueHostProfileName(rules, baseName);
   const nextPriority = Math.max(0, ...rules.hostProfiles.map(profile => Number(profile.priority) || 0)) + 10;
+  const interfaceProfileRef = String(options.interfaceProfileRef ?? '').trim() || 'agent';
+  const createOnUpdateWhenMissing = options.createOnUpdateWhenMissing === undefined
+    ? true
+    : Boolean(options.createOnUpdateWhenMissing);
+  const when = {
+    allRegex: [
+      {
+        field: 'className',
+        pattern: `(?i)^${escapeRegex(className)}$`
+      }
+    ]
+  };
+  if (forceAdditional) {
+    when.anyRegex = [
+      {
+        field: fieldKey,
+        pattern: '.+'
+      },
+      {
+        field: 'eventType',
+        pattern: '(?i)^delete$'
+      }
+    ];
+  }
   const profile = {
     name: profileName,
     priority: nextPriority,
-    createOnUpdateWhenMissing: true,
-    when: {
-      allRegex: [
-        {
-          field: 'className',
-          pattern: `(?i)^${escapeRegex(className)}$`
-        }
-      ]
-    },
-    hostNameTemplate: 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>',
-    visibleNameTemplate: '<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>',
+    createOnUpdateWhenMissing,
+    when,
+    hostNameTemplate: forceAdditional
+      ? 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-<#= Model.HostProfileName #>'
+      : 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>',
+    visibleNameTemplate: forceAdditional
+      ? '<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> <#= Model.HostProfileName #>'
+      : '<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>',
     interfaces: [
       {
-        name: `${profileName}-agent-${mode}`,
+        name: `${profileName}-${normalizeRuleName(interfaceProfileRef) || 'interface'}-${mode}`,
         priority: 10,
-        interfaceProfileRef: 'agent',
+        interfaceProfileRef,
         mode,
         valueField: fieldKey,
         when: {
@@ -41,7 +66,7 @@ export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fie
   };
 
   rules.hostProfiles.push(profile);
-  return { created: true, profileName, profile };
+  return { created: true, additional: forceAdditional, profileName, profile };
 }
 
 export function minimalHostProfileInterfaceMode(fieldKey, fieldRule = {}, target = {}) {

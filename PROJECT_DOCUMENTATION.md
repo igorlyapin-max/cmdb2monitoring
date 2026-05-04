@@ -359,7 +359,11 @@ Events:
 - `Save file as` сохраняет draft JSON и второй текстовый файл с CMDBuild webhook Body/DELETE-инструкциями только по добавленным и удаленным в текущей сессии rules/classes/source fields;
 - webhook-инструкции показывают path metadata, но сам CMDBuild Body остается плоским и содержит только source key со значением/id;
 - перед сохранением проверяется, что каждый мониторинговый класс из `source.entityClasses` или `className` regex имеет IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`, и применимый `hostProfiles[]`, иначе converter примет событие, но пропустит его с `no_host_profile_matched`;
-- при добавлении или модификации правила для нового конкретного класса редактор автоматически добавляет минимальный `hostProfiles[]`, если выбранный leaf является IP/DNS field и для класса еще нет подходящего profile;
+- блок `Профили мониторинга` отдельно управляет `hostProfiles[]`: оператор выбирает CMDBuild class, тип profile `Основной`/`Дополнительный`, IP/DNS leaf, режим IP/DNS, локальный профиль Zabbix `interfaces[]` и `createOnUpdateWhenMissing`;
+- добавление/модификация обычного conversion rule больше не создает `hostProfiles[]` скрыто; если class не имеет применимого profile, logical control покажет риск `no_host_profile_matched`, а profile нужно создать в отдельном блоке;
+- дополнительный profile создается как отдельный fan-out profile с suffix `HostProfileName`, условием выбора по заполненному leaf или `delete`, собственным `interfaces[].valueField` и выбранным `interfaceProfileRef`; при update существующего profile UI переименовывает точные условия `hostProfile` в связанных rules;
+- удаление profile в отдельном блоке удаляет `hostProfiles[]` и rules, явно ограниченные этим `hostProfile`; это не удаляет Zabbix host в управляемой системе;
+- шаблоны, группы и tags для дополнительного profile назначаются отдельными rules через виртуальное поле `hostProfile` или через чекбокс `Ограничить правило выбранным hostProfile` в форме добавления/модификации: например, после создания profile `класс-профиль` выберите этот profile в блоке `Профили мониторинга`, добавьте `Правило template` по нужному class attribute field (`description`, lookup, domain leaf и т.д.) и включите ограничение hostProfile; счетчик `Назначения` считает только rules с явным условием `hostProfile`;
 - имена классов CMDBuild нормализуются для UI: например, `NetworkDevice` и `Network device` считаются одним классом, а отображение предпочитает имя/описание из CMDBuild catalog.
 
 Логический контроль правил конвертации:
@@ -367,6 +371,7 @@ Events:
 - для отсутствующих элементов выводятся checkbox;
 - если класс есть в `source.entityClasses`, но не имеет применимого `hostProfiles[]`, раздел показывает это как ошибку rules и предлагает действие `Создать host profile`;
 - если template rule оставляет несовместимый набор Zabbix templates после применения `templateConflictRules`, раздел показывает критическую ошибку по этому rule и подсвечивает конфликтующие Zabbix templates;
+- если в текущей UI-сессии уже загружены CMDBuild webhooks, раздел строит тот же rule-based webhook plan и показывает warning по отсутствующим managed webhooks или payload-полям, которые нужны rules, но не передаются webhook;
 - кнопка `Применить выбранное` формирует исправленный rules JSON в памяти; для удалений используется проверка mixed rule, а создание недостающего `hostProfile` добавляется в общий undo/redo поток;
 - backend rules-файл и git при этом не изменяются.
 - этот раздел не предназначен для интерактивной подсветки связей, а только для поиска отсутствующих классов, атрибутов и Zabbix-ссылок.
@@ -376,9 +381,10 @@ Events:
 - пользоваться этим разделом не обязательно: оператор может самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации;
 - `Загрузить из CMDB` читает текущие CMDBuild ETL webhooks через BFF и session-scoped CMDBuild credentials;
 - после одной только загрузки из CMDB текущие webhooks показываются справочно; план create/update/delete строится отдельной командой `Проанализировать rules`;
-- `Проанализировать rules` строит желаемое состояние webhooks из текущих conversion rules, catalog cache и поддерживаемых events/classes;
+- `Проанализировать rules` каждый раз заново читает актуальные conversion rules и CMDBuild catalog cache, считает conversion rules источником правды для webhook payload и строит `webhook requirements` по всем используемым source fields;
+- желаемое состояние CMDBuild webhooks является производным артефактом `webhook requirements`: если rules начинают использовать leaf через lookup/reference/domain, в webhook payload добавляется только ближайший нужный CMDBuild placeholder для текущей карточки, а converter потом поднимает leaf по metadata `cmdbPath`;
 - новые webhook records предлагаются как `Создать`, существующие с отличающимся body/event/target/method/url/headers/active/language - как `Изменить`, управляемые `cmdbwebhooks2kafka-*`, которые больше не нужны по rules, - как `Удалить`;
-- если в существующем CMDBuild webhook отсутствуют payload-поля, которые нужны rules этого класса, summary и причина операции показывают конкретные ключи payload; без применения операции или ручного обновления webhook эти значения не попадут в Kafka event и не будут доступны converter-у;
+- если в существующем CMDBuild webhook отсутствуют payload-поля, которые нужны rules этого класса, summary, детали строки и причина операции показывают конкретные ключи payload и правила, из-за которых эти ключи нужны; без применения операции или ручного обновления webhook эти значения не попадут в Kafka event и не будут доступны converter-у;
 - каждая строка таблицы может раскрыть payload: зеленым показывается добавляемое значение, красным удаляемое, черным актуальное значение;
 - нажатие на значение в столбце `Действие` открывает блок деталей под этой же строкой; общий блок `Детали` находится под таблицей и использует ту же подсветку текста для current/desired/delete;
 - кнопка `Редактировать` на строке открывает JSON конкретного webhook; сохранение правки меняет только текущий план, а для строки из загруженного CMDB создает выбранную `update`-операцию;
@@ -386,6 +392,7 @@ Events:
 - при анализе существующего webhook UI не должен добавлять duplicate key с другим регистром или alias, например `OS` рядом с уже существующим `os`;
 - `cmdbPath` с корневым классом другого класса, например `ДругойКласс.Атрибут1.Атрибут2`, не должен порождать placeholder в webhook текущего класса;
 - удаление по умолчанию не выбирается автоматически, чтобы оператор явно подтвердил снятие старых managed webhooks;
+- кнопка `Удалить выбранные` применяет только отмеченные операции `Удалить` и не отправляет операции `Создать`/`Изменить`; остальные изменения применяются через общую кнопку `Загрузить в CMDB`;
 - `Undo`/`Redo` работают с выбором операций в текущей browser-сессии;
 - `Undo`/`Redo` не откатывают уже выполненную команду `Загрузить в CMDB`, потому что она меняет управляемую систему;
 - `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git; token/password/secret/API key/Authorization значения в export заменяются на `XXXXX`;
@@ -488,7 +495,7 @@ Webhook body для этой demo-схемы остается плоским: `i
 - фактический лимит конкретной поставки задается rules и плоским webhook body; текущая demo-схема как пример дает `main` основной IP/DNS и несколько дополнительных interface source fields, а `separate-profile-1` и `separate-profile-2` являются двумя отдельными дополнительными host profiles по одному IP каждый;
 - в одном Zabbix host допустимо несколько interfaces, но для каждого Zabbix interface type должен быть только один основной interface с `main=1`; дополнительные interfaces того же type должны иметь `main=0`, иначе Zabbix может отклонить или некорректно применить payload;
 - чтобы добавить еще один фиксированный IP в основной host, нужно добавить CMDBuild attribute, webhook field, `source.fields` и новый элемент `hostProfiles[].interfaces`; если это еще один SNMP interface, его профиль Zabbix interfaces[] должен быть не-main (`main=0`), кроме одного выбранного основного SNMP interface;
-- чтобы добавить еще один отдельный monitoring profile, нужно добавить новый named source field и отдельный `hostProfile` с собственным suffix, например `separate-profile-3`; при необходимости upsert на update включается `createOnUpdateWhenMissing=true`;
+- чтобы добавить еще один отдельный monitoring profile, нужно добавить новый named source field и отдельный `hostProfile` с собственным suffix, например `separate-profile-3`; через UI это делается в блоке `Профили мониторинга`, затем templates/groups/tags назначаются отдельными rules через виртуальное поле `hostProfile`; при необходимости upsert на update включается `createOnUpdateWhenMissing=true`;
 - произвольное или заранее неизвестное количество IP в одном поле webhook сейчас не поддерживается: текущая модель ожидает плоские именованные поля, а не массив адресов. Для безлимитного списка потребуется отдельное расширение контракта webhook/rules/T4, например массив interfaces или profiles с итерацией.
 
 Пример настройки другой модели: если в конкретной CMDBuild-модели класс называется `КлассКЕ`, два дополнительных интерфейса называются `АтрибутИнтерфейс1`/`АтрибутИнтерфейс2`, а два адреса управления `АтрибутПрофиль1`/`АтрибутПрофиль2` нужно вынести в отдельные Zabbix hosts, в rules добавляются source fields для этих четырех attributes; `АтрибутИнтерфейс1`/`АтрибутИнтерфейс2` подключаются как дополнительные `hostProfiles[].interfaces` основного profile, а для `АтрибутПрофиль1`/`АтрибутПрофиль2` создаются два отдельных `hostProfiles[]` с собственными suffix, templates/groups/tags и lifecycle.

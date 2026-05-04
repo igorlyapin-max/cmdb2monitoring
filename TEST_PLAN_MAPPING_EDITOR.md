@@ -273,10 +273,11 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 4. Нажать `Проанализировать rules`.
 5. Проверить, что для классов из текущих rules появились операции `Создать` на нужные события `create/update/delete`.
 6. Проверить, что операции `Изменить` отсутствуют для классов, которые не менялись, и что unmanaged webhooks не предлагаются к изменению или удалению.
-7. Раскрыть payload и `Детали` для нескольких строк: body должен быть плоским, без duplicate keys с другим регистром или alias.
-8. Нажать `Загрузить в CMDB` и подтвердить применение.
-9. Повторно нажать `Загрузить из CMDB` и `Проанализировать rules`.
-10. Ожидаемый результат: план пуст, либо содержит только осознанные изменения текущего сценария; ранее созданные records не должны повторно предлагаться как `Изменить`.
+7. Проверить summary `Требования webhooks по rules`: количество классов и payload-полей должно соответствовать rules, а не всем атрибутам CMDBuild catalog.
+8. Раскрыть payload и `Детали` для нескольких строк: body должен быть плоским, без duplicate keys с другим регистром или alias; в деталях должны быть видны `webhook requirements from rules` и, если payload неполный, `missing payload requirements` с именами правил.
+9. Нажать `Загрузить в CMDB` и подтвердить применение.
+10. Повторно нажать `Загрузить из CMDB` и `Проанализировать rules`.
+11. Ожидаемый результат: план пуст, либо содержит только осознанные изменения текущего сценария; ранее созданные records не должны повторно предлагаться как `Изменить`.
 
 Проверка поступления данных:
 
@@ -305,6 +306,15 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 6. Для всех остальных классов план пуст: не должно быть добавления `НовыйАтрибут`, изменения lookup/reference/domain path или любых unrelated source fields.
 7. После `Загрузить в CMDB` создать или изменить карточку `КлассА` и проверить, что новый source key приходит в `cmdbuild.webhooks.dev`.
 8. Создать или изменить карточку другого класса и проверить, что новый source key в ее webhook payload отсутствует.
+
+Регрессия "leaf через reference/domain":
+
+1. В rules добавить source field `КлассА.АтрибутReference.АтрибутLeaf` и rule, который реально использует этот field.
+2. Выполнить `Загрузить из CMDB` и `Проанализировать rules`.
+3. Ожидаемый результат для reference/lookup path: в payload добавляется только source key этого field со значением `{card:АтрибутReference}`; конечный leaf не добавляется отдельным webhook placeholder.
+4. В rules добавить source field `КлассА.{domain:КлассБ}.АтрибутLeaf` и rule, который его использует.
+5. Ожидаемый результат для domain path: в payload добавляется source key этого field со значением `{card:Id}`, а `cmdbPath` остается metadata для converter.
+6. В `Логический контроль правил конвертации` при уже загруженных CMDBuild webhooks должны появиться предупреждения, если managed webhook отсутствует или не передает payload-поля, требуемые rules.
 
 ## Сценарий отказа от мониторинга по атрибутам
 
@@ -373,9 +383,10 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 22. Проверить negative-сценарий interface address: неподтвержденный адресный field не должен сохраняться как IP/DNS interface, пока не задано явное IP/DNS имя/source metadata или `validationRegex`.
 23. Добавить rule для нового конкретного CMDBuild класса из текущего catalog, у которого в правилах еще нет `hostProfiles[]`: выбрать IP или DNS leaf, сохранить rule и проверить, что draft JSON получил `source.entityClasses`, `source.fields`, selection rule и минимальный `hostProfiles[]` с condition по `className`.
 24. Добавить `Template rule` с виртуальным field `hostProfile`, regex по имени fan-out profile и выбранным template; проверить, что rule condition создана по `hostProfile`, а `source.fields.hostProfile` не появился в draft JSON.
-25. Удалить или временно отключить этот `hostProfiles[]` только в draft JSON и запустить логический контроль правил конвертации: класс должен подсветиться как ошибка rules с действием `Создать host profile`, а применение выбранного действия должно восстановить profile через общий undo/redo поток.
-26. Запустить логический контроль правил конвертации.
-27. Выполнить `Save file as` и проверить, что webhook body остается плоским, а path metadata сохраняется рядом с source key.
+25. Для дополнительного profile выбрать его в блоке `Профили мониторинга`, добавить `Template rule` с основным условием по обычному class attribute field, например `description` + regex `(?i).*`, включить `Ограничить правило выбранным hostProfile` и сохранить. Проверить, что счетчик `Назначения` у profile увеличился, а rule содержит оба условия `description` и `hostProfile`.
+26. Удалить или временно отключить этот `hostProfiles[]` только в draft JSON и запустить логический контроль правил конвертации: класс должен подсветиться как ошибка rules с действием `Создать host profile`, а применение выбранного действия должно восстановить profile через общий undo/redo поток.
+27. Запустить логический контроль правил конвертации.
+28. Выполнить `Save file as` и проверить, что webhook body остается плоским, а path metadata сохраняется рядом с source key.
 
 ## Критерий приемки
 
