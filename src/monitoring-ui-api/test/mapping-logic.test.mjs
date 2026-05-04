@@ -9,6 +9,7 @@ import {
   ensureMinimalHostProfileForClass,
   hostProfileAppliesToClass,
   interfaceAddressCompatibilityIssue,
+  interfaceAddressTargetForForm,
   isDynamicFromLeafTarget,
   minimalHostProfileInterfaceMode,
   sourceFieldTemplate,
@@ -53,6 +54,11 @@ test('interfaceAddressCompatibilityIssue blocks unconfirmed address fields', () 
 test('interfaceAddressCompatibilityIssue allows matching IP and DNS targets', () => {
   assert.equal(interfaceAddressCompatibilityIssue('ipAddress', { source: 'ip_address' }, 'interfaceAddress', { mode: 'ip' }), null);
   assert.equal(interfaceAddressCompatibilityIssue('dnsName', { source: 'fqdn' }, 'interfaceAddress', { mode: 'dns' }), null);
+});
+
+test('interfaceAddressTargetForForm keeps target identity independent from selected leaf', () => {
+  assert.deepEqual(interfaceAddressTargetForForm({ mode: 'dns', valueField: 'hostname' }), { mode: 'dns' });
+  assert.deepEqual(interfaceAddressTargetForForm({ mode: 'ip', valueField: 'ipaddressIpAddr' }), { mode: 'ip' });
 });
 
 test('sourceFieldMayReturnMultiple blocks domain collections unless collectionMode is first', () => {

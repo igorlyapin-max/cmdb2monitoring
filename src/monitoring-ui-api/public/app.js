@@ -7,6 +7,7 @@ import {
   ensureMinimalHostProfileForClass,
   escapeRegex,
   interfaceAddressCompatibilityIssue,
+  interfaceAddressTargetForForm,
   isDynamicFromLeafTarget,
   minimalHostProfileInterfaceMode,
   normalizeRuleName,
@@ -93,7 +94,8 @@ const largeMappingSectionLimit = 500;
 const roleViews = {
   viewer: ['dashboard', 'events'],
   editor: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'about', 'help'],
-  admin: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
+  admin: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help'],
+  administrator: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
 const defaultCmdbuildWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
@@ -164,6 +166,7 @@ const zabbixCatalogSections = [
   {
     key: 'interfaceProfiles',
     title: 'Interface profiles',
+    titleKey: 'zabbix.interfaceProfiles.title',
     headers: ['Name', 'Type', 'Port'],
     row: item => [item.name, item.type, item.defaultPort]
   },
@@ -201,6 +204,30 @@ const mappingEditorFormControlSelectors = [
   '#mappingEditPriority',
   '#mappingEditRegex',
   '#mappingEditRuleName'
+];
+const mappingEditorVirtualSourceFields = [
+  {
+    value: 'hostProfile',
+    labelKey: 'mapping.option.virtualHostProfile',
+    metaKey: 'mapping.option.virtualProfileMeta',
+    fieldRule: {
+      source: 'hostProfile',
+      sources: ['hostProfile'],
+      type: 'virtual',
+      required: false
+    }
+  },
+  {
+    value: 'outputProfile',
+    labelKey: 'mapping.option.virtualOutputProfile',
+    metaKey: 'mapping.option.virtualProfileMeta',
+    fieldRule: {
+      source: 'outputProfile',
+      sources: ['outputProfile'],
+      type: 'virtual',
+      required: false
+    }
+  }
 ];
 const zabbixExtensionDefinitions = [
   {
@@ -261,6 +288,10 @@ const zabbixExtensionDefinitions = [
   },
   {
     title: 'Interface profiles',
+    titleKey: 'zabbix.interfaceProfiles.title',
+    ruleTitleKey: 'zabbix.interfaceProfiles.ruleTitle',
+    rulesTitleKey: 'zabbix.interfaceProfiles.rulesTitle',
+    helpKey: 'zabbix.interfaceProfiles.help',
     rulesKey: 'interfaceProfiles',
     selectionRulesKey: 'interfaceProfileSelectionRules',
     catalogKey: 'interfaceProfiles',
@@ -268,7 +299,7 @@ const zabbixExtensionDefinitions = [
     lazyCatalogPath: 'interface-profiles',
     label: item => item.name,
     meta: item => `type ${item.type ?? '-'} | port ${item.defaultPort ?? item.port ?? '-'}`,
-    help: 'Interface profile описывает тип интерфейса мониторинга: agent, SNMP, IPMI или JMX. Это не отдельный Zabbix object, а управляемый профиль для interfaces[]. В hostProfiles один profile может использовать несколько interface profiles для одного host или разные interface profiles для fan-out hosts.'
+    help: 'Zabbix interfaces[] profile describes the monitoring interface type: agent, SNMP, IPMI, or JMX. It is not a separate Zabbix object; it is a local rules profile for interfaces[].'
   },
   {
     title: 'Host status',
@@ -332,6 +363,10 @@ const translations = {
     'dashboard.rulesVersionManagement': 'В системе управления',
     'dashboard.rulesVersionUnavailable': 'версия недоступна',
     'dashboard.rulesVersionSchema': 'schema',
+    'dashboard.rulesSourceDisk': 'диск',
+    'dashboard.rulesSourceGit': 'git-копия',
+    'dashboard.rulesSourcePath': 'Источник: {source}, {path}',
+    'dashboard.rulesVersionMismatch': 'Версии отличаются. Проверьте источник rules в настройках git и путь, который использует микросервис.',
     'dashboard.serviceHelp': 'Проверка сервиса "{name}". Показывает HTTP-статус, задержку, проверяемый URL и версии rules, если сервис их отдает.',
     'account.changePassword': 'Сменить пароль',
     'account.currentPassword': 'Текущий пароль',
@@ -416,7 +451,7 @@ const translations = {
     'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
     'nav.dashboard': 'Панель',
     'nav.events': 'События',
-    'nav.systemAudit': 'Аудит систем',
+    'nav.systemAudit': 'Аудит',
     'nav.rules': 'Правила',
     'nav.mapping': 'Управление правилами конвертации',
     'nav.validateMapping': 'Логический контроль правил конвертации',
@@ -694,6 +729,9 @@ const translations = {
     'mapping.option.snmpInterface': 'SNMP interface',
     'mapping.option.monitoringSuppression': 'Пропустить create/update при совпадении атрибута',
     'mapping.option.profilePrefix': 'Профиль: {name}',
+    'mapping.option.virtualHostProfile': 'hostProfile / виртуальное поле текущего host profile',
+    'mapping.option.virtualOutputProfile': 'outputProfile / виртуальное поле текущего output profile',
+    'mapping.option.virtualProfileMeta': 'Заполняется converter при обработке hostProfiles[]; не приходит из CMDBuild webhook.',
     'mapping.option.newHostMacro': 'Новый host macro из class attribute field',
     'mapping.option.inventoryFromField': 'Inventory field из class attribute field',
     'mapping.option.dynamicHostGroupFromLeaf': 'Создавать/расширять host group из выбранного CMDBuild leaf',
@@ -701,8 +739,14 @@ const translations = {
     'mapping.target.hostGroups': 'Правило host group',
     'mapping.target.templates': 'Правило template',
     'mapping.target.tags': 'Правило tag',
-    'mapping.target.interfaceAddress': 'Правило адреса interface',
-    'mapping.target.interface': 'Правило interface',
+    'mapping.target.interfaceAddress': 'Правило выбора адреса интерфейса',
+    'mapping.target.interface': 'Fallback-правило интерфейса',
+    'mapping.rules.interfaceAddress': 'Правила выбора адреса интерфейса',
+    'mapping.rules.interface': 'Fallback-правила интерфейса',
+    'zabbix.interfaceProfiles.title': 'Профили Zabbix interfaces[]',
+    'zabbix.interfaceProfiles.ruleTitle': 'Правило выбора профиля интерфейса',
+    'zabbix.interfaceProfiles.rulesTitle': 'Правила выбора профиля интерфейса',
+    'zabbix.interfaceProfiles.help': 'Профиль Zabbix interfaces[] задает тип интерфейса мониторинга agent/SNMP/IPMI/JMX, порт, main/useip и SNMP details. Это не отдельный объект Zabbix, а локальный профиль rules для формирования interfaces[].',
     'mapping.target.monitoringSuppression': 'Правило исключения из мониторинга',
     'sessionTraffic.webhooks': 'Webhooks',
     'sessionTraffic.zabbixCatalog': 'Zabbix',
@@ -742,15 +786,16 @@ const translations = {
     'help.mapping.7': 'Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.',
     'help.mapping.8': 'Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.',
     'help.mapping.9': 'Повторное нажатие на выбранный элемент снимает выделение.',
-    'help.mapping.10': 'Interface address rules выбирают, чем заполнить Zabbix interface: IP target пишет в interfaces[].ip/useip=1, DNS target пишет в interfaces[].dns/useip=0. Редактор блокирует явное использование IP-атрибута как DNS и DNS/FQDN-атрибута как IP.',
+    'help.mapping.10': 'Правила выбора адреса интерфейса выбирают, чем заполнить Zabbix interfaces[]: IP target пишет в interfaces[].ip/useip=1, DNS target пишет в interfaces[].dns/useip=0. Редактор блокирует явное использование IP-атрибута как DNS и DNS/FQDN-атрибута как IP.',
     'help.mapping.11': 'Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.',
-    'help.mapping.12': 'Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.',
+    'help.mapping.12': 'Внутри host profile профиль Zabbix interfaces[] выбирает тип мониторинга agent/SNMP/IPMI/JMX и параметры interfaces[], а valueField указывает, какой CMDB атрибут станет IP или DNS.',
     'help.mapping.13': 'Source keys webhook могут отличаться от имен CMDBuild attributes; связь задается через cmdbAttribute или cmdbPath и не добавляет скрытые alias в обработку payload.',
     'help.mapping.14': 'Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.',
     'help.mapping.15': 'Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.',
     'help.mapping.16': 'Domain path вида Класс.{domain:СвязанныйКласс}.Атрибут читает связанные карточки через CMDBuild relations; поля, которые могут вернуть несколько значений, недоступны для скалярных Zabbix structures.',
     'help.mapping.17': 'monitoringSuppressionRules используется, когда атрибуты экземпляра означают осознанный отказ от постановки на мониторинг; create/update пропускаются, delete не блокируется.',
     'help.mapping.18': 'Правило template проверяется по Метаданные Zabbix: конфликт item key, LLD rule key или inventory link подсвечивается красным и блокирует сохранение до исправления templateConflictRules или выбора совместимого template set.',
+    'help.mapping.19': 'В редакторе правил доступны виртуальные поля hostProfile и outputProfile. Их заполняет converter для каждого hostProfiles[]; через них можно ограничить template/group/tag rule конкретным fan-out profile.',
     'help.validate.title': 'Логический контроль правил конвертации',
     'help.validate.1': 'Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.',
     'help.validate.2': 'Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.',
@@ -853,6 +898,10 @@ const translations = {
     'dashboard.rulesVersionManagement': 'In management system',
     'dashboard.rulesVersionUnavailable': 'version unavailable',
     'dashboard.rulesVersionSchema': 'schema',
+    'dashboard.rulesSourceDisk': 'disk',
+    'dashboard.rulesSourceGit': 'git copy',
+    'dashboard.rulesSourcePath': 'Source: {source}, {path}',
+    'dashboard.rulesVersionMismatch': 'Versions differ. Check the rules source in Git settings and the path used by the microservice.',
     'dashboard.serviceHelp': 'Service "{name}" probe. Shows HTTP status, latency, checked URL, and rules versions when the service exposes them.',
     'account.changePassword': 'Change password',
     'account.currentPassword': 'Current password',
@@ -937,7 +986,7 @@ const translations = {
     'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
     'nav.dashboard': 'Dashboard',
     'nav.events': 'Events',
-    'nav.systemAudit': 'Systems Audit',
+    'nav.systemAudit': 'Audit',
     'nav.rules': 'Rules',
     'nav.mapping': 'Conversion Rules Management',
     'nav.validateMapping': 'Conversion Rules Logical Control',
@@ -1214,6 +1263,9 @@ const translations = {
     'mapping.option.snmpInterface': 'SNMP interface',
     'mapping.option.monitoringSuppression': 'Skip create/update when attribute matches',
     'mapping.option.profilePrefix': 'Profile: {name}',
+    'mapping.option.virtualHostProfile': 'hostProfile / virtual current host profile field',
+    'mapping.option.virtualOutputProfile': 'outputProfile / virtual current output profile field',
+    'mapping.option.virtualProfileMeta': 'Filled by the converter while processing hostProfiles[]; it does not come from the CMDBuild webhook.',
     'mapping.option.newHostMacro': 'New host macro from class attribute field',
     'mapping.option.inventoryFromField': 'Inventory field from class attribute field',
     'mapping.option.dynamicHostGroupFromLeaf': 'Create/expand host group from selected CMDBuild leaf',
@@ -1221,8 +1273,14 @@ const translations = {
     'mapping.target.hostGroups': 'Host group rule',
     'mapping.target.templates': 'Template rule',
     'mapping.target.tags': 'Tag rule',
-    'mapping.target.interfaceAddress': 'Interface address rule',
-    'mapping.target.interface': 'Interface rule',
+    'mapping.target.interfaceAddress': 'Interface address selection rule',
+    'mapping.target.interface': 'Legacy interface fallback rule',
+    'mapping.rules.interfaceAddress': 'Interface address selection rules',
+    'mapping.rules.interface': 'Legacy interface fallback rules',
+    'zabbix.interfaceProfiles.title': 'Zabbix interfaces[] profiles',
+    'zabbix.interfaceProfiles.ruleTitle': 'Interface profile selection rule',
+    'zabbix.interfaceProfiles.rulesTitle': 'Interface profile selection rules',
+    'zabbix.interfaceProfiles.help': 'A Zabbix interfaces[] profile defines the monitoring interface type agent/SNMP/IPMI/JMX, port, main/useip, and SNMP details. It is not a separate Zabbix object; it is a local rules profile used to build interfaces[].',
     'mapping.target.monitoringSuppression': 'Monitoring suppression rule',
     'sessionTraffic.webhooks': 'Webhooks',
     'sessionTraffic.zabbixCatalog': 'Zabbix',
@@ -1262,15 +1320,16 @@ const translations = {
     'help.mapping.7': 'Undo and Redo work with the current session history, and Save file as saves the draft to a separate JSON file without sending it to the backend.',
     'help.mapping.8': 'Save file as also checks that every configured class has an IP or DNS class attribute field linked to Zabbix interface rules or hostProfiles[].interfaces.',
     'help.mapping.9': 'Clicking the selected item again clears the selection.',
-    'help.mapping.10': 'Interface address rules choose how to fill the Zabbix interface: the IP target writes interfaces[].ip/useip=1, and the DNS target writes interfaces[].dns/useip=0. The editor blocks explicit IP attributes as DNS and DNS/FQDN attributes as IP.',
+    'help.mapping.10': 'Interface address selection rules choose how to fill Zabbix interfaces[]: the IP target writes interfaces[].ip/useip=1, and the DNS target writes interfaces[].dns/useip=0. The editor blocks explicit IP attributes as DNS and DNS/FQDN attributes as IP.',
     'help.mapping.11': 'Host profiles describe two modes: multiple interfaces[] inside one Zabbix host, or several Zabbix hosts from one CMDB object.',
-    'help.mapping.12': 'Inside a host profile, interface profile selects agent/SNMP/IPMI/JMX monitoring type, and valueField points to the CMDB attribute used as IP or DNS.',
+    'help.mapping.12': 'Inside a host profile, the Zabbix interfaces[] profile selects agent/SNMP/IPMI/JMX monitoring type and interfaces[] parameters, while valueField points to the CMDB attribute used as IP or DNS.',
     'help.mapping.13': 'Webhook source keys may differ from CMDBuild attribute names; the link is declared through cmdbAttribute or cmdbPath and does not add hidden aliases to payload processing.',
     'help.mapping.14': 'For lookup values, only the exact class + lookup + value link is highlighted, for example Notebook.zabbixTag.tag1.',
     'help.mapping.15': 'Regex rules show which class attribute fields select groups, templates, tags, and extended Zabbix objects.',
     'help.mapping.16': 'A domain path such as Class.{domain:RelatedClass}.Attribute reads related cards through CMDBuild relations; fields that may return multiple values are unavailable for scalar Zabbix structures.',
     'help.mapping.17': 'monitoringSuppressionRules is used when instance attributes intentionally block monitoring; create/update are skipped, while delete is not blocked.',
     'help.mapping.18': 'Template rules are checked against Zabbix Metadata: an item key, LLD rule key, or inventory link conflict is marked red and blocks saving until templateConflictRules are fixed or a compatible template set is selected.',
+    'help.mapping.19': 'The rule editor exposes virtual hostProfile and outputProfile fields. The converter fills them for each hostProfiles[] entry; they can restrict a template/group/tag rule to a specific fan-out profile.',
     'help.validate.title': 'Conversion Rules Logical Control',
     'help.validate.1': 'The page does not build an interactive chain; it highlights only missing entities.',
     'help.validate.2': 'Red marks classes and attributes missing from the CMDBuild catalog, as well as Zabbix references missing from the Zabbix catalog.',
@@ -1367,7 +1426,7 @@ const viewDescriptions = {
     mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
     validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
     webhooks: 'Пользоваться этим пунктом не обязательно: можно самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации. Здесь можно загрузить текущие CMDBuild webhooks, построить план create/update/delete по rules и явно загрузить выбранные операции в CMDBuild. Отсутствующие payload-поля, необходимые rules, показываются до применения плана. Undo/Redo не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
-    zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, interface profiles, statuses, maintenance, TLS/PSK и value maps.',
+    zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, профили Zabbix interfaces[], statuses, maintenance, TLS/PSK и value maps.',
     zabbixMetadata: 'Показывает метаданные Zabbix templates, конфликтующие item keys, LLD rule keys и inventory fields. Эти данные используются редактором и логическим контролем правил.',
     cmdbuild: 'Показывает классы, атрибуты, domains и lookup-справочники, загруженные из CMDBuild.',
     authSettings: 'Управляет режимом авторизации: локальная, MS AD или IdP. В IdP режиме MS AD используется для сопоставления групп с ролями.',
@@ -1383,7 +1442,7 @@ const viewDescriptions = {
     mapping: 'Shows the CMDBuild -> conversion rules -> Zabbix chain. Host profiles show fan-out and interfaces; Template rules select templates; Tag rules create tags.',
     validateMapping: 'Validates rules against Zabbix and CMDBuild catalogs; only missing source entities are highlighted.',
     webhooks: 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved with the conversion rules file. This page loads current CMDBuild webhooks, builds a create/update/delete plan from rules, and explicitly loads selected operations into CMDBuild. Missing payload fields required by rules are shown before applying the plan. Undo/Redo does not roll back configuration already loaded into CMDBuild.',
-    zabbix: 'Shows templates, host groups, template groups, tags, and extended Zabbix catalogs.',
+    zabbix: 'Shows templates, host groups, template groups, tags, and extended Zabbix catalogs, including Zabbix interfaces[] profiles.',
     zabbixMetadata: 'Shows Zabbix template metadata, conflicting item keys, LLD rule keys, and inventory fields. The rule editor and logical control use this data.',
     cmdbuild: 'Shows classes, attributes, domains, and lookup catalogs loaded from CMDBuild.',
     authSettings: 'Manages authorization mode: local, MS AD, or IdP. In IdP mode, MS AD is used for group-to-role mapping.',
@@ -2141,6 +2200,13 @@ function renderDashboardRulesVersions(serviceRulesStatus, managementRules) {
     renderDashboardRulesVersionRow(t('dashboard.rulesVersionMicroservice'), serviceRulesStatus?.rules, serviceRulesStatus),
     renderDashboardRulesVersionRow(t('dashboard.rulesVersionManagement'), managementRules, managementRules)
   );
+  const serviceVersion = serviceRulesStatus?.rules?.rulesVersion ?? '';
+  const managementVersion = managementRules?.rulesVersion ?? '';
+  if (serviceVersion && managementVersion && serviceVersion !== managementVersion) {
+    const warning = el('div', 'rules-version-warning status-warn', t('dashboard.rulesVersionMismatch'));
+    warning.title = t('dashboard.rulesVersionMismatch');
+    container.append(warning);
+  }
   return container;
 }
 
@@ -2153,6 +2219,12 @@ function renderDashboardRulesVersionRow(label, rules, status) {
     el('span', 'rules-version-label', label),
     valueNode
   );
+  const source = formatDashboardRulesSource(rules, status);
+  if (source) {
+    const sourceNode = el('span', 'rules-version-source', source);
+    sourceNode.title = source;
+    row.append(sourceNode);
+  }
   return row;
 }
 
@@ -2167,6 +2239,23 @@ function formatDashboardRulesVersion(rules, status) {
   return schemaVersion
     ? `${versionText} / ${t('dashboard.rulesVersionSchema')} ${schemaVersion}`
     : versionText;
+}
+
+function formatDashboardRulesSource(rules, status) {
+  const source = rules?.readFromGit === true || status?.source === 'git'
+    ? t('dashboard.rulesSourceGit')
+    : rules?.readFromGit === false || status?.source === 'disk'
+      ? t('dashboard.rulesSourceDisk')
+      : '';
+  const path = rules?.location ?? status?.resolvedPath ?? status?.path ?? '';
+  if (!source && !path) {
+    return '';
+  }
+
+  return tf('dashboard.rulesSourcePath', {
+    source: source || '-',
+    path: path || '-'
+  });
 }
 
 async function loadEvents() {
@@ -2611,20 +2700,22 @@ function renderZabbixCatalogSummary(catalog = {}) {
 }
 
 function zabbixCatalogMenuItem(definition, count) {
+  const title = zabbixCatalogDefinitionTitle(definition);
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'zabbix-catalog-menu-item';
   button.dataset.zabbixCatalogKey = definition.key;
   button.append(
-    el('span', 'zabbix-catalog-menu-title', definition.title),
+    el('span', 'zabbix-catalog-menu-title', title),
     el('span', 'zabbix-catalog-count', String(count))
   );
-  setHelp(button, `Открыть или закрыть раздел Zabbix Catalog "${definition.title}". В разделе ${count} элементов.`);
+  setHelp(button, `Открыть или закрыть раздел Zabbix Catalog "${title}". В разделе ${count} элементов.`);
   button.addEventListener('click', () => toggleZabbixCatalogSection(definition.key));
   return button;
 }
 
 function zabbixCatalogSection(definition, items) {
+  const sectionTitle = zabbixCatalogDefinitionTitle(definition);
   const section = document.createElement('section');
   section.className = 'surface zabbix-catalog-section is-collapsed';
   section.dataset.zabbixCatalogKey = definition.key;
@@ -2634,15 +2725,19 @@ function zabbixCatalogSection(definition, items) {
   toggle.type = 'button';
   toggle.className = 'zabbix-catalog-section-toggle';
   toggle.textContent = '+';
-  const title = el('h2', '', definition.title);
+  const title = el('h2', '', sectionTitle);
   const count = el('span', 'zabbix-catalog-count', String(items.length));
   header.append(toggle, title, count);
-  setHelp(header, `Раздел Zabbix Catalog "${definition.title}". Нажмите, чтобы раскрыть или свернуть таблицу.`);
+  setHelp(header, `Раздел Zabbix Catalog "${sectionTitle}". Нажмите, чтобы раскрыть или свернуть таблицу.`);
   header.addEventListener('click', () => toggleZabbixCatalogSection(definition.key));
   const body = el('div', 'zabbix-catalog-section-body', '');
   section.append(header, body);
   section.renderBody = () => renderZabbixCatalogSectionBody(section, definition, items);
   return section;
+}
+
+function zabbixCatalogDefinitionTitle(definition) {
+  return definition.titleKey ? t(definition.titleKey) : definition.title;
 }
 
 function toggleZabbixCatalogSection(key) {
@@ -3838,7 +3933,7 @@ function currentWebhookDefaults(currentHooks) {
 }
 
 function webhookPlaceholderPrefixMatchesClass(prefix, className) {
-  return !isBlank(prefix)
+  return String(prefix ?? '').trim() !== ''
     && (normalizeToken(prefix) === 'card' || normalizeToken(prefix) === normalizeToken(className));
 }
 
@@ -4711,7 +4806,7 @@ function mappingDeletePayloadFieldsForItem(item) {
 }
 
 function mappingDeleteZabbixTypeLabel(type, fallback) {
-  return {
+  const builtInLabel = {
     eventRouting: 'Event routing',
     hostProfiles: 'Host profiles / interfaces',
     hostGroups: 'Host groups',
@@ -4721,10 +4816,12 @@ function mappingDeleteZabbixTypeLabel(type, fallback) {
     interface: 'Interface structure',
     tags: 'Tags',
     monitoringSuppression: 'Monitoring suppression'
-  }[type]
-    ?? zabbixExtensionDefinitions.find(definition => definition.rulesKey === type)?.title
-    ?? fallback
-    ?? type;
+  }[type];
+
+  return builtInLabel
+    || zabbixExtensionTitle(zabbixExtensionDefinitions.find(definition => definition.rulesKey === type))
+    || fallback
+    || type;
 }
 
 function mappingDeleteGroupNode(group, rules, level = 0) {
@@ -5176,12 +5273,14 @@ function populateMappingEditorFields(options = {}) {
     }));
   const catalogOptions = mappingEditorCatalogFieldOptions(selectedClass, sourceFields)
     .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
-  state.mappingEditorFieldOptions = new Map(catalogOptions
+  const virtualOptions = mappingEditorVirtualFieldOptions()
+    .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
+  state.mappingEditorFieldOptions = new Map([...catalogOptions, ...virtualOptions]
     .filter(option => option.fieldRule)
     .map(option => [option.value, option]));
   let fieldOptions = selectedClass
-    ? [...configuredOptions, ...catalogOptions]
-    : configuredOptions;
+    ? uniqueMappingEditorFieldOptions([...configuredOptions, ...catalogOptions, ...virtualOptions])
+    : uniqueMappingEditorFieldOptions([...configuredOptions, ...virtualOptions]);
   const selectedField = state.mappingModifyFieldValue || previous || '';
   if (selectedField && !fieldOptions.some(option => option.value === selectedField)) {
     fieldOptions = [{
@@ -5229,7 +5328,7 @@ function populateMappingEditorStructures(options = {}) {
     { value: 'interface', label: mappingTargetTypeLabel('interface') },
     { value: 'monitoringSuppression', label: mappingTargetTypeLabel('monitoringSuppression') },
     ...mappingEditorEditableExtensionDefinitions()
-      .map(definition => ({ value: definition.rulesKey, label: `${definition.title} rule` }))
+      .map(definition => ({ value: definition.rulesKey, label: zabbixExtensionRuleTitle(definition) }))
   ];
   if (fieldRule) {
     structureOptions = structureOptions
@@ -5325,8 +5424,8 @@ function mappingEditorTargetOptions(type, rules) {
 
   if (type === 'interfaceAddress') {
     return [
-      optionFromPayload(t('mapping.option.ipAddress'), { mode: 'ip', valueField: 'ipAddress' }),
-      optionFromPayload(t('mapping.option.dnsName'), { mode: 'dns', valueField: 'dnsName' })
+      optionFromPayload(t('mapping.option.ipAddress'), interfaceAddressTargetForForm({ mode: 'ip' })),
+      optionFromPayload(t('mapping.option.dnsName'), interfaceAddressTargetForForm({ mode: 'dns' }))
     ];
   }
 
@@ -5387,6 +5486,22 @@ function mappingEditorEditableExtensionDefinitions() {
 
 function mappingEditorExtensionDefinition(type) {
   return mappingEditorEditableExtensionDefinitions().find(definition => definition.rulesKey === type);
+}
+
+function zabbixExtensionTitle(definition) {
+  return definition?.titleKey ? t(definition.titleKey) : definition?.title ?? '';
+}
+
+function zabbixExtensionRuleTitle(definition) {
+  return definition?.ruleTitleKey ? t(definition.ruleTitleKey) : `${zabbixExtensionTitle(definition)} rule`;
+}
+
+function zabbixExtensionRulesTitle(definition) {
+  return definition?.rulesTitleKey ? t(definition.rulesTitleKey) : `${zabbixExtensionTitle(definition)} rules`;
+}
+
+function zabbixExtensionHelp(definition) {
+  return definition?.helpKey ? t(definition.helpKey) : definition?.help ?? '';
 }
 
 function shouldLoadMappingEditorExtensionCatalog(definition) {
@@ -5567,6 +5682,11 @@ function setSelectOptions(select, options, selectedValue = '') {
 }
 
 function mappingEditorSourceFieldLabel(fieldKey, field) {
+  const virtualField = mappingEditorVirtualFieldDefinition(fieldKey);
+  if (virtualField) {
+    return t(virtualField.labelKey);
+  }
+
   const attribute = findCatalogAttributeForField(mappingEditorClassAttributes($('#mappingEditClass').value), field, fieldKey);
   return field.cmdbPath
     ? `${fieldKey} / ${field.cmdbPath}`
@@ -6277,7 +6397,7 @@ function mappingRuleTargetForForm(item) {
     return rule.tags?.[0] ?? {};
   }
   if (type === 'interfaceAddress') {
-    return { mode: rule.mode ?? 'ip', valueField: rule.valueField ?? 'ipAddress' };
+    return interfaceAddressTargetForForm(rule);
   }
   if (type === 'interface') {
     return { interfaceRef: rule.interfaceRef ?? 'agentInterface' };
@@ -6454,6 +6574,10 @@ function ensureMappingEditorSourceField(rules, field) {
     return;
   }
 
+  if (mappingEditorVirtualFieldDefinition(field)) {
+    return;
+  }
+
   rules.source ??= {};
   rules.source.fields ??= {};
   const generatedOption = state.mappingEditorFieldOptions?.get(field);
@@ -6518,6 +6642,33 @@ function mappingEditorCatalogFieldOptions(className, sourceFields) {
   return options
     .filter(option => !sourceFieldHasCatalogOption(sourceFields, option))
     .sort((left, right) => compareText(left.label, right.label));
+}
+
+function mappingEditorVirtualFieldOptions() {
+  return mappingEditorVirtualSourceFields.map(definition => ({
+    value: definition.value,
+    label: t(definition.labelKey),
+    meta: t(definition.metaKey),
+    fieldRule: cloneJson(definition.fieldRule)
+  }));
+}
+
+function mappingEditorVirtualFieldDefinition(fieldKey) {
+  return mappingEditorVirtualSourceFields.find(definition =>
+    canonicalSourceField(definition.value) === canonicalSourceField(fieldKey));
+}
+
+function uniqueMappingEditorFieldOptions(options) {
+  const seen = new Set();
+  return options.filter(option => {
+    const key = canonicalSourceField(option.value);
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 function referenceLeafFieldOptions(rootClass, attribute, prefix = [], depth = 1, seen = new Set()) {
@@ -6852,7 +7003,7 @@ function mappingTargetTypeLabel(type) {
     interfaceAddress: t('mapping.target.interfaceAddress'),
     interface: t('mapping.target.interface'),
     monitoringSuppression: t('mapping.target.monitoringSuppression')
-  }[type] ?? extension?.title ?? type ?? 'target';
+  }[type] ?? (extension ? zabbixExtensionRuleTitle(extension) : type ?? 'target');
 }
 
 function isReadableMappingAttribute(attribute) {
@@ -6966,6 +7117,7 @@ function buildMappingRuleName(type, className, field, target) {
     || target.proxy_groupid
     || target.maintenanceId
     || target.valueMapId
+    || target.mode
     || target.valueField
     || target.targetMode
     || target.interfaceRef
@@ -7163,13 +7315,13 @@ function mappingRuleCollections() {
     { key: 'groupSelectionRules', label: 'Group rules', type: 'hostGroups' },
     { key: 'templateSelectionRules', label: 'Template rules', type: 'templates' },
     { key: 'templateGroupSelectionRules', label: 'Template group rules', type: 'templateGroups' },
-    { key: 'interfaceAddressRules', label: 'Interface address rules', type: 'interfaceAddress' },
-    { key: 'interfaceSelectionRules', label: 'Interface rules', type: 'interface' },
+    { key: 'interfaceAddressRules', label: t('mapping.rules.interfaceAddress'), type: 'interfaceAddress' },
+    { key: 'interfaceSelectionRules', label: t('mapping.rules.interface'), type: 'interface' },
     { key: 'tagSelectionRules', label: 'Tag rules', type: 'tags' },
     { key: 'monitoringSuppressionRules', label: 'Monitoring suppression rules', type: 'monitoringSuppression' },
     ...zabbixExtensionDefinitions.map(definition => ({
       key: definition.selectionRulesKey,
-      label: `${definition.title} rules`,
+      label: zabbixExtensionRulesTitle(definition),
       type: definition.rulesKey
     }))
   ];
@@ -7991,7 +8143,7 @@ function renderValidateMappingZabbix(container, rules, catalog, validation) {
       continue;
     }
 
-    appendValidationSection(container, definition.title, items.map(item => {
+    appendValidationSection(container, zabbixExtensionTitle(definition), items.map(item => {
       const exists = definition.requiresCatalog === false
         || zabbixExtensionItemExists(catalog[definition.catalogKey] ?? [], definition, item);
       return mappingNode({
@@ -8002,8 +8154,8 @@ function renderValidateMappingZabbix(container, rules, catalog, validation) {
         kind: 'zabbix',
         status: exists ? 'normal' : 'error',
         help: exists
-          ? definition.help
-          : `${definition.help} Объект указан в JSON правил, но отсутствует в Zabbix catalog.`
+          ? zabbixExtensionHelp(definition)
+          : `${zabbixExtensionHelp(definition)} Объект указан в JSON правил, но отсутствует в Zabbix catalog.`
       });
     }));
   }
@@ -8063,8 +8215,8 @@ function renderValidateMappingRules(container, rules, cmdbuildCatalog, validatio
   appendValidationSection(container, 'Host profiles', validationRuleNodesForCollection(rules, 'hostProfiles', 'hostProfiles', validation));
   appendValidationSection(container, 'Group rules', validationRuleNodesForCollection(rules, 'groupSelectionRules', 'hostGroups', validation));
   appendValidationSection(container, 'Template rules', validationRuleNodesForCollection(rules, 'templateSelectionRules', 'templates', validation));
-  appendValidationSection(container, 'Interface address rules', validationRuleNodesForCollection(rules, 'interfaceAddressRules', 'interfaceAddress', validation, rule => rule.valueField ?? rule.mode));
-  appendValidationSection(container, 'Interface rules', validationRuleNodesForCollection(rules, 'interfaceSelectionRules', 'interface', validation, rule => rule.interfaceRef));
+  appendValidationSection(container, t('mapping.rules.interfaceAddress'), validationRuleNodesForCollection(rules, 'interfaceAddressRules', 'interfaceAddress', validation, rule => rule.valueField ?? rule.mode));
+  appendValidationSection(container, t('mapping.rules.interface'), validationRuleNodesForCollection(rules, 'interfaceSelectionRules', 'interface', validation, rule => rule.interfaceRef));
   appendValidationSection(container, 'Tag rules', validationRuleNodesForCollection(rules, 'tagSelectionRules', 'tags', validation));
   appendValidationSection(container, 'Monitoring suppression rules', validationRuleNodesForCollection(rules, 'monitoringSuppressionRules', 'monitoringSuppression', validation));
   appendOptionalZabbixRuleSections(container, rules, validation, appendValidationSection);
@@ -8802,9 +8954,9 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
       if (!zabbixExtensionItemExists(zabbixCatalog[definition.catalogKey] ?? [], definition, item)) {
         addIssue({
           source: 'zabbix',
-          message: `Zabbix ${definition.title} отсутствует: ${definition.label(item)}`,
+          message: `Zabbix ${zabbixExtensionTitle(definition)} отсутствует: ${definition.label(item)}`,
           tokens: zabbixExtensionItemMappingTokens(definition, item, rules),
-          help: `${definition.help} Объект указан в JSON правил, но отсутствует в Zabbix catalog.`
+          help: `${zabbixExtensionHelp(definition)} Объект указан в JSON правил, но отсутствует в Zabbix catalog.`
         });
       }
     }
@@ -9060,8 +9212,9 @@ function normalizeClassName(value) {
 }
 
 function isVirtualSourceField(fieldKey, sourceName) {
-  return ['className', 'eventType'].includes(canonicalSourceField(fieldKey))
-    || ['className', 'eventType'].includes(canonicalSourceField(sourceName));
+  const virtualFields = ['className', 'eventType', 'hostProfile', 'outputProfile'];
+  return virtualFields.includes(canonicalSourceField(fieldKey))
+    || virtualFields.includes(canonicalSourceField(sourceName));
 }
 
 function isVirtualSourceFieldRule(fieldKey, field) {
@@ -9143,14 +9296,14 @@ function renderMappingZabbix(container, rules, catalog) {
   appendMappingSection(container, 'JSON-RPC fields', (rules.zabbix?.expectedMonitoringFields ?? []).map(field => mappingNode({
     label: field,
     meta: 'payload',
-    tokens: [...monitoringFieldTokens(field), 'target:payload'],
+    tokens: [...monitoringFieldTokens(field), ...monitoringFieldRuleTokens(field, rules), 'target:payload'],
     level: 1,
     kind: 'target'
   })));
 
   appendMappingSection(container, 'Host groups', zabbixHostGroups(rules, catalog).map(group => mappingNode({
     label: group.name || group.groupid,
-    meta: `groupid ${group.groupid}`,
+    meta: zabbixHostGroupMeta(group),
     tokens: zabbixItemTokens(rules, 'hostGroups', group.groupid, group.name),
     level: 1,
     kind: 'zabbix'
@@ -9183,9 +9336,9 @@ function renderMappingZabbix(container, rules, catalog) {
   for (const definition of zabbixExtensionDefinitions) {
     const items = zabbixExtensionItems(rules, catalog, definition);
     const totalCount = catalog.counts?.[definition.catalogKey] ?? items.length;
-    appendLazyMappingSection(container, `${definition.title} (${totalCount})`, () => zabbixExtensionSectionNodes(definition, items, rules, catalog), {
+    appendLazyMappingSection(container, `${zabbixExtensionTitle(definition)} (${totalCount})`, () => zabbixExtensionSectionNodes(definition, items, rules, catalog), {
       expanded: false,
-      help: definition.help,
+      help: zabbixExtensionHelp(definition),
       tokens: zabbixLazySectionTokens(definition, items, rules)
     });
   }
@@ -9221,8 +9374,8 @@ function renderMappingRules(container, rules, cmdbuildCatalog = null) {
   appendConversionRuleSection(container, 'Group rules', rules.groupSelectionRules ?? [], 'hostGroups', null, rules);
   appendConversionRuleSection(container, 'Template rules', rules.templateSelectionRules ?? [], 'templates', null, rules);
   appendConversionRuleSection(container, 'Template group rules', rules.templateGroupSelectionRules ?? [], 'templateGroups', null, rules);
-  appendConversionRuleSection(container, 'Interface address rules', rules.interfaceAddressRules ?? [], 'interfaceAddress', null, rules);
-  appendConversionRuleSection(container, 'Interface rules', rules.interfaceSelectionRules ?? [], 'interface', null, rules);
+  appendConversionRuleSection(container, t('mapping.rules.interfaceAddress'), rules.interfaceAddressRules ?? [], 'interfaceAddress', null, rules);
+  appendConversionRuleSection(container, t('mapping.rules.interface'), rules.interfaceSelectionRules ?? [], 'interface', null, rules);
   appendConversionRuleSection(container, 'Tag rules', rules.tagSelectionRules ?? [], 'tags', null, rules);
   appendConversionRuleSection(container, 'Monitoring suppression rules', rules.monitoringSuppressionRules ?? [], 'monitoringSuppression', null, rules);
   appendOptionalZabbixRuleSections(container, rules, null, appendMappingSection);
@@ -9605,14 +9758,14 @@ function sectionTitleWithCount(title, items) {
 }
 
 function mappingSectionHelp(title) {
-  const extensionDefinition = zabbixExtensionDefinitions.find(definition => definition.title === title);
+  const extensionDefinition = zabbixExtensionDefinitions.find(definition => zabbixExtensionTitle(definition) === title);
   if (extensionDefinition) {
-    return extensionDefinition.help;
+    return zabbixExtensionHelp(extensionDefinition);
   }
 
-  const extensionRulesDefinition = zabbixExtensionDefinitions.find(definition => `${definition.title} rules` === title);
+  const extensionRulesDefinition = zabbixExtensionDefinitions.find(definition => zabbixExtensionRulesTitle(definition) === title);
   if (extensionRulesDefinition) {
-    return `Правила выбора "${extensionRulesDefinition.title}". Это расширение JSON правил для будущей отправки в Zabbix payload или отдельные Zabbix API операции. Без изменения микросервисов блок можно использовать как проектирование/валидацию правил; для реального исполнения нужен соответствующий output в конвертере.`;
+    return `Правила выбора "${zabbixExtensionTitle(extensionRulesDefinition)}". Это расширение JSON правил для будущей отправки в Zabbix payload или отдельные Zabbix API операции. Без изменения микросервисов блок можно использовать как проектирование/валидацию правил; для реального исполнения нужен соответствующий output в конвертере.`;
   }
 
   const helpByTitle = {
@@ -9627,8 +9780,8 @@ function mappingSectionHelp(title) {
     'Host profiles': 'Host profiles описывают fan-out: один CMDB object может дать один или несколько Zabbix hosts. Внутри profile задаются hostName/visibleName templates и interfaces. Для нескольких IP можно оставить их interfaces одного основного host или создать отдельные profiles для отдельных Zabbix hosts. Переименование profile меняет suffix нового Zabbix host, старые hosts не переименовываются автоматически.',
     'Group rules': 'Правила выбора host groups по regex над class attribute fields. Обычно редактируются в JSON правил: priority, when.anyRegex/when.allRegex и ссылки на существующие Zabbix host groups. CMDBuild менять не нужно, если поля уже приходят в webhook.',
     'Template rules': 'Правила выбора Zabbix templates по regex над class attribute fields. В условии можно использовать lookup/class attribute field zabbixTag, если tag из CMDBuild должен влиять на выбор шаблона. Результатом Template rules должны оставаться только templates/templateRef; выбирать или назначать Zabbix tags в этом блоке нецелесообразно, для этого есть Tag rules. После выбора применяется templateConflictRules: на create конфликтующие templates не попадают в payload, на update fallback они также попадают в templates_clear.',
-    'Interface address rules': 'Правила выбора адреса Zabbix interface. Можно выбирать IP или DNS через mode и valueField; valueField ссылается на нормализованное class attribute field, например ipAddress или dnsName.',
-    'Interface rules': 'Правила выбора интерфейса мониторинга. Без изменения микросервисов можно менять regex и ссылки на уже описанные interface defaults, пока Zabbix writer поддерживает этот тип интерфейса.',
+    [t('mapping.rules.interfaceAddress')]: 'Правила выбора адреса интерфейса. Можно выбирать IP или DNS через mode и valueField; valueField ссылается на нормализованное class attribute field, например ipAddress или dnsName.',
+    [t('mapping.rules.interface')]: 'Fallback-правила интерфейса. Они выбирают старую default-структуру интерфейса, если host profile не задал конкретные hostProfiles[].interfaces.',
     'Tag rules': 'Правила формирования Zabbix tags. Они читают class attribute fields через regex, например zabbixTag, и добавляют tag/value в payload. Связь с блоком Tags прямая: Tag rules создают элементы, которые видны как Tags. Tag rules не выбирают templates; если tag должен влиять на template, используйте тот же class attribute field как условие в Template rules.',
     'T4 templates': 'T4-шаблоны JSON-RPC payload. Можно менять структуру payload для уже поддержанных Zabbix methods и Model-полей. Новые Model-поля, новые методы или новая логика выполнения требуют правки микросервисов.'
   };
@@ -10103,8 +10256,49 @@ function zabbixHostGroups(rules, catalog) {
     ...(catalog.hostGroups ?? []),
     ...(rules.lookups?.hostGroups ?? []),
     ...(rules.defaults?.hostGroups ?? []),
-    ...(rules.groupSelectionRules ?? []).flatMap(rule => rule.hostGroups ?? [])
+    ...(rules.groupSelectionRules ?? []).flatMap(rule =>
+      selectionItemsForRule(rules, rule, 'hostGroups')
+        .map(item => normalizeZabbixHostGroupMappingItem(item, rule)))
   ], 'groupid');
+}
+
+function normalizeZabbixHostGroupMappingItem(item = {}, rule = null) {
+  const dynamicLabel = firstNonBlankValue(
+    item.name,
+    item.groupid,
+    item.nameTemplate,
+    item.valueTemplate,
+    rule?.valueField ? `dynamic from ${rule.valueField}` : '',
+    rule?.name);
+  return {
+    ...item,
+    name: item.name ?? (item.groupid ? '' : dynamicLabel),
+    mappingRuleName: rule?.name ?? '',
+    dynamicFromLeaf: item.targetMode === 'dynamicFromLeaf'
+      || rule?.targetMode === 'dynamicFromLeaf'
+      || (!item.groupid && (hasText(item.nameTemplate) || hasText(rule?.valueField)))
+  };
+}
+
+function zabbixHostGroupMeta(group = {}) {
+  if (hasText(group.groupid)) {
+    return `groupid ${group.groupid}`;
+  }
+
+  const parts = [
+    group.dynamicFromLeaf ? 'dynamicFromLeaf' : 'host group',
+    hasText(group.nameTemplate) ? `nameTemplate ${group.nameTemplate}` : '',
+    hasText(group.mappingRuleName) ? `rule ${group.mappingRuleName}` : ''
+  ].filter(Boolean);
+  return parts.join(' | ') || 'host group';
+}
+
+function firstNonBlankValue(...values) {
+  return values.find(hasText) ?? '';
+}
+
+function hasText(value) {
+  return String(value ?? '').trim() !== '';
 }
 
 function zabbixTemplates(rules, catalog) {
@@ -10206,9 +10400,14 @@ function zabbixExtensionItemMappingTokens(definition, item, rules = null) {
 
   const selectionRules = rules[definition.selectionRulesKey] ?? rules[`${definition.rulesKey}SelectionRules`] ?? [];
   for (const rule of selectionRules) {
-    if (selectionItemsForRule(rules, rule, definition.rulesKey)
+    const items = selectionItemsForRule(rules, rule, definition.rulesKey);
+    if (items
       .some(candidate => sameZabbixExtensionItem(definition, candidate, item))) {
-      tokens.push(ruleValidationToken(rule, definition.rulesKey));
+      tokens.push(
+        ruleValidationToken(rule, definition.rulesKey),
+        `rule:${normalizeToken(rule.name)}`,
+        ...selectionRuleSourceTokens(rule, definition.rulesKey, items)
+      );
     }
   }
 
@@ -10280,7 +10479,7 @@ function appendOptionalZabbixRuleSections(container, rules, validation, appendSe
     if (validation && (!Array.isArray(selectionRules) || selectionRules.length === 0)) {
       continue;
     }
-    appendConversionRuleSection(container, `${definition.title} rules`, selectionRules, definition.rulesKey, validation, rules, appendSection, definition.selectionRulesKey);
+    appendConversionRuleSection(container, zabbixExtensionRulesTitle(definition), selectionRules, definition.rulesKey, validation, rules, appendSection, definition.selectionRulesKey);
   }
 }
 
@@ -10295,7 +10494,11 @@ function zabbixItemTokens(rules, type, id, name) {
   for (const rule of ruleLists[type] ?? []) {
     const items = selectionItemsForRule(rules, rule, type);
     if (items.some(item => sameMappingItem(item, type, id, name))) {
-      tokens.push(ruleValidationToken(rule, type));
+      tokens.push(
+        ruleValidationToken(rule, type),
+        `rule:${normalizeToken(rule.name)}`,
+        ...selectionRuleSourceTokens(rule, type, items)
+      );
     }
   }
 
@@ -10408,17 +10611,19 @@ function conditionMappingNodes(rule, type, validation = null) {
 }
 
 function ruleTokens(rule, type, rules = null) {
+  const selectedItems = rules ? selectionItemsForRule(rules, rule, type) : rule[type] ?? [];
   const tokens = [
     ruleValidationToken(rule, type),
     `rule:${normalizeToken(rule.name)}`,
     ...targetTokensForRuleType(type),
     ...conditionTokens(rule.when),
-    ...conditionMatchTokens(rule.when)
+    ...conditionMatchTokens(rule.when),
+    ...selectionRuleSourceTokens(rule, type, selectedItems)
   ];
 
-  for (const item of rules ? selectionItemsForRule(rules, rule, type) : rule[type] ?? []) {
+  for (const item of selectedItems) {
     if (type === 'hostGroups') {
-      tokens.push(`zbx-hostGroups:${normalizeToken(item.groupid || item.name)}`);
+      tokens.push(`zbx-hostGroups:${normalizeToken(item.groupid || item.name || item.nameTemplate || item.valueTemplate)}`);
     } else if (type === 'templates') {
       tokens.push(`zbx-templates:${normalizeToken(item.templateid || item.name)}`);
     } else if (type === 'templateGroups') {
@@ -10602,10 +10807,11 @@ function templateSourceFieldTokens(rules, templateNames) {
 
 function templateStringTokens(template = '') {
   return [
+    ...[...String(template).matchAll(/Model\.Source\(["']([^"']+)["']\)/g)].map(match => match[1]),
     ...[...String(template).matchAll(/Model\.Field\(["']([^"']+)["']\)/g)].map(match => match[1]),
     ...[...String(template).matchAll(/Model\.([A-Za-z0-9_]+)/g)]
       .map(match => canonicalSourceField(match[1]))
-      .filter(field => field !== 'field')
+      .filter(field => field !== 'field' && field !== 'source')
   ].flatMap(field => sourceFieldTokens(field));
 }
 
@@ -10628,6 +10834,98 @@ function selectionItemsForRule(rules, rule, type) {
     ...itemsFromRulesRef(rules, rule[`${type}Ref`]),
     ...singularRefItems
   ];
+}
+
+function selectionRuleSourceTokens(rule = {}, type = '', items = []) {
+  const directFields = [
+    rule.valueField,
+    rule.field,
+    rule.sourceField,
+    rule.cmdbField,
+    rule.cmdbAttribute
+  ].filter(hasText);
+  return uniqueTokens([
+    ...conditionTokens(rule.when),
+    ...conditionMatchTokens(rule.when),
+    ...directFields.flatMap(field => sourceFieldTokens(field)),
+    ...mappingTemplateObjectTokens(rule),
+    ...items.flatMap(item => mappingTemplateObjectTokens(item)),
+    ...items.flatMap(item => [
+      item?.valueField,
+      item?.field,
+      item?.sourceField,
+      item?.cmdbField,
+      item?.cmdbAttribute
+    ].filter(hasText).flatMap(field => sourceFieldTokens(field))),
+    ...(type === 'interfaceAddress' && hasText(rule.valueField) ? sourceFieldTokens(rule.valueField) : [])
+  ]);
+}
+
+function mappingTemplateObjectTokens(item = {}) {
+  return [
+    item.valueTemplate,
+    item.nameTemplate,
+    item.hostNameTemplate,
+    item.visibleNameTemplate,
+    item.displayNameTemplate,
+    item.descriptionTemplate,
+    item.macroTemplate,
+    item.value
+  ].filter(hasText).flatMap(value => templateStringTokens(value));
+}
+
+function monitoringFieldRuleTokens(field, rules = {}) {
+  const key = monitoringFieldKey(field);
+  const target = targetKey(field);
+  const tokens = [];
+  const appendRules = (items, type, predicate = () => true) => {
+    for (const rule of items ?? []) {
+      if (!predicate(rule)) {
+        continue;
+      }
+
+      tokens.push(
+        ruleValidationToken(rule, type),
+        `rule:${normalizeToken(rule.name)}`,
+        ...selectionRuleSourceTokens(rule, type, selectionItemsForRule(rules, rule, type))
+      );
+    }
+  };
+
+  if (target === 'groups') {
+    appendRules(rules.groupSelectionRules, 'hostGroups');
+  } else if (target === 'templates') {
+    appendRules(rules.templateSelectionRules, 'templates');
+  } else if (target === 'tags') {
+    appendRules(rules.tagSelectionRules, 'tags');
+  } else if (target === 'interfaces') {
+    appendRules(rules.interfaceAddressRules, 'interfaceAddress', rule => interfaceAddressRuleMatchesMonitoringField(rule, key));
+    appendRules(rules.interfaceSelectionRules, 'interface');
+    for (const profile of rules.hostProfiles ?? []) {
+      tokens.push(...hostProfileTokens(profile));
+    }
+  } else if (target === 'inventory' || key.startsWith('inventory.')) {
+    appendRules(rules.inventorySelectionRules, 'inventoryFields');
+  } else if (target === 'host' || target === 'name') {
+    for (const profile of rules.hostProfiles ?? []) {
+      tokens.push(...hostProfileTokens(profile));
+    }
+  }
+
+  return uniqueTokens(tokens);
+}
+
+function interfaceAddressRuleMatchesMonitoringField(rule = {}, key = '') {
+  if (key === 'interfaces.ip') {
+    return !rule.mode || equalsIgnoreCase(rule.mode, 'ip');
+  }
+  if (key === 'interfaces.dns') {
+    return equalsIgnoreCase(rule.mode, 'dns');
+  }
+  if (key === 'interfaces.useip') {
+    return true;
+  }
+  return true;
 }
 
 function itemsFromRulesRef(rules, ref) {
@@ -12118,7 +12416,7 @@ function uniqueById(items, idField) {
 
 function sameMappingItem(item, type, id, name) {
   const candidates = {
-    hostGroups: [item.groupid, item.name],
+    hostGroups: [item.groupid, item.name, item.nameTemplate, item.valueTemplate],
     templates: [item.templateid, item.name, item.host],
     templateGroups: [item.groupid, item.name],
     tags: [item.tag]

@@ -138,7 +138,7 @@
         <nav class="side-nav" aria-label="Разделы">
           <button class="nav-item active" data-view="dashboard" data-i18n="nav.dashboard">Dashboard</button>
           <button class="nav-item" data-view="events" data-i18n="nav.events">Events</button>
-          <button class="nav-item" data-view="systemAudit" data-i18n="nav.systemAudit">Аудит систем</button>
+          <button class="nav-item" data-view="systemAudit" data-i18n="nav.systemAudit">Аудит</button>
           <button class="nav-item" data-view="rules" data-i18n="nav.rules">Rules</button>
           <button class="nav-item" data-view="mapping" data-i18n="nav.mapping">Управление правилами конвертации</button>
           <button class="nav-item" data-view="validateMapping" data-i18n="nav.validateMapping">Логический контроль правил конвертации</button>
@@ -204,7 +204,7 @@
 
           <section class="view" id="systemAudit">
             <div class="view-header">
-              <h1 data-i18n="nav.systemAudit">Аудит систем</h1>
+              <h1 data-i18n="nav.systemAudit">Аудит</h1>
             </div>
           </section>
 
@@ -842,15 +842,16 @@
                   <li data-i18n="help.mapping.7">Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
                   <li data-i18n="help.mapping.8">Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.</li>
                   <li data-i18n="help.mapping.9">Повторное нажатие на выбранный элемент снимает выделение.</li>
-                  <li data-i18n="help.mapping.10">Interface address rules выбирают, чем заполнить Zabbix interface: ipAddress дает useip=1, dnsName дает useip=0.</li>
+                  <li data-i18n="help.mapping.10">Правила выбора адреса интерфейса выбирают, чем заполнить Zabbix interfaces[]: ipAddress дает useip=1, dnsName дает useip=0.</li>
                   <li data-i18n="help.mapping.11">Host profiles описывают два режима: несколько interfaces[] внутри одного Zabbix host или несколько Zabbix hosts из одного CMDB object.</li>
-                  <li data-i18n="help.mapping.12">Внутри host profile interface profile выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.</li>
+                  <li data-i18n="help.mapping.12">Внутри host profile профиль Zabbix interfaces[] выбирает тип мониторинга agent/SNMP/IPMI/JMX, а valueField указывает, какой CMDB атрибут станет IP или DNS.</li>
                   <li data-i18n="help.mapping.13">Source keys webhook могут отличаться от имен CMDBuild attributes; связь задается через cmdbAttribute или cmdbPath и не добавляет скрытые alias в обработку payload.</li>
                   <li data-i18n="help.mapping.14">Для lookup выделяется только конкретная связка класса, lookup и значения, например Notebook.zabbixTag.tag1.</li>
                   <li data-i18n="help.mapping.15">Regex в правилах показывает, по каким class attribute fields выбираются группы, шаблоны, tags и расширенные Zabbix-объекты.</li>
                   <li data-i18n="help.mapping.16">Domain path вида Класс.{domain:СвязанныйКласс}.Атрибут читает связанные карточки через CMDBuild relations; поля, которые могут вернуть несколько значений, недоступны для скалярных Zabbix structures.</li>
                   <li data-i18n="help.mapping.17">monitoringSuppressionRules используется, когда атрибуты экземпляра означают осознанный отказ от постановки на мониторинг; create/update пропускаются, delete не блокируется.</li>
                   <li data-i18n="help.mapping.18">Правило template проверяется по Метаданные Zabbix: конфликт item key, LLD rule key или inventory link подсвечивается красным и блокирует сохранение до исправления templateConflictRules или выбора совместимого template set.</li>
+                  <li data-i18n="help.mapping.19">В редакторе правил доступны виртуальные поля hostProfile и outputProfile. Их заполняет converter для каждого hostProfiles[]; через них можно ограничить template/group/tag rule конкретным fan-out profile.</li>
                 </ul>
               </div>
               <div class="surface">

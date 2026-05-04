@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1",
-  "rulesVersion": "2026.05.03-2140-serveri-serial-inventory-webhook-reminder",
+  "rulesVersion": "2026.05.04-0701-serveri-domain-serial-value-fix",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
   "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
@@ -986,7 +986,7 @@
           },
           {
             "field": "domainISName",
-            "pattern": "(?i).*"
+            "pattern": ".+"
           }
         ]
       },
@@ -995,7 +995,7 @@
       "createIfMissing": true,
       "hostGroups": [
         {
-          "nameTemplate": "<#= Model.Source(\"domainISName\") #>",
+          "nameTemplate": "<#= Model.Field(\"domainISName\") #>",
           "createIfMissing": true
         }
       ]
@@ -1567,6 +1567,28 @@
           "valueTemplate": "<#= Model.Field(\"serialnum\") #>"
         }
       ]
+    },
+    {
+      "name": "inventoryfields-serveri-serialnum-serialno_b",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^serveri$"
+          },
+          {
+            "field": "serialnum",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "inventoryField": {
+        "field": "serialno_b",
+        "name": "serialno_b",
+        "value": "",
+        "valueTemplate": "<#= Model.Source(\"serialnum\") #>"
+      }
     }
   ],
   "hostStatusSelectionRules": [

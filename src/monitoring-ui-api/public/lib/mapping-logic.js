@@ -148,6 +148,11 @@ export function interfaceAddressCompatibilityIssue(fieldKey, fieldRule = {}, tar
   return null;
 }
 
+export function interfaceAddressTargetForForm(ruleOrTarget = {}) {
+  const mode = String(ruleOrTarget?.mode ?? '').toLowerCase();
+  return { mode: mode === 'dns' ? 'dns' : 'ip' };
+}
+
 export function sourceFieldMayReturnMultiple(field = {}) {
   if (!cmdbPathIncludesDomain(field.cmdbPath)) {
     return false;

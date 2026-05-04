@@ -1,7 +1,7 @@
 # Документация проекта cmdb2monitoring
 
 Версия документации: `0.8.0`.
-Дата актуализации: 2026-05-03.
+Дата актуализации: 2026-05-04.
 
 ## Назначение
 
@@ -166,7 +166,7 @@ Rules-файл отвечает за:
 - lookup/reference/domain path conversion: `source.fields[].cmdbPath` хранит путь CMDBuild, а `resolve` задает, нужно ли поднять leaf через REST;
 - выбор host profiles, host groups/templates/interfaces/tags;
 - динамическое расширение только для `tags` и `hostGroups`: rule с `targetMode=dynamicFromLeaf` читает выбранный CMDBuild leaf через `valueField`; для tags формируется `tags[]`, для host groups формируется `groups[]` с name/createIfMissing до этапа Zabbix writer, а после resolve/create текущий host payload получает те же группы уже как `groupid`;
-- выбор proxy, proxy group, interface profile, host status, TLS/PSK, host macros, inventory fields, maintenances и value maps;
+- выбор proxy, proxy group, профилей Zabbix interfaces[], host status, TLS/PSK, host macros, inventory fields, maintenances и value maps;
 - `monitoringSuppressionRules` для случаев, когда по атрибутам CMDBuild-карточки объект не должен ставиться на мониторинг;
 - T4 templates для JSON-RPC;
 - fallback `host.get -> host.update/delete` без `zabbix_hostid`;
@@ -203,6 +203,8 @@ Rules reload:
 Webhook payload остается плоским. Для reference-полей CMDBuild webhook передает только numeric id первого reference attribute, например `АтрибутReference: 12345`; полный путь хранится в rules как `cmdbPath`, например `Класс.АтрибутReference.АтрибутLeaf`. `cmdbkafka2zabbix` по этому пути итеративно читает карточки CMDBuild REST и подставляет leaf-значение перед применением regex/T4. Для lookup leaf применяется тот же механизм, но результатом по умолчанию становится lookup `code`.
 
 Для CMDBuild domains, включая N:N связи без attribute в карточке, используется специальный сегмент `Класс.{domain:СвязанныйКласс}.АтрибутLeaf`: `Класс` - имя класса текущей карточки, `domain` - ключевое слово, `СвязанныйКласс` - класс второго конца связи, `АтрибутLeaf` - leaf attribute связанной карточки. UI catalog sync читает не только `/domains`, но и detailed `/domains/{domain}`, потому что список domains в CMDBuild может не содержать `source`/`destination`, без которых редактор не может предложить N:N domain path. Converter читает `/classes/{class}/cards/{id}/relations`, проверяет принадлежность связи текущему классу и классу второго конца, затем поднимает leaf тем же reference/lookup resolver. Если найдено несколько связанных карточек, по умолчанию значения склеиваются через `resolve.collectionSeparator` (`; `); для скалярного Zabbix target в UI такие fields не предлагаются, кроме явно настроенного `resolve.collectionMode=first`.
+Если domain path не смог поднять leaf, converter не должен использовать id текущей карточки как значение leaf: такое поле считается отсутствующим, чтобы dynamic host group/tag не создавались из технического id. Relations не кэшируются между событиями, потому что связи могут появиться или измениться уже после `card_create_after`, а последующий `card_update_after` должен читать актуальный набор связей.
+Runtime cache карточек CMDBuild и lookup-значений действует только внутри одного события resolver. Поэтому при модификации исходной карточки и поступлении `card_update_after` converter заново читает leaf-значения по lookup, reference и domain путям. Это позволяет обновить Zabbix по изменившимся связанным значениям, если событие update пришло именно по исходной карточке. Одна только модификация связанной карточки или domain-связи без webhook/event исходной карточки не запускает пересчет мониторинга.
 
 Максимальная глубина итеративного раскрытия `domain`/`reference`/`lookup` путей задается в `Runtime-настройки` как `Максимальная глубина рекурсии domains&reference&lookups`, диапазон `2..5`, значение по умолчанию `2`. Изменение параметра применяется к UI после logout и пересинхронизации CMDBuild catalog; новый sync записывает глубину в catalog cache, а новые `cmdbPath` fields получают соответствующий `resolve.maxDepth`.
 
@@ -332,7 +334,8 @@ Events:
 - reference attributes раскрываются итеративно до читаемых leaf-полей; выбранное leaf-поле сохраняет `source.fields[].cmdbPath`;
 - domains раскрываются как `Класс.{domain:СвязанныйКласс}.Атрибут`; редактор проверяет, что domain действительно связывает текущий class со связанным class, и не дает связать потенциально множественное domain-field со скалярной Zabbix structure;
 - центральная колонка показывает conversion fields, regex, selection rules и T4 blocks;
-- Host profiles в центральной колонке показывают fan-out и конкретные interface profile/valueField связи;
+- Host profiles в центральной колонке показывают fan-out и конкретные связи `профиль Zabbix interfaces[]`/`valueField`;
+- редактор правил добавления/модификации показывает виртуальные поля `hostProfile` и `outputProfile`: converter заполняет их для каждого `hostProfiles[]`, поэтому по ним можно ограничить template/group/tag rule конкретным fan-out profile;
 - правая колонка показывает Zabbix catalog entities;
 - повторное нажатие на элемент снимает выделение;
 - для lookup выделяется только конкретная связка class + lookup + value;
@@ -484,7 +487,7 @@ Webhook body для этой demo-схемы остается плоским: `i
 - в коде `cmdbkafka2zabbix` нет отдельного числового лимита на `Model.Interfaces`: сервис рендерит столько interfaces, сколько выбрано правилами `hostProfiles[].interfaces`;
 - фактический лимит конкретной поставки задается rules и плоским webhook body; текущая demo-схема как пример дает `main` основной IP/DNS и несколько дополнительных interface source fields, а `separate-profile-1` и `separate-profile-2` являются двумя отдельными дополнительными host profiles по одному IP каждый;
 - в одном Zabbix host допустимо несколько interfaces, но для каждого Zabbix interface type должен быть только один основной interface с `main=1`; дополнительные interfaces того же type должны иметь `main=0`, иначе Zabbix может отклонить или некорректно применить payload;
-- чтобы добавить еще один фиксированный IP в основной host, нужно добавить CMDBuild attribute, webhook field, `source.fields` и новый элемент `hostProfiles[].interfaces`; если это еще один SNMP interface, его interface profile должен быть не-main (`main=0`), кроме одного выбранного основного SNMP interface;
+- чтобы добавить еще один фиксированный IP в основной host, нужно добавить CMDBuild attribute, webhook field, `source.fields` и новый элемент `hostProfiles[].interfaces`; если это еще один SNMP interface, его профиль Zabbix interfaces[] должен быть не-main (`main=0`), кроме одного выбранного основного SNMP interface;
 - чтобы добавить еще один отдельный monitoring profile, нужно добавить новый named source field и отдельный `hostProfile` с собственным suffix, например `separate-profile-3`; при необходимости upsert на update включается `createOnUpdateWhenMissing=true`;
 - произвольное или заранее неизвестное количество IP в одном поле webhook сейчас не поддерживается: текущая модель ожидает плоские именованные поля, а не массив адресов. Для безлимитного списка потребуется отдельное расширение контракта webhook/rules/T4, например массив interfaces или profiles с итерацией.
 
@@ -539,6 +542,7 @@ Webhook body для этой demo-схемы остается плоским: `i
 ./scripts/dotnet build src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj -v minimal
 ./scripts/dotnet build src/zabbixrequests2api/zabbixrequests2api.csproj -v minimal
 ./scripts/dotnet build tests/configvalidation/configvalidation.csproj -v minimal
+./scripts/dotnet build tests/cmdbresolver/cmdbresolver.csproj -v minimal
 node src/monitoring-ui-api/scripts/validate-config.mjs
 git diff --check
 ```
@@ -548,6 +552,8 @@ Smoke-проверки цепочки:
 - `update`: CMDBuild -> Kafka -> fallback `host.get -> host.update` -> response topic -> поля изменились в Zabbix;
 - `update` с новым `profile`/`profile2`: CMDBuild -> Kafka -> fallback `host.get -> host.create` при включенном `createOnUpdateWhenMissing` -> дополнительный host появился в Zabbix;
 - `delete`: CMDBuild -> Kafka -> fallback `host.get -> host.delete` -> response topic -> host удален из Zabbix.
+
+Fast regression-набор `tests/cmdbresolver` входит в `./scripts/test-configs.sh` и не требует живых CMDBuild/Zabbix/Kafka. Он проверяет, что два последовательных update события с одним экземпляром resolver заново читают CMDBuild lookup values, reference leaf cards и domain leaf cards. Отдельный сценарий проверяет весь путь до converter output: обновленное domain leaf значение должно попасть в dynamic `groups[]` как host group с `createIfMissing=true`.
 
 Проверка полноты редактора правил описана отдельно в `TEST_PLAN_MAPPING_EDITOR.md`. Для нее подготовлены воспроизводимые scripts:
 - `node scripts/cmdbuild-demo-schema.mjs --apply` - создает абстрактную demo-модель под `CI` / `КЕ`;

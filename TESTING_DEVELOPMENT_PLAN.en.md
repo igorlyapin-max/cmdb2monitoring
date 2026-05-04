@@ -1,6 +1,6 @@
 # cmdb2monitoring Testing Development Plan
 
-Last updated: 2026-05-03.
+Last updated: 2026-05-04.
 
 ## Goal
 
@@ -58,6 +58,14 @@ Covered starter scenarios:
 15. Dynamic target is allowed only for `tags` and `hostGroups` when explicit runtime switches are enabled.
 16. Dynamic target is serialized as `targetMode=dynamicFromLeaf`, not as an empty Zabbix target.
 17. Dynamic tag/host group helpers build explicit `valueField`, `createIfMissing`, and T4 value/name templates.
+18. Virtual `hostProfile`/`outputProfile` fields are available in the add/modify rule editor, can be used as `Template rule` conditions, and are not serialized into `source.fields`.
+
+Added the .NET regression suite `tests/cmdbresolver`, included in `scripts/test-configs.sh`. It verifies that a source-card update rereads mutable CMDBuild data through the same resolver instance:
+
+1. A lookup id is reread from lookup values and converted to the current code.
+2. A reference leaf card is reread and returns the new leaf value.
+3. A domain leaf card is reread through relations and returns the new leaf value.
+4. The updated domain leaf value goes through the converter and reaches the final JSON-RPC `groups[]` as a dynamic host group.
 
 Next dynamic-target subpackage:
 

@@ -372,9 +372,10 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 21. Создать или проверить `monitoringSuppressionRules` для `MonitoringPolicy=do_not_monitor`.
 22. Проверить negative-сценарий interface address: неподтвержденный адресный field не должен сохраняться как IP/DNS interface, пока не задано явное IP/DNS имя/source metadata или `validationRegex`.
 23. Добавить rule для нового конкретного CMDBuild класса из текущего catalog, у которого в правилах еще нет `hostProfiles[]`: выбрать IP или DNS leaf, сохранить rule и проверить, что draft JSON получил `source.entityClasses`, `source.fields`, selection rule и минимальный `hostProfiles[]` с condition по `className`.
-24. Удалить или временно отключить этот `hostProfiles[]` только в draft JSON и запустить логический контроль правил конвертации: класс должен подсветиться как ошибка rules с действием `Создать host profile`, а применение выбранного действия должно восстановить profile через общий undo/redo поток.
-25. Запустить логический контроль правил конвертации.
-26. Выполнить `Save file as` и проверить, что webhook body остается плоским, а path metadata сохраняется рядом с source key.
+24. Добавить `Template rule` с виртуальным field `hostProfile`, regex по имени fan-out profile и выбранным template; проверить, что rule condition создана по `hostProfile`, а `source.fields.hostProfile` не появился в draft JSON.
+25. Удалить или временно отключить этот `hostProfiles[]` только в draft JSON и запустить логический контроль правил конвертации: класс должен подсветиться как ошибка rules с действием `Создать host profile`, а применение выбранного действия должно восстановить profile через общий undo/redo поток.
+26. Запустить логический контроль правил конвертации.
+27. Выполнить `Save file as` и проверить, что webhook body остается плоским, а path metadata сохраняется рядом с source key.
 
 ## Критерий приемки
 

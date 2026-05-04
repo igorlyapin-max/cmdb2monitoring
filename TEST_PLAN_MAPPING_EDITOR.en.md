@@ -372,9 +372,10 @@ Separate status scenario:
 21. Create or verify `monitoringSuppressionRules` for `MonitoringPolicy=do_not_monitor`.
 22. Verify the interface-address negative scenario: an unconfirmed address field must not be saved as an IP/DNS interface until it has an explicit IP/DNS name/source metadata or `validationRegex`.
 23. Add a rule for a new concrete CMDBuild class from the current catalog that has no `hostProfiles[]` entry yet: choose an IP or DNS leaf, save the rule, and verify that draft JSON receives `source.entityClasses`, `source.fields`, the selection rule, and a minimal `hostProfiles[]` with a `className` condition.
-24. Remove or temporarily disable that `hostProfiles[]` only in draft JSON and run Logical Control of Conversion Rules: the class must be highlighted as a rules error with the `Create host profile` action, and applying it must restore the profile through the shared undo/redo flow.
-25. Run Logical Control of Conversion Rules.
-26. Run `Save file as` and verify that webhook body remains flat while path metadata is stored next to the source key.
+24. Add a `Template rule` with the virtual `hostProfile` field, a regex matching the fan-out profile name, and a selected template; verify that the rule condition uses `hostProfile` and `source.fields.hostProfile` is not added to draft JSON.
+25. Remove or temporarily disable that `hostProfiles[]` only in draft JSON and run Logical Control of Conversion Rules: the class must be highlighted as a rules error with the `Create host profile` action, and applying it must restore the profile through the shared undo/redo flow.
+26. Run Logical Control of Conversion Rules.
+27. Run `Save file as` and verify that webhook body remains flat while path metadata is stored next to the source key.
 
 ## Acceptance Criteria
 

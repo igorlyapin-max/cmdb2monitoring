@@ -33,7 +33,7 @@ const roles = {
   admin: {
     key: 'admin',
     label: 'Администрирование',
-    legacy: [],
+    legacy: ['administrator'],
     views: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
   }
 };

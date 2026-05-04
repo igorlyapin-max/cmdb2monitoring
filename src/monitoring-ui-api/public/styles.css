@@ -1399,6 +1399,15 @@ fieldset.settings-stack {
   overflow-wrap: anywhere;
 }
 
+.rules-version-source,
+.rules-version-warning {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 .status-ok {
   color: var(--ok);
 }

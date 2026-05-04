@@ -13,9 +13,7 @@ public sealed class CmdbSourceFieldResolver(
     ILogger<CmdbSourceFieldResolver> logger)
 {
     private readonly Dictionary<string, IReadOnlyDictionary<string, CmdbAttributeInfo>> attributeCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> cardCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IReadOnlyList<CmdbLookupValue>> lookupCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IReadOnlyList<CmdbRelationEndpoint>> relationCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly AsyncLocal<RuntimeResolveCache?> runtimeCache = new();
     private bool missingConfigurationWarningLogged;
 
     public async Task<CmdbSourceEvent> ResolveAsync(
@@ -23,44 +21,65 @@ public sealed class CmdbSourceFieldResolver(
         ConversionRulesDocument rules,
         CancellationToken cancellationToken)
     {
-        var resolvedFields = new Dictionary<string, string>(source.SourceFields, StringComparer.OrdinalIgnoreCase);
-        foreach (var (fieldName, fieldRule) in rules.Source.Fields)
+        var previousCache = runtimeCache.Value;
+        runtimeCache.Value = new RuntimeResolveCache();
+        try
         {
-            if (!ShouldResolve(fieldRule))
+            var resolvedFields = new Dictionary<string, string>(source.SourceFields, StringComparer.OrdinalIgnoreCase);
+            foreach (var (fieldName, fieldRule) in rules.Source.Fields)
             {
-                continue;
-            }
-
-            var sourceValue = ReadSourceValue(fieldName, fieldRule, resolvedFields);
-            if (string.IsNullOrWhiteSpace(sourceValue) && IsDomainPath(fieldRule.CmdbPath))
-            {
-                sourceValue = source.EntityId;
-            }
-
-            if (string.IsNullOrWhiteSpace(sourceValue))
-            {
-                continue;
-            }
-
-            try
-            {
-                var resolvedValue = await ResolveFieldAsync(source, fieldName, fieldRule, sourceValue, cancellationToken);
-                if (!string.IsNullOrWhiteSpace(resolvedValue))
+                if (!ShouldResolve(fieldRule))
                 {
-                    resolvedFields[fieldName] = resolvedValue;
+                    continue;
+                }
+
+                var isDomainPath = IsDomainPath(fieldRule.CmdbPath);
+                var sourceValue = ReadSourceValue(fieldName, fieldRule, resolvedFields);
+                if (string.IsNullOrWhiteSpace(sourceValue) && isDomainPath)
+                {
+                    sourceValue = source.EntityId;
+                }
+
+                if (string.IsNullOrWhiteSpace(sourceValue))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var resolvedValue = await ResolveFieldAsync(source, fieldName, fieldRule, sourceValue, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(resolvedValue))
+                    {
+                        resolvedFields[fieldName] = resolvedValue;
+                    }
+                    else if (isDomainPath)
+                    {
+                        resolvedFields.Remove(fieldName);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    if (isDomainPath)
+                    {
+                        resolvedFields.Remove(fieldName);
+                    }
+
+                    logger.LogWarning(
+                        ex,
+                        isDomainPath
+                            ? "Failed to resolve CMDBuild source field {FieldName} with domain path {CmdbPath}; dropping unresolved relation id"
+                            : "Failed to resolve CMDBuild source field {FieldName} with path {CmdbPath}; keeping original value",
+                        fieldName,
+                        fieldRule.CmdbPath);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogWarning(
-                    ex,
-                    "Failed to resolve CMDBuild source field {FieldName} with path {CmdbPath}; keeping original value",
-                    fieldName,
-                    fieldRule.CmdbPath);
-            }
-        }
 
-        return UpdateSourceFields(source, resolvedFields);
+            return UpdateSourceFields(source, resolvedFields);
+        }
+        finally
+        {
+            runtimeCache.Value = previousCache;
+        }
     }
 
     private static bool ShouldResolve(SourceFieldRule rule)
@@ -530,7 +549,8 @@ public sealed class CmdbSourceFieldResolver(
         CancellationToken cancellationToken)
     {
         var cacheKey = $"{className}:{cardId}";
-        if (cardCache.TryGetValue(cacheKey, out var cached))
+        var cache = runtimeCache.Value;
+        if (cache?.CardCache.TryGetValue(cacheKey, out var cached) == true)
         {
             return cached;
         }
@@ -539,7 +559,10 @@ public sealed class CmdbSourceFieldResolver(
             $"/classes/{Uri.EscapeDataString(className)}/cards/{Uri.EscapeDataString(cardId)}",
             cancellationToken);
         var data = ReadDataObject(document.RootElement);
-        cardCache[cacheKey] = data;
+        if (cache is not null)
+        {
+            cache.CardCache[cacheKey] = data;
+        }
         return data;
     }
 
@@ -547,7 +570,8 @@ public sealed class CmdbSourceFieldResolver(
         string lookupType,
         CancellationToken cancellationToken)
     {
-        if (lookupCache.TryGetValue(lookupType, out var cached))
+        var cache = runtimeCache.Value;
+        if (cache?.LookupCache.TryGetValue(lookupType, out var cached) == true)
         {
             return cached;
         }
@@ -563,7 +587,10 @@ public sealed class CmdbSourceFieldResolver(
                 || !string.IsNullOrWhiteSpace(item.Code)
                 || !string.IsNullOrWhiteSpace(item.Description))
             .ToArray();
-        lookupCache[lookupType] = values;
+        if (cache is not null)
+        {
+            cache.LookupCache[lookupType] = values;
+        }
         return values;
     }
 
@@ -573,25 +600,16 @@ public sealed class CmdbSourceFieldResolver(
         string targetClass,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"{sourceClass}:{sourceCardId}:{targetClass}";
-        if (relationCache.TryGetValue(cacheKey, out var cached))
-        {
-            return cached;
-        }
-
         using var document = await GetJsonAsync(
             $"/classes/{Uri.EscapeDataString(sourceClass)}/cards/{Uri.EscapeDataString(sourceCardId)}/relations",
             cancellationToken);
-        var related = ReadDataArray(document.RootElement)
+        return ReadDataArray(document.RootElement)
             .Select(item => ReadRelatedEndpoint(item, sourceClass, sourceCardId, targetClass))
             .Where(item => item is not null)
             .Select(item => item!)
             .GroupBy(item => $"{item.ClassName}:{item.CardId}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();
-
-        relationCache[cacheKey] = related;
-        return related;
     }
 
     private static CmdbRelationEndpoint? ReadRelatedEndpoint(
@@ -918,6 +936,13 @@ public sealed class CmdbSourceFieldResolver(
     private sealed record CmdbRelationEndpoint(
         string ClassName,
         string CardId);
+
+    private sealed class RuntimeResolveCache
+    {
+        public Dictionary<string, IReadOnlyDictionary<string, string>> CardCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, IReadOnlyList<CmdbLookupValue>> LookupCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
 
     private sealed record CmdbLookupValue(
         string Id,

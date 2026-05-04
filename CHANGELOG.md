@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Changed
+
+- Renamed the audit placeholder menu to `Аудит` / `Audit` and allowed the `administrator` role alias to resolve to `admin` access.
+- Added `cmdbresolver` regression tests for update events that must reread CMDBuild lookup, reference, and domain leaf values, including the dynamic host group JSON-RPC output built from a domain leaf.
+
+### Fixed
+
+- Dashboard rules-version rows now show the exact disk/git source path and warn when the converter-loaded rules version differs from the management UI source.
+- Conversion Rules Management view now keeps the Zabbix side visible when selecting a CMDBuild attribute, including ordinary payload mappings and dynamic Host group mappings from CMDBuild leaf values.
+- Conversion Rules Management now identifies `interfaceAddress` targets by address mode (`ip`/`dns`), so editing a DNS rule that uses a concrete CMDBuild leaf such as `hostname` no longer blocks save because the target option used a different default leaf.
+- Renamed interface-related UI terms: `interfaceAddress` is shown as an interface address selection rule, `interfaceSelectionRules` as legacy interface fallback rules, and interface profiles as Zabbix `interfaces[]` profiles.
+- Conversion Rules Management add/modify now exposes virtual `hostProfile` and `outputProfile` fields for restricting template/group/tag rules to a specific fan-out profile without adding those fields to `source.fields`.
+- `cmdbkafka2zabbix` now scopes runtime CMDBuild card/lookup caches to one resolver event so source-card updates can pick up changed linked lookup/reference/domain leaves.
+- Fixed CMDBuild domain leaf resolution so an unresolved relation id is not used as a dynamic Zabbix host group name.
+- Stopped caching CMDBuild relation lists in `cmdbkafka2zabbix`, so relations created after the source card create event can be seen by later update events.
+
 ## 0.8.0 - 2026-05-03
 
 ### Added

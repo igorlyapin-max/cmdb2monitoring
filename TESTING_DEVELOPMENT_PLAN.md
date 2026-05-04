@@ -1,6 +1,6 @@
 # План развития тестирования cmdb2monitoring
 
-Дата актуализации: 2026-05-03.
+Дата актуализации: 2026-05-04.
 
 ## Цель
 
@@ -58,6 +58,14 @@
 15. Dynamic target разрешается только для `tags` и `hostGroups` при явных runtime-флагах.
 16. Dynamic target сериализуется как `targetMode=dynamicFromLeaf`, а не как пустой Zabbix target.
 17. Dynamic tag/host group helper формирует явный `valueField`, `createIfMissing` и T4 value/name template.
+18. Виртуальные поля `hostProfile`/`outputProfile` доступны в add/modify редакторе rules, могут использоваться в `Template rule` как condition и не сериализуются в `source.fields`.
+
+Добавлен .NET regression-набор `tests/cmdbresolver`, входящий в `scripts/test-configs.sh`. Он проверяет, что update исходной карточки перечитывает mutable CMDBuild data через один и тот же экземпляр resolver:
+
+1. Lookup id повторно читается из lookup values и преобразуется в актуальный code.
+2. Reference leaf card повторно читается и возвращает новое leaf-значение.
+3. Domain leaf card повторно читается через relations и возвращает новое leaf-значение.
+4. Обновленное domain leaf значение проходит через converter и попадает в итоговый JSON-RPC `groups[]` как dynamic host group.
 
 Следующий подпакет для dynamic targets:
 
