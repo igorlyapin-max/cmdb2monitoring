@@ -60,6 +60,10 @@ public sealed class ZabbixHostCreateModel
 
     public string EventType { get; init; } = string.Empty;
 
+    public string RulesVersion { get; init; } = string.Empty;
+
+    public string SchemaVersion { get; init; } = string.Empty;
+
     public string CurrentMethod { get; init; } = string.Empty;
 
     public string? FallbackForMethod { get; init; }

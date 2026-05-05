@@ -9,21 +9,23 @@
 | IF-003 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
 | IF-004 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |
 | IF-005 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.responses.*` | Результат вызова Zabbix API |
-| IF-006 | Микросервисы `:5080/:5081/:5082` | Kafka `:9092` | `*.logs.*` topics | Structured JSON logs для будущего ELK |
+| IF-006 | Микросервисы `:5080/:5081/:5082/:5083` | Kafka `:9092` | `*.logs.*` topics | Structured JSON logs для будущего ELK |
 | IF-007 | cmdbkafka2zabbix `:5081` | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
-| IF-008 | Микросервисы `:5080/:5081/:5082` | Local FS | `state/*.json` | Последний обработанный объект |
+| IF-008 | Микросервисы `:5080/:5081/:5082/:5083` | Local FS | `state/*.json` | Последний обработанный объект |
 | IF-009 | Browser | monitoring-ui-api `:5090` | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
 | IF-010 | monitoring-ui-api `:5090` | IdP/SAML2/OAuth2 и MS AD LDAP/LDAPS `:443/:80/:636/:389` | Redirect/POST SAML2, OAuth2 Authorization Code, LDAP bind/search | AuthnRequest, SAMLResponse, metadata, OAuth2 code/token/userinfo, LDAP user/groups |
 | IF-011 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP | Classes, attributes, lookup types, optional session credentials |
 | IF-012 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC | Templates, host groups, template groups, known tags, template item keys/LLD/inventory metadata, existing host templates |
 | IF-013 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
 | IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json`, `state/users.json` | Catalog cache, persisted UI settings и local users; runtime/state-файлы не попадают в git |
-| IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
-| IF-016 | monitoring-ui-api `:5090` | .NET services `:5080/:5081/:5082` | HTTP GET `/health` | Проверка готовности микросервисов на dashboard |
+| IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `zabbix.host.bindings.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
+| IF-016 | monitoring-ui-api `:5090` | .NET services `:5080/:5081/:5082/:5083` | HTTP GET `/health` | Проверка готовности микросервисов на dashboard |
 | IF-017 | Browser | Local downloads | rules JSON и `*-webhook-bodies.txt` | `Управление правилами конвертации` / `Save file as`: draft rules и webhook Body/DELETE-инструкции только по изменениям текущей UI-сессии |
 | IF-018 | cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP GET `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/classes/{class}/cards/{id}/relations`, `/lookup_types/{type}/values` | Подъем reference/lookup/domain leaf-значений по `source.fields[].cmdbPath` |
 | IF-019 | monitoring-ui-api `:5090` | cmdbkafka2zabbix `:5081` | HTTP POST `/admin/reload-rules` с Bearer token | Сигнал перечитывания conversion rules через provider abstraction |
 | IF-020 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT/DELETE `/etl/webhook/` | Чтение и применение выбранного плана CMDBuild webhooks в разделе `Настройка webhooks` |
+| IF-021 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.bindings.*` | Событие связи CMDBuild card/profile -> Zabbix hostid после успешного host.create/update/delete |
+| IF-022 | zabbixbindings2cmdbuild `:5083` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT `/classes/.../cards` | Запись `zabbix_main_hostid` или карточки `ZabbixHostBinding` |
 
 ## Срез бизнес-описания
 
@@ -31,7 +33,7 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-020:
+Срез поддержки включает IF-006..IF-022:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
@@ -42,6 +44,7 @@
 - чтение CMDBuild reference/lookup/domain leaf-значений конвертером по path metadata из rules;
 - авторизованный reload сигнал для перечитывания conversion rules;
 - настройка managed CMDBuild webhooks из UI через BFF с явным apply и ограничением префикса `cmdbwebhooks2kafka-`;
+- обратная запись Zabbix binding-ов в CMDBuild после успешного применения мониторинга;
 - Authorization session и settings для локального входа, MS AD LDAP/LDAPS и IdP SAML2/OAuth2/OIDC;
 - секреты и credentials через конфиги/переменные окружения.
 
@@ -68,7 +71,7 @@
 - `method`;
 - `params`;
 - `id`;
-- optional metadata `cmdb2monitoring` для внутренних сценариев и fallback update/delete; содержит `eventType`, `entityId`, `host`, `hostProfile`.
+- optional metadata `cmdb2monitoring` для внутренних сценариев, binding events и fallback update/delete; содержит `eventType`, `entityId`, `sourceClass`, `sourceCardId`, `sourceCode`, `host`, `hostProfile`, `isMainProfile`, `rulesVersion`, `schemaVersion`.
 
 `params` для `host.create/update` может включать:
 - `host`, `name`, `status`;
@@ -81,6 +84,8 @@
 Если передается `inventory`, `inventory_mode` не должен быть `-1`.
 
 Для `host.update` поля `groups`, `templates`, `tags`, `macros` и `inventory` являются merge-полями на стороне `zabbixrequests2api`: текущие значения Zabbix host сохраняются, если rules не передают значение с тем же ключом. `templates_clear` явно удаляет конфликтующие linked templates. `interfaces` остаются authoritative по rules, writer только переносит существующие `interfaceid`.
+
+При `update/delete` `cmdbkafka2zabbix` сначала использует explicit `zabbix_hostid` из события/rules, затем сохраненную CMDBuild связь `zabbix_main_hostid` или `ZabbixHostBinding`, и только после этого fallback `host.get` по technical host name.
 
 Zabbix template metadata из IF-012 хранится рядом с catalog cache и содержит `itemKeys`, `discoveryRuleKeys`, `inventoryLinks`, parent templates, existing host templates и индекс конфликтов. UI использует индекс для предупреждений и блокировок в редакторе rules и Logical Control, а `zabbixrequests2api` повторяет проверку непосредственно перед `host.create/update`.
 
@@ -102,6 +107,22 @@ Zabbix template metadata из IF-012 хранится рядом с catalog cach
 - `input`;
 - `missing`;
 - `zabbixResponse`.
+
+### Zabbix binding event
+
+Передается в `zabbix.host.bindings.*` после успешного `host.create/update/delete`.
+
+Поля:
+- `eventType`: `zabbix.host.binding.created`, `zabbix.host.binding.updated` или `zabbix.host.binding.deleted`;
+- `operation`;
+- `sourceClass`, `sourceCardId`, `sourceCode`;
+- `hostProfile`, `isMainProfile`;
+- `zabbixHostId`, `zabbixHostName`;
+- `bindingStatus`: `active` или `deleted`;
+- `rulesVersion`, `schemaVersion`, `requestId`, `occurredAt`;
+- `input.topic`, `input.partition`, `input.offset`, `input.key`.
+
+`zabbixbindings2cmdbuild` использует это событие для записи `zabbix_main_hostid` в исходную карточку основного профиля или карточки `ZabbixHostBinding` для дополнительного профиля.
 
 ### Monitoring UI session
 

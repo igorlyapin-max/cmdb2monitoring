@@ -1,7 +1,7 @@
 cmdb2monitoring Technical Specification
 
 Document version: 0.8.0
-Last updated: 2026-05-04
+Last updated: 2026-05-05
 English companion for TZ_cmdb2monitoring.txt. Architecture artifacts under aa/ are intentionally not translated in this pass.
 
 1. Project Purpose
@@ -10,12 +10,15 @@ The project implements an integration chain:
 
 CMDBuild webhook -> Kafka -> conversion rules -> Kafka -> Zabbix API -> Kafka response.
 
+After successful Zabbix host writes, a separate binding flow records `CMDBuild card/profile -> Zabbix hostid` back in CMDBuild for audit and future exact identification.
+
 Goals:
 - receive CMDBuild card lifecycle events;
 - normalize webhook payloads into Kafka events;
 - convert CMDBuild events to Zabbix JSON-RPC requests using JSON rules and T4 templates;
 - call Zabbix API through a dedicated worker;
 - keep audit/diagnostic responses in Kafka;
+- publish and consume Zabbix binding events to fill `zabbix_main_hostid` and `ZabbixHostBinding` in CMDBuild;
 - provide an operator UI/BFF for health, events, catalog sync, rules validation/dry-run, rules editing, logical control, authorization, and runtime settings.
 
 monitoring-ui-api does not write active rules files and does not commit/push rules to git. Operators save JSON through the browser, publish it to their chosen git repository outside the application, and then request rules reload on the converter microservice.
@@ -41,6 +44,7 @@ Verified development environment:
 | Apache Kafka | `3.9.2` | Verified in PLAINTEXT/KRaft dev mode |
 | CMDBuild DB | PostgreSQL `17.9` + PostGIS `3.5.x` | Used by CMDBuild only |
 | Zabbix DB | PostgreSQL `16.13` | Used by Zabbix only |
+| Audit storage | PostgreSQL `16/17`, SQLite `3.x` | PostgreSQL is the target audit store for medium and large installations; SQLite is used for development and small installations through the same storage contract |
 | .NET SDK | `10.0.203` | Repository wrapper `scripts/dotnet` |
 | Node.js | `>=22` | Required by monitoring-ui-api |
 
@@ -51,6 +55,7 @@ Expected compatibility is contract-based: CMDBuild `4.x` with REST v3, Zabbix `7
 - `src/cmdbwebhooks2kafka`: webhook receiver and Kafka event producer.
 - `src/cmdbkafka2zabbix`: CMDB event consumer, rules/T4 converter, Zabbix request producer.
 - `src/zabbixrequests2api`: Zabbix request consumer, Zabbix API caller, response producer.
+- `src/zabbixbindings2cmdbuild`: Zabbix binding event consumer and CMDBuild reverse-binding writer.
 - `src/monitoring-ui-api`: Node.js frontend/BFF.
 - `rules/`: demo and starter conversion rules.
 - `tests/configvalidation`: config and rules validation.
@@ -121,9 +126,11 @@ Normalized CMDBuild events include source, event type, class name, entity id, pa
 - `cmdbuild.webhooks.*`;
 - `zabbix.host.requests.*`;
 - `zabbix.host.responses.*`;
+- `zabbix.host.bindings.*`;
 - `cmdbwebhooks2kafka.logs.*`;
 - `cmdbkafka2zabbix.logs.*`;
-- `zabbixrequests2api.logs.*`.
+- `zabbixrequests2api.logs.*`;
+- `zabbixbindings2cmdbuild.logs.*`.
 
 Topics are created externally. Services must not create topics on startup.
 
@@ -257,20 +264,24 @@ Structured service logs are written to configured log sinks, currently Kafka log
 13.10. create/update/delete Handling
 
 - `create` normally renders `host.create`;
-- `update` without `zabbix_hostid` uses fallback `host.get -> host.update`;
+- `update` without an explicit `zabbix_hostid` first tries stored CMDBuild bindings and then uses fallback `host.get -> host.update`;
 - update can upsert through `host.get -> host.create` when a profile has `createOnUpdateWhenMissing=true`;
-- `delete` without `zabbix_hostid` uses fallback `host.get -> host.delete`.
+- `delete` without an explicit `zabbix_hostid` first tries stored CMDBuild bindings and then uses fallback `host.get -> host.delete`.
 
 `zabbix_hostid` source:
 
 - `zabbix_hostid`/`zabbixHostId` is not created automatically in the incoming CMDBuild webhook;
 - it can come from a dedicated CMDBuild attribute when an installation stores the Zabbix hostid on the card;
 - it can be added by an external enrichment process between the CMDBuild webhook and `cmdbkafka2zabbix`;
-- it can be read by rules as `source.fields.zabbixHostId` when explicitly mapped to a payload field.
+- it can be read by rules as `source.fields.zabbixHostId` when explicitly mapped to a payload field;
+- it can be read automatically from `zabbix_main_hostid` or `ZabbixHostBinding` after `zabbixbindings2cmdbuild` has written it.
 
 Normal host identity for update/delete without `zabbix_hostid`:
 
+- for the main host profile, `cmdbkafka2zabbix` reads the source card attribute `Cmdbuild:MainHostIdAttributeName`, default `zabbix_main_hostid`;
+- for an additional host profile, it reads `Cmdbuild:BindingClassName`, default `ZabbixHostBinding`, and finds an active card by `OwnerClass + OwnerCardId + HostProfile`;
 - `cmdbkafka2zabbix` computes the technical host name from `normalization.hostName` or `hostProfiles[].hostNameTemplate`;
+- if no stored binding is available, fallback `host.get` by the computed host name is used;
 - the technical host name must use stable CMDBuild identity: `className`, `id`, immutable `code`, and profile name;
 - IP/DNS must not be used as part of the host identifier when IP/DNS changes are expected;
 - `zabbixrequests2api` performs `host.get` with `filter.host`, reads the found `hostid`, and then builds `host.update` or `host.delete`;
@@ -299,12 +310,15 @@ IP address change:
 
 14.1. Purpose
 
-The service consumes Zabbix JSON-RPC requests from Kafka, validates payloads and referenced catalogs, calls Zabbix API, and publishes responses.
+The service consumes Zabbix JSON-RPC requests from Kafka, validates payloads and referenced catalogs, calls Zabbix API, publishes responses, and publishes binding events after successful host writes.
 
 14.2. Kafka Input/Output
 
 Input topic: `zabbix.host.requests.*`.
 Output topic: `zabbix.host.responses.*`.
+Binding output topic: `zabbix.host.bindings.*`.
+
+Binding publish failures must not cause the already completed Zabbix API operation to be repeated. The service logs the error, publishes/commits the normal response path, and leaves binding recovery to operational follow-up.
 
 14.3. Zabbix API
 
@@ -330,6 +344,24 @@ If a catalog reference is missing or template compatibility fails, the service m
 
 Responses include source request metadata, success/failure status, Zabbix API result or error, and processing diagnostics.
 
+14.7A. Binding Output Contract
+
+After a successful and actually sent `host.create`, `host.update`, or `host.delete`, `zabbixrequests2api` publishes a JSON event to `zabbix.host.bindings.*`.
+
+Required fields:
+- `eventType`: `zabbix.host.binding.created`, `zabbix.host.binding.updated`, or `zabbix.host.binding.deleted`;
+- `operation`: `host.create`, `host.update`, or `host.delete`;
+- `sourceClass`, `sourceCardId`, optional `sourceCode`;
+- `hostProfile`, `isMainProfile`;
+- `zabbixHostId`, `zabbixHostName`;
+- `bindingStatus`: `active` or `deleted`;
+- `rulesVersion`, `schemaVersion`, `requestId`, `occurredAt`;
+- `input.topic`, `input.partition`, `input.offset`, `input.key`.
+
+Kafka key: `sourceClass:sourceCardId:hostProfile`.
+Headers: `binding-event-type`, `binding-host-profile`, `binding-status`.
+If `sourceClass`, `sourceCardId`, or `zabbixHostId` is missing, the binding event is not published and a warning is logged.
+
 14.8. Processing State File
 
 The service stores last successfully processed input offset and resumes from `lastInputOffset + 1`.
@@ -337,6 +369,28 @@ The service stores last successfully processed input offset and resumes from `la
 14.9. Logging
 
 Structured JSON logs go to configured log sinks.
+
+14.10. zabbixbindings2cmdbuild
+
+The service is the first-stage reverse-write path after Zabbix API processing:
+
+`zabbixrequests2api -> zabbix.host.bindings.* -> zabbixbindings2cmdbuild -> CMDBuild REST API`.
+
+Input topic: `zabbix.host.bindings.*`.
+Log topic: `zabbixbindings2cmdbuild.logs.*`.
+Dev health endpoint: `GET http://localhost:5083/health`.
+
+Responsibilities:
+- consume binding events published by `zabbixrequests2api`;
+- for `isMainProfile=true`, update the source CMDBuild card and write `zabbix_main_hostid=<hostid>`; on `host.delete`, clear the field;
+- for additional profiles, find a `ZabbixHostBinding` card by `OwnerClass + OwnerCardId + HostProfile` and create or update the binding;
+- starting with stage 2, provide data for direct update/delete identification: `cmdbkafka2zabbix` reads `zabbix_main_hostid` and `ZabbixHostBinding` before fallback `host.get`;
+- skip invalid JSON as poison messages with state/offset recorded;
+- treat CMDBuild write errors as retryable and do not commit the Kafka offset.
+
+Configuration must expose `Kafka:Input`, `Cmdbuild:BaseUrl`, `Cmdbuild:Username`, `Cmdbuild:Password`, `Cmdbuild:MainHostIdAttributeName`, `Cmdbuild:BindingClassName`, `Cmdbuild:BindingLookupLimit`, `ProcessingState`, and `ElkLogging`.
+
+The CMDBuild service account for this service needs read/update permissions on cards of classes participating in conversion rules, and read/create/update permissions on the `ZabbixHostBinding` service class.
 
 14.10. Zabbix Templates
 
@@ -430,6 +484,8 @@ With a switch disabled, `Tag rule`/`Host group rule` must require an existing Za
 - CMDBuild for UI/catalog sync: REST API login and read-only access to metadata classes/attributes/domains, lookup types/values, current-card relations, and target cards reachable through reference/domain chains used by `source.fields[].cmdbPath`. CMDBuild card create/update/delete permissions are not required for catalog sync.
 - CMDBuild for `Webhook Setup` load/analyze: read access to ETL/webhook records through REST v3 `/etl/webhook/?detailed=true`.
 - CMDBuild for `Load into CMDB`: create/update/delete, or equivalent modify permissions, on ETL/webhook records through REST v3 `/etl/webhook/`. These permissions are needed only by operators who apply webhook plans to CMDBuild.
+- CMDBuild service account for `cmdbkafka2zabbix`: read-only access to source cards and `ZabbixHostBinding` when `Cmdbuild:HostBindingLookupEnabled` is enabled.
+- CMDBuild service account for `zabbixbindings2cmdbuild`: read/update access to cards of classes participating in conversion rules, plus read/create/update access to `ZabbixHostBinding`.
 - The backend must restrict writes to the managed `cmdbwebhooks2kafka-*` prefix, but this is an application guard, not a replacement for CMDBuild permissions. The CMDBuild account must still be restricted as narrowly as the CMDBuild permission model allows.
 - Zabbix for UI/catalog sync: API access and read-only access to used host groups, template groups, templates, hosts/tags, and catalogs read through `*.get`, including `template.get` subselects for item keys, LLD rules, inventory links, linked templates, and template groups.
 - Zabbix host create/update/delete permissions are not required for UI catalog reads, but they are required by the separate `zabbixrequests2api` API user that applies monitoring.
@@ -490,7 +546,19 @@ Rules files:
 
 18.6. monitoring-ui-api Configuration
 
-Runtime Settings include CMDBuild/Zabbix endpoints, optional Zabbix API key, Kafka Events browser settings, and health/reload endpoints. Git Settings include only rules-file storage/read settings. `Cmdbuild:UseIdp` and `Zabbix:UseIdp` runtime flags are not supported.
+Runtime Settings include CMDBuild/Zabbix endpoints, optional Zabbix API key, AuditStorage, Kafka Events browser settings, and health/reload endpoints. AuditStorage supports provider `postgresql` or `sqlite`, connection string, PostgreSQL schema, `AutoMigrate`, and `CommandTimeoutSeconds`; dev config uses SQLite. SQLite is allowed for small installations with an estimate of up to 1000 monitored objects, and can be acceptable up to 2000 objects with moderate event flow and short audit retention. Larger scale, high user concurrency, or long audit retention requires PostgreSQL. Audit code must use a shared storage abstraction and be validated against both DB engines. Git Settings include only rules-file storage/read settings. `Cmdbuild:UseIdp` and `Zabbix:UseIdp` runtime flags are not supported.
+
+Audit model:
+
+- the UI must provide the `Audit` section for `editor` and `admin`; model check is available to `editor/admin`, while applying CMDBuild changes is `admin`-only;
+- audit model check must derive participating CMDBuild classes from conversion rules and build a plan without modifying CMDBuild;
+- audit model apply must add the missing `zabbix_main_hostid` attribute to participating classes. This attribute stores the Zabbix `hostid` of the main host for a concrete CMDBuild card and supports audit/diagnostics of whether the card is monitored;
+- `zabbix_main_hostid` belongs only to the main host profile. Additional `hostProfiles`, where one CMDBuild card creates several Zabbix hosts, must use a separate binding class;
+- the UI must check the `ZabbixHostBinding` class; if it is missing, the administrator must choose in the CMDBuild tree which parent class should contain it;
+- `ZabbixHostBinding` must store one card per `CMDBuild class + card id + hostProfile -> Zabbix host` link. Minimum attributes: `OwnerClass`, `OwnerCardId`, `OwnerCode`, `HostProfile`, `ZabbixHostId`, `ZabbixHostName`, `BindingStatus`, `RulesVersion`, `LastSyncAt`;
+- attribute meaning: `OwnerClass`/`OwnerCardId`/`OwnerCode` identify the source CMDBuild card; `HostProfile` identifies the profile from rules; `ZabbixHostId`/`ZabbixHostName` identify the Zabbix object; `BindingStatus`, `RulesVersion`, and `LastSyncAt` store binding state, rules version, and last synchronization time;
+- after successful Zabbix writes, `zabbixbindings2cmdbuild` must fill `zabbix_main_hostid` for the main profile and `ZabbixHostBinding` cards for additional profiles automatically;
+- applying the audit model requires CMDBuild model-administration permissions to create classes and attributes through REST (`POST /classes?scope=service`, `POST /classes/{class}/attributes`). These write permissions are not required for checking the plan.
 
 18.7. Checks
 

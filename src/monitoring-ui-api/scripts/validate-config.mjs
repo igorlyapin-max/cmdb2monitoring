@@ -43,6 +43,8 @@ required(config, 'Zabbix.ApiEndpoint');
 required(config, 'Rules.ReadFromGit');
 required(config, 'Rules.RepositoryPath');
 required(config, 'Rules.RulesFilePath');
+required(config, 'AuditStorage.Provider');
+required(config, 'AuditStorage.CommandTimeoutSeconds');
 required(config, 'EventBrowser.BootstrapServers');
 required(config, 'EventBrowser.ClientId');
 required(config, 'EventBrowser.SecurityProtocol');
@@ -57,8 +59,26 @@ if (typeof config.Rules.ReadFromGit !== 'boolean') {
   errors.push('Rules.ReadFromGit must be boolean.');
 }
 
+if (!['sqlite', 'postgresql', 'postgres'].includes(String(config.AuditStorage?.Provider ?? '').toLowerCase())) {
+  errors.push(`AuditStorage.Provider has unsupported value: ${config.AuditStorage?.Provider}`);
+}
+
+if (!intInRange(config.AuditStorage?.CommandTimeoutSeconds, 1, 300)) {
+  errors.push('AuditStorage.CommandTimeoutSeconds must be an integer from 1 to 300.');
+}
+
 if (!Array.isArray(config.EventBrowser.Topics) || config.EventBrowser.Topics.length === 0) {
   errors.push('EventBrowser.Topics must contain at least one topic.');
+}
+
+for (const expectedTopic of ['zabbix.host.bindings', 'zabbixbindings2cmdbuild.logs']) {
+  if (!config.EventBrowser.Topics.some(topic => topic?.Name === expectedTopic)) {
+    errors.push(`EventBrowser.Topics must include ${expectedTopic}.`);
+  }
+}
+
+if (!config.Services.HealthEndpoints.some(endpoint => endpoint?.Name === 'zabbixbindings2cmdbuild')) {
+  errors.push('Services.HealthEndpoints must include zabbixbindings2cmdbuild.');
 }
 
 if (!['Plaintext', 'Ssl', 'SaslPlaintext', 'SaslSsl'].includes(config.EventBrowser.SecurityProtocol)) {

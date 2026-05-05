@@ -39,6 +39,19 @@ const roles = {
 };
 
 const managedCmdbuildWebhookPrefix = 'cmdbwebhooks2kafka-';
+const auditMainHostIdAttributeName = 'zabbix_main_hostid';
+const auditBindingClassName = 'ZabbixHostBinding';
+const auditBindingAttributes = [
+  { name: 'OwnerClass', description: 'CMDBuild owner class', maxLength: 100 },
+  { name: 'OwnerCardId', description: 'CMDBuild owner card id', maxLength: 64 },
+  { name: 'OwnerCode', description: 'CMDBuild owner code', maxLength: 100 },
+  { name: 'HostProfile', description: 'cmdb2monitoring hostProfile name', maxLength: 128 },
+  { name: 'ZabbixHostId', description: 'Zabbix hostid', maxLength: 64 },
+  { name: 'ZabbixHostName', description: 'Zabbix host technical name', maxLength: 255 },
+  { name: 'BindingStatus', description: 'Binding status', maxLength: 32 },
+  { name: 'RulesVersion', description: 'Conversion rules version', maxLength: 128 },
+  { name: 'LastSyncAt', description: 'Last sync timestamp', maxLength: 64 }
+];
 
 const defaultLocalUsers = [
   { username: 'viewer', password: 'viewer', role: 'viewer', displayName: 'Просмотр' },
@@ -450,6 +463,28 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'POST' && path === '/api/cmdbuild/audit-model/plan') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await analyzeCmdbuildAuditModel(session, payload));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/cmdbuild/audit-model/apply') {
+    requireRole(session, response, ['admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await applyCmdbuildAuditModel(session, payload));
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/settings/idp') {
     requireRole(session, response, ['admin']);
     if (response.writableEnded) {
@@ -775,6 +810,11 @@ function applyEnvOverrides(target) {
     RULES_REPOSITORY_URL: ['Rules', 'RepositoryUrl'],
     RULES_REPOSITORY_PATH: ['Rules', 'RepositoryPath'],
     RULES_FILE_PATH: ['Rules', 'RulesFilePath'],
+    AUDIT_STORAGE_PROVIDER: ['AuditStorage', 'Provider'],
+    AUDIT_STORAGE_CONNECTION_STRING: ['AuditStorage', 'ConnectionString'],
+    AUDIT_STORAGE_SCHEMA: ['AuditStorage', 'Schema'],
+    AUDIT_STORAGE_AUTO_MIGRATE: ['AuditStorage', 'AutoMigrate'],
+    AUDIT_STORAGE_COMMAND_TIMEOUT_SECONDS: ['AuditStorage', 'CommandTimeoutSeconds'],
     MONITORING_UI_SETTINGS_FILE: ['UiSettings', 'FilePath'],
     MONITORING_UI_USERS_FILE: ['Auth', 'UsersFilePath'],
     MONITORING_UI_EVENTS_ENABLED: ['EventBrowser', 'Enabled'],
@@ -2325,6 +2365,304 @@ async function applyCmdbuildWebhookOperations(session, payload) {
   };
 }
 
+async function analyzeCmdbuildAuditModel(session, payload = {}) {
+  const credentials = requireCmdbuildSessionCredentials(session);
+  const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const rules = await readCurrentRules();
+  const catalog = await syncCmdbuildCatalog(session);
+  const parentClass = stringOrDefault(payload.parentClass, defaultAuditBindingParentClass(catalog));
+  const plan = buildCmdbuildAuditModelPlan(rules.content ?? rules, catalog, parentClass);
+
+  return {
+    analyzedAt: new Date().toISOString(),
+    cmdbuildEndpoint: baseUrl,
+    catalogSyncedAt: catalog.syncedAt ?? '',
+    rulesVersion: plan.rulesVersion,
+    schemaVersion: plan.schemaVersion,
+    parentClass,
+    mainAttributeName: auditMainHostIdAttributeName,
+    bindingClassName: auditBindingClassName,
+    classes: catalog.classes ?? [],
+    ...plan
+  };
+}
+
+async function applyCmdbuildAuditModel(session, payload = {}) {
+  const credentials = requireCmdbuildSessionCredentials(session);
+  const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const rules = await readCurrentRules();
+  let catalog = await syncCmdbuildCatalog(session);
+  const parentClass = stringOrDefault(payload.parentClass, defaultAuditBindingParentClass(catalog));
+  const before = buildCmdbuildAuditModelPlan(rules.content ?? rules, catalog, parentClass);
+  const results = [];
+
+  for (const item of before.classChecks) {
+    if (!item.exists) {
+      results.push({
+        action: 'skip_main_attribute',
+        className: item.className,
+        status: 'skipped',
+        reason: 'class_missing'
+      });
+      continue;
+    }
+    if (item.hasMainHostId) {
+      continue;
+    }
+
+    await createCmdbuildStringAttribute(baseUrl, credentials, item.className, {
+      name: auditMainHostIdAttributeName,
+      description: 'Zabbix main host ID',
+      maxLength: 64,
+      showInGrid: false
+    });
+    results.push({
+      action: 'create_main_attribute',
+      className: item.className,
+      attribute: auditMainHostIdAttributeName,
+      status: 'applied'
+    });
+  }
+
+  if (!before.bindingClass.exists) {
+    await createCmdbuildClass(baseUrl, credentials, parentClass, {
+      name: auditBindingClassName,
+      description: 'Zabbix Host Binding'
+    });
+    results.push({
+      action: 'create_binding_class',
+      className: auditBindingClassName,
+      parentClass,
+      status: 'applied'
+    });
+  }
+
+  for (const attribute of before.bindingAttributes) {
+    if (attribute.exists) {
+      continue;
+    }
+    const definition = auditBindingAttributes.find(item => sameNormalized(item.name, attribute.name));
+    await createCmdbuildStringAttribute(baseUrl, credentials, auditBindingClassName, {
+      name: definition?.name ?? attribute.name,
+      description: definition?.description ?? attribute.name,
+      maxLength: definition?.maxLength ?? 128,
+      showInGrid: ['OwnerClass', 'OwnerCardId', 'HostProfile', 'ZabbixHostId'].some(item => sameNormalized(item, attribute.name))
+    });
+    results.push({
+      action: 'create_binding_attribute',
+      className: auditBindingClassName,
+      attribute: definition?.name ?? attribute.name,
+      status: 'applied'
+    });
+  }
+
+  catalog = await syncCmdbuildCatalog(session);
+  const after = buildCmdbuildAuditModelPlan(rules.content ?? rules, catalog, parentClass);
+  return {
+    appliedAt: new Date().toISOString(),
+    cmdbuildEndpoint: baseUrl,
+    catalogSyncedAt: catalog.syncedAt ?? '',
+    rulesVersion: after.rulesVersion,
+    schemaVersion: after.schemaVersion,
+    parentClass,
+    mainAttributeName: auditMainHostIdAttributeName,
+    bindingClassName: auditBindingClassName,
+    count: results.length,
+    results,
+    classes: catalog.classes ?? [],
+    ...after
+  };
+}
+
+function buildCmdbuildAuditModelPlan(rules = {}, catalog = {}, parentClass = 'Class') {
+  const participatingClasses = conversionParticipatingClasses(rules, catalog);
+  const classChecks = participatingClasses.map(className => {
+    const catalogClass = findCmdbuildCatalogClass(catalog, className);
+    const attributes = catalogAttributesForClass(catalog, catalogClass?.name ?? className);
+    const mainAttribute = findCmdbuildCatalogAttribute(attributes, auditMainHostIdAttributeName);
+    return {
+      className,
+      description: catalogClass?.description ?? '',
+      exists: Boolean(catalogClass),
+      hasMainHostId: Boolean(mainAttribute),
+      inherited: Boolean(mainAttribute?.inherited),
+      attributeType: mainAttribute?.type ?? '',
+      action: !catalogClass
+        ? 'class_missing'
+        : mainAttribute
+          ? 'none'
+          : 'create_attribute'
+    };
+  });
+
+  const bindingClass = findCmdbuildCatalogClass(catalog, auditBindingClassName);
+  const bindingAttributes = auditBindingAttributes.map(attribute => {
+    const existing = bindingClass
+      ? findCmdbuildCatalogAttribute(catalogAttributesForClass(catalog, bindingClass.name), attribute.name)
+      : null;
+    return {
+      name: attribute.name,
+      description: attribute.description,
+      exists: Boolean(existing),
+      type: existing?.type ?? 'string',
+      action: existing ? 'none' : 'create_attribute'
+    };
+  });
+  const operations = [
+    ...classChecks
+      .filter(item => item.action === 'create_attribute')
+      .map(item => ({
+        action: 'create_main_attribute',
+        className: item.className,
+        attribute: auditMainHostIdAttributeName
+      })),
+    ...(!bindingClass ? [{
+      action: 'create_binding_class',
+      className: auditBindingClassName,
+      parentClass
+    }] : []),
+    ...bindingAttributes
+      .filter(item => item.action === 'create_attribute')
+      .map(item => ({
+        action: 'create_binding_attribute',
+        className: auditBindingClassName,
+        attribute: item.name
+      }))
+  ];
+
+  return {
+    schemaVersion: rules.schemaVersion ?? '',
+    rulesVersion: rules.rulesVersion ?? '',
+    participatingClasses,
+    classChecks,
+    bindingClass: {
+      name: auditBindingClassName,
+      parentClass: bindingClass?.parent ?? parentClass,
+      exists: Boolean(bindingClass),
+      description: bindingClass?.description ?? ''
+    },
+    bindingAttributes,
+    operations,
+    ready: operations.length === 0
+  };
+}
+
+function conversionParticipatingClasses(rules = {}, catalog = {}) {
+  const result = [];
+  const add = value => {
+    const className = String(value ?? '').trim();
+    if (!className || result.some(item => sameNormalized(item, className))) {
+      return;
+    }
+    result.push(className);
+  };
+
+  for (const className of (rules.source?.entityClasses ?? [])) {
+    add(className);
+  }
+  for (const field of Object.values(rules.source?.fields ?? {})) {
+    const root = cmdbPathRootClass(field?.cmdbPath);
+    if (root && findCmdbuildCatalogClass(catalog, root)) {
+      add(root);
+    }
+  }
+  collectClassNameConditions(rules, add);
+
+  return result;
+}
+
+function cmdbPathRootClass(cmdbPath) {
+  const first = String(cmdbPath ?? '').split('.').map(item => item.trim()).find(Boolean);
+  if (!first || first.startsWith('{')) {
+    return '';
+  }
+  return first;
+}
+
+function collectClassNameConditions(value, add) {
+  if (Array.isArray(value)) {
+    value.forEach(item => collectClassNameConditions(item, add));
+    return;
+  }
+  if (!isPlainObject(value)) {
+    return;
+  }
+
+  if (sameNormalized(value.field, 'className') && !isBlank(value.pattern)) {
+    classNamesFromRegex(value.pattern).forEach(add);
+  }
+  Object.values(value).forEach(item => collectClassNameConditions(item, add));
+}
+
+function classNamesFromRegex(pattern) {
+  let value = String(pattern ?? '').trim();
+  value = value.replace(/^\(\?i\)/i, '');
+  value = value.replace(/^\^/, '').replace(/\$$/, '');
+  if (value.startsWith('(') && value.endsWith(')')) {
+    value = value.slice(1, -1);
+  }
+
+  return value
+    .split('|')
+    .map(item => item.trim())
+    .filter(item => /^[A-Za-z_][A-Za-z0-9_]*$/.test(item));
+}
+
+function findCmdbuildCatalogClass(catalog = {}, className = '') {
+  return (catalog.classes ?? []).find(item => sameNormalized(item.name, className) || sameNormalized(item.description, className));
+}
+
+function catalogAttributesForClass(catalog = {}, className = '') {
+  return (catalog.attributes ?? [])
+    .find(item => sameNormalized(item.className, className))
+    ?.items ?? [];
+}
+
+function findCmdbuildCatalogAttribute(attributes = [], name = '') {
+  return attributes.find(item => sameNormalized(item.name, name) || sameNormalized(item._id, name));
+}
+
+function defaultAuditBindingParentClass(catalog = {}) {
+  const ci = findCmdbuildCatalogClass(catalog, 'CI');
+  return ci?.name ?? 'Class';
+}
+
+async function createCmdbuildClass(baseUrl, credentials, parentClass, definition) {
+  const body = {
+    name: definition.name,
+    description: definition.description ?? definition.name,
+    type: 'standard',
+    prototype: false,
+    active: true,
+    parent: stringOrDefault(parentClass, 'Class')
+  };
+  await cmdbuildRequest(baseUrl, '/classes?scope=service', credentials, {
+    method: 'POST',
+    body,
+    headers: { 'CMDBuild-View': 'admin' }
+  });
+}
+
+async function createCmdbuildStringAttribute(baseUrl, credentials, className, definition) {
+  const body = {
+    name: definition.name,
+    description: definition.description ?? definition.name,
+    mode: 'write',
+    type: 'string',
+    maxLength: clampInt(definition.maxLength, 128, 1, 1024),
+    active: true,
+    showInGrid: Boolean(definition.showInGrid),
+    showInReducedGrid: false,
+    unique: false,
+    mandatory: false
+  };
+  await cmdbuildRequest(baseUrl, `/classes/${encodeURIComponent(className)}/attributes`, credentials, {
+    method: 'POST',
+    body,
+    headers: { 'CMDBuild-View': 'admin' }
+  });
+}
+
 function normalizeCmdbuildWebhook(item = {}) {
   const code = firstNonBlank(item.code, item._id, item.id, item.name);
   return {
@@ -2813,6 +3151,7 @@ async function exportGitRulesCopy(payload = {}) {
 function normalizeRuntimeSettingsPayload(payload = {}) {
   const cmdbuild = payload.cmdbuild ?? {};
   const zabbix = payload.zabbix ?? {};
+  const auditStorage = payload.auditStorage ?? {};
   const currentMaxTraversalDepth = cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth);
   const result = {
     cmdbuild: {
@@ -2831,6 +3170,7 @@ function normalizeRuntimeSettingsPayload(payload = {}) {
         'allowDynamicHostGroupsFromCmdbLeaf',
         Boolean(config.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf))
     },
+    auditStorage: normalizeAuditStorageSettingsPayload(auditStorage, config.AuditStorage ?? {}),
     eventBrowser: {
       enabled: Boolean(payload.eventBrowser?.enabled),
       bootstrapServers: payload.eventBrowser?.bootstrapServers ?? '',
@@ -2849,6 +3189,40 @@ function normalizeRuntimeSettingsPayload(payload = {}) {
     result.rules = normalizeRulesSettingsPayload(payload.rules);
   }
   return result;
+}
+
+function normalizeAuditStorageSettingsPayload(auditStorage = {}, current = {}) {
+  const provider = normalizeAuditStorageProvider(
+    auditStorage.provider ?? auditStorage.Provider ?? current.Provider ?? current.provider ?? 'sqlite');
+  return {
+    provider,
+    connectionString: auditStorage.connectionString
+      ?? auditStorage.ConnectionString
+      ?? current.ConnectionString
+      ?? current.connectionString
+      ?? '',
+    schema: provider === 'sqlite'
+      ? ''
+      : String(auditStorage.schema ?? auditStorage.Schema ?? current.Schema ?? current.schema ?? 'public').trim(),
+    autoMigrate: booleanSettingOrDefault(
+      auditStorage,
+      'autoMigrate',
+      current.AutoMigrate ?? current.autoMigrate ?? false),
+    commandTimeoutSeconds: clampInt(
+      auditStorage.commandTimeoutSeconds ?? auditStorage.CommandTimeoutSeconds,
+      current.CommandTimeoutSeconds ?? current.commandTimeoutSeconds ?? 30,
+      1,
+      300)
+  };
+}
+
+function normalizeAuditStorageProvider(value) {
+  const normalized = String(value ?? 'sqlite').trim().toLowerCase();
+  if (['postgres', 'postgresql', 'pgsql'].includes(normalized)) {
+    return 'postgresql';
+  }
+
+  return 'sqlite';
 }
 
 function normalizeRulesSettingsPayload(rules = {}) {
@@ -2952,6 +3326,18 @@ function applyRuntimeSettings(target, persisted = {}) {
     target.Rules.ReadFromGit = Boolean(persisted.rules.readFromGit);
     target.Rules.RepositoryUrl = persisted.rules.repositoryUrl ?? target.Rules.RepositoryUrl ?? '';
     target.Rules.RepositoryPath = persisted.rules.repositoryPath ?? target.Rules.RepositoryPath ?? '';
+  }
+
+  if (persisted.auditStorage) {
+    const auditStorage = normalizeAuditStorageSettingsPayload(persisted.auditStorage, target.AuditStorage ?? {});
+    target.AuditStorage = {
+      ...(target.AuditStorage ?? {}),
+      Provider: auditStorage.provider,
+      ConnectionString: auditStorage.connectionString,
+      Schema: auditStorage.schema,
+      AutoMigrate: auditStorage.autoMigrate,
+      CommandTimeoutSeconds: auditStorage.commandTimeoutSeconds
+    };
   }
 
   if (persisted.eventBrowser) {
@@ -3606,6 +3992,7 @@ function normalizeRoleKey(value) {
 function publicRuntimeSettings() {
   const eventBrowser = config.EventBrowser ?? {};
   const rules = config.Rules ?? {};
+  const auditStorage = normalizeAuditStorageSettingsPayload(config.AuditStorage ?? {}, config.AuditStorage ?? {});
 
   return {
     filePath: config.UiSettings?.FilePath ?? 'state/ui-settings.json',
@@ -3625,6 +4012,7 @@ function publicRuntimeSettings() {
       readFromGit: Boolean(rules.ReadFromGit),
       repositoryUrl: rules.RepositoryUrl ?? ''
     },
+    auditStorage,
     eventBrowser: {
       enabled: Boolean(eventBrowser.Enabled),
       bootstrapServers: eventBrowser.BootstrapServers ?? '',

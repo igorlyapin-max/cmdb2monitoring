@@ -5,7 +5,7 @@
 | SEC-001 | IF-001 | CMDBuild -> cmdbwebhooks2kafka | `CmdbWebhook` token или env | По политике ИБ | Static token сейчас, dynamic mode зарезервирован |
 | SEC-002 | IF-002, IF-006 | Kafka SASL для cmdbwebhooks2kafka | `Kafka__Username`, `Kafka__Password` | По политике Kafka | В dev не используется |
 | SEC-003 | IF-002, IF-003, IF-006 | Kafka SASL для cmdbkafka2zabbix input/output/logs | `Kafka__Input__*`, `Kafka__Output__*`, `ElkLogging__Kafka__*` | По политике Kafka | В dev не используется |
-| SEC-004 | IF-003, IF-005, IF-006 | Kafka SASL для zabbixrequests2api input/output/logs | `Kafka__Input__*`, `Kafka__Output__*`, `ElkLogging__Kafka__*` | По политике Kafka | В dev не используется |
+| SEC-004 | IF-003, IF-005, IF-006, IF-021 | Kafka SASL для zabbixrequests2api input/output/binding-output/logs | `Kafka__Input__*`, `Kafka__Output__*`, `Kafka__BindingOutput__*`, `ElkLogging__Kafka__*` | По политике Kafka | В dev не используется |
 | SEC-005 | IF-004, IF-012 | Zabbix API token | `Zabbix__ApiToken`, `ZABBIX_API_TOKEN` | По политике Zabbix | Рекомендуемый prod-режим |
 | SEC-006 | IF-004, IF-012 | Zabbix login/password | `Zabbix__User`, `Zabbix__Password` или session credentials в `monitoring-ui-api` | По политике Zabbix | UI хранит login/password только в памяти session |
 | SEC-007 | IF-006 | ELK API key | `ElkLogging__Elk__ApiKey` | По политике ELK | Пока ELK не подключен |
@@ -20,5 +20,7 @@
 | SEC-016 | IF-010 | monitoring-ui-api OAuth2 client secret | `OAUTH2_CLIENT_SECRET`, `Idp:OAuth2:ClientSecret` | По политике IdP | Используется только BFF при authorization code exchange |
 | SEC-017 | IF-010 | monitoring-ui-api LDAP bind password | `LDAP_BIND_PASSWORD`, `Idp:Ldap:BindPassword` | По политике AD/LDAP | Нужен для MS AD login service bind и для чтения AD-групп в IdP режиме; user password хранится только в запросе login и не пишется в state |
 | SEC-018 | IF-019 | cmdbkafka2zabbix rules reload token | `Service__RulesReloadToken`, `Service:RulesReloadToken`, `Services:HealthEndpoints[].RulesReloadToken` в BFF | По политике ИБ | Bearer token для `POST /admin/reload-rules`; не коммитить реальные значения |
+| SEC-019 | IF-021, IF-006 | Kafka SASL для zabbixbindings2cmdbuild input/logs | `Kafka__Input__*`, `ElkLogging__Kafka__*` | По политике Kafka | В dev не используется |
+| SEC-020 | IF-022 | zabbixbindings2cmdbuild CMDBuild writer account | `Cmdbuild__Username`, `Cmdbuild__Password`, `Cmdbuild__BaseUrl` | По политике CMDBuild | Нужен для записи `zabbix_main_hostid` и карточек `ZabbixHostBinding`; в prod задавать через secret/env |
 
 Production/base config не должен хранить реальные секреты. Использовать переменные окружения, secret storage или local config, исключенный из git.

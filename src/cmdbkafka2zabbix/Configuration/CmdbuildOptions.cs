@@ -16,6 +16,14 @@ public sealed class CmdbuildOptions
 
     public bool Enabled { get; init; } = true;
 
+    public bool HostBindingLookupEnabled { get; init; } = true;
+
+    public string MainHostIdAttributeName { get; init; } = "zabbix_main_hostid";
+
+    public string BindingClassName { get; init; } = "ZabbixHostBinding";
+
+    public int BindingLookupLimit { get; init; } = 1000;
+
     public bool HasCredentials =>
         !string.IsNullOrWhiteSpace(Username)
         && !string.IsNullOrWhiteSpace(Password);
@@ -24,4 +32,11 @@ public sealed class CmdbuildOptions
         Enabled
         && !string.IsNullOrWhiteSpace(BaseUrl)
         && HasCredentials;
+
+    public bool CanResolveHostBindings =>
+        CanResolve
+        && HostBindingLookupEnabled
+        && !string.IsNullOrWhiteSpace(MainHostIdAttributeName)
+        && !string.IsNullOrWhiteSpace(BindingClassName)
+        && BindingLookupLimit > 0;
 }

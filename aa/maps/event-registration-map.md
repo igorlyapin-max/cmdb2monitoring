@@ -23,5 +23,7 @@
 | EV-019 | IF-018 | cmdbkafka2zabbix | Lookup/reference/domain field resolution | Warning | fieldName, cmdbPath, reason |
 | EV-020 | IF-009 | monitoring-ui-api frontend | Interface language changed | UI state | language, cookie |
 | EV-021 | IF-019 | cmdbkafka2zabbix / monitoring-ui-api | Conversion rules reload requested | Information/Warning/Error | service, rules name, schemaVersion, version, result |
+| EV-022 | IF-021 | zabbixrequests2api | Binding event published/skipped | Information/Warning/Error | sourceClass, sourceCardId, hostProfile, zabbixHostId, topic, reason |
+| EV-023 | IF-022 | zabbixbindings2cmdbuild | Binding applied to CMDBuild | Information/Error | sourceClass, sourceCardId, hostProfile, bindingStatus, zabbixHostId |
 
 Логи пишутся в JSON и временно публикуются в Kafka log topics для будущей доставки в ELK.

@@ -239,6 +239,13 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 3. Проверить, что итоговый update сохраняет внешние значения так же, как fallback `host.get -> host.update`.
 4. Проверить, что `host.get` с `hostids` проходит validation.
 
+Сценарий `UPDATE-BINDING-001`: update/delete используют hostid из CMDBuild binding-данных.
+
+1. Создать host через обычный create flow и убедиться, что `zabbixbindings2cmdbuild` записал `zabbix_main_hostid` для основного профиля или карточку `ZabbixHostBinding` для дополнительного профиля.
+2. Изменить CMDBuild-карточку так, чтобы technical host name мог измениться или fallback по имени был нежелателен.
+3. Выполнить update и проверить, что `cmdbkafka2zabbix` сформировал прямой `host.update` с `hostid`, а не fallback `host.get`.
+4. Выполнить delete и проверить, что `cmdbkafka2zabbix` сформировал прямой `host.delete` с тем же `hostid`, а binding event очистил `zabbix_main_hostid` или пометил `ZabbixHostBinding` как `deleted`.
+
 Сценарий `UPDATE-MERGE-004`: `interfaces[]` не являются merge-полем.
 
 1. Добавить на Zabbix host внешний interface, которого нет в rules.
@@ -387,6 +394,17 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 26. Удалить или временно отключить этот `hostProfiles[]` только в draft JSON и запустить логический контроль правил конвертации: класс должен подсветиться как ошибка rules с действием `Создать host profile`, а применение выбранного действия должно восстановить profile через общий undo/redo поток.
 27. Запустить логический контроль правил конвертации.
 28. Выполнить `Save file as` и проверить, что webhook body остается плоским, а path metadata сохраняется рядом с source key.
+
+## Автоматизированные регрессии binding-контура
+
+Пакет `tests/zabbixbindings` проверяет новый контур `Zabbix hostid -> CMDBuild -> следующий update/delete` без живых Kafka, CMDBuild и Zabbix:
+
+- `ZabbixBindingEventReader` разбирает create/update/delete события, применяет defaults и отклоняет сообщения без обязательных полей;
+- `zabbixbindings2cmdbuild` для основного profile пишет или очищает `zabbix_main_hostid`;
+- `zabbixbindings2cmdbuild` для дополнительных `hostProfiles[]` создает или обновляет карточку `ZabbixHostBinding` по ключу `OwnerClass + OwnerCardId + HostProfile`;
+- `cmdbkafka2zabbix` resolver читает `zabbix_main_hostid` и активные `ZabbixHostBinding`, игнорирует `BindingStatus=deleted` и возвращает `null` при ошибке CMDBuild, чтобы converter мог перейти к fallback `host.get`;
+- `zabbixrequests2api` contract tests проверяют извлечение `hostid` из успешного create/update результата и payload/header contract binding publisher-а;
+- общий запуск выполняется через `./scripts/test-configs.sh`, где `tests/zabbixbindings` стоит после `tests/cmdbresolver`.
 
 ## Критерий приемки
 

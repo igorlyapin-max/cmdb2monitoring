@@ -37,6 +37,7 @@ public sealed class ZabbixRequestReader
                 ? createParams.Clone()
                 : default;
 
+        var hostProfileName = ReadString(metadata, "hostProfile");
         return new ZabbixRequestDocument
         {
             RawJson = messageValue,
@@ -48,7 +49,13 @@ public sealed class ZabbixRequestReader
             RequestId = ReadScalar(id),
             EntityId = key,
             Host = hostOverride ?? ReadHost(method, parameters) ?? ReadString(metadata, "host"),
-            HostProfileName = ReadString(metadata, "hostProfile"),
+            HostProfileName = hostProfileName,
+            SourceClass = ReadString(metadata, "sourceClass") ?? ReadString(metadata, "className"),
+            SourceCardId = ReadString(metadata, "sourceCardId") ?? ReadString(metadata, "entityId") ?? key,
+            SourceCode = ReadString(metadata, "sourceCode") ?? ReadString(metadata, "code"),
+            IsMainProfile = ReadBool(metadata, "isMainProfile") || IsMainProfileName(hostProfileName),
+            RulesVersion = ReadString(metadata, "rulesVersion"),
+            SchemaVersion = ReadString(metadata, "schemaVersion"),
             FallbackForMethod = ReadString(metadata, "fallbackForMethod"),
             CreateOnUpdateWhenMissing = ReadBool(metadata, "createOnUpdateWhenMissing"),
             FallbackUpdateParams = fallbackUpdateParams,
@@ -131,6 +138,13 @@ public sealed class ZabbixRequestReader
             JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
             _ => false
         };
+    }
+
+    private static bool IsMainProfileName(string? profileName)
+    {
+        return string.IsNullOrWhiteSpace(profileName)
+            || string.Equals(profileName, "default", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(profileName, "main", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ReadScalar(JsonElement value)

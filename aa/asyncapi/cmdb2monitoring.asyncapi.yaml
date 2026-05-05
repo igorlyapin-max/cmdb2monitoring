@@ -44,6 +44,18 @@ channels:
       summary: zabbixrequests2api публикует результат обработки
       message:
         $ref: '#/components/messages/ZabbixProcessingResponse'
+  zabbix.host.bindings.dev:
+    description: События связи CMDBuild card/profile -> Zabbix hostid после успешного вызова Zabbix API.
+    publish:
+      operationId: publishZabbixBinding
+      summary: zabbixrequests2api публикует binding event
+      message:
+        $ref: '#/components/messages/ZabbixBindingEvent'
+    subscribe:
+      operationId: consumeZabbixBinding
+      summary: zabbixbindings2cmdbuild читает binding event
+      message:
+        $ref: '#/components/messages/ZabbixBindingEvent'
   cmdbwebhooks2kafka.logs.dev:
     description: Structured JSON logs первого сервиса.
     publish:
@@ -56,6 +68,11 @@ channels:
         $ref: '#/components/messages/StructuredLog'
   zabbixrequests2api.logs.dev:
     description: Structured JSON logs третьего сервиса.
+    publish:
+      message:
+        $ref: '#/components/messages/StructuredLog'
+  zabbixbindings2cmdbuild.logs.dev:
+    description: Structured JSON logs сервиса обратной записи binding-ов.
     publish:
       message:
         $ref: '#/components/messages/StructuredLog'
@@ -87,6 +104,21 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ZabbixProcessingResponse'
+    ZabbixBindingEvent:
+      name: ZabbixBindingEvent
+      title: Zabbix binding event
+      contentType: application/json
+      headers:
+        type: object
+        properties:
+          binding-event-type:
+            type: string
+          binding-host-profile:
+            type: string
+          binding-status:
+            type: string
+      payload:
+        $ref: '#/components/schemas/ZabbixBindingEvent'
     StructuredLog:
       name: StructuredLog
       title: Structured service log
@@ -318,6 +350,77 @@ components:
           required: [hostGroups, templates, templateGroups]
         zabbixResponse:
           type: object
+    ZabbixBindingEvent:
+      type: object
+      required:
+        - source
+        - eventType
+        - operation
+        - sourceClass
+        - sourceCardId
+        - hostProfile
+        - isMainProfile
+        - zabbixHostId
+        - bindingStatus
+        - occurredAt
+        - input
+      properties:
+        source:
+          type: string
+          const: zabbixrequests2api
+        eventType:
+          type: string
+          enum:
+            - zabbix.host.binding.created
+            - zabbix.host.binding.updated
+            - zabbix.host.binding.deleted
+        operation:
+          type: string
+          enum: [host.create, host.update, host.delete]
+        sourceClass:
+          type: string
+        sourceCardId:
+          type: string
+        sourceCode:
+          type: string
+          nullable: true
+        hostProfile:
+          type: string
+        isMainProfile:
+          type: boolean
+        zabbixHostId:
+          type: string
+        zabbixHostName:
+          type: string
+          nullable: true
+        bindingStatus:
+          type: string
+          enum: [active, deleted]
+        rulesVersion:
+          type: string
+          nullable: true
+        schemaVersion:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
+        input:
+          type: object
+          required: [topic, partition, offset, key]
+          properties:
+            topic:
+              type: string
+            partition:
+              type: integer
+            offset:
+              type: integer
+            key:
+              type: string
+              nullable: true
     StructuredLog:
       type: object
       required: [timestamp, level, category, message, service, environment]

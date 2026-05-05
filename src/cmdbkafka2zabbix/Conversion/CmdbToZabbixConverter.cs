@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using CmdbKafka2Zabbix.Rules;
 using Microsoft.Extensions.Options;
@@ -8,9 +9,17 @@ namespace CmdbKafka2Zabbix.Conversion;
 
 public sealed class CmdbToZabbixConverter(
     T4TemplateRenderer templateRenderer,
-    IOptions<ConversionRulesOptions> options)
+    IOptions<ConversionRulesOptions> options,
+    ICmdbZabbixHostBindingResolver hostBindingResolver)
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(500);
+
+    public CmdbToZabbixConverter(
+        T4TemplateRenderer templateRenderer,
+        IOptions<ConversionRulesOptions> options)
+        : this(templateRenderer, options, NullCmdbZabbixHostBindingResolver.Instance)
+    {
+    }
 
     public async Task<IReadOnlyList<ZabbixConversionResult>> ConvertAsync(
         CmdbSourceEvent source,
@@ -41,6 +50,15 @@ public sealed class CmdbToZabbixConverter(
                 profiledSource,
                 profile,
                 allowSourceHostId: profiles.Count == 1);
+            if (route.RequiresZabbixHostId && string.IsNullOrWhiteSpace(zabbixHostId))
+            {
+                zabbixHostId = await hostBindingResolver.ResolveHostIdAsync(
+                    profiledSource,
+                    profileName,
+                    IsMainProfileName(profileName),
+                    cancellationToken);
+            }
+
             var methodName = route.Method;
             var templateName = route.TemplateName;
             string? fallbackForMethod = null;
@@ -77,6 +95,7 @@ public sealed class CmdbToZabbixConverter(
             }
 
             var request = await templateRenderer.RenderAsync(templateLines, model, cancellationToken);
+            request = EnrichCmdb2MonitoringMetadata(request, model, rules);
 
             using (JsonDocument.Parse(request))
             {
@@ -141,6 +160,8 @@ public sealed class CmdbToZabbixConverter(
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
             EventType = source.EventType,
+            RulesVersion = rules.RulesVersion,
+            SchemaVersion = rules.SchemaVersion,
             CurrentMethod = currentMethod,
             FallbackForMethod = fallbackForMethod,
             CreateOnUpdateWhenMissing = profile.CreateOnUpdateWhenMissing
@@ -173,6 +194,8 @@ public sealed class CmdbToZabbixConverter(
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
             EventType = source.EventType,
+            RulesVersion = rules.RulesVersion,
+            SchemaVersion = rules.SchemaVersion,
             CurrentMethod = currentMethod,
             FallbackForMethod = fallbackForMethod,
             CreateOnUpdateWhenMissing = profile.CreateOnUpdateWhenMissing
@@ -201,6 +224,8 @@ public sealed class CmdbToZabbixConverter(
             OperatingSystem = source.OperatingSystem,
             ZabbixTag = source.ZabbixTag,
             EventType = source.EventType,
+            RulesVersion = rules.RulesVersion,
+            SchemaVersion = rules.SchemaVersion,
             CurrentMethod = currentMethod,
             FallbackForMethod = fallbackForMethod,
             CreateOnUpdateWhenMissing = profile.CreateOnUpdateWhenMissing
@@ -421,12 +446,49 @@ public sealed class CmdbToZabbixConverter(
             return ReadField(source, profile.ZabbixHostIdField);
         }
 
-        return allowSourceHostId || IsDefaultProfile(profile) ? source.ZabbixHostId : null;
+        return allowSourceHostId || IsMainProfileName(ProfileName(profile)) ? source.ZabbixHostId : null;
     }
 
-    private static bool IsDefaultProfile(HostProfileRule profile)
+    private static string EnrichCmdb2MonitoringMetadata(
+        string requestJson,
+        ZabbixHostCreateModel model,
+        ConversionRulesDocument rules)
     {
-        return string.Equals(ProfileName(profile), "default", StringComparison.OrdinalIgnoreCase);
+        var root = JsonNode.Parse(requestJson) as JsonObject
+            ?? throw new JsonException("Rendered Zabbix request must be a JSON object.");
+        if (root["cmdb2monitoring"] is not JsonObject metadata)
+        {
+            metadata = new JsonObject();
+            root["cmdb2monitoring"] = metadata;
+        }
+
+        WriteMetadata(metadata, "entityId", model.EntityId);
+        WriteMetadata(metadata, "sourceCardId", model.EntityId);
+        WriteMetadata(metadata, "sourceClass", model.ClassName);
+        WriteMetadata(metadata, "sourceCode", model.Code);
+        WriteMetadata(metadata, "host", model.Host);
+        WriteMetadata(metadata, "hostProfile", model.HostProfileName);
+        WriteMetadata(metadata, "eventType", model.EventType);
+        WriteMetadata(metadata, "rulesVersion", rules.RulesVersion);
+        WriteMetadata(metadata, "schemaVersion", rules.SchemaVersion);
+        metadata["isMainProfile"] = IsMainProfileName(model.HostProfileName);
+
+        return root.ToJsonString();
+    }
+
+    private static void WriteMetadata(JsonObject metadata, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            metadata[name] = value;
+        }
+    }
+
+    private static bool IsMainProfileName(string? profileName)
+    {
+        return string.IsNullOrWhiteSpace(profileName)
+            || string.Equals(profileName, "default", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(profileName, "main", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildKafkaKey(CmdbSourceEvent source, ZabbixHostCreateModel model)

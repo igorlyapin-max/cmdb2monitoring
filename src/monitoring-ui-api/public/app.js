@@ -84,6 +84,8 @@ const state = {
   zabbixCatalog: null,
   cmdbuildCatalog: null,
   zabbixMetadata: null,
+  auditModelPlan: null,
+  auditCmdbuildCatalog: null,
   sessionIndicators: {
     webhooks: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
     zabbixCatalog: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
@@ -463,6 +465,41 @@ const translations = {
     'webhooks.detailsHint': 'Нажмите значение в столбце "Действие", чтобы открыть детали под строкой; общий блок деталей находится под таблицей.',
     'webhooks.currentDetailsHint': 'Загруженные из CMDB webhooks показаны ниже. Нажмите "Проанализировать rules", чтобы построить план операций.',
     'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
+    'audit.storageIntro': 'Аудит будет использовать хранилище, выбранное в Runtime-настройках. PostgreSQL предназначен для средних и крупных инсталляций, SQLite - для разработки и небольших инсталляций.',
+    'audit.modelIntro': 'Подготовка CMDBuild добавляет zabbix_main_hostid в классы, участвующие в правилах конвертации, и создает класс ZabbixHostBinding для дополнительных hostProfiles.',
+    'audit.analyzeModel': 'Проверить модель CMDBuild',
+    'audit.applyModel': 'Применить подготовку CMDBuild',
+    'audit.bindingParentClass': 'Где создать ZabbixHostBinding',
+    'audit.bindingParentRoot': 'Корень CMDBuild / Class',
+    'audit.participatingClasses': 'Участвующие классы',
+    'audit.className': 'Класс',
+    'audit.mainHostId': 'zabbix_main_hostid',
+    'audit.action': 'Действие',
+    'audit.bindingClass': 'ZabbixHostBinding',
+    'audit.attribute': 'Атрибут',
+    'audit.status': 'Статус',
+    'audit.statusNotAnalyzed': 'Нажмите "Проверить модель CMDBuild".',
+    'audit.statusAnalyzed': 'План CMDBuild построен. Операций: {count}.',
+    'audit.statusApplied': 'Подготовка CMDBuild выполнена. Операций: {count}.',
+    'audit.statusFailed': 'Операция аудита не выполнена: {message}',
+    'audit.confirmApply': 'Применить подготовку CMDBuild? Будут созданы недостающие атрибуты и класс ZabbixHostBinding. Операций: {count}.',
+    'audit.onlyAdmin': 'Применение доступно только администратору.',
+    'audit.exists': 'есть',
+    'audit.missing': 'отсутствует',
+    'audit.create': 'создать',
+    'audit.none': 'не требуется',
+    'audit.classMissing': 'класс отсутствует',
+    'audit.inherited': 'наследуется',
+    'audit.bindingParent': 'Parent',
+    'audit.operations': 'Операций',
+    'audit.ready': 'Модель CMDBuild уже подготовлена.',
+    'audit.noClasses': 'Участвующие классы не найдены.',
+    'audit.summaryClass': 'Класс',
+    'audit.summaryState': 'Состояние',
+    'audit.summaryRulesVersion': 'Rules version',
+    'audit.summarySchemaVersion': 'Schema version',
+    'audit.summaryParent': 'Родительский класс',
+    'audit.summaryCatalogSynced': 'CMDBuild catalog',
     'nav.dashboard': 'Панель',
     'nav.events': 'События',
     'nav.systemAudit': 'Аудит',
@@ -488,6 +525,14 @@ const translations = {
     'settings.maxTraversalDepthNote': 'Изменение заработает только после logout и пересинхронизации CMDBuild catalog.',
     'settings.zabbixApi': 'Zabbix API',
     'settings.zabbixApiKey': 'Zabbix API key',
+    'settings.auditStorage': 'Хранилище аудита',
+    'settings.auditStorageProvider': 'СУБД хранилища',
+    'settings.auditStorageSchema': 'Схема',
+    'settings.auditStorageConnectionString': 'Строка подключения',
+    'settings.auditStorageConnectionStringPlaceholder': 'Data Source=state/audit-dev.sqlite',
+    'settings.auditStorageCommandTimeout': 'Таймаут команды, сек',
+    'settings.auditStorageAutoMigrate': 'Автоматически применять миграции аудита',
+    'settings.auditStorageNote': 'SQLite используется для разработки и небольших инсталляций: ориентир до 1000 объектов на мониторинге, допустимо до 2000 при умеренном потоке событий и коротком хранении аудита. Для большего объема, высокой параллельности или длительного хранения используйте PostgreSQL. Production connection string не храните в git.',
     'settings.zabbixDynamicTargets': 'Динамическое расширение Zabbix из CMDBuild leaf',
     'settings.allowDynamicTagsFromCmdbLeaf': 'Разрешить динамическое расширение Zabbix Tags из CMDBuild leaf',
     'settings.allowDynamicHostGroupsFromCmdbLeaf': 'Разрешить динамическое создание Zabbix Host groups из CMDBuild leaf',
@@ -842,7 +887,7 @@ const translations = {
     'session.notAuthenticated': 'не авторизован',
     'help.general.title': 'Общий принцип',
     'help.general.1': 'Браузер работает только с monitoring-ui-api; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.',
-    'help.general.2': 'Адреса, Zabbix API key, Kafka topics и параметры чтения Events настраиваются во внешних конфигурационных файлах или через Runtime-настройки. Авторизация настраивается отдельно: локальная, MS AD или IdP с группами AD для ролей.',
+    'help.general.2': 'Адреса, Zabbix API key, Kafka topics, параметры чтения Events и хранилище аудита настраиваются во внешних конфигурационных файлах или через Runtime-настройки. Авторизация настраивается отдельно: локальная, MS AD или IdP с группами AD для ролей.',
     'help.general.3': 'Всплывающие подсказки показываются при наведении или фокусе на элементе интерфейса.',
     'help.dashboard.title': 'Панель и события',
     'help.dashboard.1': 'Панель показывает доступность cmdbwebhooks2kafka, cmdbkafka2zabbix, zabbixrequests2api и самого BFF.',
@@ -892,10 +937,17 @@ const translations = {
     'help.webhooks.8': 'В таблице можно раскрыть payload каждой строки: зеленым показано добавление, красным удаление, черным актуальное значение. Нажатие на значение в столбце "Действие" открывает детали под этой строкой, а общий блок деталей находится под таблицей и использует ту же подсветку. Редактировать меняет JSON конкретного webhook в текущем плане.',
     'help.webhooks.9': 'Если текущий CMDBuild webhook не передает payload-поля, которые нужны rules, summary, детали и причина операции показывают конкретные отсутствующие ключи и правила, из-за которых они нужны. Без загрузки операции в CMDB или ручной правки webhook converter не получит эти значения.',
     'help.webhooks.10': '`Удалить выбранные` применяет только отмеченные операции удаления CMDBuild webhooks и не отправляет create/update операции. Остальные изменения применяются отдельной командой `Загрузить в CMDB`.',
+    'help.audit.title': 'Аудит',
+    'help.audit.1': 'Раздел аудита готовит CMDBuild model для обратной связи с Zabbix: проверяет классы, участвующие в conversion rules, и строит план добавления управляемого атрибута и служебного класса.',
+    'help.audit.2': 'Атрибут zabbix_main_hostid создается в карточке каждого участвующего класса. Он нужен для хранения Zabbix hostid основного host объекта и прямой диагностики, какая карточка CMDBuild уже поставлена на мониторинг.',
+    'help.audit.3': 'zabbix_main_hostid относится только к основному host profile. Если одна карточка CMDBuild создает несколько Zabbix hosts через дополнительные hostProfiles, их связи хранятся отдельно.',
+    'help.audit.4': 'Класс ZabbixHostBinding нужен для расширенной логики: одна карточка класса описывает связь CMDBuild object + hostProfile -> конкретный Zabbix host. Администратор выбирает в дереве CMDBuild, где создать этот класс.',
+    'help.audit.5': 'Атрибуты ZabbixHostBinding: OwnerClass, OwnerCardId и OwnerCode указывают исходную карточку; HostProfile указывает profile из rules; ZabbixHostId и ZabbixHostName указывают созданный host; BindingStatus, RulesVersion и LastSyncAt фиксируют состояние, версию rules и время последней синхронизации.',
+    'help.audit.6': 'Кнопка Проверить модель CMDBuild только строит план. Кнопка Применить подготовку CMDBuild доступна администратору и создает отсутствующие атрибуты/класс в управляемой CMDBuild.',
     'help.catalogs.title': 'Каталоги и настройки',
     'help.catalogs.1': 'Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.',
     'help.catalogs.2': 'CMDBuild Catalog загружает классы, атрибуты, domains и lookup-значения.',
-    'help.catalogs.3': 'Runtime-настройки сохраняют подключения и Events Kafka browser; Настройка git сохраняет параметры файла правил; Авторизация сохраняет локальный режим, MS AD, IdP/SAML2/OAuth2 и привязку AD-групп к ролям.',
+    'help.catalogs.3': 'Runtime-настройки сохраняют подключения, параметры хранилища аудита и Events Kafka browser; Настройка git сохраняет параметры файла правил; Авторизация сохраняет локальный режим, MS AD, IdP/SAML2/OAuth2 и привязку AD-групп к ролям.',
     'help.catalogs.4': 'Справочники источников лучше менять в CMDBuild/Zabbix, а правила конвертации менять в JSON rules.',
     'help.catalogs.5': 'Для тестовой системы rules читаются с диска из rules/cmdbuild-to-zabbix-host-create.json; если включено чтение из git, этот файл ожидается внутри repository по тому же пути.',
     'help.catalogs.6': 'Галки Динамическое расширение Zabbix из CMDBuild leaf разрешают создавать или расширять только Tags и Host groups по значениям выбранного leaf. Эту функцию нужно применять ответственно: перед включением проанализируйте разнообразие содержимого атрибутов, по которым выполняется mapping, потому что неконтролируемые изменения этих атрибутов в CMDBuild дадут такой же объем динамических изменений в Zabbix. Для Host groups микросервис Zabbix writer дополнительно должен разрешать создание групп в своей конфигурации; созданный или найденный groupid подставляется в тот же host.create/host.update payload.',
@@ -956,6 +1008,9 @@ const translations = {
     'tooltip.webhooksApplyCmdb': 'Применяет выбранные операции create/update/delete к CMDBuild webhooks. Это изменяет управляемую систему.',
     'tooltip.webhooksSelectAll': 'Выбирает все операции плана webhooks.',
     'tooltip.webhooksClear': 'Снимает выбор со всех операций плана webhooks.',
+    'tooltip.auditAnalyzeModel': 'Синхронизирует CMDBuild catalog и строит план подготовки audit model без изменений в CMDBuild.',
+    'tooltip.auditApplyModel': 'Создает недостающий zabbix_main_hostid и класс ZabbixHostBinding в CMDBuild. Доступно только администратору.',
+    'tooltip.auditBindingParentClass': 'Родительский класс CMDBuild, под которым будет создан служебный класс ZabbixHostBinding.',
     'tooltip.syncZabbix': 'Обновляет каталог Zabbix из API Zabbix.',
     'tooltip.loadZabbix': 'Загружает сохраненный каталог Zabbix.',
     'tooltip.syncZabbixMetadata': 'Обновляет каталог Zabbix и перестраивает метаданные совместимости templates.',
@@ -1083,6 +1138,41 @@ const translations = {
     'webhooks.detailsHint': 'Click the Action value to open details under that row; the shared details panel is below the table.',
     'webhooks.currentDetailsHint': 'Loaded CMDB webhooks are shown below. Click "Analyze rules" to build the operation plan.',
     'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
+    'audit.storageIntro': 'Audit will use the storage selected in Runtime settings. PostgreSQL targets medium and large installations; SQLite is for development and small installations.',
+    'audit.modelIntro': 'CMDBuild preparation adds zabbix_main_hostid to classes participating in conversion rules and creates ZabbixHostBinding for additional hostProfiles.',
+    'audit.analyzeModel': 'Check CMDBuild model',
+    'audit.applyModel': 'Apply CMDBuild preparation',
+    'audit.bindingParentClass': 'Where to create ZabbixHostBinding',
+    'audit.bindingParentRoot': 'CMDBuild root / Class',
+    'audit.participatingClasses': 'Participating classes',
+    'audit.className': 'Class',
+    'audit.mainHostId': 'zabbix_main_hostid',
+    'audit.action': 'Action',
+    'audit.bindingClass': 'ZabbixHostBinding',
+    'audit.attribute': 'Attribute',
+    'audit.status': 'Status',
+    'audit.statusNotAnalyzed': 'Click "Check CMDBuild model".',
+    'audit.statusAnalyzed': 'CMDBuild plan built. Operations: {count}.',
+    'audit.statusApplied': 'CMDBuild preparation applied. Operations: {count}.',
+    'audit.statusFailed': 'Audit operation failed: {message}',
+    'audit.confirmApply': 'Apply CMDBuild preparation? Missing attributes and ZabbixHostBinding will be created. Operations: {count}.',
+    'audit.onlyAdmin': 'Apply is available only to administrators.',
+    'audit.exists': 'exists',
+    'audit.missing': 'missing',
+    'audit.create': 'create',
+    'audit.none': 'not required',
+    'audit.classMissing': 'class missing',
+    'audit.inherited': 'inherited',
+    'audit.bindingParent': 'Parent',
+    'audit.operations': 'Operations',
+    'audit.ready': 'The CMDBuild model is already prepared.',
+    'audit.noClasses': 'No participating classes were found.',
+    'audit.summaryClass': 'Class',
+    'audit.summaryState': 'State',
+    'audit.summaryRulesVersion': 'Rules version',
+    'audit.summarySchemaVersion': 'Schema version',
+    'audit.summaryParent': 'Parent class',
+    'audit.summaryCatalogSynced': 'CMDBuild catalog',
     'nav.dashboard': 'Dashboard',
     'nav.events': 'Events',
     'nav.systemAudit': 'Audit',
@@ -1108,6 +1198,14 @@ const translations = {
     'settings.maxTraversalDepthNote': 'The change takes effect only after logout and CMDBuild catalog resync.',
     'settings.zabbixApi': 'Zabbix API',
     'settings.zabbixApiKey': 'Zabbix API key',
+    'settings.auditStorage': 'Audit storage',
+    'settings.auditStorageProvider': 'Storage database',
+    'settings.auditStorageSchema': 'Schema',
+    'settings.auditStorageConnectionString': 'Connection string',
+    'settings.auditStorageConnectionStringPlaceholder': 'Host=localhost;Port=5432;Database=cmdb2monitoring;Username=cmdb2monitoring;Password=...',
+    'settings.auditStorageCommandTimeout': 'Command timeout, sec',
+    'settings.auditStorageAutoMigrate': 'Apply audit migrations automatically',
+    'settings.auditStorageNote': 'SQLite is used for development and small installations: estimate up to 1000 monitored objects, acceptable up to 2000 with moderate event flow and short audit retention. Use PostgreSQL for larger scale, high concurrency, or long retention. Do not store production connection strings in git.',
     'settings.zabbixDynamicTargets': 'Dynamic Zabbix expansion from CMDBuild leaf',
     'settings.allowDynamicTagsFromCmdbLeaf': 'Allow dynamic Zabbix Tags expansion from a CMDBuild leaf',
     'settings.allowDynamicHostGroupsFromCmdbLeaf': 'Allow dynamic Zabbix Host groups creation from a CMDBuild leaf',
@@ -1461,7 +1559,7 @@ const translations = {
     'session.notAuthenticated': 'not authenticated',
     'help.general.title': 'General Principle',
     'help.general.1': 'The browser works only with monitoring-ui-api; it does not connect directly to CMDBuild, Zabbix, or Kafka.',
-    'help.general.2': 'Addresses, Zabbix API key, Kafka topics, and Events read settings are configured externally or through Runtime settings. Authorization is configured separately: local, MS AD, or IdP with AD groups mapped to roles.',
+    'help.general.2': 'Addresses, Zabbix API key, Kafka topics, Events read settings, and audit storage are configured externally or through Runtime settings. Authorization is configured separately: local, MS AD, or IdP with AD groups mapped to roles.',
     'help.general.3': 'Tooltips are shown when you hover or focus interface elements.',
     'help.dashboard.title': 'Dashboard And Events',
     'help.dashboard.1': 'Dashboard shows availability for cmdbwebhooks2kafka, cmdbkafka2zabbix, zabbixrequests2api, and the BFF itself.',
@@ -1511,10 +1609,17 @@ const translations = {
     'help.webhooks.8': 'Each table row can expand its payload: green means added, red means deleted, and black means current value. Clicking the Action value opens details under that row, while the shared details panel is below the table and uses the same highlighting. Edit changes JSON for that concrete webhook in the current plan.',
     'help.webhooks.9': 'If a current CMDBuild webhook does not send payload fields required by rules, the summary, details, and operation reason show the concrete missing keys and the rules that require them. Until the operation is loaded into CMDB or the webhook is updated manually, the converter will not receive those values.',
     'help.webhooks.10': '`Delete selected` applies only selected CMDBuild webhook delete operations and does not send create/update operations. Other changes are applied separately with `Load into CMDB`.',
+    'help.audit.title': 'Audit',
+    'help.audit.1': 'The Audit section prepares the CMDBuild model for reverse links to Zabbix: it checks classes participating in conversion rules and builds a plan for adding a managed attribute and service class.',
+    'help.audit.2': 'The zabbix_main_hostid attribute is created on each participating class card. It stores the Zabbix hostid of the main host object and makes it clear which CMDBuild card is already monitored.',
+    'help.audit.3': 'zabbix_main_hostid belongs only to the main host profile. If one CMDBuild card creates several Zabbix hosts through additional hostProfiles, those links are stored separately.',
+    'help.audit.4': 'The ZabbixHostBinding class supports the extended logic: one class card represents the CMDBuild object + hostProfile -> concrete Zabbix host link. The administrator chooses in the CMDBuild tree where this class should be created.',
+    'help.audit.5': 'ZabbixHostBinding attributes: OwnerClass, OwnerCardId, and OwnerCode identify the source card; HostProfile identifies the rules profile; ZabbixHostId and ZabbixHostName identify the created host; BindingStatus, RulesVersion, and LastSyncAt store state, rules version, and last sync time.',
+    'help.audit.6': 'Check CMDBuild model only builds the plan. Apply CMDBuild preparation is administrator-only and creates missing attributes/class in the managed CMDBuild system.',
     'help.catalogs.title': 'Catalogs And Settings',
     'help.catalogs.1': 'Zabbix Catalog loads templates, host groups, template groups, tags, and extended Zabbix catalogs.',
     'help.catalogs.2': 'CMDBuild Catalog loads classes, attributes, domains, and lookup values.',
-    'help.catalogs.3': 'Runtime settings saves connections and the Events Kafka browser; Git Settings saves rules-file parameters; Authorization saves local mode, MS AD, IdP/SAML2/OAuth2, and AD group-to-role mapping.',
+    'help.catalogs.3': 'Runtime settings saves connections, audit storage settings, and the Events Kafka browser; Git Settings saves rules-file parameters; Authorization saves local mode, MS AD, IdP/SAML2/OAuth2, and AD group-to-role mapping.',
     'help.catalogs.4': 'Source catalogs should usually be changed in CMDBuild/Zabbix, while conversion behavior is changed in JSON rules.',
     'help.catalogs.5': 'For the test system, rules are read from disk at rules/cmdbuild-to-zabbix-host-create.json; when git reading is enabled, the same file is expected inside the repository at that path.',
     'help.catalogs.6': 'The Dynamic Zabbix expansion from CMDBuild leaf switches allow creating or expanding only Tags and Host groups from selected leaf values. Use this function responsibly: before enabling it, analyze the variety of attribute contents used for mapping, because uncontrolled CMDBuild changes will produce the same amount of dynamic change in Zabbix. For Host groups, the Zabbix writer microservice must also allow group creation in its own configuration; the created or resolved groupid is substituted into the same host.create/host.update payload.',
@@ -1575,6 +1680,9 @@ const translations = {
     'tooltip.webhooksApplyCmdb': 'Applies selected create/update/delete operations to CMDBuild webhooks. This changes the managed system.',
     'tooltip.webhooksSelectAll': 'Selects all webhook plan operations.',
     'tooltip.webhooksClear': 'Clears all webhook plan operation selections.',
+    'tooltip.auditAnalyzeModel': 'Syncs the CMDBuild catalog and builds an audit model preparation plan without changing CMDBuild.',
+    'tooltip.auditApplyModel': 'Creates missing zabbix_main_hostid attributes and the ZabbixHostBinding class in CMDBuild. Administrator-only.',
+    'tooltip.auditBindingParentClass': 'CMDBuild parent class under which the service ZabbixHostBinding class will be created.',
     'tooltip.syncZabbix': 'Refreshes the Zabbix catalog from the Zabbix API.',
     'tooltip.loadZabbix': 'Loads the saved Zabbix catalog.',
     'tooltip.syncZabbixMetadata': 'Refreshes the Zabbix catalog and rebuilds template compatibility metadata.',
@@ -1601,6 +1709,7 @@ const viewDescriptions = {
   ru: {
     dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
     events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
+    systemAudit: 'Готовит CMDBuild model для аудита постановки на мониторинг: проверяет zabbix_main_hostid в участвующих классах и служебный класс ZabbixHostBinding для дополнительных hostProfiles.',
     rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и сохраняет файл через браузер.',
     mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
     validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
@@ -1609,7 +1718,7 @@ const viewDescriptions = {
     zabbixMetadata: 'Показывает метаданные Zabbix templates, конфликтующие item keys, LLD rule keys и inventory fields. Эти данные используются редактором и логическим контролем правил.',
     cmdbuild: 'Показывает классы, атрибуты, domains и lookup-справочники, загруженные из CMDBuild.',
     authSettings: 'Управляет режимом авторизации: локальная, MS AD или IdP. В IdP режиме MS AD используется для сопоставления групп с ролями.',
-    runtimeSettings: 'Содержит runtime-настройки подключений, Zabbix API key и Kafka Events.',
+    runtimeSettings: 'Содержит runtime-настройки подключений, хранилище аудита, Zabbix API key и Kafka Events.',
     gitSettings: 'Настройка микросервиса по конвертации, который использует файл конвертации, не зависит от настроек ниже, здесь управляется только копиями, размещение которых в продуктивных местах хранение лежит в области ответственности администратора системы.',
     about: 'Информация об авторстве и свободном использовании.',
     help: 'Содержит справку по разделам интерфейса, управлению правилами конвертации, логическому контролю правил конвертации и настройкам.'
@@ -1617,6 +1726,7 @@ const viewDescriptions = {
   en: {
     dashboard: 'Shows service availability and quick checks for the current environment.',
     events: 'Shows configured Kafka topics and the latest messages from the selected topic.',
+    systemAudit: 'Prepares the CMDBuild model for monitoring audit: checks zabbix_main_hostid on participating classes and the service ZabbixHostBinding class for additional hostProfiles.',
     rules: 'Loads the current rules JSON, validates it, runs dry-run, and saves a rules file through the browser.',
     mapping: 'Shows the CMDBuild -> conversion rules -> Zabbix chain. Host profiles show fan-out and interfaces; Template rules select templates; Tag rules create tags.',
     validateMapping: 'Validates rules against Zabbix and CMDBuild catalogs; only missing source entities are highlighted.',
@@ -1625,7 +1735,7 @@ const viewDescriptions = {
     zabbixMetadata: 'Shows Zabbix template metadata, conflicting item keys, LLD rule keys, and inventory fields. The rule editor and logical control use this data.',
     cmdbuild: 'Shows classes, attributes, domains, and lookup catalogs loaded from CMDBuild.',
     authSettings: 'Manages authorization mode: local, MS AD, or IdP. In IdP mode, MS AD is used for group-to-role mapping.',
-    runtimeSettings: 'Contains runtime connection settings, Zabbix API key, and Kafka Events.',
+    runtimeSettings: 'Contains runtime connection settings, audit storage, Zabbix API key, and Kafka Events.',
     gitSettings: 'Converter microservice settings, which use the conversion file, do not depend on the settings below; this page only manages copies, and production placement of those copies is the system administrator responsibility.',
     about: 'Authorship and free-use information.',
     help: 'Contains help for UI sections, Conversion Rules Management, Conversion Rules Logical Control, and settings.'
@@ -1807,6 +1917,7 @@ function actionStatusNode(button, explicitSelector = '') {
   const selectors = {
     dashboard: '#dashboardActionStatus',
     events: '#eventsActionStatus',
+    systemAudit: '#auditModelStatus',
     rules: '#rulesActionStatus',
     mapping: '#mappingActionStatus',
     validateMapping: '#validateMappingActionStatus',
@@ -1922,6 +2033,15 @@ function normalizeIdpProvider(value) {
     return 'ldap';
   }
   return 'saml2';
+}
+
+function normalizeAuditStorageProvider(value) {
+  const provider = String(value ?? 'sqlite').trim().toLowerCase();
+  if (['postgres', 'postgresql', 'pgsql'].includes(provider)) {
+    return 'postgresql';
+  }
+
+  return 'sqlite';
 }
 
 function isRedirectIdp() {
@@ -2044,6 +2164,7 @@ function updateLocalizedDynamicUi() {
   if (state.webhooksLoaded) {
     renderWebhooks();
   }
+  renderAuditModel();
 }
 
 function viewDescription(viewId) {
@@ -2235,6 +2356,9 @@ function bindForms() {
   bindAction('#webhooksSaveAs', saveWebhooksAsFile);
   bindAction('#webhooksDeleteSelected', deleteSelectedCmdbuildWebhooks, { restoreDisabled: false });
   bindAction('#webhooksApplyCmdb', applyCmdbuildWebhooks, { restoreDisabled: false });
+  bindAction('#auditAnalyzeModel', analyzeAuditModel, { success: false });
+  bindAction('#auditApplyModel', applyAuditModel, { restoreDisabled: false, success: false });
+  $('#auditBindingParentClass')?.addEventListener('change', () => renderAuditModel());
   $('#webhooksSelectAll')?.addEventListener('click', () => setWebhookOperationsSelection(true));
   $('#webhooksClear')?.addEventListener('click', () => setWebhookOperationsSelection(false));
   bindAction('#deleteValidateMappingSelected', deleteSelectedValidationFixes, { restoreDisabled: false });
@@ -3046,6 +3170,259 @@ function renderCmdbuildCatalogSummary(catalog = {}) {
   });
   container.append(el('div', 'validation-summary-line', text));
   setHelp(container, text);
+}
+
+async function analyzeAuditModel() {
+  const plan = await api('/api/cmdbuild/audit-model/plan', {
+    method: 'POST',
+    body: { parentClass: selectedAuditBindingParentClass() }
+  });
+  state.auditModelPlan = plan;
+  state.auditCmdbuildCatalog = { classes: plan.classes ?? [] };
+  renderAuditModel(plan);
+  const count = String(plan.operations?.length ?? 0);
+  setActionStatus(
+    $('#auditModelStatus'),
+    plan.ready ? t('audit.ready') : tf('audit.statusAnalyzed', { count }),
+    'success'
+  );
+  return { count: plan.operations?.length ?? 0 };
+}
+
+async function applyAuditModel() {
+  if (!['admin', 'administrator'].includes(currentRole())) {
+    setActionStatus($('#auditModelStatus'), t('audit.onlyAdmin'), 'error');
+    return false;
+  }
+
+  if (!state.auditModelPlan) {
+    await analyzeAuditModel();
+  }
+  const plan = state.auditModelPlan;
+  const count = plan.operations?.length ?? 0;
+  if (count === 0) {
+    setActionStatus($('#auditModelStatus'), t('audit.ready'), 'success');
+    return { count: 0 };
+  }
+
+  if (!window.confirm(tf('audit.confirmApply', { count: String(count) }))) {
+    return { cancelled: true };
+  }
+
+  const result = await api('/api/cmdbuild/audit-model/apply', {
+    method: 'POST',
+    body: { parentClass: selectedAuditBindingParentClass(plan) }
+  });
+  state.auditModelPlan = result;
+  state.auditCmdbuildCatalog = { classes: result.classes ?? [] };
+  renderAuditModel(result);
+  setActionStatus($('#auditModelStatus'), tf('audit.statusApplied', {
+    count: String(result.count ?? 0)
+  }), 'success');
+  return { count: result.count ?? 0 };
+}
+
+function selectedAuditBindingParentClass(plan = state.auditModelPlan) {
+  return $('#auditBindingParentClass')?.value || plan?.parentClass || 'Class';
+}
+
+function renderAuditModel(plan = state.auditModelPlan) {
+  renderAuditBindingParentSelector(plan);
+  const operationsCount = plan?.operations?.length ?? 0;
+  const canApply = ['admin', 'administrator'].includes(currentRole()) && Boolean(plan) && operationsCount > 0;
+  const applyButton = $('#auditApplyModel');
+  if (applyButton) {
+    applyButton.disabled = !canApply;
+  }
+
+  if (!plan) {
+    renderEmptyAuditTables();
+    const status = $('#auditModelStatus');
+    if (status && !status.textContent.trim()) {
+      setActionStatus(status, t('audit.statusNotAnalyzed'), 'info');
+    }
+    return;
+  }
+
+  renderAuditClassChecks(plan);
+  renderAuditBindingSummary(plan);
+  renderAuditBindingAttributes(plan);
+}
+
+function renderAuditBindingParentSelector(plan = state.auditModelPlan) {
+  const select = $('#auditBindingParentClass');
+  if (!select) {
+    return;
+  }
+
+  const classes = plan?.classes
+    ?? state.auditCmdbuildCatalog?.classes
+    ?? state.cmdbuildCatalog?.classes
+    ?? [];
+  setSelectOptions(select, auditBindingParentOptions(classes), selectedAuditBindingParentClass(plan));
+}
+
+function auditBindingParentOptions(classes = []) {
+  const result = [{ value: 'Class', label: t('audit.bindingParentRoot') }];
+  const byName = new Map();
+  for (const item of classes.filter(item => item?.name)) {
+    const key = normalizeClassName(item.name);
+    if (!byName.has(key)) {
+      byName.set(key, item);
+    }
+  }
+
+  const childrenByParent = cmdbChildrenByParent({ classes: [...byName.values()] });
+  const visited = new Set();
+  const appendClass = (item, depth) => {
+    const key = normalizeClassName(item.name);
+    if (visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+    const description = item.description && item.description !== item.name ? ` - ${item.description}` : '';
+    result.push({
+      value: item.name,
+      label: `${'  '.repeat(depth)}${item.name}${description}`
+    });
+    for (const child of childrenByParent.get(key) ?? []) {
+      appendClass(child, depth + 1);
+    }
+  };
+
+  [...byName.values()]
+    .filter(item => {
+      const parent = cmdbParentClassName(item);
+      return !parent || !byName.has(parent);
+    })
+    .sort(compareCmdbClasses)
+    .forEach(item => appendClass(item, 0));
+
+  return result;
+}
+
+function renderEmptyAuditTables() {
+  renderAuditEmptyRow($('#auditClassChecks'), t('audit.statusNotAnalyzed'));
+  renderAuditEmptyRow($('#auditBindingAttributes'), t('audit.statusNotAnalyzed'));
+  const summary = $('#auditBindingSummary');
+  if (summary) {
+    clear(summary);
+  }
+}
+
+function renderAuditClassChecks(plan = {}) {
+  const tbody = $('#auditClassChecks');
+  if (!tbody) {
+    return;
+  }
+  clear(tbody);
+  const checks = plan.classChecks ?? [];
+  if (checks.length === 0) {
+    renderAuditEmptyRow(tbody, t('audit.noClasses'));
+    return;
+  }
+
+  for (const item of checks) {
+    const row = document.createElement('tr');
+    row.append(
+      el('td', '', auditClassTitle(item)),
+      auditStatusCell(auditMainHostIdStatus(item), item.exists && item.hasMainHostId),
+      auditStatusCell(auditActionLabel(item.action), item.action === 'none')
+    );
+    tbody.append(row);
+  }
+}
+
+function renderAuditBindingSummary(plan = {}) {
+  const summary = $('#auditBindingSummary');
+  if (!summary) {
+    return;
+  }
+
+  renderDefinitionList(summary, {
+    [t('audit.summaryClass')]: plan.bindingClassName ?? plan.bindingClass?.name ?? 'ZabbixHostBinding',
+    [t('audit.summaryParent')]: plan.bindingClass?.exists
+      ? plan.bindingClass?.parentClass ?? ''
+      : selectedAuditBindingParentClass(plan),
+    [t('audit.summaryState')]: plan.bindingClass?.exists ? t('audit.exists') : t('audit.missing'),
+    [t('audit.summaryRulesVersion')]: plan.rulesVersion || '-',
+    [t('audit.summarySchemaVersion')]: plan.schemaVersion || '-',
+    [t('audit.summaryCatalogSynced')]: plan.catalogSyncedAt || '-',
+    [t('audit.operations')]: plan.operations?.length ?? 0
+  });
+}
+
+function renderAuditBindingAttributes(plan = {}) {
+  const tbody = $('#auditBindingAttributes');
+  if (!tbody) {
+    return;
+  }
+  clear(tbody);
+  const attributes = plan.bindingAttributes ?? [];
+  if (attributes.length === 0) {
+    renderAuditEmptyRow(tbody, t('audit.statusNotAnalyzed'));
+    return;
+  }
+
+  for (const attribute of attributes) {
+    const row = document.createElement('tr');
+    row.append(
+      el('td', '', attribute.name),
+      auditStatusCell(auditBindingAttributeStatus(attribute), attribute.exists)
+    );
+    tbody.append(row);
+  }
+}
+
+function auditClassTitle(item = {}) {
+  return item.description && item.description !== item.className
+    ? `${item.className} - ${item.description}`
+    : item.className;
+}
+
+function auditMainHostIdStatus(item = {}) {
+  if (!item.exists) {
+    return t('audit.classMissing');
+  }
+  if (!item.hasMainHostId) {
+    return t('audit.missing');
+  }
+  return item.inherited ? `${t('audit.exists')} (${t('audit.inherited')})` : t('audit.exists');
+}
+
+function auditBindingAttributeStatus(attribute = {}) {
+  return attribute.exists ? t('audit.exists') : t('audit.missing');
+}
+
+function auditActionLabel(action = '') {
+  if (action === 'none') {
+    return t('audit.none');
+  }
+  if (action === 'class_missing') {
+    return t('audit.classMissing');
+  }
+  if (action === 'create_attribute' || action === 'create_binding_class' || action === 'create_binding_attribute') {
+    return t('audit.create');
+  }
+  return action || t('audit.none');
+}
+
+function auditStatusCell(text, ok) {
+  const cell = el('td', ok ? 'status-ok' : 'status-bad', text);
+  setHelp(cell, text);
+  return cell;
+}
+
+function renderAuditEmptyRow(tbody, text) {
+  if (!tbody) {
+    return;
+  }
+  clear(tbody);
+  const row = document.createElement('tr');
+  const cell = el('td', '', text);
+  cell.colSpan = 10;
+  row.append(cell);
+  tbody.append(row);
 }
 
 async function loadMapping(options = {}) {
@@ -12269,6 +12646,10 @@ function mergeRuntimeSettings(current = {}, update = {}) {
       ...(current?.cmdbuild ?? {}),
       ...(update?.cmdbuild ?? {})
     },
+    auditStorage: {
+      ...(current?.auditStorage ?? {}),
+      ...(update?.auditStorage ?? {})
+    },
     rules: {
       ...(current?.rules ?? {}),
       ...(update?.rules ?? {})
@@ -12323,6 +12704,7 @@ function fillRuntimeSettingsForm(settings, options = {}) {
   const form = $('#runtimeSettingsForm');
   const cmdbuild = settings.cmdbuild ?? {};
   const zabbix = settings.zabbix ?? {};
+  const auditStorage = settings.auditStorage ?? {};
   const eventBrowser = settings.eventBrowser ?? {};
 
   if (form.elements.filePath) {
@@ -12335,6 +12717,12 @@ function fillRuntimeSettingsForm(settings, options = {}) {
   form.elements.zabbixApiToken.value = zabbix.apiToken ?? '';
   form.elements.allowDynamicTagsFromCmdbLeaf.checked = Boolean(zabbix.allowDynamicTagsFromCmdbLeaf);
   form.elements.allowDynamicHostGroupsFromCmdbLeaf.checked = Boolean(zabbix.allowDynamicHostGroupsFromCmdbLeaf);
+  form.elements.auditStorageProvider.value = normalizeAuditStorageProvider(auditStorage.provider);
+  form.elements.auditStorageConnectionString.value = auditStorage.connectionString ?? '';
+  form.elements.auditStorageSchema.value = auditStorage.schema ?? '';
+  form.elements.auditStorageAutoMigrate.checked = Boolean(auditStorage.autoMigrate);
+  form.elements.auditStorageCommandTimeoutSeconds.value = auditStorage.commandTimeoutSeconds ?? 30;
+  updateAuditStorageUiState();
   updateIdpUiState();
 
   form.elements.eventsEnabled.checked = Boolean(eventBrowser.enabled);
@@ -12358,11 +12746,34 @@ function handleRuntimeSettingsChange(event) {
   if (event.target.matches('[name="cmdbuildMaxTraversalDepth"]')) {
     toast(t('toast.maxTraversalDepthChanged'));
   }
+  if (event.target.matches('[name="auditStorageProvider"]')) {
+    updateAuditStorageUiState();
+  }
   markRuntimeSettingsDirty();
 }
 
 function handleRuntimeSettingsInput() {
   markRuntimeSettingsDirty();
+}
+
+function updateAuditStorageUiState() {
+  const form = $('#runtimeSettingsForm');
+  if (!form) {
+    return;
+  }
+
+  const provider = normalizeAuditStorageProvider(form.elements.auditStorageProvider?.value);
+  const schemaInput = form.elements.auditStorageSchema;
+  if (!schemaInput) {
+    return;
+  }
+
+  const sqliteMode = provider === 'sqlite';
+  if (sqliteMode) {
+    schemaInput.value = '';
+  }
+  schemaInput.readOnly = sqliteMode;
+  schemaInput.closest('label')?.classList.toggle('is-muted', sqliteMode);
 }
 
 function resetRuntimeSettingsDirtyState(statusKey, statusLevel = 'info') {
@@ -12725,6 +13136,7 @@ function readRuntimeSettingsForm() {
   const checked = name => Boolean(elements[name]?.checked);
   const cmdbuildBaseUrl = form.get('cmdbuildBaseUrl');
   const zabbixApiEndpoint = form.get('zabbixApiEndpoint');
+  const auditStorageProvider = normalizeAuditStorageProvider(form.get('auditStorageProvider'));
   return {
     cmdbuild: {
       baseUrl: cmdbuildBaseUrl,
@@ -12735,6 +13147,13 @@ function readRuntimeSettingsForm() {
       apiToken: form.get('zabbixApiToken'),
       allowDynamicTagsFromCmdbLeaf: checked('allowDynamicTagsFromCmdbLeaf'),
       allowDynamicHostGroupsFromCmdbLeaf: checked('allowDynamicHostGroupsFromCmdbLeaf')
+    },
+    auditStorage: {
+      provider: auditStorageProvider,
+      connectionString: form.get('auditStorageConnectionString'),
+      schema: auditStorageProvider === 'sqlite' ? '' : form.get('auditStorageSchema'),
+      autoMigrate: checked('auditStorageAutoMigrate'),
+      commandTimeoutSeconds: Number(form.get('auditStorageCommandTimeoutSeconds') || 30)
     },
     eventBrowser: {
       enabled: checked('eventsEnabled'),
@@ -13205,6 +13624,9 @@ function applyHelpText() {
     '#webhooksApplyCmdb': 'tooltip.webhooksApplyCmdb',
     '#webhooksSelectAll': 'tooltip.webhooksSelectAll',
     '#webhooksClear': 'tooltip.webhooksClear',
+    '#auditAnalyzeModel': 'tooltip.auditAnalyzeModel',
+    '#auditApplyModel': 'tooltip.auditApplyModel',
+    '#auditBindingParentClass': 'tooltip.auditBindingParentClass',
     '#syncZabbix': 'tooltip.syncZabbix',
     '#loadZabbix': 'tooltip.loadZabbix',
     '#syncZabbixMetadata': 'tooltip.syncZabbixMetadata',

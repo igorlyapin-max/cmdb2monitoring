@@ -9,6 +9,7 @@ flowchart LR
     ui -->|IF-016 GET /health :5080| wh
     ui -->|IF-016 GET /health :5081| conv
     ui -->|IF-016 GET /health :5082| api
+    ui -->|IF-016 GET /health :5083| bind
     ui -->|IF-017 save-as rules/webhook files| downloads[(Local downloads)]
     ui -->|IF-019 POST /admin/reload-rules :5081| conv
     conv -->|IF-018 reference/lookup/domain resolver :8090| cmdb
@@ -20,10 +21,15 @@ flowchart LR
     kafka -->|zabbix.host.requests.* :9092| api[zabbixrequests2api :5082]
     api -->|IF-004 JSON-RPC :8081| zbx[Zabbix API :8081]
     api -->|IF-005 zabbix.host.responses.* :9092| kafka
+    api -->|IF-021 zabbix.host.bindings.* :9092| kafka
+    kafka -->|zabbix.host.bindings.* :9092| bind[zabbixbindings2cmdbuild :5083]
+    bind -->|IF-022 binding write :8090| cmdb
     wh -->|IF-006 logs :9092| kafka
     conv -->|IF-006 logs :9092| kafka
     api -->|IF-006 logs :9092| kafka
+    bind -->|IF-006 logs :9092| kafka
     wh -->|IF-008 state| fs[(Local FS)]
     conv -->|IF-008 state| fs
     api -->|IF-008 state| fs
+    bind -->|IF-008 state| fs
     kafka -. future ship :9200 .-> elk[ELK]

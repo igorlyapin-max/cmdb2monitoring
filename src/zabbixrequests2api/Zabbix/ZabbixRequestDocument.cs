@@ -24,6 +24,18 @@ public sealed class ZabbixRequestDocument
 
     public string? HostProfileName { get; init; }
 
+    public string? SourceClass { get; init; }
+
+    public string? SourceCardId { get; init; }
+
+    public string? SourceCode { get; init; }
+
+    public bool IsMainProfile { get; init; }
+
+    public string? RulesVersion { get; init; }
+
+    public string? SchemaVersion { get; init; }
+
     public string? FallbackForMethod { get; init; }
 
     public bool CreateOnUpdateWhenMissing { get; init; }

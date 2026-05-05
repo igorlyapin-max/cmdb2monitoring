@@ -17,3 +17,4 @@
 | M-011 | IF-011, IF-012, IF-014 | monitoring-ui-api | catalog sync duration/error count | Контроль синхронизации CMDBuild/Zabbix catalog | Кандидат |
 | M-012 | IF-013, IF-014 | monitoring-ui-api | rules validate/upload count | Контроль изменений rules через UI | Кандидат |
 | M-013 | IF-018 | cmdbkafka2zabbix | cmdb resolver duration/error count | Контроль чтения CMDBuild reference/lookup/domain leaf-значений | Кандидат |
+| M-014 | IF-021, IF-022 | zabbixbindings2cmdbuild | binding apply success/error count | Контроль обратной записи `zabbix_main_hostid` и `ZabbixHostBinding` | Кандидат |

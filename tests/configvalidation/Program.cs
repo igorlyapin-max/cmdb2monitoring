@@ -16,7 +16,8 @@ var services = new[]
 {
     new ServiceDefinition("cmdbwebhooks2kafka", "src/cmdbwebhooks2kafka", ServiceKind.Webhook),
     new ServiceDefinition("cmdbkafka2zabbix", "src/cmdbkafka2zabbix", ServiceKind.Converter),
-    new ServiceDefinition("zabbixrequests2api", "src/zabbixrequests2api", ServiceKind.ZabbixApi)
+    new ServiceDefinition("zabbixrequests2api", "src/zabbixrequests2api", ServiceKind.ZabbixApi),
+    new ServiceDefinition("zabbixbindings2cmdbuild", "src/zabbixbindings2cmdbuild", ServiceKind.BindingWriter)
 };
 
 var configs = new Dictionary<(string Service, string Environment), JsonObject>();
@@ -162,10 +163,18 @@ static void ValidateServiceConfig(
         case ServiceKind.ZabbixApi:
             ValidateKafkaClient(config, "Kafka:Input", context, errors, requireGroup: true);
             ValidateKafkaClient(config, "Kafka:Output", context, errors, requireGroup: false);
+            ValidateKafkaClient(config, "Kafka:BindingOutput", context, errors, requireGroup: false);
             ValidateTopicSuffix(config, "Kafka:Input:Topic", environment, context, errors);
             ValidateTopicSuffix(config, "Kafka:Output:Topic", environment, context, errors);
+            ValidateTopicSuffix(config, "Kafka:BindingOutput:Topic", environment, context, errors);
             ValidateZabbix(config, context, errors, warnings);
             ValidateProcessing(config, context, errors);
+            ValidateProcessingState(config, context, errors);
+            break;
+        case ServiceKind.BindingWriter:
+            ValidateKafkaClient(config, "Kafka:Input", context, errors, requireGroup: true);
+            ValidateTopicSuffix(config, "Kafka:Input:Topic", environment, context, errors);
+            ValidateCmdbuildBinding(config, context, errors);
             ValidateProcessingState(config, context, errors);
             break;
     }
@@ -265,6 +274,9 @@ static void ValidateCmdbuildResolver(JsonObject config, string context, List<str
 {
     RequirePositiveInt(config, "Cmdbuild:RequestTimeoutMs", context, errors);
     RequireIntRange(config, "Cmdbuild:MaxPathDepth", 2, 5, context, errors);
+    RequireNonEmpty(config, "Cmdbuild:MainHostIdAttributeName", context, errors);
+    RequireNonEmpty(config, "Cmdbuild:BindingClassName", context, errors);
+    RequirePositiveInt(config, "Cmdbuild:BindingLookupLimit", context, errors);
 }
 
 static void ValidateZabbix(JsonObject config, string context, List<string> errors, List<string> warnings)
@@ -330,7 +342,8 @@ static void ValidateTopicChain(
 {
     if (!configs.TryGetValue(("cmdbwebhooks2kafka", environment), out var webhook)
         || !configs.TryGetValue(("cmdbkafka2zabbix", environment), out var converter)
-        || !configs.TryGetValue(("zabbixrequests2api", environment), out var zabbixApi))
+        || !configs.TryGetValue(("zabbixrequests2api", environment), out var zabbixApi)
+        || !configs.TryGetValue(("zabbixbindings2cmdbuild", environment), out var bindingWriter))
     {
         return;
     }
@@ -347,6 +360,21 @@ static void ValidateTopicChain(
         $"{environment} cmdbkafka2zabbix output topic",
         $"{environment} zabbixrequests2api input topic",
         errors);
+    RequireEqual(
+        GetString(zabbixApi, "Kafka:BindingOutput:Topic"),
+        GetString(bindingWriter, "Kafka:Input:Topic"),
+        $"{environment} zabbixrequests2api binding output topic",
+        $"{environment} zabbixbindings2cmdbuild input topic",
+        errors);
+}
+
+static void ValidateCmdbuildBinding(JsonObject config, string context, List<string> errors)
+{
+    RequireNonEmpty(config, "Cmdbuild:BaseUrl", context, errors);
+    RequirePositiveInt(config, "Cmdbuild:RequestTimeoutMs", context, errors);
+    RequireNonEmpty(config, "Cmdbuild:MainHostIdAttributeName", context, errors);
+    RequireNonEmpty(config, "Cmdbuild:BindingClassName", context, errors);
+    RequirePositiveInt(config, "Cmdbuild:BindingLookupLimit", context, errors);
 }
 
 static void ValidateRulesFile(string repositoryRoot, List<string> errors)
@@ -724,24 +752,39 @@ static async Task ValidateC2MTestMultiProfileConversion(string repositoryRoot, L
         return;
     }
 
-    if (!mainResult.Value.Contains("\"templateid\": \"10256\"", StringComparison.Ordinal))
+    using var mainDocument = JsonDocument.Parse(mainResult.Value);
+    if (!mainDocument.RootElement.TryGetProperty("params", out var mainParams)
+        || mainParams.ValueKind != JsonValueKind.Object)
+    {
+        errors.Add("Rules C2MTest multi-profile validation expected main profile request params.");
+        return;
+    }
+
+    var mainTemplateIds = mainParams.TryGetProperty("templates", out var mainTemplates)
+        && mainTemplates.ValueKind == JsonValueKind.Array
+            ? mainTemplates.EnumerateArray()
+                .Select(item => ReadElementString(item, "templateid"))
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
+                .ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+
+    if (!mainTemplateIds.Contains("10256"))
     {
         errors.Add("Rules C2MTest multi-profile validation expected main profile with extra interface IPs to use template HP iLO by SNMP (10256).");
     }
 
-    if (mainResult.Value.Contains("\"templateid\": \"10564\"", StringComparison.Ordinal))
+    if (mainTemplateIds.Contains("10564"))
     {
         errors.Add("Rules C2MTest multi-profile validation expected template conflict rules to remove ICMP Ping (10564) from main profile when HP iLO by SNMP is selected.");
     }
 
-    if (mainResult.Value.Contains("\"templateid\": \"10081\"", StringComparison.Ordinal))
+    if (mainTemplateIds.Contains("10081"))
     {
         errors.Add("Rules C2MTest multi-profile validation expected template conflict rules to remove Windows by Zabbix agent (10081) from main profile when HP iLO by SNMP is selected.");
     }
 
-    using var mainDocument = JsonDocument.Parse(mainResult.Value);
-    if (!mainDocument.RootElement.TryGetProperty("params", out var mainParams)
-        || !mainParams.TryGetProperty("interfaces", out var interfaces)
+    if (!mainParams.TryGetProperty("interfaces", out var interfaces)
         || interfaces.ValueKind != JsonValueKind.Array
         || interfaces.GetArrayLength() != 3)
     {
@@ -763,7 +806,8 @@ static async Task ValidateC2MTestMultiProfileConversion(string repositoryRoot, L
 
     foreach (var expectedIp in new[] { "192.168.202.10", "192.168.202.101", "192.168.202.102" })
     {
-        if (!mainResult.Value.Contains($"\"ip\": \"{expectedIp}\"", StringComparison.Ordinal))
+        if (interfaces.ValueKind != JsonValueKind.Array
+            || !interfaces.EnumerateArray().Any(item => string.Equals(ReadElementString(item, "ip"), expectedIp, StringComparison.Ordinal)))
         {
             errors.Add($"Rules C2MTest multi-profile validation expected main profile interface IP {expectedIp}.");
         }
@@ -1515,6 +1559,7 @@ static void ValidateNoProductionSecrets(ServiceDefinition service, JsonObject ba
         "Kafka:Password",
         "Kafka:Input:Password",
         "Kafka:Output:Password",
+        "Kafka:BindingOutput:Password",
         "ElkLogging:Kafka:Password",
         "ElkLogging:Elk:ApiKey",
         "Zabbix:ApiToken",
@@ -1726,7 +1771,8 @@ internal enum ServiceKind
 {
     Webhook,
     Converter,
-    ZabbixApi
+    ZabbixApi,
+    BindingWriter
 }
 
 internal sealed record ServiceDefinition(string Name, string RelativePath, ServiceKind Kind);

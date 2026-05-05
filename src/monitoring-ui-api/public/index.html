@@ -205,6 +205,49 @@
           <section class="view" id="systemAudit">
             <div class="view-header">
               <h1 data-i18n="nav.systemAudit">Аудит</h1>
+              <div class="actions">
+                <button id="auditAnalyzeModel" type="button" data-i18n="audit.analyzeModel">Проверить модель CMDBuild</button>
+                <button id="auditApplyModel" type="button" data-i18n="audit.applyModel">Применить подготовку CMDBuild</button>
+              </div>
+            </div>
+            <div class="surface">
+              <p class="settings-note" data-i18n="audit.storageIntro">Аудит будет использовать хранилище, выбранное в Runtime-настройках. Поддерживаются PostgreSQL для продуктивной эксплуатации и SQLite для разработки.</p>
+              <p class="settings-note" data-i18n="audit.modelIntro">Подготовка CMDBuild добавляет zabbix_main_hostid в классы, участвующие в правилах конвертации, и создает класс ZabbixHostBinding для дополнительных hostProfiles.</p>
+              <div class="settings-grid">
+                <label class="wide-field">
+                  <span data-i18n="audit.bindingParentClass">Где создать ZabbixHostBinding</span>
+                  <select id="auditBindingParentClass"></select>
+                </label>
+              </div>
+              <p id="auditModelStatus" class="mapping-editor-status" aria-live="polite"></p>
+            </div>
+            <div class="split-layout">
+              <div class="surface">
+                <h2 data-i18n="audit.participatingClasses">Участвующие классы</h2>
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="audit.className">Класс</th>
+                      <th data-i18n="audit.mainHostId">zabbix_main_hostid</th>
+                      <th data-i18n="audit.action">Действие</th>
+                    </tr>
+                  </thead>
+                  <tbody id="auditClassChecks"></tbody>
+                </table>
+              </div>
+              <div class="surface">
+                <h2 data-i18n="audit.bindingClass">ZabbixHostBinding</h2>
+                <dl class="kv" id="auditBindingSummary"></dl>
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="audit.attribute">Атрибут</th>
+                      <th data-i18n="audit.status">Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody id="auditBindingAttributes"></tbody>
+                </table>
+              </div>
             </div>
           </section>
 
@@ -593,6 +636,24 @@
                 <label><span data-i18n="settings.zabbixApi">Zabbix API</span><input name="zabbixApiEndpoint"></label>
                 <label><span data-i18n="settings.zabbixApiKey">Zabbix API key</span><input name="zabbixApiToken" type="password"></label>
               </div>
+              <h2 data-i18n="settings.auditStorage">Хранилище аудита</h2>
+              <div class="settings-grid">
+                <label>
+                  <span data-i18n="settings.auditStorageProvider">СУБД хранилища</span>
+                  <select name="auditStorageProvider">
+                    <option value="sqlite">SQLite</option>
+                    <option value="postgresql">PostgreSQL</option>
+                  </select>
+                </label>
+                <label class="audit-schema-field"><span data-i18n="settings.auditStorageSchema">Схема</span><input name="auditStorageSchema" placeholder="public"></label>
+                <label class="wide-field"><span data-i18n="settings.auditStorageConnectionString">Строка подключения</span><input name="auditStorageConnectionString" type="password" spellcheck="false" placeholder="Data Source=state/audit-dev.sqlite" data-i18n-placeholder="settings.auditStorageConnectionStringPlaceholder"></label>
+                <label><span data-i18n="settings.auditStorageCommandTimeout">Таймаут команды, сек</span><input name="auditStorageCommandTimeoutSeconds" type="number" min="1" max="300"></label>
+                <label class="check-row">
+                  <input name="auditStorageAutoMigrate" type="checkbox">
+                  <span data-i18n="settings.auditStorageAutoMigrate">Автоматически применять миграции аудита</span>
+                </label>
+                <p class="settings-note wide-field" data-i18n="settings.auditStorageNote">SQLite используется для разработки; продуктивный режим ориентирован на PostgreSQL. Код аудита должен работать через общий слой хранения и не зависеть от конкретной СУБД. Production connection string не храните в git.</p>
+              </div>
               <h2 data-i18n="settings.zabbixDynamicTargets">Динамическое расширение Zabbix из CMDBuild leaf</h2>
               <div class="settings-grid">
                 <label class="check-row">
@@ -918,6 +979,17 @@
                   <li data-i18n="help.webhooks.8">В таблице можно раскрыть payload каждой строки: зеленым показано добавление, красным удаление, черным актуальное значение. Нажатие на значение в столбце "Действие" открывает детали под этой строкой, а общий блок деталей находится под таблицей и использует ту же подсветку. Редактировать меняет JSON конкретного webhook в текущем плане.</li>
                   <li data-i18n="help.webhooks.9">Если текущий CMDBuild webhook не передает payload-поля, которые нужны rules, summary и причина операции показывают конкретные отсутствующие ключи. Без загрузки операции в CMDB или ручной правки webhook converter не получит эти значения.</li>
                   <li data-i18n="help.webhooks.10">`Удалить выбранные` применяет только отмеченные операции удаления CMDBuild webhooks и не отправляет create/update операции. Остальные изменения применяются отдельной командой `Загрузить в CMDB`.</li>
+                </ul>
+              </div>
+              <div class="surface">
+                <h2 data-i18n="help.audit.title">Аудит</h2>
+                <ul>
+                  <li data-i18n="help.audit.1">Раздел аудита готовит CMDBuild model для обратной связи с Zabbix: проверяет классы, участвующие в conversion rules, и строит план добавления управляемого атрибута и служебного класса.</li>
+                  <li data-i18n="help.audit.2">Атрибут zabbix_main_hostid создается в карточке каждого участвующего класса. Он нужен для хранения Zabbix hostid основного host объекта и прямой диагностики, какая карточка CMDBuild уже поставлена на мониторинг.</li>
+                  <li data-i18n="help.audit.3">zabbix_main_hostid относится только к основному host profile. Если одна карточка CMDBuild создает несколько Zabbix hosts через дополнительные hostProfiles, их связи хранятся отдельно.</li>
+                  <li data-i18n="help.audit.4">Класс ZabbixHostBinding нужен для расширенной логики: одна карточка класса описывает связь CMDBuild object + hostProfile -> конкретный Zabbix host. Администратор выбирает в дереве CMDBuild, где создать этот класс.</li>
+                  <li data-i18n="help.audit.5">Атрибуты ZabbixHostBinding: OwnerClass, OwnerCardId и OwnerCode указывают исходную карточку; HostProfile указывает profile из rules; ZabbixHostId и ZabbixHostName указывают созданный host; BindingStatus, RulesVersion и LastSyncAt фиксируют состояние, версию rules и время последней синхронизации.</li>
+                  <li data-i18n="help.audit.6">Кнопка Проверить модель CMDBuild только строит план. Кнопка Применить подготовку CMDBuild доступна администратору и создает отсутствующие атрибуты/класс в управляемой CMDBuild.</li>
                 </ul>
               </div>
               <div class="surface">

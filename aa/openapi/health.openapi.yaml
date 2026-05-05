@@ -11,6 +11,8 @@ servers:
     description: cmdbkafka2zabbix dev
   - url: http://localhost:5082
     description: zabbixrequests2api dev
+  - url: http://localhost:5083
+    description: zabbixbindings2cmdbuild dev
   - url: http://localhost:5090
     description: monitoring-ui-api dev
 paths:

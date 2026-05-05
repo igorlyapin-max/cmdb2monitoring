@@ -19,6 +19,7 @@ Run .NET commands through the repository wrapper:
 - `cmdbwebhooks2kafka`: receives CMDBuild webhook payloads on `POST /webhooks/cmdbuild` and publishes normalized events to Kafka.
 - `cmdbkafka2zabbix`: reads CMDB events from Kafka, applies JSON/T4 conversion rules including `hostProfiles[]`, and publishes one or more Zabbix JSON-RPC requests.
 - `zabbixrequests2api`: reads Zabbix JSON-RPC requests from Kafka, validates them, calls Zabbix API, and publishes responses.
+- `zabbixbindings2cmdbuild`: reads Zabbix binding events and writes `zabbix_main_hostid` / `ZabbixHostBinding` back to CMDBuild.
 - `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, Events Kafka browser, rules validate/dry-run/browser save-as, Conversion Rules Management edit/delete, SAML2/OAuth2/MS AD authorization settings, and CMDBuild/Zabbix catalog sync.
 
 Dev HTTP ports:
@@ -26,6 +27,7 @@ Dev HTTP ports:
 - `cmdbwebhooks2kafka`: `http://localhost:5080`, bind `0.0.0.0:5080` so CMDBuild in Docker can call `http://192.168.202.100:5080/webhooks/cmdbuild`.
 - `cmdbkafka2zabbix`: `http://localhost:5081`.
 - `zabbixrequests2api`: `http://localhost:5082`.
+- `zabbixbindings2cmdbuild`: `http://localhost:5083`.
 - `monitoring-ui-api`: `http://localhost:5090`.
 
 Tested dev compatibility:
@@ -56,6 +58,8 @@ dotnet --info
 
 - `CHANGELOG.md`: release history and version notes.
 - `PROJECT_DOCUMENTATION.md` / `PROJECT_DOCUMENTATION.en.md`: full project operations and configuration guide.
+- `SYSTEM_ADMIN_GUIDE.md` / `SYSTEM_ADMIN_GUIDE.en.md`: system administrator checklist for runtime settings, CMDBuild/Zabbix preparation, webhooks, bindings, and operational risks.
+- `RULE_DEVELOPER_GUIDE.md` / `RULE_DEVELOPER_GUIDE.en.md`: rule developer workflow for host profiles, leaf paths, dynamic tags/groups, suppression, update behavior, and webhook checks.
 - `TZ_cmdb2monitoring.txt` / `TZ_cmdb2monitoring.en.txt`: project technical specification.
 - `TEST_PLAN_MAPPING_EDITOR.md` / `TEST_PLAN_MAPPING_EDITOR.en.md`: conversion rules editor and demo E2E test plan.
 - `must.md` / `must.en.md`: mandatory development agreements.
@@ -71,6 +75,8 @@ Architecture artifacts under `aa/` are not translated by default. Non-architectu
 ./scripts/dotnet build src/cmdbwebhooks2kafka/cmdbwebhooks2kafka.csproj
 ./scripts/dotnet build src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj
 ./scripts/dotnet build src/zabbixrequests2api/zabbixrequests2api.csproj
+./scripts/dotnet build src/zabbixbindings2cmdbuild/zabbixbindings2cmdbuild.csproj
+./scripts/dotnet run --project tests/zabbixbindings/zabbixbindings.csproj
 ```
 
 Run the frontend slice:

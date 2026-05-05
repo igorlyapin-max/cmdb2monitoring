@@ -16,6 +16,7 @@
 | cmdbwebhooks2kafka | Прием и нормализация webhook |
 | cmdbkafka2zabbix | Конвертация CMDB-события в Zabbix JSON-RPC |
 | zabbixrequests2api | Вызов Zabbix API и публикация результата |
+| zabbixbindings2cmdbuild | Обратная запись связи CMDBuild card/profile -> Zabbix hostid |
 | monitoring-ui-api | Frontend/BFF для оператора, rules, catalog sync, настройка CMDBuild webhooks, Events Kafka browser, authorization menu и runtime settings |
 | IdP / MS AD | Внешняя аутентификация через SAML2, OAuth2/OIDC или LDAP/LDAPS; MS AD также дает группы для назначения ролей |
 | Kafka | Асинхронная шина обмена и временный транспорт логов |
@@ -36,6 +37,7 @@
 | SP-008 | Визуальное управление rules: add/delete, reference drill-down, undo/redo, save-as draft/webhook instructions | `Управление правилами конвертации` |
 | SP-009 | Локализация frontend: язык `ru/en`, Help и всплывающие подсказки | Login, меню UI, Help |
 | SP-010 | Чтение CMDBuild ETL/webhooks, анализ rules и применение выбранного create/update/delete плана | `Настройка webhooks` |
+| SP-011 | Публикация binding event и запись `zabbix_main_hostid`/`ZabbixHostBinding` в CMDBuild | Create, Update, Delete |
 
 ## Позитивные сценарии
 
@@ -47,23 +49,26 @@
 4. `cmdbkafka2zabbix` читает событие, при необходимости поднимает scalar/lookup/reference/domain leaf по `source.fields[].cmdbPath` через CMDBuild REST, применяет JSON rules, `hostProfiles[]` и T4-шаблон, публикует один или несколько `host.create` в `zabbix.host.requests.*`.
 5. `zabbixrequests2api` валидирует payload, проверяет host groups/templates/template groups и совместимость расширенных host-полей, вызывает Zabbix API.
 6. Zabbix создает host.
-7. `zabbixrequests2api` публикует результат в `zabbix.host.responses.*`.
+7. `zabbixrequests2api` публикует результат в `zabbix.host.responses.*` и binding event в `zabbix.host.bindings.*`.
+8. `zabbixbindings2cmdbuild` записывает `zabbix_main_hostid` для основного профиля или карточку `ZabbixHostBinding` для дополнительного профиля.
 
 ### Update
 
 1. Пользователь изменяет IP/DNS, lookup/reference/domain или другие поля, описанные в rules.
 2. CMDBuild отправляет webhook `card_update_after`.
-3. Если `zabbix_hostid` не передан, `cmdbkafka2zabbix` формирует fallback `host.get` с metadata `hostProfile`, `fallbackForMethod=host.update` и целевыми `fallbackUpdateParams`.
-4. `zabbixrequests2api` выполняет `host.get`, получает `hostid`, существующие `interfaceid` и текущие назначения host. Затем он выполняет `host.update`: `interfaces[]` сопоставляются по type/ip/dns/port и остаются authoritative по rules, а `groups[]`, `templates[]`, `tags[]`, `macros[]` и `inventory` объединяются с текущими значениями Zabbix host, чтобы внешние назначения не удалялись.
-5. Результат публикуется в response topic.
+3. Если explicit `zabbix_hostid` не передан, `cmdbkafka2zabbix` сначала ищет hostid в CMDBuild: `zabbix_main_hostid` для основного профиля или `ZabbixHostBinding` для дополнительного профиля.
+4. Если сохраненный hostid найден, `cmdbkafka2zabbix` формирует прямой `host.update`; если не найден, формирует fallback `host.get` с metadata `hostProfile`, `fallbackForMethod=host.update` и целевыми `fallbackUpdateParams`.
+5. `zabbixrequests2api` выполняет прямой `host.update` или сначала `host.get`, получает `hostid`, существующие `interfaceid` и текущие назначения host. Затем он выполняет `host.update`: `interfaces[]` сопоставляются по type/ip/dns/port и остаются authoritative по rules, а `groups[]`, `templates[]`, `tags[]`, `macros[]` и `inventory` объединяются с текущими значениями Zabbix host, чтобы внешние назначения не удалялись.
+6. Результат публикуется в response topic, а binding event обновляет audit-связь в CMDBuild.
 
 ### Delete
 
 1. Пользователь удаляет карточку.
 2. CMDBuild отправляет webhook `card_delete_after`.
-3. Если `zabbix_hostid` не передан, `cmdbkafka2zabbix` формирует fallback `host.get` с metadata `fallbackForMethod=host.delete`.
-4. `zabbixrequests2api` выполняет `host.get`, получает `hostid`, затем выполняет `host.delete`.
-5. Результат публикуется в response topic.
+3. Если explicit `zabbix_hostid` не передан, `cmdbkafka2zabbix` сначала ищет hostid в CMDBuild binding-данных.
+4. Если сохраненный hostid найден, `cmdbkafka2zabbix` формирует прямой `host.delete`; если не найден, формирует fallback `host.get` с metadata `fallbackForMethod=host.delete`.
+5. `zabbixrequests2api` выполняет прямой `host.delete` или сначала `host.get`, получает `hostid`, затем выполняет `host.delete`.
+6. Результат публикуется в response topic, а binding event очищает `zabbix_main_hostid` или помечает дополнительную связь как `deleted`.
 
 ### Operator UI
 
@@ -95,6 +100,8 @@
 | Zabbix host не найден для delete | `zabbixrequests2api` публикует `host_not_found` |
 | Zabbix API недоступен | retry по конфигу, затем error response |
 | Kafka publish error | ошибка логируется, offset не коммитится до успешной обработки |
+| Binding event не опубликован после успешного Zabbix API | ошибка логируется, основной response/offset не откатывается, чтобы не повторить Zabbix write; восстановление binding выполняется операционно |
+| CMDBuild недоступен для `zabbixbindings2cmdbuild` | binding offset не коммитится, событие повторяется после восстановления сервиса/CMDBuild |
 | CMDBuild resolver не настроен для `cmdbPath` | `cmdbkafka2zabbix` пишет warning и оставляет исходный numeric id/scalar value |
 | Reference/domain path содержит цикл или глубже `Cmdbuild:MaxPathDepth` | `cmdbkafka2zabbix` пишет warning по полю и продолжает обработку с исходным значением |
 | Rules reload token не настроен или неверный | `cmdbkafka2zabbix` отклоняет `POST /admin/reload-rules`, BFF показывает ошибку оператору |
@@ -122,6 +129,7 @@
 - `Настройка webhooks`: чтение текущих CMDBuild webhooks, построение плана create/update/delete по rules, локальный save-as JSON-плана и явное применение выбранных операций в CMDBuild.
 - Переключение языка интерфейса `ru/en` с сохранением в cookie и синхронным переводом Help/tooltip-текстов.
 - Перечитывание conversion rules через provider abstraction и dashboard-кнопку `Перечитать правила конвертации`.
+- Обратная запись binding-ов `CMDBuild card/profile -> Zabbix hostid` в CMDBuild после успешной записи в Zabbix.
 - Назначение UI-ролей по таблице соответствия `admin/editor/viewer` группам IdP/AD.
 - Ведение state-файлов последнего обработанного объекта и восстановление Kafka consumer с `lastInputOffset + 1`.
 - Структурное логирование в Kafka topics для будущей интеграции с ELK.
@@ -133,5 +141,6 @@
 | --- | --- |
 | cmdbwebhooks2kafka | Получен webhook, ошибка авторизации, ошибка JSON, публикация в Kafka |
 | cmdbkafka2zabbix | Загружены rules, событие сконвертировано, событие пропущено, Kafka publish |
-| zabbixrequests2api | JSON-RPC принят, validation error, Zabbix API request/response, response опубликован |
+| zabbixrequests2api | JSON-RPC принят, validation error, Zabbix API request/response, response опубликован, binding event опубликован/пропущен |
+| zabbixbindings2cmdbuild | Binding event принят, `zabbix_main_hostid` записан/очищен, `ZabbixHostBinding` создан/обновлен, ошибка CMDBuild write |
 | monitoring-ui-api | Login/logout, SAML2 ACS, OAuth2 callback, LDAP login, settings update, rules validate/upload, rules reload signal, catalog sync, Kafka Events read |

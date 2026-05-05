@@ -10,6 +10,14 @@
 - Webhook Setup now derives desired CMDBuild webhooks from explicit rule-based webhook requirements and shows the rules that require missing payload fields.
 - Added unit coverage for webhook requirement generation, including reference leaves, domain leaves, foreign-root paths, virtual fields, and obsolete managed hooks.
 - Conversion Rules Management now has an explicit selected-`hostProfile` scope checkbox for add/modify rules, so template/group/tag assignments can keep a normal condition such as `description` while still counting as assignments to an additional profile.
+- Runtime Settings now expose `AuditStorage` for the Audit menu: PostgreSQL for production, SQLite for development, connection string, schema, auto-migrate, and command timeout.
+- Clarified that SQLite audit storage is supported for development and small installations, with PostgreSQL expected for larger monitored-object counts or longer audit retention.
+- Added separate administrator and rule-developer guides covering CMDBuild/Zabbix preparation, webhooks, dynamic leaf behavior, update merge behavior, and human-factor failure scenarios.
+- Added `tests/zabbixbindings` regression coverage for the Zabbix host binding loop: binding event parsing, CMDBuild writes, binding lookup fallback, and publisher payload/header contracts.
+- Audit now plans CMDBuild model preparation for `zabbix_main_hostid` and `ZabbixHostBinding`, with documentation for why the class and attributes are needed.
+- Added `zabbixbindings2cmdbuild`, a Kafka consumer that writes Zabbix host bindings back to CMDBuild as `zabbix_main_hostid` for the main profile and `ZabbixHostBinding` cards for additional profiles.
+- `zabbixrequests2api` now publishes `zabbix.host.bindings.*` events after successful `host.create/update/delete`; Dashboard and Events config include the new service, binding topic, and log topic.
+- `cmdbkafka2zabbix` now reads stored CMDBuild host bindings before fallback `host.get`: `zabbix_main_hostid` for the main profile and `ZabbixHostBinding` for additional profiles.
 
 ### Fixed
 

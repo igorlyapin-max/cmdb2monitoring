@@ -7,4 +7,6 @@ public sealed class KafkaOptions
     public KafkaInputOptions Input { get; init; } = new();
 
     public KafkaOutputOptions Output { get; init; } = new();
+
+    public KafkaBindingOutputOptions BindingOutput { get; init; } = new();
 }

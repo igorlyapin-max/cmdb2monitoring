@@ -55,6 +55,9 @@ builder.Services.AddOptions<CmdbuildOptions>()
     .Bind(builder.Configuration.GetSection(CmdbuildOptions.SectionName))
     .Validate(options => options.RequestTimeoutMs > 0, "CMDBuild request timeout must be greater than zero.")
     .Validate(options => options.MaxPathDepth is >= 2 and <= 5, "CMDBuild max path depth must be from 2 to 5.")
+    .Validate(options => !options.HostBindingLookupEnabled || !string.IsNullOrWhiteSpace(options.MainHostIdAttributeName), "CMDBuild main host id attribute name is required when host binding lookup is enabled.")
+    .Validate(options => !options.HostBindingLookupEnabled || !string.IsNullOrWhiteSpace(options.BindingClassName), "CMDBuild binding class name is required when host binding lookup is enabled.")
+    .Validate(options => !options.HostBindingLookupEnabled || options.BindingLookupLimit > 0, "CMDBuild binding lookup limit must be greater than zero when host binding lookup is enabled.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ProcessingStateOptions>()
@@ -91,6 +94,8 @@ builder.Logging.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerPro
 builder.Services.AddSingleton<IConversionRulesProvider, GitConversionRulesProvider>();
 builder.Services.AddSingleton<CmdbEventReader>();
 builder.Services.AddHttpClient<CmdbSourceFieldResolver>();
+builder.Services.AddHttpClient<CmdbZabbixHostBindingResolver>();
+builder.Services.AddSingleton<ICmdbZabbixHostBindingResolver>(services => services.GetRequiredService<CmdbZabbixHostBindingResolver>());
 builder.Services.AddSingleton<T4TemplateRenderer>();
 builder.Services.AddSingleton<CmdbToZabbixConverter>();
 builder.Services.AddSingleton<IZabbixRequestPublisher, ZabbixRequestPublisher>();

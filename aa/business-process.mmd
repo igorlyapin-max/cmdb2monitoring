@@ -9,6 +9,7 @@ flowchart TD
     monui -->|GET /health :5080| wh
     monui -->|GET /health :5081| conv
     monui -->|GET /health :5082| api
+    monui -->|GET /health :5083| bind
     monui -->|POST /admin/reload-rules :5081| conv
     monui -->|Kafka events read-only :9092| kafka
     ui -->|HTTP :8090| cmdb[CMDBuild :8090]
@@ -21,9 +22,13 @@ flowchart TD
     kafka -->|consume zabbix.host.requests.* :9092| api[zabbixrequests2api :5082]
     api -->|JSON-RPC :8081| zabbix[Zabbix API :8081]
     api -->|zabbix.host.responses.* :9092| kafka
+    api -->|zabbix.host.bindings.* :9092| kafka
+    kafka -->|consume zabbix.host.bindings.* :9092| bind[zabbixbindings2cmdbuild :5083]
+    bind -->|write zabbix_main_hostid / ZabbixHostBinding :8090| cmdb
     wh -->|logs :9092| logs[Kafka log topics]
     conv -->|logs :9092| logs
     api -->|logs :9092| logs
+    bind -->|logs :9092| logs
     logs -. future ship :9200 .-> elk[ELK]
 
     subgraph subprocesses[Повторно используемые подпроцессы]
@@ -36,6 +41,7 @@ flowchart TD
         sp7[SP-007 rules validate + backup + save]
         sp8[SP-008 conversion rules add/delete + reference/domain drill-down + save-as]
         sp9[SP-009 UI language ru/en + Help/tooltips]
+        sp11[SP-011 binding event + CMDBuild reverse write]
     end
 
     subgraph fallback[Fallback для update/delete без zabbix_hostid]

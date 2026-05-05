@@ -239,6 +239,13 @@ Scenario `UPDATE-MERGE-003`: direct `host.update` with `hostid` and merge fields
 3. Verify that the final update preserves external values the same way as fallback `host.get -> host.update`.
 4. Verify that `host.get` with `hostids` passes validation.
 
+Scenario `UPDATE-BINDING-001`: update/delete use hostid from CMDBuild binding data.
+
+1. Create a host through the normal create flow and verify that `zabbixbindings2cmdbuild` wrote `zabbix_main_hostid` for the main profile or a `ZabbixHostBinding` card for an additional profile.
+2. Change the CMDBuild card so the technical host name could change or fallback by name would be undesirable.
+3. Run update and verify that `cmdbkafka2zabbix` rendered direct `host.update` with `hostid`, not fallback `host.get`.
+4. Run delete and verify that `cmdbkafka2zabbix` rendered direct `host.delete` with the same `hostid`, while the binding event cleared `zabbix_main_hostid` or marked `ZabbixHostBinding` as `deleted`.
+
 Scenario `UPDATE-MERGE-004`: `interfaces[]` are not a merge field.
 
 1. Add an external interface to the Zabbix host that is absent from rules.
@@ -387,6 +394,17 @@ Separate status scenario:
 26. Remove or temporarily disable that `hostProfiles[]` only in draft JSON and run Logical Control of Conversion Rules: the class must be highlighted as a rules error with the `Create host profile` action, and applying it must restore the profile through the shared undo/redo flow.
 27. Run Logical Control of Conversion Rules.
 28. Run `Save file as` and verify that webhook body remains flat while path metadata is stored next to the source key.
+
+## Automated Binding-Loop Regressions
+
+The `tests/zabbixbindings` package checks the new `Zabbix hostid -> CMDBuild -> next update/delete` loop without live Kafka, CMDBuild, or Zabbix:
+
+- `ZabbixBindingEventReader` parses create/update/delete events, applies defaults, and rejects messages without required fields;
+- `zabbixbindings2cmdbuild` writes or clears `zabbix_main_hostid` for the main profile;
+- `zabbixbindings2cmdbuild` creates or updates `ZabbixHostBinding` cards for additional `hostProfiles[]` by `OwnerClass + OwnerCardId + HostProfile`;
+- the `cmdbkafka2zabbix` resolver reads `zabbix_main_hostid` and active `ZabbixHostBinding`, ignores `BindingStatus=deleted`, and returns `null` on CMDBuild errors so the converter can continue to fallback `host.get`;
+- `zabbixrequests2api` contract tests verify `hostid` extraction from successful create/update results and the binding publisher payload/header contract;
+- the full local run goes through `./scripts/test-configs.sh`, where `tests/zabbixbindings` runs after `tests/cmdbresolver`.
 
 ## Acceptance Criteria
 

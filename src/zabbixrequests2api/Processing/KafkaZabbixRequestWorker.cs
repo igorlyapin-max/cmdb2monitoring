@@ -14,6 +14,7 @@ public sealed class KafkaZabbixRequestWorker(
     ZabbixDynamicHostGroupResolver dynamicHostGroupResolver,
     IZabbixClient zabbixClient,
     IZabbixResponsePublisher responsePublisher,
+    IZabbixBindingEventPublisher bindingEventPublisher,
     IProcessingStateStore stateStore,
     ILogger<KafkaZabbixRequestWorker> logger) : BackgroundService
 {
@@ -272,13 +273,7 @@ public sealed class KafkaZabbixRequestWorker(
                 []);
         }
 
-        var deleteRequestJson = JsonSerializer.Serialize(new
-        {
-            jsonrpc = "2.0",
-            method = "host.delete",
-            @params = new[] { hostId },
-            id = ResolveJsonRpcId(lookupRequest)
-        });
+        var deleteRequestJson = BuildHostDeleteRequestJson(lookupRequest, hostId);
         var deleteRequest = requestReader.Read(lookupRequest.EntityId, deleteRequestJson, lookupRequest.Host);
         var deleteValidation = await requestValidator.ValidateAsync(deleteRequest, cancellationToken);
         if (!deleteValidation.IsValid)
@@ -626,6 +621,7 @@ public sealed class KafkaZabbixRequestWorker(
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
+            WriteCmdbMetadata(writer, lookupRequest);
             writer.WriteString("jsonrpc", "2.0");
             writer.WriteString("method", "host.update");
             writer.WritePropertyName("params");
@@ -709,6 +705,7 @@ public sealed class KafkaZabbixRequestWorker(
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
+            WriteCmdbMetadata(writer, updateRequest);
             writer.WriteString("jsonrpc", "2.0");
             writer.WriteString("method", "host.get");
             writer.WritePropertyName("params");
@@ -737,31 +734,34 @@ public sealed class KafkaZabbixRequestWorker(
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
+    private static string BuildHostDeleteRequestJson(ZabbixRequestDocument lookupRequest, string hostId)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            WriteCmdbMetadata(writer, lookupRequest);
+            writer.WriteString("jsonrpc", "2.0");
+            writer.WriteString("method", "host.delete");
+            writer.WritePropertyName("params");
+            writer.WriteStartArray();
+            writer.WriteStringValue(hostId);
+            writer.WriteEndArray();
+            writer.WritePropertyName("id");
+            lookupRequest.Id.WriteTo(writer);
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
     private static string BuildHostCreateRequestJson(ZabbixRequestDocument lookupRequest)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WritePropertyName("cmdb2monitoring");
-            writer.WriteStartObject();
-            if (!string.IsNullOrWhiteSpace(lookupRequest.EntityId))
-            {
-                writer.WriteString("entityId", lookupRequest.EntityId);
-            }
-
-            if (!string.IsNullOrWhiteSpace(lookupRequest.Host))
-            {
-                writer.WriteString("host", lookupRequest.Host);
-            }
-
-            if (!string.IsNullOrWhiteSpace(lookupRequest.HostProfileName))
-            {
-                writer.WriteString("hostProfile", lookupRequest.HostProfileName);
-            }
-
-            writer.WriteString("fallbackSource", "createOnUpdateWhenMissing");
-            writer.WriteEndObject();
+            WriteCmdbMetadata(writer, lookupRequest, "createOnUpdateWhenMissing");
             writer.WriteString("jsonrpc", "2.0");
             writer.WriteString("method", "host.create");
             writer.WritePropertyName("params");
@@ -772,6 +772,38 @@ public sealed class KafkaZabbixRequestWorker(
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void WriteCmdbMetadata(
+        Utf8JsonWriter writer,
+        ZabbixRequestDocument request,
+        string? fallbackSource = null)
+    {
+        writer.WritePropertyName("cmdb2monitoring");
+        writer.WriteStartObject();
+        WriteOptionalString(writer, "entityId", request.EntityId);
+        WriteOptionalString(writer, "sourceCardId", request.SourceCardId ?? request.EntityId);
+        WriteOptionalString(writer, "sourceClass", request.SourceClass);
+        WriteOptionalString(writer, "sourceCode", request.SourceCode);
+        WriteOptionalString(writer, "host", request.Host);
+        WriteOptionalString(writer, "hostProfile", request.HostProfileName);
+        WriteOptionalString(writer, "rulesVersion", request.RulesVersion);
+        WriteOptionalString(writer, "schemaVersion", request.SchemaVersion);
+        writer.WriteBoolean("isMainProfile", request.IsMainProfile);
+        if (!string.IsNullOrWhiteSpace(fallbackSource))
+        {
+            writer.WriteString("fallbackSource", fallbackSource);
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteOptionalString(Utf8JsonWriter writer, string propertyName, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            writer.WriteString(propertyName, value);
+        }
     }
 
     private static void WriteInterfacesWithExistingIds(
@@ -1203,6 +1235,18 @@ public sealed class KafkaZabbixRequestWorker(
         CancellationToken cancellationToken)
     {
         var deliveryResult = await responsePublisher.PublishAsync(result, consumed, cancellationToken);
+        try
+        {
+            await bindingEventPublisher.PublishAsync(result, consumed, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Failed to publish Zabbix binding event for method {Method}, entity {EntityId}; Zabbix response stays committed to avoid duplicate Zabbix writes",
+                result.Method,
+                result.EntityId ?? "<unknown>");
+        }
 
         await stateStore.WriteAsync(new ProcessingStateDocument(
             LastEntityId: result.EntityId,

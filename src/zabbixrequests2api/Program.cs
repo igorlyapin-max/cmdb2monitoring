@@ -35,6 +35,16 @@ builder.Services.AddOptions<KafkaOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.SuccessHeaderName), "Kafka output success header name is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.MethodHeaderName), "Kafka output method header name is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.ErrorCodeHeaderName), "Kafka output error code header name is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.BootstrapServers), "Kafka binding output bootstrap servers are required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.Topic), "Kafka binding output topic is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.ClientId), "Kafka binding output client id is required.")
+    .Validate(options => options.BindingOutput.HasValidSecurityProtocol(), "Kafka binding output security protocol is invalid.")
+    .Validate(options => options.BindingOutput.HasValidSaslMechanism(), "Kafka binding output SASL mechanism is invalid.")
+    .Validate(options => options.BindingOutput.HasValidAcks(), "Kafka binding output acks value is invalid.")
+    .Validate(options => options.BindingOutput.MessageTimeoutMs > 0, "Kafka binding output message timeout must be greater than zero.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.EventTypeHeaderName), "Kafka binding output event type header name is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.HostProfileHeaderName), "Kafka binding output host profile header name is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.BindingStatusHeaderName), "Kafka binding output status header name is required.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ZabbixOptions>()
@@ -91,6 +101,7 @@ builder.Services.AddSingleton<ZabbixRequestReader>();
 builder.Services.AddSingleton<ZabbixRequestValidator>();
 builder.Services.AddSingleton<ZabbixDynamicHostGroupResolver>();
 builder.Services.AddSingleton<IZabbixResponsePublisher, ZabbixResponsePublisher>();
+builder.Services.AddSingleton<IZabbixBindingEventPublisher, ZabbixBindingEventPublisher>();
 builder.Services.AddSingleton<IProcessingStateStore, FileProcessingStateStore>();
 builder.Services.AddHostedService<KafkaZabbixRequestWorker>();
 
