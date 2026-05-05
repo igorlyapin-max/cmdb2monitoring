@@ -246,6 +246,15 @@ node scripts/cmdbuild-demo-e2e.mjs --apply --cleanup-zabbix --code C2M-DEMO-013-
 3. Выполнить update и проверить, что `cmdbkafka2zabbix` сформировал прямой `host.update` с `hostid`, а не fallback `host.get`.
 4. Выполнить delete и проверить, что `cmdbkafka2zabbix` сформировал прямой `host.delete` с тем же `hostid`, а binding event очистил `zabbix_main_hostid` или пометил `ZabbixHostBinding` как `deleted`.
 
+Сценарий `AUDIT-QUICK-001`: быстрый аудит выявляет основные расхождения без исправлений.
+
+1. Подготовить карточки CMDBuild с основным profile и дополнительным `hostProfile`, убедиться, что rules содержат ожидаемые host groups/templates/maintenance/status.
+2. В меню `Аудит` выбрать корень `Class` или конкретный участвующий класс, включить дочерние классы и фильтр только по rules, запустить `Быстрый аудит`.
+3. Проверить, что отчет показывает OK для карточек, где совпали binding, host name, interface address, host groups, templates, maintenance и status.
+4. Установить `Offset карточек` равным размеру первого пакета или нажать `Следующий пакет`, проверить, что следующий запуск читает следующий пакет карточек выбранных классов.
+5. Удалить или изменить вручную один host group/template/maintenance/address в Zabbix и повторить быстрый аудит.
+6. Проверить, что отчет показывает ошибку только по затронутому объекту/profile и не предлагает автоисправление.
+
 Сценарий `UPDATE-MERGE-004`: `interfaces[]` не являются merge-полем.
 
 1. Добавить на Zabbix host внешний interface, которого нет в rules.

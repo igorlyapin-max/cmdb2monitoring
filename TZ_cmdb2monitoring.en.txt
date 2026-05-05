@@ -1,6 +1,6 @@
 cmdb2monitoring Technical Specification
 
-Document version: 0.8.0
+Document version: 0.8.2
 Last updated: 2026-05-05
 English companion for TZ_cmdb2monitoring.txt. Architecture artifacts under aa/ are intentionally not translated in this pass.
 
@@ -140,7 +140,7 @@ Until ELK is available, services write structured JSON logs to Kafka log topics.
 
 8. Configuration
 
-Base configs must not contain production secrets. Development configs may contain local stand values. Production secrets use env/secret storage/local ignored config.
+Base configs must not contain production secrets. Development configs may contain local stand values. Production secrets use env/secret storage/local ignored config. Service-account secrets may also use the corporate `IndeedPamAapm` provider: config stores `secret://id`, the service reads the actual value from Indeed PAM/AAPM at startup, and the AAPM application token or application login/password remains a deployment-layer bootstrap secret. Compatible env aliases `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD` and `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET` are supported for corporate deployments.
 
 .NET services use standard `__` environment overrides. monitoring-ui-api uses explicit env mappings documented in project documentation.
 
@@ -558,6 +558,7 @@ Audit model:
 - `ZabbixHostBinding` must store one card per `CMDBuild class + card id + hostProfile -> Zabbix host` link. Minimum attributes: `OwnerClass`, `OwnerCardId`, `OwnerCode`, `HostProfile`, `ZabbixHostId`, `ZabbixHostName`, `BindingStatus`, `RulesVersion`, `LastSyncAt`;
 - attribute meaning: `OwnerClass`/`OwnerCardId`/`OwnerCode` identify the source CMDBuild card; `HostProfile` identifies the profile from rules; `ZabbixHostId`/`ZabbixHostName` identify the Zabbix object; `BindingStatus`, `RulesVersion`, and `LastSyncAt` store binding state, rules version, and last synchronization time;
 - after successful Zabbix writes, `zabbixbindings2cmdbuild` must fill `zabbix_main_hostid` for the main profile and `ZabbixHostBinding` cards for additional profiles automatically;
+- the UI must provide quick audit as a read-only `editor/admin` operation: choose a CMDBuild class with child-class scope and a rules-only filter, read cards through `limit/offset`, calculate expected host/profile/interface/groups/templates/maintenance/status from current conversion rules, and compare them with Zabbix `host.get` and bulk `maintenance.get`. `Run quick audit` must read the current offset, while `Next batch` must increase offset by the current max-cards-per-class limit. Quick audit must not perform auto-fixes;
 - applying the audit model requires CMDBuild model-administration permissions to create classes and attributes through REST (`POST /classes?scope=service`, `POST /classes/{class}/attributes`). These write permissions are not required for checking the plan.
 
 18.7. Checks

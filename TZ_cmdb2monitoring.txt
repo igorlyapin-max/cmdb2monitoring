@@ -1,6 +1,6 @@
 Техническое задание
 Проект: cmdb2monitoring
-Версия: 0.8.0
+Версия: 0.8.2
 Дата: 2026-05-05
 
 1. Назначение проекта
@@ -1263,6 +1263,7 @@ aa/configuration-files.md
 - какие appsettings-файлы есть у каждого микросервиса;
 - какие параметры менять при смене Kafka/Zabbix/ELK/окружения;
 - какие параметры должны задаваться только через env/secret storage;
+- как подключать корпоративное PAM/AAPM-хранилище сервисных секретов через `Secrets:Provider=IndeedPamAapm`, ссылки `secret://id` и совместимые env aliases `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD`, `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET`;
 - как включать SASL/TLS Kafka через конфиг;
 - какие topics должны совпадать между микросервисами;
 - как настраивать rules-файл, state-файл и gentle processing.
@@ -1285,6 +1286,7 @@ scripts/test-configs.sh
 - связность topic chain между микросервисами;
 - корректность dev/base topic suffix;
 - отсутствие production-секретов в base config;
+- корректность секции `Secrets` и допустимость `secret://id` вместо фактического значения секрета;
 - наличие обязательных architecture artifacts в aa;
 - наличие fallback metadata в rules-файле для update/delete.
 - regression-проверки CMDBuild resolver без живых CMDBuild/Zabbix/Kafka: два последовательных update события с одним экземпляром resolver должны заново читать lookup values, reference leaf cards и domain leaf cards; отдельный сценарий должен проверять, что обновленное domain leaf значение попадает в итоговый JSON-RPC `groups[]` как dynamic host group.
@@ -1384,6 +1386,7 @@ IdP disabled / локальный режим:
 - Zabbix использует runtime `Zabbix:ApiToken`, если он заполнен;
 - если Zabbix API key не заполнен, Zabbix login/password запрашиваются при первой операции, которой нужен Zabbix API, и хранятся только в памяти server-side session;
 - production secrets не попадают в git.
+- сервисные учетные записи микросервисов могут получать пароль/token через Indeed PAM/AAPM: в конфигурации хранится `secret://id`, а фактическое значение считывается при старте сервиса только в память процесса; AAPM application token или application login/password является bootstrap-секретом deployment-слоя и может передаваться через `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD`.
 
 CMDBuild/Zabbix credentials при MS AD/IdP:
 - внешний вход через MS AD/IdP используется только для UI identity и ролей;
@@ -1504,6 +1507,7 @@ Audit model:
 - `ZabbixHostBinding` должен хранить одну карточку на связь `CMDBuild class + card id + hostProfile -> Zabbix host`. Минимальные атрибуты: `OwnerClass`, `OwnerCardId`, `OwnerCode`, `HostProfile`, `ZabbixHostId`, `ZabbixHostName`, `BindingStatus`, `RulesVersion`, `LastSyncAt`;
 - назначение атрибутов: `OwnerClass`/`OwnerCardId`/`OwnerCode` описывают исходную карточку CMDBuild; `HostProfile` указывает профиль из rules; `ZabbixHostId`/`ZabbixHostName` указывают объект Zabbix; `BindingStatus`, `RulesVersion`, `LastSyncAt` нужны для состояния связи, версии правил и времени последней синхронизации;
 - после успешной записи в Zabbix микросервис `zabbixbindings2cmdbuild` должен автоматически заполнять `zabbix_main_hostid` для основного профиля и карточки `ZabbixHostBinding` для дополнительных профилей;
+- UI должен предоставлять быстрый аудит как read-only операцию для `editor/admin`: выбор класса CMDBuild с учетом дочерних классов и фильтра только участвующих в rules, чтение карточек через `limit/offset`, расчет ожидаемых host/profile/interface/groups/templates/maintenance/status по текущим conversion rules и сравнение с Zabbix `host.get` и bulk `maintenance.get`. `Запустить быстрый аудит` должен читать текущий offset, `Следующий пакет` должен увеличивать offset на текущий лимит карточек на класс. Быстрый аудит не должен выполнять автоисправления;
 - для применения audit model CMDBuild user должен иметь права администратора модели на создание классов и атрибутов через REST (`POST /classes?scope=service`, `POST /classes/{class}/attributes`). Для проверки плана эти write-права не требуются.
 
 Events Kafka browser:

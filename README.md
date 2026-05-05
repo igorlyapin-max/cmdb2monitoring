@@ -1,6 +1,6 @@
 # cmdb2monitoring
 
-Current release version: `0.8.0`.
+Current release version: `0.8.2`.
 
 Local .NET development environment is installed in `.dotnet`.
 The repository wrapper also keeps .NET CLI state and NuGet packages inside this workspace, which makes it work without a global SDK installation.
@@ -60,6 +60,7 @@ dotnet --info
 - `PROJECT_DOCUMENTATION.md` / `PROJECT_DOCUMENTATION.en.md`: full project operations and configuration guide.
 - `SYSTEM_ADMIN_GUIDE.md` / `SYSTEM_ADMIN_GUIDE.en.md`: system administrator checklist for runtime settings, CMDBuild/Zabbix preparation, webhooks, bindings, and operational risks.
 - `RULE_DEVELOPER_GUIDE.md` / `RULE_DEVELOPER_GUIDE.en.md`: rule developer workflow for host profiles, leaf paths, dynamic tags/groups, suppression, update behavior, and webhook checks.
+- `DEPLOYMENT_LOCAL_REGISTRY.md` / `DEPLOYMENT_LOCAL_REGISTRY.en.md`: build and deployment guide for publishing microservice/UI images to a local Docker registry.
 - `TZ_cmdb2monitoring.txt` / `TZ_cmdb2monitoring.en.txt`: project technical specification.
 - `TEST_PLAN_MAPPING_EDITOR.md` / `TEST_PLAN_MAPPING_EDITOR.en.md`: conversion rules editor and demo E2E test plan.
 - `must.md` / `must.en.md`: mandatory development agreements.

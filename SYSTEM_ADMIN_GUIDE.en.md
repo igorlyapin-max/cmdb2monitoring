@@ -32,11 +32,12 @@ The rule developer is responsible for rules-file content: source fields, `cmdbPa
    - Log topics for services when enabled in configuration.
 
 3. Configure microservices.
-   - `cmdbwebhooks2kafka`: webhook URL, Bearer token, Kafka input.
+   - `cmdbwebhooks2kafka`: webhook URL, network access or reverse proxy auth for inbound webhooks, Kafka input.
    - `cmdbkafka2zabbix`: CMDBuild REST URL, rules provider, `HostBindingLookupEnabled`, Kafka input/output.
    - `zabbixrequests2api`: Zabbix API URL/token, validation settings, dynamic host group creation.
    - `zabbixbindings2cmdbuild`: CMDBuild REST URL, service account for writing bindings.
    - `monitoring-ui-api`: endpoints, Kafka Event Browser, auth, runtime settings, git settings.
+   - Docker image build, local registry publishing, Kafka topics, per-service secrets, and external-system permissions are described in `DEPLOYMENT_LOCAL_REGISTRY.md`.
 
 4. Configure UI roles.
    - `viewer`: Dashboard and Events.
@@ -50,6 +51,7 @@ CMDBuild:
 - UI catalog sync: read-only access to metadata classes/attributes/domains, lookup types/values, target class cards, related reference/domain classes, and current-card relations.
 - Webhook Setup, `Load from CMDB`: read access to ETL/webhook records.
 - Webhook Setup, `Load into CMDB`: create/update/delete or equivalent modify permissions on ETL/webhook records.
+- Audit, `Run quick audit`: read-only access to metadata classes/attributes, selected class cards, and `ZabbixHostBinding`; Zabbix needs read-only `host.get` with interfaces, groups, and parent templates, plus `maintenance.get` to check membership for expected maintenances.
 - Audit, `Apply CMDBuild preparation`: model administrator permissions to create classes and attributes.
 - `cmdbkafka2zabbix`: read-only access to source cards and `ZabbixHostBinding` when `Cmdbuild:HostBindingLookupEnabled` is enabled.
 - `zabbixbindings2cmdbuild`: read/update on participating class cards for `zabbix_main_hostid`, read/create/update on `ZabbixHostBinding`.
@@ -78,6 +80,9 @@ Important separation:
 - UI/BFF settings in `Runtime settings` do not automatically change microservice configuration;
 - `cmdbkafka2zabbix`, `zabbixrequests2api`, and `zabbixbindings2cmdbuild` settings live in their `appsettings*.json` or env/secret values;
 - external UI authentication through MS AD/IdP is not used as CMDBuild/Zabbix API credentials.
+- service accounts can use `Secrets:Provider=IndeedPamAapm` and `secret://id` references; the actual secret is read from Indeed PAM/AAPM and must not be stored in git or Docker images.
+- the AAPM application token or application login/password is the application's bootstrap secret and must be provided through a Docker/Kubernetes secret, protected mount, another deployment-layer mechanism, or `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD` env aliases.
+- Kafka SASL can use the corporate `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET` format; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` becomes `secret://AAA.LOCAL\PROD.contractorProfiles` and is read from PAM/AAPM.
 
 ## Git Settings And Rules File
 
@@ -135,6 +140,12 @@ Class attributes:
 | `LastSyncAt` | string 64 | Last write timestamp |
 
 Recommended creation is through the `Audit` menu: the administrator selects where to create `ZabbixHostBinding` in the CMDBuild tree and applies preparation. This reduces the risk of wrong attribute names or types.
+
+### Quick Audit
+
+`Run quick audit` is read-only. The administrator or rule developer selects a CMDBuild class, enables child classes and the rules-only filter when needed, and the UI reads cards in `limit/offset` batches, calculates expected host/profile/interface/groups/templates/maintenance/status from the current rules file, and compares the result with Zabbix `host.get` and bulk `maintenance.get`. `Cards offset` sets the start of the batch for every selected class; `Next batch` increases offset by the current max-cards-per-class limit.
+
+Use quick audit after changing rules, webhooks, or the CMDBuild model. Reported discrepancies mean the object was not created, binding was not written, the host still has an old name/address, host groups/templates/maintenance did not arrive, or monitoring status differs from rules. Quick audit does not fix data automatically.
 
 ## Webhook Setup
 

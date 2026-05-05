@@ -32,11 +32,12 @@
    - Logs topics для сервисов, если они включены в конфигурации.
 
 3. Настройте микросервисы.
-   - `cmdbwebhooks2kafka`: URL webhook, Bearer token, input Kafka.
+   - `cmdbwebhooks2kafka`: URL webhook, сетевой доступ или reverse proxy auth для входящего webhook, input Kafka.
    - `cmdbkafka2zabbix`: CMDBuild REST URL, rules provider, `HostBindingLookupEnabled`, Kafka input/output.
    - `zabbixrequests2api`: Zabbix API URL/token, validation settings, dynamic host group creation.
    - `zabbixbindings2cmdbuild`: CMDBuild REST URL, service account для записи binding-ов.
    - `monitoring-ui-api`: endpoints, Kafka Event Browser, auth, runtime settings, git settings.
+   - Сборка Docker images, публикация в локальный registry, Kafka topics, секреты по сервисам и права внешних систем описаны в `DEPLOYMENT_LOCAL_REGISTRY.md`.
 
 4. Настройте роли UI.
    - `viewer`: Панель и События.
@@ -50,6 +51,7 @@ CMDBuild:
 - UI catalog sync: read-only к metadata classes/attributes/domains, lookup types/values, карточкам целевых классов, reference/domain связанным классам и relations текущей карточки.
 - Webhook Setup, `Загрузить из CMDB`: read к ETL/webhook records.
 - Webhook Setup, `Загрузить в CMDB`: create/update/delete или эквивалентные modify-права на ETL/webhook records.
+- Audit, `Запустить быстрый аудит`: read-only к metadata classes/attributes, карточкам выбранных классов и `ZabbixHostBinding`; в Zabbix нужен read-only `host.get` с interfaces, groups и parent templates, а также `maintenance.get` для проверки membership по ожидаемым maintenance.
 - Audit, `Применить подготовку CMDBuild`: права администратора модели на создание classes и attributes.
 - `cmdbkafka2zabbix`: read-only к исходным карточкам и `ZabbixHostBinding`, если включен `Cmdbuild:HostBindingLookupEnabled`.
 - `zabbixbindings2cmdbuild`: read/update на карточки участвующих классов для `zabbix_main_hostid`, read/create/update на `ZabbixHostBinding`.
@@ -78,6 +80,9 @@ AuditStorage:
 - настройки UI/BFF в `Runtime-настройках` не меняют автоматически конфигурацию микросервисов;
 - настройки `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild` живут в их `appsettings*.json` или env/secret;
 - внешняя авторизация UI через MS AD/IdP не используется как credential для CMDBuild/Zabbix API.
+- для сервисных учеток можно использовать `Secrets:Provider=IndeedPamAapm` и ссылки `secret://id`; фактический секрет будет считан из Indeed PAM/AAPM и не должен храниться в git или Docker image.
+- AAPM application token или application login/password является bootstrap-секретом самого приложения и должен передаваться через Docker/Kubernetes secret, защищенный mount, иной механизм deployment-слоя или env aliases `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD`.
+- Kafka SASL можно задавать корпоративным форматом `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET`; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` будет преобразован в `secret://AAA.LOCAL\PROD.contractorProfiles` и прочитан из PAM/AAPM.
 
 ## Настройка git и rules-файла
 
@@ -135,6 +140,12 @@ AuditStorage:
 | `LastSyncAt` | string 64 | timestamp последней записи |
 
 Рекомендуемый способ создания - меню `Аудит`: администратор выбирает в дереве CMDBuild, где создать `ZabbixHostBinding`, затем применяет подготовку. Это уменьшает риск ошибки в типах и именах атрибутов.
+
+### Быстрый аудит
+
+`Запустить быстрый аудит` выполняет только чтение. Администратор или разработчик правил выбирает класс CMDBuild, включает при необходимости дочерние классы и фильтр только по классам, участвующим в rules. UI читает карточки пакетами через `limit/offset`, рассчитывает ожидаемые host/profile/interface/groups/templates/maintenance/status по текущему файлу правил и сравнивает с Zabbix `host.get` и bulk `maintenance.get`. Поле `Offset карточек` задает начало пакета для каждого выбранного класса; кнопка `Следующий пакет` увеличивает offset на текущий лимит карточек на класс.
+
+Используйте быстрый аудит после изменения rules, webhooks или модели CMDBuild. Расхождения в отчете означают, что объект не создан, binding не записан, host остался на старом имени/адресе, не доехали host groups/templates/maintenance или состояние monitoring status отличается от rules. Быстрый аудит не исправляет данные автоматически.
 
 ## Настройка webhooks
 

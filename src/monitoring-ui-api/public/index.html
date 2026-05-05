@@ -205,14 +205,62 @@
           <section class="view" id="systemAudit">
             <div class="view-header">
               <h1 data-i18n="nav.systemAudit">Аудит</h1>
+            </div>
+            <div class="surface">
+              <p class="settings-note" data-i18n="audit.storageIntro">Аудит будет использовать хранилище, выбранное в Runtime-настройках. Поддерживаются PostgreSQL для продуктивной эксплуатации и SQLite для разработки.</p>
+              <h2 data-i18n="audit.quickTitle">Быстрый аудит</h2>
+              <p class="settings-note" data-i18n="audit.quickIntro">Быстрый аудит сравнивает основные параметры карточек CMDBuild с host в Zabbix без изменений в управляемых системах.</p>
+              <div class="settings-grid">
+                <label>
+                  <span data-i18n="audit.quickClass">Класс CMDBuild</span>
+                  <select id="auditQuickClass"></select>
+                </label>
+                <label>
+                  <span data-i18n="audit.quickMaxCards">Максимум карточек на класс</span>
+                  <input id="auditQuickMaxCards" type="number" min="1" max="500" value="100">
+                </label>
+                <label>
+                  <span data-i18n="audit.quickOffset">Offset карточек</span>
+                  <input id="auditQuickOffset" type="number" min="0" step="1" value="0">
+                </label>
+                <label class="check-row">
+                  <input id="auditQuickIncludeDescendants" type="checkbox" checked>
+                  <span data-i18n="audit.quickIncludeDescendants">Включить дочерние классы</span>
+                </label>
+                <label class="check-row">
+                  <input id="auditQuickOnlyRulesClasses" type="checkbox" checked>
+                  <span data-i18n="audit.quickOnlyRulesClasses">Только классы из правил</span>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="auditRunQuick" type="button" data-i18n="audit.quickRun">Запустить быстрый аудит</button>
+                <button id="auditRunQuickNext" type="button" data-i18n="audit.quickNext">Следующий пакет</button>
+              </div>
+              <p id="auditQuickStatus" class="mapping-editor-status" aria-live="polite"></p>
+              <dl class="kv" id="auditQuickSummary"></dl>
+              <table>
+                <thead>
+                  <tr>
+                    <th data-i18n="audit.quickSeverity">Статус</th>
+                    <th data-i18n="audit.quickObject">Объект</th>
+                    <th data-i18n="audit.quickProfile">Профиль</th>
+                    <th data-i18n="audit.quickBinding">Binding</th>
+                    <th data-i18n="audit.quickHost">Host</th>
+                    <th data-i18n="audit.quickAddress">Адрес</th>
+                    <th data-i18n="audit.quickGroupsTemplates">Groups/Templates</th>
+                    <th data-i18n="audit.quickMaintenance">Maintenance</th>
+                    <th data-i18n="audit.quickNotes">Замечания</th>
+                  </tr>
+                </thead>
+                <tbody id="auditQuickResults"></tbody>
+              </table>
+            </div>
+            <div class="surface">
+              <p class="settings-note" data-i18n="audit.modelIntro">Подготовка CMDBuild добавляет zabbix_main_hostid в классы, участвующие в правилах конвертации, и создает класс ZabbixHostBinding для дополнительных hostProfiles.</p>
               <div class="actions">
                 <button id="auditAnalyzeModel" type="button" data-i18n="audit.analyzeModel">Проверить модель CMDBuild</button>
                 <button id="auditApplyModel" type="button" data-i18n="audit.applyModel">Применить подготовку CMDBuild</button>
               </div>
-            </div>
-            <div class="surface">
-              <p class="settings-note" data-i18n="audit.storageIntro">Аудит будет использовать хранилище, выбранное в Runtime-настройках. Поддерживаются PostgreSQL для продуктивной эксплуатации и SQLite для разработки.</p>
-              <p class="settings-note" data-i18n="audit.modelIntro">Подготовка CMDBuild добавляет zabbix_main_hostid в классы, участвующие в правилах конвертации, и создает класс ZabbixHostBinding для дополнительных hostProfiles.</p>
               <div class="settings-grid">
                 <label class="wide-field">
                   <span data-i18n="audit.bindingParentClass">Где создать ZabbixHostBinding</span>
@@ -990,6 +1038,7 @@
                   <li data-i18n="help.audit.4">Класс ZabbixHostBinding нужен для расширенной логики: одна карточка класса описывает связь CMDBuild object + hostProfile -> конкретный Zabbix host. Администратор выбирает в дереве CMDBuild, где создать этот класс.</li>
                   <li data-i18n="help.audit.5">Атрибуты ZabbixHostBinding: OwnerClass, OwnerCardId и OwnerCode указывают исходную карточку; HostProfile указывает profile из rules; ZabbixHostId и ZabbixHostName указывают созданный host; BindingStatus, RulesVersion и LastSyncAt фиксируют состояние, версию rules и время последней синхронизации.</li>
                   <li data-i18n="help.audit.6">Кнопка Проверить модель CMDBuild только строит план. Кнопка Применить подготовку CMDBuild доступна администратору и создает отсутствующие атрибуты/класс в управляемой CMDBuild.</li>
+                  <li data-i18n="help.audit.7">Быстрый аудит читает выбранные карточки CMDBuild и Zabbix hosts, сравнивает binding, host name, interface address, host groups, templates, maintenance и status. Он не выполняет автоисправления.</li>
                 </ul>
               </div>
               <div class="surface">

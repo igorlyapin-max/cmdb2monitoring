@@ -2,11 +2,13 @@ using CmdbWebhooks2Kafka.Configuration;
 using CmdbWebhooks2Kafka.Endpoints;
 using CmdbWebhooks2Kafka.Kafka;
 using CmdbWebhooks2Kafka.Logging;
+using Cmdb2Monitoring.Secrets;
 using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
+await builder.Configuration.ResolveSecretReferencesAsync("cmdbwebhooks2kafka");
 
 builder.Services.AddOptions<ServiceOptions>()
     .Bind(builder.Configuration.GetSection(ServiceOptions.SectionName))

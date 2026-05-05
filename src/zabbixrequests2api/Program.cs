@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using Cmdb2Monitoring.Secrets;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Configuration;
@@ -8,6 +9,7 @@ using ZabbixRequests2Api.Processing;
 using ZabbixRequests2Api.Zabbix;
 
 var builder = WebApplication.CreateBuilder(args);
+await builder.Configuration.ResolveSecretReferencesAsync("zabbixrequests2api");
 
 builder.Services.AddOptions<ServiceOptions>()
     .Bind(builder.Configuration.GetSection(ServiceOptions.SectionName))

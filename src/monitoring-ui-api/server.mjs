@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { basename, dirname, extname, join, normalize, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Kafka, logLevel } from 'kafkajs';
 import { Client as LdapClient } from 'ldapts';
@@ -12,6 +12,7 @@ import { parseStringPromise } from 'xml2js';
 const serviceRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const repositoryRoot = resolve(serviceRoot, '../..');
 const environment = process.env.NODE_ENV || 'Development';
+const resolvedSecretReferences = new Map();
 const config = await loadConfig();
 const sessions = new Map();
 const oauthStates = new Map();
@@ -485,6 +486,17 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'POST' && path === '/api/audit/quick') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await runQuickAudit(session, payload));
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/settings/idp') {
     requireRole(session, response, ['admin']);
     if (response.writableEnded) {
@@ -729,7 +741,216 @@ async function loadConfig() {
 
   await applyPersistedUiSettings(merged);
   applyEnvOverrides(merged);
+  applyPamCompatibilityEnvironment(merged);
+  applySecretCompanionReferences(merged);
+  await resolveSecretReferences(merged, 'monitoring-ui-api');
   return merged;
+}
+
+async function resolveSecretReferences(target, serviceName) {
+  const references = [];
+  collectSecretReferences(target, [], references);
+  if (references.length === 0) {
+    return;
+  }
+
+  const provider = String(target.Secrets?.Provider ?? target.Secrets?.provider ?? 'None');
+  if (provider.toLowerCase() !== 'indeedpamaapm') {
+    throw new Error(`Configuration contains secret:// references, but Secrets.Provider is '${provider}'.`);
+  }
+
+  for (const reference of references) {
+    const secret = await readIndeedPamAapmSecret(target, serviceName, reference.secretId);
+    setPath(target, reference.path, secret);
+    resolvedSecretReferences.set(reference.path.join('.'), reference.originalValue);
+  }
+}
+
+function collectSecretReferences(value, path, references) {
+  if (path[0] === 'Secrets') {
+    return;
+  }
+
+  if (typeof value === 'string') {
+    const secretId = readSecretReferenceId(value);
+    if (secretId) {
+      references.push({ path, secretId, originalValue: value.trim() });
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectSecretReferences(item, [...path, index], references));
+    return;
+  }
+
+  if (isPlainObject(value)) {
+    for (const [key, nested] of Object.entries(value)) {
+      collectSecretReferences(nested, [...path, key], references);
+    }
+  }
+}
+
+function readSecretReferenceId(value) {
+  const trimmed = String(value ?? '').trim();
+  for (const prefix of ['secret://', 'aapm://']) {
+    if (trimmed.toLowerCase().startsWith(prefix)) {
+      const secretId = trimmed.slice(prefix.length).trim();
+      return secretId || null;
+    }
+  }
+
+  return null;
+}
+
+async function readIndeedPamAapmSecret(target, serviceName, secretId) {
+  const aapm = target.Secrets?.IndeedPamAapm ?? target.Secrets?.indeedPamAapm ?? {};
+  const references = target.Secrets?.References ?? target.Secrets?.references ?? {};
+  const reference = references[secretId] ?? references[String(secretId).toLowerCase()] ?? null;
+  const parsed = parseAapmSecretId(secretId);
+
+  const baseUrl = requiredSecretSetting(aapm.BaseUrl ?? aapm.baseUrl, 'Secrets.IndeedPamAapm.BaseUrl');
+  const endpointPath = aapm.PasswordEndpointPath ?? aapm.passwordEndpointPath ?? '/sc_aapm_ui/rest/aapm/password';
+  const applicationCredentials = await readAapmApplicationCredentials(aapm);
+  const accountPath = requiredSecretSetting(
+    firstNonBlank(reference?.AccountPath, reference?.accountPath, parsed.accountPath, aapm.DefaultAccountPath, aapm.defaultAccountPath),
+    `Secrets.References.${secretId}.AccountPath`);
+  const accountName = requiredSecretSetting(
+    firstNonBlank(reference?.AccountName, reference?.accountName, parsed.accountName),
+    `Secrets.References.${secretId}.AccountName`);
+  const responseType = reference?.ResponseType ?? reference?.responseType ?? aapm.ResponseType ?? aapm.responseType ?? 'json';
+  const valueJsonPath = reference?.ValueJsonPath ?? reference?.valueJsonPath ?? aapm.ValueJsonPath ?? aapm.valueJsonPath ?? 'password';
+  const timeoutMs = clampInt(aapm.TimeoutMs ?? aapm.timeoutMs, 10000, 1000, 120000);
+  const url = new URL(`${String(baseUrl).replace(/\/+$/, '')}/${String(endpointPath).replace(/^\/+/, '')}`);
+
+  for (const [key, value] of Object.entries({
+    token: applicationCredentials.token,
+    sapmaccountpath: accountPath,
+    sapmaccountname: accountName,
+    responsetype: responseType,
+    passwordexpirationinminute: reference?.PasswordExpirationInMinute ?? reference?.passwordExpirationInMinute ?? aapm.PasswordExpirationInMinute ?? aapm.passwordExpirationInMinute,
+    passwordchangerequired: boolQueryValue(reference?.PasswordChangeRequired ?? reference?.passwordChangeRequired ?? aapm.PasswordChangeRequired ?? aapm.passwordChangeRequired),
+    comment: formatSecretComment(
+      reference?.Comment ?? reference?.comment ?? aapm.Comment ?? aapm.comment ?? `cmdb2monitoring ${serviceName} ${secretId}`,
+      serviceName,
+      secretId),
+    tenantid: reference?.TenantId ?? reference?.tenantId ?? aapm.TenantId ?? aapm.tenantId,
+    pin: reference?.Pin ?? reference?.pin ?? aapm.Pin ?? aapm.pin
+  })) {
+    if (!isBlank(value)) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const headers = {};
+  if (!isBlank(applicationCredentials.username) && !isBlank(applicationCredentials.password)) {
+    headers.Authorization = `Basic ${Buffer.from(`${applicationCredentials.username}:${applicationCredentials.password}`).toString('base64')}`;
+
+    if (aapm.SendApplicationCredentialsInQuery === true || aapm.sendApplicationCredentialsInQuery === true) {
+      url.searchParams.set('username', applicationCredentials.username);
+      url.searchParams.set('password', applicationCredentials.password);
+    }
+  }
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Indeed PAM AAPM secret '${secretId}' request failed with HTTP ${response.status}.`);
+  }
+
+  const secret = extractAapmSecretValue(body, responseType, valueJsonPath);
+  if (isBlank(secret)) {
+    throw new Error(`Indeed PAM AAPM secret '${secretId}' returned an empty value.`);
+  }
+
+  return secret;
+}
+
+async function readAapmApplicationCredentials(aapm) {
+  const token = aapm.ApplicationToken ?? aapm.applicationToken;
+  if (!isBlank(token)) {
+    return { token: String(token).trim(), username: '', password: '' };
+  }
+
+  const tokenFile = aapm.ApplicationTokenFile ?? aapm.applicationTokenFile;
+  if (!isBlank(tokenFile)) {
+    const fullPath = isAbsolute(String(tokenFile)) ? String(tokenFile) : resolve(serviceRoot, String(tokenFile));
+    return { token: (await readFile(fullPath, 'utf8')).trim(), username: '', password: '' };
+  }
+
+  const username = aapm.ApplicationUsername ?? aapm.applicationUsername;
+  const password = aapm.ApplicationPassword ?? aapm.applicationPassword;
+  if (!isBlank(username) && !isBlank(password)) {
+    return { token: '', username: String(username).trim(), password: String(password).trim() };
+  }
+
+  throw new Error('Indeed PAM AAPM credentials are not configured. Set Secrets.IndeedPamAapm.ApplicationToken, ApplicationTokenFile, or ApplicationUsername/ApplicationPassword.');
+}
+
+function parseAapmSecretId(secretId) {
+  const value = String(secretId ?? '').trim();
+  for (const separator of ['.', '/']) {
+    const index = value.lastIndexOf(separator);
+    if (index > 0 && index < value.length - 1) {
+      return {
+        accountPath: value.slice(0, index),
+        accountName: value.slice(index + 1)
+      };
+    }
+  }
+
+  return { accountPath: '', accountName: '' };
+}
+
+function requiredSecretSetting(value, path) {
+  if (isBlank(value)) {
+    throw new Error(`Required Indeed PAM AAPM configuration value is missing: ${path}.`);
+  }
+
+  return String(value).trim();
+}
+
+function boolQueryValue(value) {
+  return typeof value === 'boolean' ? String(value) : value;
+}
+
+function formatSecretComment(comment, serviceName, secretId) {
+  return String(comment)
+    .replaceAll('{service}', serviceName)
+    .replaceAll('{secretId}', secretId);
+}
+
+function extractAapmSecretValue(body, responseType, valueJsonPath) {
+  if (String(responseType).toLowerCase() !== 'json') {
+    return body.trim();
+  }
+
+  const parsed = JSON.parse(body);
+  if (typeof parsed === 'string') {
+    return parsed;
+  }
+
+  for (const path of [valueJsonPath, 'password', 'value', 'secret', 'Password']) {
+    const value = readJsonPath(parsed, path);
+    if (!isBlank(value)) {
+      return String(value);
+    }
+  }
+
+  return '';
+}
+
+function readJsonPath(value, path) {
+  let current = value;
+  for (const part of String(path ?? '').split(/[.:]/).filter(Boolean)) {
+    current = current?.[part];
+  }
+
+  return ['string', 'number', 'boolean'].includes(typeof current) ? current : '';
 }
 
 async function applyPersistedUiSettings(target) {
@@ -839,6 +1060,120 @@ function applyEnvOverrides(target) {
     target.EventBrowser.Topics = normalizeStringArray(process.env.MONITORING_UI_EVENTS_TOPICS)
       .map(name => ({ Name: name, Service: '', Direction: '', Description: '' }));
   }
+}
+
+function applyPamCompatibilityEnvironment(target) {
+  target.Secrets ??= {};
+  target.Secrets.IndeedPamAapm ??= {};
+
+  setIfBlank(target, ['Secrets', 'IndeedPamAapm', 'BaseUrl'], process.env.PAMURL);
+  setIfBlank(target, ['Secrets', 'IndeedPamAapm', 'ApplicationUsername'], process.env.PAMUSERNAME);
+  setIfBlank(target, ['Secrets', 'IndeedPamAapm', 'ApplicationPassword'], process.env.PAMPASSWORD);
+  setIfBlank(target, ['Secrets', 'IndeedPamAapm', 'ApplicationToken'], process.env.PAMTOKEN);
+  setIfBlank(target, ['Secrets', 'IndeedPamAapm', 'DefaultAccountPath'], process.env.PAMDEFAULTACCOUNTPATH);
+
+  const hasPamCompatibility =
+    !isBlank(process.env.PAMURL)
+    || !isBlank(process.env.PAMTOKEN)
+    || (!isBlank(process.env.PAMUSERNAME) && !isBlank(process.env.PAMPASSWORD));
+  if (hasPamCompatibility && String(target.Secrets.Provider ?? 'None').toLowerCase() === 'none') {
+    target.Secrets.Provider = 'IndeedPamAapm';
+  }
+
+  applyCommonSaslCompatibility(target);
+}
+
+function applyCommonSaslCompatibility(target) {
+  const username = process.env.SASLUSERNAME;
+  const password = process.env.SASLPASSWORD;
+  const passwordSecret = process.env.SASLPASSWORDSECRET;
+  const sectionPaths = [
+    ['Kafka'],
+    ['Kafka', 'Input'],
+    ['Kafka', 'Output'],
+    ['Kafka', 'BindingOutput'],
+    ['ElkLogging', 'Kafka'],
+    ['EventBrowser']
+  ];
+
+  for (const sectionPath of sectionPaths) {
+    const section = readPath(target, sectionPath);
+    if (!isPlainObject(section)) {
+      continue;
+    }
+
+    if (!isBlank(username) && isBlank(section.Username)) {
+      section.Username = username;
+    }
+
+    if (!isBlank(section.Password)) {
+      continue;
+    }
+
+    if (!isBlank(password)) {
+      section.Password = password;
+    } else if (!isBlank(passwordSecret)) {
+      section.Password = ensureSecretReference(passwordSecret);
+    }
+  }
+}
+
+function applySecretCompanionReferences(target) {
+  applySecretCompanionReferencesInner(target, []);
+}
+
+function applySecretCompanionReferencesInner(value, path) {
+  if (path[0] === 'Secrets') {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => applySecretCompanionReferencesInner(item, [...path, index]));
+    return;
+  }
+
+  if (!isPlainObject(value)) {
+    return;
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (typeof nested === 'string'
+      && key.endsWith('Secret')
+      && key.length > 'Secret'.length) {
+      const targetKey = key.slice(0, -'Secret'.length);
+      if (Object.prototype.hasOwnProperty.call(value, targetKey) && isBlank(value[targetKey])) {
+        value[targetKey] = ensureSecretReference(nested);
+      }
+    }
+
+    applySecretCompanionReferencesInner(nested, [...path, key]);
+  }
+}
+
+function ensureSecretReference(value) {
+  const trimmed = String(value ?? '').trim();
+  return trimmed.toLowerCase().startsWith('secret://') || trimmed.toLowerCase().startsWith('aapm://')
+    ? trimmed
+    : `secret://${trimmed}`;
+}
+
+function setIfBlank(target, path, value) {
+  if (!isBlank(value) && isBlank(readPath(target, path))) {
+    setPath(target, path, String(value));
+  }
+}
+
+function readPath(target, path) {
+  let current = target;
+  for (const part of path) {
+    if (current === undefined || current === null) {
+      return undefined;
+    }
+
+    current = current[part];
+  }
+
+  return current;
 }
 
 async function ensureRuntimeDirectories() {
@@ -2474,6 +2809,83 @@ async function applyCmdbuildAuditModel(session, payload = {}) {
   };
 }
 
+async function runQuickAudit(session, payload = {}) {
+  const cmdbuildCredentials = requireCmdbuildSessionCredentials(session);
+  const zabbixCredentials = requireZabbixSessionCredentials(session);
+  const cmdbuildBaseUrl = withoutTrailingSlash(cmdbuildCredentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const zabbixEndpoint = zabbixCredentials.apiEndpoint || config.Zabbix.ApiEndpoint;
+  const rulesDocument = await readCurrentRules();
+  const rules = rulesDocument.content ?? rulesDocument;
+  const cmdbuildCatalog = await syncCmdbuildCatalog(session);
+  const zabbixToken = await resolveZabbixToken(zabbixEndpoint, zabbixCredentials);
+  const scope = quickAuditScope(cmdbuildCatalog, rules, payload);
+  const maxCardsPerClass = clampInt(payload.maxCards, 100, 1, 500);
+  const cardsOffset = clampInt(payload.offset, 0, 0, 1000000000);
+  const bindingCards = await readAuditBindingCards(cmdbuildBaseUrl, cmdbuildCredentials, cmdbuildCatalog);
+  const bindingMap = buildAuditBindingMap(bindingCards);
+  const pendingItems = [];
+  const fetchErrors = [];
+  let cardCount = 0;
+
+  for (const cmdbClass of scope.selectedClasses) {
+    let cards = [];
+    try {
+      cards = await readCmdbuildCards(cmdbuildBaseUrl, cmdbuildCredentials, cmdbClass.name, maxCardsPerClass, cardsOffset);
+    } catch (error) {
+      fetchErrors.push({
+        className: cmdbClass.name,
+        severity: 'error',
+        reason: 'cmdbuild_cards_read_failed',
+        notes: [error instanceof Error ? error.message : 'CMDBuild cards read failed.']
+      });
+      continue;
+    }
+
+    cardCount += cards.length;
+    for (const card of cards) {
+      pendingItems.push(...buildQuickAuditItemsForCard({
+        rules,
+        catalog: cmdbuildCatalog,
+        cmdbClass,
+        card,
+        bindingMap
+      }));
+    }
+  }
+
+  const zabbixHosts = await readZabbixHostsForQuickAudit(
+    zabbixEndpoint,
+    zabbixToken,
+    pendingItems.map(item => item.expected ?? {})
+  );
+  const items = [
+    ...fetchErrors,
+    ...pendingItems.map(item => compareQuickAuditItem(item, zabbixHosts))
+  ];
+
+  return {
+    auditedAt: new Date().toISOString(),
+    cmdbuildEndpoint: cmdbuildBaseUrl,
+    zabbixEndpoint,
+    catalogSyncedAt: cmdbuildCatalog.syncedAt ?? '',
+    rulesVersion: rules.rulesVersion ?? '',
+    schemaVersion: rules.schemaVersion ?? '',
+    classes: cmdbuildCatalog.classes ?? [],
+    scope: {
+      className: scope.className,
+      includeDescendants: scope.includeDescendants,
+      onlyRulesClasses: scope.onlyRulesClasses,
+      maxCardsPerClass,
+      offset: cardsOffset,
+      nextOffset: cardsOffset + maxCardsPerClass,
+      participatingClasses: scope.participatingClasses,
+      selectedClasses: scope.selectedClasses.map(item => item.name)
+    },
+    summary: quickAuditSummary(items, scope.selectedClasses.length, cardCount),
+    items
+  };
+}
+
 function buildCmdbuildAuditModelPlan(rules = {}, catalog = {}, parentClass = 'Class') {
   const participatingClasses = conversionParticipatingClasses(rules, catalog);
   const classChecks = participatingClasses.map(className => {
@@ -2545,6 +2957,707 @@ function buildCmdbuildAuditModelPlan(rules = {}, catalog = {}, parentClass = 'Cl
     operations,
     ready: operations.length === 0
   };
+}
+
+function uniqueTokens(values = []) {
+  const result = [];
+  for (const value of values) {
+    if (isBlank(value) || result.some(item => auditSameValue(item, value))) {
+      continue;
+    }
+    result.push(String(value).trim());
+  }
+  return result;
+}
+
+function auditComparableKey(value) {
+  return String(value ?? '').trim().toLocaleLowerCase();
+}
+
+function auditSameValue(left, right) {
+  return auditComparableKey(left) === auditComparableKey(right);
+}
+
+function quickAuditScope(catalog = {}, rules = {}, payload = {}) {
+  const className = stringOrDefault(payload.className, 'Class');
+  const includeDescendants = payload.includeDescendants !== false;
+  const onlyRulesClasses = payload.onlyRulesClasses !== false;
+  const participatingClasses = conversionParticipatingClasses(rules, catalog);
+  const catalogByName = new Map((catalog.classes ?? [])
+    .filter(item => item?.name)
+    .map(item => [auditComparableKey(item.name), item]));
+  let selectedNames;
+
+  if (auditSameValue(className, 'Class')) {
+    selectedNames = onlyRulesClasses
+      ? participatingClasses
+      : [...catalogByName.values()].map(item => item.name);
+  } else {
+    selectedNames = includeDescendants
+      ? cmdbuildClassWithDescendants(catalog, className)
+      : [className];
+    if (onlyRulesClasses) {
+      selectedNames = selectedNames.filter(name => participatingClasses.some(item => auditSameValue(item, name)));
+    }
+  }
+
+  const selectedClasses = [];
+  for (const name of uniqueTokens(selectedNames)) {
+    if (auditSameValue(name, auditBindingClassName)) {
+      continue;
+    }
+    const catalogClass = catalogByName.get(auditComparableKey(name));
+    selectedClasses.push({
+      name: catalogClass?.name ?? name,
+      description: catalogClass?.description ?? ''
+    });
+  }
+
+  return {
+    className,
+    includeDescendants,
+    onlyRulesClasses,
+    participatingClasses,
+    selectedClasses: selectedClasses.sort((left, right) => compareText(left.name, right.name))
+  };
+}
+
+function cmdbuildClassWithDescendants(catalog = {}, className = '') {
+  const byName = new Map((catalog.classes ?? [])
+    .filter(item => item?.name)
+    .map(item => [auditComparableKey(item.name), item]));
+  const selected = byName.get(auditComparableKey(className));
+  if (!selected) {
+    return [className];
+  }
+
+  const childrenByParent = new Map();
+  for (const item of byName.values()) {
+    const parent = cmdbuildCatalogClassParent(item);
+    if (isBlank(parent)) {
+      continue;
+    }
+    const key = auditComparableKey(parent);
+    const items = childrenByParent.get(key) ?? [];
+    items.push(item);
+    childrenByParent.set(key, items);
+  }
+
+  const result = [];
+  const visit = item => {
+    if (!item?.name || result.some(name => auditSameValue(name, item.name))) {
+      return;
+    }
+    result.push(item.name);
+    for (const child of childrenByParent.get(auditComparableKey(item.name)) ?? []) {
+      visit(child);
+    }
+  };
+  visit(selected);
+  return result;
+}
+
+function cmdbuildCatalogClassParent(item = {}) {
+  if (typeof item.parent === 'string') {
+    return item.parent;
+  }
+  if (isPlainObject(item.parent)) {
+    return item.parent.name ?? item.parent._id ?? item.parent.id ?? '';
+  }
+  const raw = item.raw ?? {};
+  if (typeof raw.parent === 'string') {
+    return raw.parent;
+  }
+  if (isPlainObject(raw.parent)) {
+    return raw.parent.name ?? raw.parent._id ?? raw.parent.id ?? '';
+  }
+  return raw.superclass ?? raw.prototype ?? '';
+}
+
+async function readCmdbuildCards(baseUrl, credentials, className, limit, offset = 0) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset)
+  });
+  const result = await cmdbuildGet(baseUrl, `/classes/${encodeURIComponent(className)}/cards?${params}`, credentials);
+  return normalizeCmdbuildList(result);
+}
+
+async function readAuditBindingCards(baseUrl, credentials, catalog = {}) {
+  if (!findCmdbuildCatalogClass(catalog, auditBindingClassName)) {
+    return [];
+  }
+
+  try {
+    return await readCmdbuildCards(baseUrl, credentials, auditBindingClassName, 5000);
+  } catch {
+    return [];
+  }
+}
+
+function buildAuditBindingMap(cards = []) {
+  const result = new Map();
+  for (const card of cards) {
+    const status = readCmdbuildCardField(card, 'BindingStatus');
+    if (equalsIgnoreCase(status, 'deleted')) {
+      continue;
+    }
+    const key = auditBindingKey(
+      readCmdbuildCardField(card, 'OwnerClass'),
+      readCmdbuildCardField(card, 'OwnerCardId'),
+      readCmdbuildCardField(card, 'HostProfile')
+    );
+    if (!isBlank(key)) {
+      result.set(key, card);
+    }
+  }
+  return result;
+}
+
+function auditBindingKey(className, cardId, hostProfile) {
+  const parts = [className, cardId, hostProfile].map(value => String(value ?? '').trim());
+  return parts.some(isBlank) ? '' : parts.map(auditComparableKey).join(':');
+}
+
+function buildQuickAuditItemsForCard({ rules, catalog, cmdbClass, card, bindingMap }) {
+  const source = normalizeAuditCardSource(card, rules, catalog, cmdbClass.name);
+  const cardId = source.entityId || source.id || readCmdbuildCardField(card, 'id');
+  const code = source.code || readCmdbuildCardField(card, 'code');
+  const suppression = auditSuppressionForSource(rules, source);
+  const profiles = auditHostProfilesForSource(rules, source);
+  if (profiles.length === 0) {
+    return [{
+      className: cmdbClass.name,
+      cardId,
+      code,
+      profileName: '',
+      profileRole: '',
+      severity: suppression ? 'ok' : 'warning',
+      reason: suppression ? 'suppressed_no_profile' : 'no_host_profile_matched',
+      checks: [suppression ? 'suppressed_by_rule' : 'no_host_profile_matched'],
+      notes: [suppression
+        ? `Monitoring is suppressed by ${suppression.reason || suppression.name}.`
+        : 'No hostProfiles[] rule matched the CMDBuild card.'],
+      suppression,
+      expected: null,
+      actual: null
+    }];
+  }
+
+  return profiles.map((profile, index) => {
+    const isMainProfile = index === 0;
+    const profileName = stringOrDefault(profile.name, isMainProfile ? 'main' : `profile-${index + 1}`);
+    const profileSource = {
+      ...source,
+      hostProfile: profileName,
+      outputProfile: profile.outputProfile ?? profileName
+    };
+    const expected = buildQuickAuditExpectation({
+      rules,
+      card,
+      source: profileSource,
+      profile,
+      profileName,
+      isMainProfile,
+      bindingMap
+    });
+    return {
+      className: cmdbClass.name,
+      cardId,
+      code,
+      profileName,
+      profileRole: isMainProfile ? 'main' : 'additional',
+      suppression,
+      expected,
+      actual: null,
+      severity: 'info',
+      checks: [],
+      notes: []
+    };
+  });
+}
+
+function normalizeAuditCardSource(card = {}, rules = {}, catalog = {}, className = '') {
+  const normalizedCard = {};
+  for (const [key, value] of Object.entries(card)) {
+    normalizedCard[key] = normalizeCmdbuildCardValue(value);
+  }
+
+  const id = firstNonBlank(
+    readCmdbuildCardField(card, '_id'),
+    readCmdbuildCardField(card, 'id'),
+    normalizedCard._id,
+    normalizedCard.id
+  );
+  const code = firstNonBlank(
+    readCmdbuildCardField(card, 'code'),
+    readCmdbuildCardField(card, 'Code'),
+    readCmdbuildCardField(card, '_code'),
+    normalizedCard.code,
+    normalizedCard.Code,
+    id
+  );
+  const payload = {
+    ...normalizedCard,
+    id,
+    entityId: id,
+    code,
+    className,
+    entityType: className,
+    eventType: 'update'
+  };
+  return resolveLookupFieldsFromCatalog(normalizeSourcePayload(payload, rules), rules, catalog);
+}
+
+function normalizeCmdbuildCardValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeCmdbuildCardValue).filter(item => !isBlank(item)).join(',');
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
+  return firstNonBlank(
+    value.code,
+    value._code,
+    value.name,
+    value._description_translation,
+    value.description,
+    value._id,
+    value.id
+  );
+}
+
+function readCmdbuildCardField(card = {}, fieldName = '') {
+  if (!card || isBlank(fieldName)) {
+    return '';
+  }
+  const variants = [fieldName, `_${fieldName}`, fieldName.replace(/^_/, '')];
+  for (const variant of variants) {
+    if (card[variant] !== undefined) {
+      return normalizeCmdbuildCardValue(card[variant]);
+    }
+  }
+  const wanted = normalizeToken(fieldName);
+  const key = Object.keys(card).find(item => normalizeToken(item) === wanted || normalizeToken(item.replace(/^_/, '')) === wanted);
+  return key ? normalizeCmdbuildCardValue(card[key]) : '';
+}
+
+function auditSuppressionForSource(rules = {}, source = {}) {
+  return (rules.monitoringSuppressionRules ?? [])
+    .filter(rule => rule?.enabled !== false)
+    .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+    .find(rule => auditRuleMatches(rule, source, false)) ?? null;
+}
+
+function auditHostProfilesForSource(rules = {}, source = {}) {
+  return (rules.hostProfiles ?? [])
+    .filter(profile => profile?.enabled !== false)
+    .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+    .filter(profile => auditRuleMatches(profile, source, true));
+}
+
+function auditRuleMatches(rule = {}, source = {}, emptyMatches = true) {
+  const when = rule.when;
+  if (!isPlainObject(when) || Object.keys(when).length === 0) {
+    return emptyMatches;
+  }
+  return matchesCondition(when, source);
+}
+
+function buildQuickAuditExpectation({ rules, card, source, profile, profileName, isMainProfile, bindingMap }) {
+  const interfaces = auditProfileInterfaces(rules, profile, source);
+  const model = quickAuditTemplateModel(rules, source, profileName, interfaces[0]);
+  const host = stringOrDefault(
+    profile.hostNameTemplate ? renderSimple(profile.hostNameTemplate, model) : '',
+    normalizeHostName(rules, source.className, source.code || source.entityId || source.id || 'unknown', source)
+  );
+  const visibleName = stringOrDefault(
+    profile.visibleNameTemplate ? renderSimple(profile.visibleNameTemplate, { ...model, Host: host }) : '',
+    `${source.className} ${source.code || source.entityId || source.id || ''}`.trim()
+  );
+  const bindingCard = isMainProfile
+    ? null
+    : bindingMap.get(auditBindingKey(source.className, source.entityId || source.id, profileName));
+  const bindingHostId = isMainProfile
+    ? readCmdbuildCardField(card, auditMainHostIdAttributeName)
+    : readCmdbuildCardField(bindingCard, 'ZabbixHostId');
+  const groupModel = { ...model, Host: host, VisibleName: visibleName };
+  const hostStatus = selectSingleRuleItem(rules.hostStatusSelectionRules, rules, source, 'hostStatus', 'hostStatusRef')
+    ?? rules.defaults?.hostStatus
+    ?? rules.defaults?.host;
+
+  return {
+    host,
+    visibleName,
+    bindingHostId,
+    bindingSource: isMainProfile ? auditMainHostIdAttributeName : auditBindingClassName,
+    bindingStatus: isMainProfile ? (isBlank(bindingHostId) ? 'missing' : 'active') : readCmdbuildCardField(bindingCard, 'BindingStatus'),
+    interfaces,
+    groups: auditLookupItems(rules.groupSelectionRules, rules, source, 'hostGroups', 'hostGroupsRef', groupModel),
+    templates: auditLookupItems(rules.templateSelectionRules, rules, source, 'templates', 'templatesRef', groupModel),
+    maintenances: auditLookupItems(rules.maintenanceSelectionRules, rules, source, 'maintenances', 'maintenancesRef', groupModel),
+    status: hostStatus?.status ?? rules.defaults?.host?.status ?? 0
+  };
+}
+
+function quickAuditTemplateModel(rules, source, profileName, firstInterface = {}) {
+  const className = source.className || source.entityType || 'unknown';
+  const hostInput = source.code || source.id || source.entityId || 'unknown';
+  const host = normalizeHostName(rules, className, hostInput, source);
+  return {
+    ClassName: className,
+    EntityId: source.entityId || source.id,
+    Code: source.code,
+    IpAddress: source.ipAddress || source.ip_address,
+    DnsName: source.dnsName || source.dns_name,
+    OperatingSystem: source.os,
+    ZabbixTag: source.zabbixTag,
+    EventType: source.eventType,
+    HostProfileName: profileName,
+    OutputProfileName: source.outputProfile ?? profileName,
+    Host: host,
+    VisibleName: `${className} ${source.code || source.id || source.entityId || ''}`.trim(),
+    Interface: firstInterface,
+    Fields: source
+  };
+}
+
+function auditProfileInterfaces(rules = {}, profile = {}, source = {}) {
+  const profileRules = Array.isArray(profile.interfaces) ? profile.interfaces : [];
+  if (profileRules.length === 0) {
+    const fallback = selectInterface(rules, source);
+    return fallback ? [fallback] : [];
+  }
+
+  const matched = profileRules
+    .filter(rule => !rule.fallback)
+    .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+    .filter(rule => auditRuleMatches(rule, source, true));
+  const selected = matched.length > 0
+    ? matched
+    : profileRules
+      .filter(rule => rule.fallback)
+      .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+      .filter(rule => auditRuleMatches(rule, source, true));
+  return selected
+    .map(rule => auditInterfaceFromProfileRule(rules, rule, source))
+    .filter(Boolean);
+}
+
+function auditInterfaceFromProfileRule(rules = {}, rule = {}, source = {}) {
+  const valueField = rule.valueField || rule.field || rule.mode;
+  const value = readSourceField(source, valueField);
+  if (isBlank(value)) {
+    return null;
+  }
+  const mode = rule.mode || (canonicalSourceField(valueField) === 'dnsName' ? 'dns' : 'ip');
+  const profile = resolveAuditInterfaceProfile(rules, rule.interfaceProfileRef || rule.interfaceRef);
+  return {
+    ...applyInterfaceAddress(profile, { mode, value }, source),
+    name: rule.name ?? '',
+    sourceField: valueField,
+    mode,
+    address: value
+  };
+}
+
+function resolveAuditInterfaceProfile(rules = {}, profileRef = '') {
+  if (!isBlank(profileRef)) {
+    const key = String(profileRef).trim();
+    if (rules.defaults?.interfaceProfiles?.[key]) {
+      return rules.defaults.interfaceProfiles[key];
+    }
+    if (equalsIgnoreCase(key, 'agent') || equalsIgnoreCase(key, 'agentInterface')) {
+      return rules.defaults?.agentInterface ?? {};
+    }
+    if (equalsIgnoreCase(key, 'snmp') || equalsIgnoreCase(key, 'snmpInterface')) {
+      return rules.defaults?.snmpInterface ?? {};
+    }
+  }
+  return rules.defaults?.agentInterface ?? {};
+}
+
+function auditLookupItems(rulesList = [], rules = {}, source = {}, propertyName, refName, model = {}) {
+  const matched = rulesList
+    .filter(rule => rule?.enabled !== false && !rule.fallback)
+    .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+    .filter(rule => auditRuleMatches(rule, source, false));
+  const selected = matched.length > 0
+    ? matched
+    : rulesList
+      .filter(rule => rule?.enabled !== false && rule.fallback)
+      .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
+      .filter(rule => auditRuleMatches(rule, source, true));
+  const items = selected.flatMap(rule => {
+    if (Array.isArray(rule[propertyName]) && rule[propertyName].length > 0) {
+      return rule[propertyName];
+    }
+    if (rule[propertyName] && typeof rule[propertyName] === 'object') {
+      return [rule[propertyName]];
+    }
+    if (rule[refName] === `defaults.${propertyName}`) {
+      const value = rules.defaults?.[propertyName];
+      return Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : [];
+    }
+    return [];
+  });
+
+  const unique = new Map();
+  for (const item of items) {
+    const rendered = {
+      ...item,
+      name: item.name ?? (item.nameTemplate ? renderSimple(item.nameTemplate, model) : undefined),
+      host: item.host ?? (item.hostTemplate ? renderSimple(item.hostTemplate, model) : undefined),
+      value: item.value ?? (item.valueTemplate ? renderSimple(item.valueTemplate, model) : undefined)
+    };
+    const key = rendered.groupid
+      || rendered.templateid
+      || rendered.maintenanceid
+      || rendered.maintenanceId
+      || rendered.host
+      || rendered.name
+      || rendered.value;
+    if (!isBlank(key)) {
+      unique.set(String(key), rendered);
+    }
+  }
+
+  return [...unique.values()];
+}
+
+async function readZabbixHostsForQuickAudit(apiEndpoint, token, expectedItems = []) {
+  const hostids = uniqueTokens(expectedItems.map(item => item.bindingHostId).filter(value => !isBlank(value)));
+  const hosts = uniqueTokens(expectedItems.map(item => item.host).filter(value => !isBlank(value)));
+  const byHostId = new Map();
+  const byHost = new Map();
+  const add = item => {
+    if (!item) {
+      return;
+    }
+    if (!isBlank(item.hostid)) {
+      byHostId.set(String(item.hostid), item);
+    }
+    if (!isBlank(item.host)) {
+      byHost.set(auditComparableKey(item.host), item);
+    }
+  };
+
+  const params = {
+    output: ['hostid', 'host', 'name', 'status'],
+    selectInterfaces: ['interfaceid', 'type', 'main', 'useip', 'ip', 'dns', 'port'],
+    selectGroups: ['groupid', 'name'],
+    selectParentTemplates: ['templateid', 'host', 'name'],
+    selectTags: ['tag', 'value']
+  };
+  if (hostids.length > 0) {
+    for (const item of await zabbixCall(apiEndpoint, token, 'host.get', {
+      ...params,
+      hostids
+    })) {
+      add(item);
+    }
+  }
+  if (hosts.length > 0) {
+    for (const item of await zabbixCall(apiEndpoint, token, 'host.get', {
+      ...params,
+      filter: { host: hosts }
+    })) {
+      add(item);
+    }
+  }
+
+  const maintenancesByHostId = await readZabbixMaintenanceMembershipsForQuickAudit(apiEndpoint, token, expectedItems);
+  return { byHostId, byHost, maintenancesByHostId };
+}
+
+async function readZabbixMaintenanceMembershipsForQuickAudit(apiEndpoint, token, expectedItems = []) {
+  const expectedMaintenances = expectedItems.flatMap(item => item.maintenances ?? []);
+  if (expectedMaintenances.length === 0) {
+    return new Map();
+  }
+
+  const maintenanceIds = uniqueTokens(expectedMaintenances
+    .map(item => item.maintenanceid ?? item.maintenanceId)
+    .filter(value => !isBlank(value)));
+  const maintenanceNames = uniqueTokens(expectedMaintenances
+    .map(item => item.name)
+    .filter(value => !isBlank(value)));
+  const params = {
+    output: ['maintenanceid', 'name', 'maintenance_type'],
+    selectHosts: ['hostid', 'host', 'name'],
+    ...(maintenanceIds.length > 0 ? { maintenanceids: maintenanceIds } : {})
+  };
+  const maintenances = await zabbixCall(apiEndpoint, token, 'maintenance.get', params);
+  const wanted = maintenanceIds.length > 0
+    ? maintenances
+    : maintenances.filter(item => maintenanceNames.some(name => auditSameValue(name, item.name)));
+  const result = new Map();
+  for (const maintenance of wanted) {
+    for (const host of maintenance.hosts ?? []) {
+      if (isBlank(host.hostid)) {
+        continue;
+      }
+      const items = result.get(String(host.hostid)) ?? [];
+      items.push({
+        maintenanceid: maintenance.maintenanceid ?? '',
+        name: maintenance.name ?? '',
+        maintenance_type: maintenance.maintenance_type ?? ''
+      });
+      result.set(String(host.hostid), items);
+    }
+  }
+
+  return result;
+}
+
+function compareQuickAuditItem(item = {}, zabbixHosts = {}) {
+  if (!item.expected) {
+    return item;
+  }
+
+  const expected = item.expected;
+  const actual = !isBlank(expected.bindingHostId)
+    ? zabbixHosts.byHostId.get(String(expected.bindingHostId))
+    : null;
+  const actualByHost = !actual && !isBlank(expected.host)
+    ? zabbixHosts.byHost.get(auditComparableKey(expected.host))
+    : null;
+  const zabbixHost = actual ?? actualByHost ?? null;
+  if (zabbixHost && !zabbixHost.maintenances) {
+    zabbixHost.maintenances = zabbixHosts.maintenancesByHostId?.get(String(zabbixHost.hostid)) ?? [];
+  }
+  const checks = [];
+  const notes = [];
+
+  if (item.suppression) {
+    if (zabbixHost) {
+      checks.push({ severity: 'error', code: 'suppressed_host_exists', message: `Object is marked "не ставить на мониторинг", but Zabbix host ${zabbixHost.host} exists.` });
+    } else {
+      checks.push({ severity: 'ok', code: 'suppressed_host_absent', message: `Object is marked "не ставить на мониторинг" by ${item.suppression.reason || item.suppression.name}.` });
+    }
+    return finalizeQuickAuditItem(item, zabbixHost, checks, notes);
+  }
+
+  if (isBlank(expected.host)) {
+    checks.push({ severity: 'error', code: 'expected_host_empty', message: 'Expected Zabbix host name is empty.' });
+  }
+  if (!zabbixHost) {
+    checks.push({ severity: 'error', code: 'zabbix_host_missing', message: `Zabbix host ${expected.host || expected.bindingHostId || '-'} was not found.` });
+    return finalizeQuickAuditItem(item, zabbixHost, checks, notes);
+  }
+  if (isBlank(expected.bindingHostId)) {
+    checks.push({ severity: 'warning', code: 'binding_missing', message: `Binding ${expected.bindingSource} is empty; host was found by name.` });
+  }
+  if (!auditSameValue(zabbixHost.host, expected.host)) {
+    checks.push({ severity: 'warning', code: 'host_name_mismatch', message: `Expected host ${expected.host}, actual ${zabbixHost.host}.` });
+  }
+
+  const missingInterfaces = expected.interfaces.filter(expectedInterface => !zabbixInterfaceExists(zabbixHost.interfaces ?? [], expectedInterface));
+  if (expected.interfaces.length === 0) {
+    checks.push({ severity: 'warning', code: 'expected_interface_empty', message: 'Expected interface set is empty.' });
+  } else if (missingInterfaces.length > 0) {
+    checks.push({ severity: 'error', code: 'interface_missing', message: `Missing interface address: ${missingInterfaces.map(formatAuditInterface).join(', ')}.` });
+  }
+
+  const missingGroups = expected.groups.filter(group => !zabbixCollectionContains(zabbixHost.groups ?? [], group, 'groupid'));
+  if (missingGroups.length > 0) {
+    checks.push({ severity: 'error', code: 'host_group_missing', message: `Missing host groups: ${missingGroups.map(auditLookupItemName).join(', ')}.` });
+  }
+  const missingTemplates = expected.templates.filter(template => !zabbixCollectionContains(zabbixHost.parentTemplates ?? [], template, 'templateid'));
+  if (missingTemplates.length > 0) {
+    checks.push({ severity: 'error', code: 'template_missing', message: `Missing templates: ${missingTemplates.map(auditLookupItemName).join(', ')}.` });
+  }
+  const missingMaintenances = expected.maintenances.filter(maintenance => !zabbixCollectionContains(zabbixHost.maintenances ?? [], maintenance, 'maintenanceid'));
+  if (missingMaintenances.length > 0) {
+    checks.push({ severity: 'warning', code: 'maintenance_missing', message: `Missing maintenances: ${missingMaintenances.map(auditLookupItemName).join(', ')}.` });
+  }
+  if (!isBlank(expected.status) && String(zabbixHost.status) !== String(expected.status)) {
+    checks.push({ severity: 'warning', code: 'status_mismatch', message: `Expected status ${expected.status}, actual ${zabbixHost.status}.` });
+  }
+  if (checks.length === 0) {
+    checks.push({ severity: 'ok', code: 'matched', message: 'Main audited parameters match.' });
+  }
+
+  return finalizeQuickAuditItem(item, zabbixHost, checks, notes);
+}
+
+function finalizeQuickAuditItem(item = {}, zabbixHost, checks = [], notes = []) {
+  const severity = checks.reduce((current, check) => worstQuickAuditSeverity(current, check.severity), 'ok');
+  return {
+    ...item,
+    actual: zabbixHost ? {
+      hostid: zabbixHost.hostid ?? '',
+      host: zabbixHost.host ?? '',
+      name: zabbixHost.name ?? '',
+      status: zabbixHost.status ?? '',
+      interfaces: zabbixHost.interfaces ?? [],
+      groups: zabbixHost.groups ?? [],
+      templates: zabbixHost.parentTemplates ?? [],
+      maintenances: zabbixHost.maintenances ?? []
+    } : null,
+    severity,
+    checks: checks.map(check => check.code),
+    notes: [...notes, ...checks.map(check => check.message)]
+  };
+}
+
+function worstQuickAuditSeverity(current, next) {
+  const order = { ok: 0, info: 0, warning: 1, error: 2 };
+  return (order[next] ?? 0) > (order[current] ?? 0) ? next : current;
+}
+
+function zabbixInterfaceExists(actualInterfaces = [], expected = {}) {
+  const expectedUseIp = Number(expected.useip ?? 1);
+  const expectedAddress = expectedUseIp === 1 ? expected.ip : expected.dns;
+  if (isBlank(expectedAddress)) {
+    return false;
+  }
+  return actualInterfaces.some(item => {
+    if (!isBlank(expected.type) && String(item.type) !== String(expected.type)) {
+      return false;
+    }
+    const actualAddress = Number(item.useip ?? 1) === 1 ? item.ip : item.dns;
+    return auditSameValue(actualAddress, expectedAddress);
+  });
+}
+
+function zabbixCollectionContains(actualItems = [], expected = {}, idField = '') {
+  const candidates = [
+    expected[idField],
+    idField === 'maintenanceid' ? expected.maintenanceId : null,
+    expected.name,
+    expected.host,
+    expected.value
+  ].filter(value => !isBlank(value)).map(auditComparableKey);
+  return actualItems.some(item => [item[idField], idField === 'maintenanceid' ? item.maintenanceId : null, item.name, item.host, item.value]
+    .filter(value => !isBlank(value))
+    .map(auditComparableKey)
+    .some(value => candidates.includes(value)));
+}
+
+function auditLookupItemName(item = {}) {
+  return firstNonBlank(item.name, item.host, item.value, item.groupid, item.templateid, '-');
+}
+
+function formatAuditInterface(item = {}) {
+  const address = Number(item.useip ?? 1) === 1 ? item.ip : item.dns;
+  return [item.name, `type=${item.type ?? ''}`, address].filter(value => !isBlank(value)).join(' ');
+}
+
+function quickAuditSummary(items = [], classCount = 0, cardCount = 0) {
+  const summary = {
+    classes: classCount,
+    cards: cardCount,
+    profiles: items.length,
+    ok: 0,
+    warning: 0,
+    error: 0
+  };
+  for (const item of items) {
+    const severity = ['ok', 'warning', 'error'].includes(item.severity) ? item.severity : 'warning';
+    summary[severity] += 1;
+  }
+  return summary;
 }
 
 function conversionParticipatingClasses(rules = {}, catalog = {}) {
@@ -2898,7 +4011,15 @@ async function saveIdpSettings(payload) {
 
   Object.assign(persisted, safePayload);
   await writePersistedUiSettings(persisted);
+  clearResolvedSecretReferences([
+    'Idp.IdpX509Certificate',
+    'Idp.SpCertificate',
+    'Idp.SpPrivateKey',
+    'Idp.OAuth2.ClientSecret',
+    'Idp.Ldap.BindPassword'
+  ]);
   applyIdpSettings(config, safePayload.idp);
+  await resolveSecretReferences(config, 'monitoring-ui-api');
 
   return publicIdpSettings();
 }
@@ -3021,7 +4142,14 @@ async function saveRuntimeSettings(payload) {
   delete persisted.auth;
   Object.assign(persisted, runtime);
   await writePersistedUiSettings(persisted);
+  clearResolvedSecretReferences([
+    'Zabbix.ApiToken',
+    'Zabbix.ServiceAccount.ApiToken',
+    'AuditStorage.ConnectionString',
+    'EventBrowser.Password'
+  ]);
   applyRuntimeSettings(config, runtime);
+  await resolveSecretReferences(config, 'monitoring-ui-api');
 
   return publicRuntimeSettings();
 }
@@ -3993,6 +5121,7 @@ function publicRuntimeSettings() {
   const eventBrowser = config.EventBrowser ?? {};
   const rules = config.Rules ?? {};
   const auditStorage = normalizeAuditStorageSettingsPayload(config.AuditStorage ?? {}, config.AuditStorage ?? {});
+  auditStorage.connectionString = secretDisplayValue('AuditStorage.ConnectionString', auditStorage.connectionString);
 
   return {
     filePath: config.UiSettings?.FilePath ?? 'state/ui-settings.json',
@@ -4003,7 +5132,9 @@ function publicRuntimeSettings() {
     },
     zabbix: {
       apiEndpoint: config.Zabbix.ApiEndpoint ?? '',
-      apiToken: currentZabbixApiToken(null),
+      apiToken: secretDisplayValue(
+        ['Zabbix.ApiToken', 'Zabbix.ServiceAccount.ApiToken'],
+        currentZabbixApiToken(null)),
       allowDynamicTagsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicTagsFromCmdbLeaf),
       allowDynamicHostGroupsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf)
     },
@@ -4020,13 +5151,30 @@ function publicRuntimeSettings() {
       securityProtocol: eventBrowser.SecurityProtocol ?? 'Plaintext',
       saslMechanism: eventBrowser.SaslMechanism ?? '',
       username: eventBrowser.Username ?? '',
-      password: eventBrowser.Password ?? '',
+      password: secretDisplayValue('EventBrowser.Password', eventBrowser.Password ?? ''),
       sslRejectUnauthorized: eventBrowser.SslRejectUnauthorized !== false,
       maxMessages: eventBrowser.MaxMessages ?? 50,
       readTimeoutMs: eventBrowser.ReadTimeoutMs ?? 2500,
       topics: publicEventTopics()
     }
   };
+}
+
+function secretDisplayValue(path, fallback) {
+  const paths = Array.isArray(path) ? path : [path];
+  for (const item of paths) {
+    if (resolvedSecretReferences.has(item)) {
+      return resolvedSecretReferences.get(item);
+    }
+  }
+
+  return fallback ?? '';
+}
+
+function clearResolvedSecretReferences(paths) {
+  for (const path of paths) {
+    resolvedSecretReferences.delete(path);
+  }
 }
 
 function publicRuntimeCapabilities() {
@@ -5225,6 +6373,8 @@ function renderSimple(template = '', model) {
     .replaceAll('<#= Model.Code #>', model.Code ?? '')
     .replaceAll('<#= Model.Host #>', model.Host ?? '')
     .replaceAll('<#= Model.VisibleName #>', model.VisibleName ?? '')
+    .replaceAll('<#= Model.HostProfileName #>', model.HostProfileName ?? '')
+    .replaceAll('<#= Model.OutputProfileName #>', model.OutputProfileName ?? '')
     .replaceAll('<#= Model.IpAddress #>', model.IpAddress ?? '')
     .replaceAll('<#= Model.DnsName #>', model.DnsName ?? '')
     .replaceAll('<#= Model.Interface.Ip #>', model.Interface?.ip ?? model.Interface?.Ip ?? '')
@@ -5232,6 +6382,7 @@ function renderSimple(template = '', model) {
     .replaceAll('<#= Model.OperatingSystem #>', model.OperatingSystem ?? '')
     .replaceAll('<#= Model.ZabbixTag #>', model.ZabbixTag ?? '')
     .replaceAll('<#= Model.EventType #>', model.EventType ?? '')
+    .replace(/<#=\s*Model\.Source\(["']([^"']+)["']\)\s*#>/g, (_, name) => readSourceField(model.Fields ?? {}, name) ?? '')
     .replace(/<#=\s*Model\.Field\(["']([^"']+)["']\)\s*#>/g, (_, name) => readSourceField(model.Fields ?? {}, name) ?? '');
 }
 

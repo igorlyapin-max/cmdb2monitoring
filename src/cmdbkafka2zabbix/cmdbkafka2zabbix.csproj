@@ -13,4 +13,8 @@
     <PackageReference Include="Mono.TextTemplating" Version="3.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../shared/Secrets/*.cs" Link="Secrets/%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

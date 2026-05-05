@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.2 - 2026-05-05
+
 ### Changed
 
 - Renamed the audit placeholder menu to `Аудит` / `Audit` and allowed the `administrator` role alias to resolve to `admin` access.
@@ -11,8 +13,13 @@
 - Added unit coverage for webhook requirement generation, including reference leaves, domain leaves, foreign-root paths, virtual fields, and obsolete managed hooks.
 - Conversion Rules Management now has an explicit selected-`hostProfile` scope checkbox for add/modify rules, so template/group/tag assignments can keep a normal condition such as `description` while still counting as assignments to an additional profile.
 - Runtime Settings now expose `AuditStorage` for the Audit menu: PostgreSQL for production, SQLite for development, connection string, schema, auto-migrate, and command timeout.
+- Audit now includes a read-only Quick audit that compares selected CMDBuild cards with Zabbix hosts by binding, host name, interface address, groups, templates, and status.
+- Quick audit now includes a Zabbix maintenance column and checks expected maintenance membership in bulk through `maintenance.get`.
+- Quick audit can now read CMDBuild cards by offset and provides a `Next batch` action for paged class-card scanning.
 - Clarified that SQLite audit storage is supported for development and small installations, with PostgreSQL expected for larger monitored-object counts or longer audit retention.
 - Added separate administrator and rule-developer guides covering CMDBuild/Zabbix preparation, webhooks, dynamic leaf behavior, update merge behavior, and human-factor failure scenarios.
+- Added Dockerfiles, a local-registry build/push script, and Russian/English deployment instructions for microservices and the UI, including Kafka topics, per-service secrets, and external-system permissions.
+- Added `Secrets:Provider=IndeedPamAapm` support for `secret://id` service-account secret references in .NET microservices and `monitoring-ui-api`; secrets are fetched from AAPM into process memory, including the corporate `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD` and `SASLUSERNAME`/`SASLPASSWORDSECRET` env alias format.
 - Added `tests/zabbixbindings` regression coverage for the Zabbix host binding loop: binding event parsing, CMDBuild writes, binding lookup fallback, and publisher payload/header contracts.
 - Audit now plans CMDBuild model preparation for `zabbix_main_hostid` and `ZabbixHostBinding`, with documentation for why the class and attributes are needed.
 - Added `zabbixbindings2cmdbuild`, a Kafka consumer that writes Zabbix host bindings back to CMDBuild as `zabbix_main_hostid` for the main profile and `ZabbixHostBinding` cards for additional profiles.

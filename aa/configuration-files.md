@@ -6,6 +6,7 @@
 `monitoring-ui-api` использует `config/appsettings*.json` и явно поддержанные env overrides, перечисленные в этом документе и в `PROJECT_DOCUMENTATION.md`.
 
 Production/base конфиги не должны содержать реальные секреты. Development конфиги могут содержать локальные dev-значения, если они не используются в продуктивном контуре.
+Для сервисных учетных записей поддерживается корпоративный provider `Secrets:Provider=IndeedPamAapm`: в чувствительном строковом поле можно хранить `secret://id`, а фактическое значение будет считано из Indeed PAM/AAPM при старте сервиса и подставлено только в память процесса.
 
 ## Общие правила
 
@@ -21,7 +22,68 @@ Production/base конфиги не должны содержать реальн
 | Меняется задержка обработки объектов | `Processing:DelayBetweenObjectsMs` |
 | Меняется rules-файл | Для converter: `ConversionRules:RepositoryPath`, `ConversionRules:RulesFilePath`; для UI copies: `Rules:RepositoryPath`, `Rules:RulesFilePath` |
 | Подключается ELK | `ElkLogging:Mode`, `ElkLogging:Elk:*`, при необходимости отключить Kafka log sink |
+| Подключается Indeed PAM/AAPM | `Secrets:Provider=IndeedPamAapm`, `Secrets:IndeedPamAapm:*`, `Secrets:References:{id}:AccountPath/AccountName` или env aliases `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD`; в secret-полях указывать `secret://id` |
 | CMDBuild работает в Docker и вызывает локальный webhook | `src/cmdbwebhooks2kafka/Properties/launchSettings.json`, `ASPNETCORE_URLS=http://0.0.0.0:5080` |
+
+## Секреты через Indeed PAM/AAPM
+
+Единый формат поддерживается всеми .NET-микросервисами и `monitoring-ui-api`:
+
+```json
+"Secrets": {
+  "Provider": "IndeedPamAapm",
+  "References": {
+    "cmdbuild-writer-password": {
+      "AccountPath": "/cmdb2monitoring/cmdbuild",
+      "AccountName": "cmdbuild-writer",
+      "ValueJsonPath": "password"
+    }
+  },
+  "IndeedPamAapm": {
+    "BaseUrl": "https://pam.example.org",
+    "PasswordEndpointPath": "/sc_aapm_ui/rest/aapm/password",
+    "ApplicationTokenFile": "/run/secrets/indeed-pam-aapm-token",
+    "ApplicationUsername": "",
+    "ApplicationPassword": "",
+    "DefaultAccountPath": "",
+    "SendApplicationCredentialsInQuery": false,
+    "ResponseType": "json",
+    "ValueJsonPath": "password",
+    "PasswordExpirationInMinute": "30",
+    "PasswordChangeRequired": false,
+    "Comment": "cmdb2monitoring {service} {secretId}",
+    "TenantId": "",
+    "TimeoutMs": 10000
+  }
+}
+```
+
+Использование:
+
+```json
+"Cmdbuild": {
+  "Username": "cmdbuild-writer",
+  "Password": "secret://cmdbuild-writer-password"
+}
+```
+
+`ApplicationToken`/`ApplicationTokenFile` или `ApplicationUsername`/`ApplicationPassword` является bootstrap-секретом доступа приложения к AAPM и должен передаваться через Docker/Kubernetes secret, защищенный mount или env aliases.
+`PasswordEndpointPath` оставлен настраиваемым для совместимости с конкретной публикацией Indeed PAM.
+Если AAPM возвращает plain text, `ResponseType` задается не равным `json`; если возвращает JSON, значение читается по `ValueJsonPath`.
+Config validation допускает `secret://id` в base config, но продолжает запрещать фактические production-пароли и tokens.
+
+Поддержан корпоративный env-формат:
+
+```bash
+PAMURL=https://pam.localhost
+PAMUSERNAME=MS_PRO
+PAMPASSWORD='*****'
+SASLUSERNAME=MS_SUN
+SASLPASSWORD=
+SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles
+```
+
+`PAMURL` и `PAMUSERNAME`/`PAMPASSWORD` включают provider `IndeedPamAapm`, если он не задан явно. `SASLPASSWORDSECRET` заполняет пустые Kafka SASL password-поля ссылкой `secret://AAA.LOCAL\PROD.contractorProfiles`; id разбирается по последней точке как `AccountPath=AAA.LOCAL\PROD`, `AccountName=contractorProfiles`. Явно заданные `Kafka__...__Password` и `EventBrowser:Password` не перезаписываются.
 
 ## cmdbwebhooks2kafka
 

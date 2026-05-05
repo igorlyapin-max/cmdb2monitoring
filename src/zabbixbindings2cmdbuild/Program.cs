@@ -1,3 +1,4 @@
+using Cmdb2Monitoring.Secrets;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ZabbixBindings2Cmdbuild.Cmdbuild;
@@ -8,6 +9,7 @@ using ZabbixBindings2Cmdbuild.Models;
 using ZabbixBindings2Cmdbuild.Processing;
 
 var builder = WebApplication.CreateBuilder(args);
+await builder.Configuration.ResolveSecretReferencesAsync("zabbixbindings2cmdbuild");
 
 builder.Services.AddOptions<ServiceOptions>()
     .Bind(builder.Configuration.GetSection(ServiceOptions.SectionName))

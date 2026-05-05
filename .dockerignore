@@ -1,0 +1,13 @@
+.git
+.dotnet
+.nuget
+**/bin
+**/obj
+**/node_modules
+src/monitoring-ui-api/data
+src/monitoring-ui-api/state
+state
+reports
+rules-git-working-copy
+*.log
+*.tmp

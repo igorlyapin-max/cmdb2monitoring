@@ -138,6 +138,7 @@ static void ValidateServiceConfig(
     var context = $"{service.Name}:{environment}";
     RequireNonEmpty(config, "Service:Name", context, errors);
     RequireRoute(config, "Service:HealthRoute", context, errors);
+    ValidateSecrets(config, context, errors);
     ValidateElkLogging(config, context, errors);
 
     switch (service.Kind)
@@ -241,6 +242,22 @@ static void ValidateElkLogging(JsonObject config, string context, List<string> e
         RequireNonEmpty(config, "ElkLogging:Kafka:MinimumLevel", context, errors);
         RequireNonEmpty(config, "ElkLogging:Kafka:ServiceName", context, errors);
         RequireNonEmpty(config, "ElkLogging:Kafka:Environment", context, errors);
+    }
+}
+
+static void ValidateSecrets(JsonObject config, string context, List<string> errors)
+{
+    var provider = GetString(config, "Secrets:Provider") ?? "None";
+    if (!IsOneOf(provider, "None", "IndeedPamAapm"))
+    {
+        errors.Add($"{context} Secrets:Provider has unsupported value '{provider}'.");
+    }
+
+    if (string.Equals(provider, "IndeedPamAapm", StringComparison.OrdinalIgnoreCase))
+    {
+        RequireNonEmpty(config, "Secrets:IndeedPamAapm:BaseUrl", context, errors);
+        RequireNonEmpty(config, "Secrets:IndeedPamAapm:PasswordEndpointPath", context, errors);
+        RequirePositiveInt(config, "Secrets:IndeedPamAapm:TimeoutMs", context, errors);
     }
 }
 
@@ -1568,11 +1585,18 @@ static void ValidateNoProductionSecrets(ServiceDefinition service, JsonObject ba
     })
     {
         var value = GetString(baseConfig, path);
-        if (!string.IsNullOrWhiteSpace(value))
+        if (!string.IsNullOrWhiteSpace(value) && !IsSecretReference(value))
         {
             errors.Add($"{service.Name}:base must not contain production secret in {path}; use env/secret storage.");
         }
     }
+}
+
+static bool IsSecretReference(string value)
+{
+    var trimmed = value.Trim();
+    return trimmed.StartsWith("secret://", StringComparison.OrdinalIgnoreCase)
+        || trimmed.StartsWith("aapm://", StringComparison.OrdinalIgnoreCase);
 }
 
 static void ValidateStringArray(JsonObject config, string path, string context, List<string> errors)

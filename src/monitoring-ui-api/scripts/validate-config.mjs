@@ -17,6 +17,7 @@ for (const relativePath of ['config/appsettings.json', 'config/appsettings.Devel
 const config = JSON.parse(readFileSync(join(serviceRoot, 'config/appsettings.json'), 'utf8'));
 required(config, 'Service.Name');
 required(config, 'Service.HealthRoute');
+required(config, 'Secrets.Provider');
 required(config, 'UiSettings.FilePath');
 required(config, 'Auth.UsersFilePath');
 required(config, 'Auth.SessionCookieName');
@@ -57,6 +58,19 @@ if (!existsSync(join(repoRoot, config.Rules.RulesFilePath))) {
 
 if (typeof config.Rules.ReadFromGit !== 'boolean') {
   errors.push('Rules.ReadFromGit must be boolean.');
+}
+
+const secretsProvider = String(config.Secrets?.Provider ?? '').toLowerCase();
+if (!['none', 'indeedpamaapm'].includes(secretsProvider)) {
+  errors.push(`Secrets.Provider has unsupported value: ${config.Secrets?.Provider}`);
+}
+
+if (secretsProvider === 'indeedpamaapm') {
+  required(config, 'Secrets.IndeedPamAapm.BaseUrl');
+  required(config, 'Secrets.IndeedPamAapm.PasswordEndpointPath');
+  if (!intInRange(config.Secrets?.IndeedPamAapm?.TimeoutMs, 1000, 120000)) {
+    errors.push('Secrets.IndeedPamAapm.TimeoutMs must be an integer from 1000 to 120000.');
+  }
 }
 
 if (!['sqlite', 'postgresql', 'postgres'].includes(String(config.AuditStorage?.Provider ?? '').toLowerCase())) {

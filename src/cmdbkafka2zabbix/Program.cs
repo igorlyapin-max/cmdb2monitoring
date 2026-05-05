@@ -4,6 +4,7 @@ using CmdbKafka2Zabbix.Kafka;
 using CmdbKafka2Zabbix.Logging;
 using CmdbKafka2Zabbix.Processing;
 using CmdbKafka2Zabbix.Rules;
+using Cmdb2Monitoring.Secrets;
 using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -11,6 +12,7 @@ using System.Security.Cryptography;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+await builder.Configuration.ResolveSecretReferencesAsync("cmdbkafka2zabbix");
 
 builder.Services.AddOptions<ServiceOptions>()
     .Bind(builder.Configuration.GetSection(ServiceOptions.SectionName))

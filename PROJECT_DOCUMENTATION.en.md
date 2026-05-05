@@ -45,9 +45,12 @@ The additional `monitoring-ui-api` component provides an operator frontend/BFF f
 | `rules/cmdbuild-to-zabbix-host-create.dev-empty.json` | Clean dev no-op starter rules: installation-style base with dev topic and Zabbix API URL |
 | `SYSTEM_ADMIN_GUIDE.md` / `SYSTEM_ADMIN_GUIDE.en.md` | Administrator guide for runtime settings, CMDBuild/Zabbix preparation, webhooks, bindings, and operational risks |
 | `RULE_DEVELOPER_GUIDE.md` / `RULE_DEVELOPER_GUIDE.en.md` | Rule developer guide for host profiles, leaf paths, dynamic targets, suppression, update behavior, and webhook checks |
+| `DEPLOYMENT_LOCAL_REGISTRY.md` / `DEPLOYMENT_LOCAL_REGISTRY.en.md` | Docker image build and local registry publishing guide for microservices/UI |
+| `deploy/dockerfiles/` | Dockerfiles for `cmdbwebhooks2kafka`, `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild`, `monitoring-ui-api` |
 | `aa/` | Architecture artifacts, diagrams, OpenAPI/AsyncAPI, maps |
 | `tests/configvalidation` | Configuration and artifact checks |
 | `scripts/test-configs.sh` | Fast repository configuration validator |
+| `scripts/build-local-registry-images.sh` | Build and push all Docker images to a local registry |
 
 ## Development Endpoints
 
@@ -114,6 +117,7 @@ Topics are created by external infrastructure. Services must not create Kafka to
 Base config must not contain production secrets.
 Development config may contain local stand values.
 Production secrets are provided through environment variables, secret storage, or local config excluded from git.
+The corporate secret-store provider `IndeedPamAapm` is also supported: any sensitive string field can contain `secret://id` or `aapm://id`, and the actual value is requested from `Secrets:References`/`Secrets:IndeedPamAapm` at service startup and substituted only in process memory. The bootstrap secret `Secrets:IndeedPamAapm:ApplicationToken`, `ApplicationTokenFile`, or `ApplicationUsername`/`ApplicationPassword` is provided by the deployment layer through a Docker/Kubernetes secret, protected mount, or `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD` env aliases. Kafka SASL also supports the compatible `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET` format; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` is parsed as `AccountPath=AAA.LOCAL\PROD`, `AccountName=contractorProfiles`.
 
 .NET services use `__` environment overrides:
 
@@ -141,6 +145,7 @@ Main settings:
 | `CmdbWebhook:*Fields` | Fields used to detect event type, class, and id in webhook body |
 | `Kafka` | Bootstrap servers, output topic, client id, auth/security |
 | `ElkLogging` | Kafka log sink or future ELK endpoint |
+| `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to an Indeed PAM/AAPM account path/name |
 
 For local Docker Kafka inside the Docker network:
 
@@ -168,6 +173,7 @@ Main settings:
 | `Cmdbuild` | CMDBuild REST base URL, lookup/reference/domain resolver limits, `HostBindingLookupEnabled`, `MainHostIdAttributeName`, `BindingClassName`, `BindingLookupLimit` |
 | `ProcessingState` | State file for the last processed object |
 | `ElkLogging` | Kafka log topic or future ELK |
+| `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to CMDBuild/Kafka/reload-token service secrets |
 
 The rules file defines:
 
@@ -248,6 +254,7 @@ Main settings:
 | `Zabbix:Validate*` | Host group/template/template group checks before API call |
 | `Processing` | Gentle delay, retries, retry delay |
 | `ProcessingState` | State file for the last processed object |
+| `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to Zabbix/Kafka/ELK secrets |
 
 `Processing:DelayBetweenObjectsMs` defaults to `2000` to avoid sending objects to Zabbix too aggressively.
 
@@ -276,6 +283,7 @@ Main settings:
 | `Cmdbuild:BindingLookupLimit` | Existing binding-card lookup limit |
 | `ProcessingState` | State file for the last processed binding event |
 | `ElkLogging` | Kafka log topic or future ELK |
+| `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to CMDBuild/Kafka/ELK secrets |
 
 The service consumes `zabbix.host.bindings.*` and applies reverse writes:
 
@@ -309,6 +317,7 @@ Main settings:
 | `AuditStorage` | Provider `postgresql`/`sqlite`, connection string, schema, auto-migrate, and timeout for the future audit section |
 | `EventBrowser` | Read-only Kafka browser for Events: bootstrap, auth, topics, limits |
 | `Services:HealthEndpoints` | Microservice health endpoints and optional rules reload URL/token |
+| `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to the Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB secrets, and rules reload tokens |
 
 Authorization modes:
 
@@ -317,6 +326,7 @@ Authorization modes:
 - `IdP`: `Auth:UseIdp=true`, `Idp:Provider=SAML2` or `OAuth2`; IdP identifies the user, and the BFF reads MS AD groups through LDAP service bind when configured. If AD lookup is not configured, group claims from IdP are used as fallback.
 
 Local UI users are stored in `Auth:UsersFilePath` near `UiSettings:FilePath`. First startup creates `viewer`, `editor`, and `admin` with PBKDF2-SHA256 hashes. Deployment initial passwords must be changed after first login or supplied through a mounted users file.
+When `Zabbix:ApiToken`, `EventBrowser:Password`, LDAP/OAuth2 secrets, or the Audit DB connection string are configured as `secret://id`, the UI/BFF resolves them through Indeed PAM/AAPM and shows the reference in the interface instead of the actual secret.
 
 Roles:
 
@@ -331,6 +341,7 @@ Minimum permissions by operation:
 - CMDBuild for UI/catalog sync: REST API login and read-only access to metadata classes/attributes/domains, lookup types/values, current-card relations, and target cards reachable through reference/domain chains used by `source.fields[].cmdbPath`. CMDBuild card create/update/delete permissions are not required for catalog sync.
 - CMDBuild for `Webhook Setup` load/analyze: read access to ETL/webhook records through REST v3 `/etl/webhook/?detailed=true`.
 - CMDBuild for `Load into CMDB`: create/update/delete, or equivalent modify permissions, on ETL/webhook records through REST v3 `/etl/webhook/`. These permissions are needed only by operators who actually apply webhook plans to CMDBuild; they are not needed by viewers or for ordinary catalog sync.
+- CMDBuild for quick audit: read-only access to metadata classes/attributes, selected class cards, and `ZabbixHostBinding`; Zabbix user/API token must have read-only `host.get` access with groups, parent templates, and interfaces, plus `maintenance.get` to check membership for expected maintenances.
 - CMDBuild for `Apply CMDBuild preparation` in the `Audit` section: CMDBuild model-administration permissions to create classes and attributes through `POST /classes?scope=service` and `POST /classes/{class}/attributes`. These permissions are not needed for the audit plan check.
 - CMDBuild service account for `cmdbkafka2zabbix`: read-only access to source cards and `ZabbixHostBinding` when `Cmdbuild:HostBindingLookupEnabled` is enabled; these permissions are in addition to the resolver's attributes/cards/relations/lookups access required by `cmdbPath`.
 - CMDBuild service account for `zabbixbindings2cmdbuild`: read/update permissions on cards of classes participating in conversion rules to write/clear `zabbix_main_hostid`, plus read/create/update permissions on the `ZabbixHostBinding` service class. If additional profiles are used, the service also needs list/read access to this class to find existing bindings.
@@ -350,6 +361,7 @@ Audit model:
 - the administrator chooses in the CMDBuild tree where `ZabbixHostBinding` should be created. Its baseline attributes are `OwnerClass`, `OwnerCardId`, `OwnerCode`, `HostProfile`, `ZabbixHostId`, `ZabbixHostName`, `BindingStatus`, `RulesVersion`, and `LastSyncAt`;
 - attribute meaning: `OwnerClass`/`OwnerCardId`/`OwnerCode` identify the source card, `HostProfile` identifies the profile from rules, `ZabbixHostId`/`ZabbixHostName` identify the Zabbix object, `BindingStatus` stores binding state, `RulesVersion` stores the rules version, and `LastSyncAt` stores the last successful synchronization time.
 - `zabbixbindings2cmdbuild` fills these elements automatically after a successful Zabbix write: the main profile writes `zabbix_main_hostid` to the source card, while additional profiles write separate `ZabbixHostBinding` cards.
+- quick audit in the `Audit` section performs a read-only comparison between selected CMDBuild classes and Zabbix: using current conversion rules it calculates the expected host/profile, binding (`zabbix_main_hostid` or `ZabbixHostBinding`), interface address, host groups, templates, maintenance, and status, then compares them with `host.get` and bulk `maintenance.get`. It does not perform auto-fixes and is intended as the first discrepancy check before full audit. CMDBuild cards are read in `limit/offset` batches: `Run quick audit` reads the current offset, while `Next batch` increases offset by the current max-cards-per-class limit;
 
 The Rules view loads current JSON, validates local JSON, performs dry-run, creates an empty production starter, and saves JSON through the browser. `monitoring-ui-api` does not write active rules files and does not commit/push git.
 

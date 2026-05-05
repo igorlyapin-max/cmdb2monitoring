@@ -86,6 +86,7 @@ const state = {
   zabbixMetadata: null,
   auditModelPlan: null,
   auditCmdbuildCatalog: null,
+  auditQuickReport: null,
   sessionIndicators: {
     webhooks: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
     zabbixCatalog: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
@@ -466,6 +467,39 @@ const translations = {
     'webhooks.currentDetailsHint': 'Загруженные из CMDB webhooks показаны ниже. Нажмите "Проанализировать rules", чтобы построить план операций.',
     'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
     'audit.storageIntro': 'Аудит будет использовать хранилище, выбранное в Runtime-настройках. PostgreSQL предназначен для средних и крупных инсталляций, SQLite - для разработки и небольших инсталляций.',
+    'audit.quickTitle': 'Быстрый аудит',
+    'audit.quickIntro': 'Быстрый аудит читает CMDBuild и Zabbix, сравнивает основные параметры постановки на мониторинг и не меняет управляемые системы.',
+    'audit.quickClass': 'Класс CMDBuild',
+    'audit.quickMaxCards': 'Максимум карточек на класс',
+    'audit.quickOffset': 'Offset карточек',
+    'audit.quickIncludeDescendants': 'Включить дочерние классы',
+    'audit.quickOnlyRulesClasses': 'Только классы из правил',
+    'audit.quickRun': 'Запустить быстрый аудит',
+    'audit.quickNext': 'Следующий пакет',
+    'audit.quickStatusNotRun': 'Быстрый аудит еще не запускался.',
+    'audit.quickStatusDone': 'Быстрый аудит выполнен. Ошибок: {error}, предупреждений: {warning}, OK: {ok}.',
+    'audit.quickSeverity': 'Статус',
+    'audit.quickObject': 'Объект',
+    'audit.quickProfile': 'Профиль',
+    'audit.quickBinding': 'Binding',
+    'audit.quickHost': 'Host',
+    'audit.quickAddress': 'Адрес',
+    'audit.quickGroupsTemplates': 'Groups/Templates',
+    'audit.quickMaintenance': 'Maintenance',
+    'audit.quickNotes': 'Замечания',
+    'audit.quickNoResults': 'Результатов быстрого аудита нет.',
+    'audit.quickExpected': 'ожидается',
+    'audit.quickActual': 'факт',
+    'audit.quickSummaryAt': 'Время аудита',
+    'audit.quickSummaryScope': 'Область',
+    'audit.quickSummaryOffset': 'Offset',
+    'audit.quickSummaryClasses': 'Классов',
+    'audit.quickSummaryCards': 'Карточек',
+    'audit.quickSummaryProfiles': 'Профилей',
+    'audit.quickSummaryOk': 'OK',
+    'audit.quickSummaryWarning': 'Предупреждений',
+    'audit.quickSummaryError': 'Ошибок',
+    'audit.quickBindingEmpty': 'пусто',
     'audit.modelIntro': 'Подготовка CMDBuild добавляет zabbix_main_hostid в классы, участвующие в правилах конвертации, и создает класс ZabbixHostBinding для дополнительных hostProfiles.',
     'audit.analyzeModel': 'Проверить модель CMDBuild',
     'audit.applyModel': 'Применить подготовку CMDBuild',
@@ -944,6 +978,7 @@ const translations = {
     'help.audit.4': 'Класс ZabbixHostBinding нужен для расширенной логики: одна карточка класса описывает связь CMDBuild object + hostProfile -> конкретный Zabbix host. Администратор выбирает в дереве CMDBuild, где создать этот класс.',
     'help.audit.5': 'Атрибуты ZabbixHostBinding: OwnerClass, OwnerCardId и OwnerCode указывают исходную карточку; HostProfile указывает profile из rules; ZabbixHostId и ZabbixHostName указывают созданный host; BindingStatus, RulesVersion и LastSyncAt фиксируют состояние, версию rules и время последней синхронизации.',
     'help.audit.6': 'Кнопка Проверить модель CMDBuild только строит план. Кнопка Применить подготовку CMDBuild доступна администратору и создает отсутствующие атрибуты/класс в управляемой CMDBuild.',
+    'help.audit.7': 'Быстрый аудит читает выбранные карточки CMDBuild и Zabbix hosts, сравнивает binding, host name, interface address, host groups, templates, maintenance и status. Он не выполняет автоисправления.',
     'help.catalogs.title': 'Каталоги и настройки',
     'help.catalogs.1': 'Zabbix Catalog загружает templates, host groups, template groups, tags и расширенные справочники Zabbix.',
     'help.catalogs.2': 'CMDBuild Catalog загружает классы, атрибуты, domains и lookup-значения.',
@@ -1011,6 +1046,11 @@ const translations = {
     'tooltip.auditAnalyzeModel': 'Синхронизирует CMDBuild catalog и строит план подготовки audit model без изменений в CMDBuild.',
     'tooltip.auditApplyModel': 'Создает недостающий zabbix_main_hostid и класс ZabbixHostBinding в CMDBuild. Доступно только администратору.',
     'tooltip.auditBindingParentClass': 'Родительский класс CMDBuild, под которым будет создан служебный класс ZabbixHostBinding.',
+    'tooltip.auditRunQuick': 'Читает выбранные карточки CMDBuild и Zabbix host, сравнивает binding, host, интерфейсы, groups, templates, maintenance и status без записи в системы.',
+    'tooltip.auditQuickClass': 'Корень Class означает все доступные классы, обычно с фильтром "только классы из правил".',
+    'tooltip.auditQuickMaxCards': 'Ограничивает количество карточек, читаемых из каждого выбранного класса за один запуск быстрого аудита.',
+    'tooltip.auditQuickOffset': 'С какой позиции читать карточки каждого выбранного CMDBuild class. Первый пакет начинается с offset 0.',
+    'tooltip.auditRunQuickNext': 'Увеличивает offset на текущий лимит карточек на класс и запускает следующий пакет быстрого аудита.',
     'tooltip.syncZabbix': 'Обновляет каталог Zabbix из API Zabbix.',
     'tooltip.loadZabbix': 'Загружает сохраненный каталог Zabbix.',
     'tooltip.syncZabbixMetadata': 'Обновляет каталог Zabbix и перестраивает метаданные совместимости templates.',
@@ -1139,6 +1179,39 @@ const translations = {
     'webhooks.currentDetailsHint': 'Loaded CMDB webhooks are shown below. Click "Analyze rules" to build the operation plan.',
     'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
     'audit.storageIntro': 'Audit will use the storage selected in Runtime settings. PostgreSQL targets medium and large installations; SQLite is for development and small installations.',
+    'audit.quickTitle': 'Quick audit',
+    'audit.quickIntro': 'Quick audit reads CMDBuild and Zabbix, compares the main monitoring placement parameters, and does not modify managed systems.',
+    'audit.quickClass': 'CMDBuild class',
+    'audit.quickMaxCards': 'Max cards per class',
+    'audit.quickOffset': 'Cards offset',
+    'audit.quickIncludeDescendants': 'Include child classes',
+    'audit.quickOnlyRulesClasses': 'Only classes from rules',
+    'audit.quickRun': 'Run quick audit',
+    'audit.quickNext': 'Next batch',
+    'audit.quickStatusNotRun': 'Quick audit has not been run yet.',
+    'audit.quickStatusDone': 'Quick audit completed. Errors: {error}, warnings: {warning}, OK: {ok}.',
+    'audit.quickSeverity': 'Status',
+    'audit.quickObject': 'Object',
+    'audit.quickProfile': 'Profile',
+    'audit.quickBinding': 'Binding',
+    'audit.quickHost': 'Host',
+    'audit.quickAddress': 'Address',
+    'audit.quickGroupsTemplates': 'Groups/Templates',
+    'audit.quickMaintenance': 'Maintenance',
+    'audit.quickNotes': 'Notes',
+    'audit.quickNoResults': 'No quick audit results.',
+    'audit.quickExpected': 'expected',
+    'audit.quickActual': 'actual',
+    'audit.quickSummaryAt': 'Audited at',
+    'audit.quickSummaryScope': 'Scope',
+    'audit.quickSummaryOffset': 'Offset',
+    'audit.quickSummaryClasses': 'Classes',
+    'audit.quickSummaryCards': 'Cards',
+    'audit.quickSummaryProfiles': 'Profiles',
+    'audit.quickSummaryOk': 'OK',
+    'audit.quickSummaryWarning': 'Warnings',
+    'audit.quickSummaryError': 'Errors',
+    'audit.quickBindingEmpty': 'empty',
     'audit.modelIntro': 'CMDBuild preparation adds zabbix_main_hostid to classes participating in conversion rules and creates ZabbixHostBinding for additional hostProfiles.',
     'audit.analyzeModel': 'Check CMDBuild model',
     'audit.applyModel': 'Apply CMDBuild preparation',
@@ -1616,6 +1689,7 @@ const translations = {
     'help.audit.4': 'The ZabbixHostBinding class supports the extended logic: one class card represents the CMDBuild object + hostProfile -> concrete Zabbix host link. The administrator chooses in the CMDBuild tree where this class should be created.',
     'help.audit.5': 'ZabbixHostBinding attributes: OwnerClass, OwnerCardId, and OwnerCode identify the source card; HostProfile identifies the rules profile; ZabbixHostId and ZabbixHostName identify the created host; BindingStatus, RulesVersion, and LastSyncAt store state, rules version, and last sync time.',
     'help.audit.6': 'Check CMDBuild model only builds the plan. Apply CMDBuild preparation is administrator-only and creates missing attributes/class in the managed CMDBuild system.',
+    'help.audit.7': 'Quick audit reads selected CMDBuild cards and Zabbix hosts, then compares binding, host name, interface address, host groups, templates, maintenance, and status. It does not run auto-fixes.',
     'help.catalogs.title': 'Catalogs And Settings',
     'help.catalogs.1': 'Zabbix Catalog loads templates, host groups, template groups, tags, and extended Zabbix catalogs.',
     'help.catalogs.2': 'CMDBuild Catalog loads classes, attributes, domains, and lookup values.',
@@ -1683,6 +1757,11 @@ const translations = {
     'tooltip.auditAnalyzeModel': 'Syncs the CMDBuild catalog and builds an audit model preparation plan without changing CMDBuild.',
     'tooltip.auditApplyModel': 'Creates missing zabbix_main_hostid attributes and the ZabbixHostBinding class in CMDBuild. Administrator-only.',
     'tooltip.auditBindingParentClass': 'CMDBuild parent class under which the service ZabbixHostBinding class will be created.',
+    'tooltip.auditRunQuick': 'Reads selected CMDBuild cards and Zabbix hosts, then compares binding, host, interfaces, groups, templates, maintenance, and status without writing to either system.',
+    'tooltip.auditQuickClass': 'Root Class means all available classes, normally filtered to classes used by rules.',
+    'tooltip.auditQuickMaxCards': 'Limits how many cards are read from each selected class in one quick audit run.',
+    'tooltip.auditQuickOffset': 'Position from which cards are read in every selected CMDBuild class. The first batch starts with offset 0.',
+    'tooltip.auditRunQuickNext': 'Increases offset by the current max-cards-per-class value and runs the next quick audit batch.',
     'tooltip.syncZabbix': 'Refreshes the Zabbix catalog from the Zabbix API.',
     'tooltip.loadZabbix': 'Loads the saved Zabbix catalog.',
     'tooltip.syncZabbixMetadata': 'Refreshes the Zabbix catalog and rebuilds template compatibility metadata.',
@@ -1709,7 +1788,7 @@ const viewDescriptions = {
   ru: {
     dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
     events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
-    systemAudit: 'Готовит CMDBuild model для аудита постановки на мониторинг: проверяет zabbix_main_hostid в участвующих классах и служебный класс ZabbixHostBinding для дополнительных hostProfiles.',
+    systemAudit: 'Готовит CMDBuild model для аудита постановки на мониторинг и запускает быстрый read-only аудит расхождений CMDBuild/Zabbix.',
     rules: 'Загружает текущий JSON правил, проверяет его, выполняет dry-run и сохраняет файл через браузер.',
     mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
     validateMapping: 'Проверяет правила против каталогов Zabbix и CMDBuild; красным отмечаются только отсутствующие сущности в источниках. Template rules не назначают tags, а Tag rules не назначают templates; смешивать результат этих блоков нецелесообразно.',
@@ -1726,7 +1805,7 @@ const viewDescriptions = {
   en: {
     dashboard: 'Shows service availability and quick checks for the current environment.',
     events: 'Shows configured Kafka topics and the latest messages from the selected topic.',
-    systemAudit: 'Prepares the CMDBuild model for monitoring audit: checks zabbix_main_hostid on participating classes and the service ZabbixHostBinding class for additional hostProfiles.',
+    systemAudit: 'Prepares the CMDBuild model for monitoring audit and runs read-only quick discrepancy checks between CMDBuild and Zabbix.',
     rules: 'Loads the current rules JSON, validates it, runs dry-run, and saves a rules file through the browser.',
     mapping: 'Shows the CMDBuild -> conversion rules -> Zabbix chain. Host profiles show fan-out and interfaces; Template rules select templates; Tag rules create tags.',
     validateMapping: 'Validates rules against Zabbix and CMDBuild catalogs; only missing source entities are highlighted.',
@@ -2358,7 +2437,12 @@ function bindForms() {
   bindAction('#webhooksApplyCmdb', applyCmdbuildWebhooks, { restoreDisabled: false });
   bindAction('#auditAnalyzeModel', analyzeAuditModel, { success: false });
   bindAction('#auditApplyModel', applyAuditModel, { restoreDisabled: false, success: false });
+  bindAction('#auditRunQuick', runQuickAudit, { statusSelector: '#auditQuickStatus', success: false });
+  bindAction('#auditRunQuickNext', runNextQuickAuditBatch, { statusSelector: '#auditQuickStatus', success: false });
   $('#auditBindingParentClass')?.addEventListener('change', () => renderAuditModel());
+  ['#auditQuickClass', '#auditQuickIncludeDescendants', '#auditQuickOnlyRulesClasses'].forEach(selector => {
+    $(selector)?.addEventListener('change', () => setAuditQuickOffset(0));
+  });
   $('#webhooksSelectAll')?.addEventListener('click', () => setWebhookOperationsSelection(true));
   $('#webhooksClear')?.addEventListener('click', () => setWebhookOperationsSelection(false));
   bindAction('#deleteValidateMappingSelected', deleteSelectedValidationFixes, { restoreDisabled: false });
@@ -3222,12 +3306,67 @@ async function applyAuditModel() {
   return { count: result.count ?? 0 };
 }
 
+async function runQuickAudit() {
+  return runQuickAuditWithOffset(auditQuickOffsetValue());
+}
+
+async function runNextQuickAuditBatch() {
+  const nextOffset = auditQuickOffsetValue() + auditQuickLimitValue();
+  setAuditQuickOffset(nextOffset);
+  return runQuickAuditWithOffset(nextOffset);
+}
+
+async function runQuickAuditWithOffset(offset) {
+  const result = await api('/api/audit/quick', {
+    method: 'POST',
+    body: {
+      className: selectedAuditQuickClass(),
+      includeDescendants: $('#auditQuickIncludeDescendants')?.checked !== false,
+      onlyRulesClasses: $('#auditQuickOnlyRulesClasses')?.checked !== false,
+      maxCards: auditQuickLimitValue(),
+      offset
+    }
+  });
+  state.auditQuickReport = result;
+  state.auditCmdbuildCatalog = { classes: result.classes ?? [] };
+  setAuditQuickOffset(result.scope?.offset ?? offset);
+  renderAuditQuickControls(result);
+  renderAuditQuickReport(result);
+  setActionStatus($('#auditQuickStatus'), tf('audit.quickStatusDone', {
+    error: String(result.summary?.error ?? 0),
+    warning: String(result.summary?.warning ?? 0),
+    ok: String(result.summary?.ok ?? 0)
+  }), (result.summary?.error ?? 0) > 0 ? 'error' : (result.summary?.warning ?? 0) > 0 ? 'warning' : 'success');
+  return result.summary ?? {};
+}
+
+function auditQuickLimitValue() {
+  return clampNumber($('#auditQuickMaxCards')?.value, 100, 1, 500);
+}
+
+function auditQuickOffsetValue() {
+  return clampNumber($('#auditQuickOffset')?.value, 0, 0, 1000000000);
+}
+
+function setAuditQuickOffset(value) {
+  const input = $('#auditQuickOffset');
+  if (input) {
+    input.value = String(clampNumber(value, 0, 0, 1000000000));
+  }
+}
+
 function selectedAuditBindingParentClass(plan = state.auditModelPlan) {
   return $('#auditBindingParentClass')?.value || plan?.parentClass || 'Class';
 }
 
+function selectedAuditQuickClass(report = state.auditQuickReport) {
+  return $('#auditQuickClass')?.value || report?.scope?.className || 'Class';
+}
+
 function renderAuditModel(plan = state.auditModelPlan) {
   renderAuditBindingParentSelector(plan);
+  renderAuditQuickControls(state.auditQuickReport ?? plan);
+  renderAuditQuickReport(state.auditQuickReport);
   const operationsCount = plan?.operations?.length ?? 0;
   const canApply = ['admin', 'administrator'].includes(currentRole()) && Boolean(plan) && operationsCount > 0;
   const applyButton = $('#auditApplyModel');
@@ -3260,6 +3399,18 @@ function renderAuditBindingParentSelector(plan = state.auditModelPlan) {
     ?? state.cmdbuildCatalog?.classes
     ?? [];
   setSelectOptions(select, auditBindingParentOptions(classes), selectedAuditBindingParentClass(plan));
+}
+
+function renderAuditQuickControls(source = state.auditQuickReport ?? state.auditModelPlan) {
+  const select = $('#auditQuickClass');
+  if (!select) {
+    return;
+  }
+  const classes = source?.classes
+    ?? state.auditCmdbuildCatalog?.classes
+    ?? state.cmdbuildCatalog?.classes
+    ?? [];
+  setSelectOptions(select, auditBindingParentOptions(classes), selectedAuditQuickClass(source));
 }
 
 function auditBindingParentOptions(classes = []) {
@@ -3304,9 +3455,71 @@ function auditBindingParentOptions(classes = []) {
 function renderEmptyAuditTables() {
   renderAuditEmptyRow($('#auditClassChecks'), t('audit.statusNotAnalyzed'));
   renderAuditEmptyRow($('#auditBindingAttributes'), t('audit.statusNotAnalyzed'));
+  renderAuditQuickReport(state.auditQuickReport);
   const summary = $('#auditBindingSummary');
   if (summary) {
     clear(summary);
+  }
+}
+
+function renderAuditQuickReport(report = state.auditQuickReport) {
+  const summary = $('#auditQuickSummary');
+  const tbody = $('#auditQuickResults');
+  if (!summary || !tbody) {
+    return;
+  }
+  clear(summary);
+  clear(tbody);
+
+  if (!report) {
+    renderAuditEmptyRow(tbody, t('audit.quickStatusNotRun'));
+    return;
+  }
+
+  const scope = report.scope ?? {};
+  renderDefinitionList(summary, {
+    [t('audit.quickSummaryAt')]: report.auditedAt || '-',
+    [t('audit.quickSummaryScope')]: [
+      scope.className || 'Class',
+      scope.includeDescendants ? t('audit.quickIncludeDescendants') : '',
+      scope.onlyRulesClasses ? t('audit.quickOnlyRulesClasses') : ''
+    ].filter(Boolean).join(' / '),
+    [t('audit.quickSummaryOffset')]: `${scope.offset ?? 0} / ${scope.maxCardsPerClass ?? '-'}`,
+    [t('audit.summaryRulesVersion')]: report.rulesVersion || '-',
+    [t('audit.summarySchemaVersion')]: report.schemaVersion || '-',
+    [t('audit.quickSummaryClasses')]: report.summary?.classes ?? 0,
+    [t('audit.quickSummaryCards')]: report.summary?.cards ?? 0,
+    [t('audit.quickSummaryProfiles')]: report.summary?.profiles ?? 0,
+    [t('audit.quickSummaryOk')]: report.summary?.ok ?? 0,
+    [t('audit.quickSummaryWarning')]: report.summary?.warning ?? 0,
+    [t('audit.quickSummaryError')]: report.summary?.error ?? 0
+  });
+
+  const items = report.items ?? [];
+  if (items.length === 0) {
+    renderAuditEmptyRow(tbody, t('audit.quickNoResults'));
+    return;
+  }
+
+  for (const item of items) {
+    const row = document.createElement('tr');
+    const severityClass = item.severity === 'error'
+      ? 'status-bad'
+      : item.severity === 'warning'
+        ? 'status-warn'
+        : 'status-ok';
+    row.append(
+      el('td', severityClass, item.severity || '-'),
+      el('td', '', auditQuickObjectLabel(item)),
+      el('td', '', auditQuickProfileLabel(item)),
+      el('td', '', auditQuickBindingLabel(item)),
+      el('td', '', auditQuickHostLabel(item)),
+      el('td', '', auditQuickAddressLabel(item)),
+      el('td', '', auditQuickGroupTemplateLabel(item)),
+      el('td', '', auditQuickMaintenanceLabel(item)),
+      el('td', '', auditQuickNotesLabel(item))
+    );
+    tbody.append(row);
   }
 }
 
@@ -3372,6 +3585,71 @@ function renderAuditBindingAttributes(plan = {}) {
     );
     tbody.append(row);
   }
+}
+
+function auditQuickObjectLabel(item = {}) {
+  return [item.className, item.code || item.cardId].filter(Boolean).join(' / ') || '-';
+}
+
+function auditQuickProfileLabel(item = {}) {
+  return [item.profileName, item.profileRole].filter(Boolean).join(' / ') || '-';
+}
+
+function auditQuickBindingLabel(item = {}) {
+  const source = item.expected?.bindingSource ?? '';
+  const hostid = item.expected?.bindingHostId ?? '';
+  const actual = item.actual?.hostid ? `Zabbix ${item.actual.hostid}` : '';
+  return [
+    source,
+    hostid || t('audit.quickBindingEmpty'),
+    actual
+  ].filter(Boolean).join(' -> ');
+}
+
+function auditQuickHostLabel(item = {}) {
+  const expected = item.expected?.host ? `${t('audit.quickExpected')} ${item.expected.host}` : '';
+  const actual = item.actual?.host ? `${t('audit.quickActual')} ${item.actual.host}` : '';
+  return [expected, actual].filter(Boolean).join(' | ') || '-';
+}
+
+function auditQuickAddressLabel(item = {}) {
+  const expected = (item.expected?.interfaces ?? []).map(auditQuickInterfaceLabel).filter(Boolean).join(', ');
+  const actual = (item.actual?.interfaces ?? []).map(auditQuickInterfaceLabel).filter(Boolean).join(', ');
+  return [
+    expected ? `${t('audit.quickExpected')} ${expected}` : '',
+    actual ? `${t('audit.quickActual')} ${actual}` : ''
+  ].filter(Boolean).join(' | ') || '-';
+}
+
+function auditQuickInterfaceLabel(item = {}) {
+  const address = Number(item.useip ?? 1) === 1 ? item.ip : item.dns;
+  return [item.name, item.type ? `type=${item.type}` : '', address].filter(Boolean).join(' ');
+}
+
+function auditQuickGroupTemplateLabel(item = {}) {
+  const groups = (item.expected?.groups ?? []).map(auditQuickLookupLabel).filter(Boolean);
+  const templates = (item.expected?.templates ?? []).map(auditQuickLookupLabel).filter(Boolean);
+  return [
+    groups.length ? `groups: ${groups.join(', ')}` : '',
+    templates.length ? `templates: ${templates.join(', ')}` : ''
+  ].filter(Boolean).join(' | ') || '-';
+}
+
+function auditQuickMaintenanceLabel(item = {}) {
+  const expected = (item.expected?.maintenances ?? []).map(auditQuickLookupLabel).filter(Boolean);
+  const actual = (item.actual?.maintenances ?? []).map(auditQuickLookupLabel).filter(Boolean);
+  return [
+    expected.length ? `${t('audit.quickExpected')} ${expected.join(', ')}` : '',
+    actual.length ? `${t('audit.quickActual')} ${actual.join(', ')}` : ''
+  ].filter(Boolean).join(' | ') || '-';
+}
+
+function auditQuickLookupLabel(item = {}) {
+  return item.name || item.host || item.value || item.groupid || item.templateid || item.maintenanceid || item.maintenanceId || '';
+}
+
+function auditQuickNotesLabel(item = {}) {
+  return (item.notes ?? []).join(' ');
 }
 
 function auditClassTitle(item = {}) {
@@ -13627,6 +13905,11 @@ function applyHelpText() {
     '#auditAnalyzeModel': 'tooltip.auditAnalyzeModel',
     '#auditApplyModel': 'tooltip.auditApplyModel',
     '#auditBindingParentClass': 'tooltip.auditBindingParentClass',
+    '#auditRunQuick': 'tooltip.auditRunQuick',
+    '#auditRunQuickNext': 'tooltip.auditRunQuickNext',
+    '#auditQuickClass': 'tooltip.auditQuickClass',
+    '#auditQuickMaxCards': 'tooltip.auditQuickMaxCards',
+    '#auditQuickOffset': 'tooltip.auditQuickOffset',
     '#syncZabbix': 'tooltip.syncZabbix',
     '#loadZabbix': 'tooltip.loadZabbix',
     '#syncZabbixMetadata': 'tooltip.syncZabbixMetadata',
@@ -13752,8 +14035,22 @@ async function api(path, options = {}) {
   const payload = await response.json();
   if (!response.ok) {
     if (response.status === 428 && payload.error === 'credentials_required' && options.retryCredentials !== false) {
+      const prompted = new Set(options.credentialServices ?? []);
+      const service = payload.service ?? payload.details?.service ?? 'unknown';
+      const retries = options.credentialRetries ?? 0;
+      if (prompted.has(service) || retries >= 3) {
+        const error = new Error(payload.message ?? payload.error ?? `HTTP ${response.status}`);
+        error.status = response.status;
+        error.payload = payload;
+        throw error;
+      }
       await promptSessionCredentials(payload);
-      return api(path, { ...options, retryCredentials: false });
+      prompted.add(service);
+      return api(path, {
+        ...options,
+        credentialRetries: retries + 1,
+        credentialServices: [...prompted]
+      });
     }
 
     const error = new Error(payload.message ?? payload.error ?? `HTTP ${response.status}`);

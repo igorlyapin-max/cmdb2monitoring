@@ -246,6 +246,15 @@ Scenario `UPDATE-BINDING-001`: update/delete use hostid from CMDBuild binding da
 3. Run update and verify that `cmdbkafka2zabbix` rendered direct `host.update` with `hostid`, not fallback `host.get`.
 4. Run delete and verify that `cmdbkafka2zabbix` rendered direct `host.delete` with the same `hostid`, while the binding event cleared `zabbix_main_hostid` or marked `ZabbixHostBinding` as `deleted`.
 
+Scenario `AUDIT-QUICK-001`: quick audit detects main discrepancies without fixing them.
+
+1. Prepare CMDBuild cards with a main profile and an additional `hostProfile`; verify that rules contain expected host groups/templates/maintenance/status.
+2. In `Audit`, select root `Class` or a concrete participating class, enable child classes and the rules-only filter, then run `Quick audit`.
+3. Verify that the report shows OK for cards where binding, host name, interface address, host groups, templates, maintenance, and status match.
+4. Set `Cards offset` to the first batch size or click `Next batch`, and verify that the next run reads the next card batch for the selected classes.
+5. Manually remove or change one host group/template/maintenance/address in Zabbix and run quick audit again.
+6. Verify that the report shows an error only for the affected object/profile and does not offer an auto-fix.
+
 Scenario `UPDATE-MERGE-004`: `interfaces[]` are not a merge field.
 
 1. Add an external interface to the Zabbix host that is absent from rules.
