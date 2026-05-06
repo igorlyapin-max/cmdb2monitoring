@@ -3841,21 +3841,42 @@ async function resolveZabbixToken(apiEndpoint, credentials) {
     return credentials.apiToken;
   }
 
-  const result = await zabbixRawCall(apiEndpoint, null, {
-    jsonrpc: '2.0',
-    method: 'user.login',
-    params: {
-      username: credentials.username,
-      password: credentials.password
-    },
-    id: 1
-  });
+  let result;
+  try {
+    result = await zabbixRawCall(apiEndpoint, null, {
+      jsonrpc: '2.0',
+      method: 'user.login',
+      params: {
+        username: credentials.username,
+        password: credentials.password
+      },
+      id: 1
+    });
+  } catch (error) {
+    if (isZabbixAuthenticationError(error)) {
+      throw httpError(
+        428,
+        'credentials_required',
+        'Zabbix credentials were rejected. Re-enter Zabbix login/password; the default dev login is case-sensitive: Admin/zabbix.',
+        {
+          service: 'zabbix',
+          apiEndpoint
+        });
+    }
+    throw error;
+  }
 
   if (!result.result) {
     throw httpError(502, 'zabbix_login_failed', 'Zabbix login did not return a token.');
   }
 
   return result.result;
+}
+
+function isZabbixAuthenticationError(error) {
+  const message = String(error?.message ?? '');
+  return error?.code === 'zabbix_api_error'
+    && /incorrect user name|password|account is temporarily blocked/i.test(message);
 }
 
 function requireZabbixSessionCredentials(session) {

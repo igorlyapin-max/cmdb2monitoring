@@ -399,7 +399,8 @@ static Task BindingPublisherContractOnlyPublishesSuccessfulHostWrites()
 
 static CmdbuildBindingClient CreateBindingClient(FakeHttpMessageHandler handler)
 {
-    return new CmdbuildBindingClient(
+    var constructor = typeof(CmdbuildBindingClient).GetConstructors().Single();
+    return (CmdbuildBindingClient)constructor.Invoke([
         new HttpClient(handler),
         Options.Create(new BindingCmdbuildOptions
         {
@@ -410,7 +411,17 @@ static CmdbuildBindingClient CreateBindingClient(FakeHttpMessageHandler handler)
             BindingClassName = "ZabbixHostBinding",
             BindingLookupLimit = 1000
         }),
-        NullLogger<CmdbuildBindingClient>.Instance);
+        CreateDefaultOptions(constructor.GetParameters()[2].ParameterType),
+        NullLogger<CmdbuildBindingClient>.Instance
+    ])!;
+}
+
+static object CreateDefaultOptions(Type optionsInterfaceType)
+{
+    var optionsType = optionsInterfaceType.GenericTypeArguments.Single();
+    var optionsValue = Activator.CreateInstance(optionsType)!;
+    var wrapperType = typeof(OptionsWrapper<>).MakeGenericType(optionsType);
+    return Activator.CreateInstance(wrapperType, optionsValue)!;
 }
 
 static CmdbZabbixHostBindingResolver CreateHostBindingResolver(

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Kafka;
@@ -16,6 +17,7 @@ public sealed class KafkaZabbixRequestWorker(
     IZabbixResponsePublisher responsePublisher,
     IZabbixBindingEventPublisher bindingEventPublisher,
     IProcessingStateStore stateStore,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaZabbixRequestWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -69,6 +71,18 @@ public sealed class KafkaZabbixRequestWorker(
                 {
                     continue;
                 }
+
+                logger.LogBasic(
+                    debugLoggingOptions,
+                    "Consumed Zabbix request from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
+                    consumed.Topic,
+                    consumed.Partition.Value,
+                    consumed.Offset.Value,
+                    consumed.Message.Key ?? "<empty>");
+                logger.LogVerbose(
+                    debugLoggingOptions,
+                    "Consumed Zabbix request payload {KafkaPayload}",
+                    consumed.Message.Value);
 
                 await ProcessMessageAsync(consumed, consumer, stoppingToken);
                 await DelayBeforeNextObjectAsync(stoppingToken);
@@ -135,6 +149,13 @@ public sealed class KafkaZabbixRequestWorker(
         try
         {
             request = requestReader.Read(consumed.Message.Key, consumed.Message.Value);
+            logger.LogBasic(
+                debugLoggingOptions,
+                "Parsed Zabbix request {Method} for entity {EntityId}, profile {HostProfileName}, host {Host}",
+                request.Method,
+                request.EntityId ?? "<unknown>",
+                request.HostProfileName ?? "<default>",
+                request.Host ?? "<unknown>");
         }
         catch (JsonException ex)
         {
@@ -158,6 +179,20 @@ public sealed class KafkaZabbixRequestWorker(
         }
 
         result = await ProcessRequestWithRetryAsync(request, cancellationToken);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Zabbix processing result for {Method}, entity {EntityId}: success {Success}, sent {ZabbixRequestSent}, error {ErrorCode}",
+            result.Method,
+            result.EntityId ?? "<unknown>",
+            result.Success,
+            result.ZabbixRequestSent,
+            result.ErrorCode ?? "<none>");
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Zabbix response JSON for {Method}, entity {EntityId}: {ZabbixResponseJson}",
+            result.Method,
+            result.EntityId ?? "<unknown>",
+            result.ZabbixResponseJson ?? "<empty>");
         await PublishStateAndCommitAsync(consumed, consumer, result, cancellationToken);
 
         logger.LogInformation(
@@ -223,6 +258,13 @@ public sealed class KafkaZabbixRequestWorker(
         var validation = await requestValidator.ValidateAsync(request, cancellationToken);
         if (!validation.IsValid)
         {
+            logger.LogBasic(
+                debugLoggingOptions,
+                "Rejected Zabbix request {Method} for entity {EntityId}: {ValidationErrorCode} {ValidationErrorMessage}",
+                request.Method,
+                request.EntityId ?? "<unknown>",
+                validation.PrimaryErrorCode(),
+                validation.PrimaryErrorMessage());
             return ZabbixProcessingResult.FromValidationError(
                 request,
                 validation.PrimaryErrorCode(),
@@ -234,9 +276,20 @@ public sealed class KafkaZabbixRequestWorker(
 
         if (IsDirectUpdateRequest(request) && HasMergeableHostUpdateFields(request.Params))
         {
+            logger.LogBasic(
+                debugLoggingOptions,
+                "Processing direct mergeable host.update for entity {EntityId}, host {Host}",
+                request.EntityId ?? "<unknown>",
+                request.Host ?? "<unknown>");
             return await ProcessDirectUpdateAsync(request, cancellationToken);
         }
 
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Sending Zabbix API request {Method} for entity {EntityId}, host {Host}",
+            request.Method,
+            request.EntityId ?? "<unknown>",
+            request.Host ?? "<unknown>");
         var apiResult = await zabbixClient.ExecuteAsync(request, cancellationToken);
         if (IsDeleteFallbackRequest(request))
         {
@@ -306,6 +359,10 @@ public sealed class KafkaZabbixRequestWorker(
         {
             if (lookupRequest.CreateOnUpdateWhenMissing)
             {
+                logger.LogBasic(
+                    debugLoggingOptions,
+                    "Zabbix update fallback did not find host {Host}; create-on-update is enabled",
+                    lookupRequest.Host ?? "<unknown>");
                 return await ProcessCreateOnMissingUpdateAsync(lookupRequest, cancellationToken);
             }
 
@@ -332,6 +389,11 @@ public sealed class KafkaZabbixRequestWorker(
         var updateRequestJson = BuildHostUpdateRequestJson(
             lookupRequest,
             hostInfo);
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Built fallback host.update payload for hostid {HostId}: {ZabbixPayload}",
+            hostInfo.HostId,
+            updateRequestJson);
         var updateRequest = requestReader.Read(lookupRequest.EntityId, updateRequestJson, lookupRequest.Host);
         updateRequest = await dynamicHostGroupResolver.ResolveAsync(updateRequest, cancellationToken);
         var updateValidation = await requestValidator.ValidateAsync(updateRequest, cancellationToken);
@@ -402,6 +464,11 @@ public sealed class KafkaZabbixRequestWorker(
             updateRequest,
             updateRequest.Params,
             hostInfo);
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Built merged host.update payload for hostid {HostId}: {ZabbixPayload}",
+            hostInfo.HostId,
+            mergedUpdateRequestJson);
         var mergedUpdateRequest = requestReader.Read(updateRequest.EntityId, mergedUpdateRequestJson, updateRequest.Host);
         mergedUpdateRequest = await dynamicHostGroupResolver.ResolveAsync(mergedUpdateRequest, cancellationToken);
         var mergedValidation = await requestValidator.ValidateAsync(mergedUpdateRequest, cancellationToken);
@@ -436,6 +503,11 @@ public sealed class KafkaZabbixRequestWorker(
         }
 
         var createRequestJson = BuildHostCreateRequestJson(lookupRequest);
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Built create-on-update host.create payload for host {Host}: {ZabbixPayload}",
+            lookupRequest.Host ?? "<unknown>",
+            createRequestJson);
         var createRequest = requestReader.Read(lookupRequest.EntityId, createRequestJson, lookupRequest.Host);
         createRequest = await dynamicHostGroupResolver.ResolveAsync(createRequest, cancellationToken);
         var createValidation = await requestValidator.ValidateAsync(createRequest, cancellationToken);

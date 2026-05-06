@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Added `DebugLogging` settings for all .NET microservices with `Basic` and `Verbose` levels; extended debug events are emitted through regular `ILogger` at `Information`.
+
 ## 0.8.2 - 2026-05-05
 
 ### Changed

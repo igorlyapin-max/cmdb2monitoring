@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Zabbix;
@@ -10,13 +11,16 @@ public sealed class ZabbixBindingEventPublisher : IZabbixBindingEventPublisher, 
 {
     private readonly IProducer<string, string> producer;
     private readonly IOptions<KafkaOptions> options;
+    private readonly IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions;
     private readonly ILogger<ZabbixBindingEventPublisher> logger;
 
     public ZabbixBindingEventPublisher(
         IOptions<KafkaOptions> options,
+        IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
         ILogger<ZabbixBindingEventPublisher> logger)
     {
         this.options = options;
+        this.debugLoggingOptions = debugLoggingOptions;
         this.logger = logger;
         producer = new ProducerBuilder<string, string>(options.Value.BindingOutput.BuildProducerConfig()).Build();
     }
@@ -45,16 +49,34 @@ public sealed class ZabbixBindingEventPublisher : IZabbixBindingEventPublisher, 
         var bindingStatus = BindingStatus(result.Method);
         var eventType = BindingEventType(result.Method);
         var outputOptions = options.Value.BindingOutput;
+        var payload = BuildPayload(result, input, eventType, bindingStatus);
         var message = new Message<string, string>
         {
             Key = BindingKey(result),
-            Value = BuildPayload(result, input, eventType, bindingStatus),
+            Value = payload,
             Headers = BuildHeaders(result, outputOptions, eventType, bindingStatus)
         };
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Publishing Zabbix binding event to Kafka topic {Topic}, key {KafkaKey}, payload {KafkaPayload}",
+            outputOptions.Topic,
+            message.Key,
+            payload);
 
         var deliveryResult = await producer.ProduceAsync(outputOptions.Topic, message, cancellationToken);
         logger.LogInformation(
             "Published Zabbix binding event {EventType} for {SourceClass}/{SourceCardId}, profile {HostProfile}, hostid {ZabbixHostId} to Kafka topic {Topic} partition {Partition} offset {Offset}",
+            eventType,
+            result.SourceClass,
+            result.SourceCardId,
+            HostProfile(result),
+            result.ZabbixHostId,
+            deliveryResult.Topic,
+            deliveryResult.Partition.Value,
+            deliveryResult.Offset.Value);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Published Zabbix binding event {EventType} for {SourceClass}/{SourceCardId}, profile {HostProfile}, hostid {ZabbixHostId} to {Topic}[{Partition}]@{Offset}",
             eventType,
             result.SourceClass,
             result.SourceCardId,

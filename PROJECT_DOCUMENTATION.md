@@ -606,6 +606,21 @@ Webhook body для этой demo-схемы остается плоским: `i
 - заполнить `ElkLogging:Elk:Endpoint`, `Index`, `ApiKey`;
 - при необходимости отключить Kafka log sink.
 
+## Extended debug logging
+
+Все .NET-микросервисы поддерживают секцию `DebugLogging`:
+
+```json
+"DebugLogging": {
+  "Enabled": false,
+  "Level": "Basic"
+}
+```
+
+Поддержанные уровни: `Basic` и `Verbose`. События расширенного режима пишутся через обычный `ILogger` на уровне `Information`, поэтому попадают в Docker stdout/stderr, Kafka log topic при `ElkLogging:Mode=Kafka`, ELK при включенном ELK sink и в syslog, если Docker настроен с syslog logging driver.
+
+`Basic` включает диагностическую трассу прохождения события между webhook, Kafka, converter, Zabbix API и обратной записью binding в CMDBuild. `Verbose` дополнительно пишет payload/request/response JSON и должен включаться только на время диагностики: в этих сообщениях могут быть значения CMDBuild attributes, Zabbix request/response и другие операционные данные.
+
 ## Проверки перед commit/push
 
 ```bash

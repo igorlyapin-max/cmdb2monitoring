@@ -37,6 +37,7 @@ The rule developer is responsible for rules-file content: source fields, `cmdbPa
    - `zabbixrequests2api`: Zabbix API URL/token, validation settings, dynamic host group creation.
    - `zabbixbindings2cmdbuild`: CMDBuild REST URL, service account for writing bindings.
    - `monitoring-ui-api`: endpoints, Kafka Event Browser, auth, runtime settings, git settings.
+   - For temporary microservice diagnostics, enable `DebugLogging:Enabled=true` with `Basic` or `Verbose`; `Verbose` exposes payload/request/response JSON and must not remain enabled permanently.
    - Docker image build, local registry publishing, Kafka topics, per-service secrets, and external-system permissions are described in `DEPLOYMENT_LOCAL_REGISTRY.md`.
 
 4. Configure UI roles.

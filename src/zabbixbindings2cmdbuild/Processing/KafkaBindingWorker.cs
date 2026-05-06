@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixBindings2Cmdbuild.Cmdbuild;
@@ -12,6 +13,7 @@ public sealed class KafkaBindingWorker(
     ZabbixBindingEventReader eventReader,
     ICmdbuildBindingClient cmdbuildClient,
     IProcessingStateStore stateStore,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaBindingWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -52,6 +54,18 @@ public sealed class KafkaBindingWorker(
                 {
                     continue;
                 }
+
+                logger.LogBasic(
+                    debugLoggingOptions,
+                    "Consumed Zabbix binding event from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
+                    consumed.Topic,
+                    consumed.Partition.Value,
+                    consumed.Offset.Value,
+                    consumed.Message.Key ?? "<empty>");
+                logger.LogVerbose(
+                    debugLoggingOptions,
+                    "Consumed Zabbix binding payload {KafkaPayload}",
+                    consumed.Message.Value);
 
                 await ProcessMessageAsync(consumed, consumer, stoppingToken);
             }
@@ -115,6 +129,14 @@ public sealed class KafkaBindingWorker(
         try
         {
             bindingEvent = eventReader.Read(consumed.Message.Value);
+            logger.LogBasic(
+                debugLoggingOptions,
+                "Applying Zabbix binding event {EventType} for {SourceClass}/{SourceCardId}, profile {HostProfile}, hostid {ZabbixHostId}",
+                bindingEvent.EventType,
+                bindingEvent.SourceClass,
+                bindingEvent.SourceCardId,
+                bindingEvent.HostProfile,
+                bindingEvent.ZabbixHostId);
             await cmdbuildClient.ApplyAsync(bindingEvent, cancellationToken);
             await WriteStateAndCommitAsync(consumed, consumer, bindingEvent, true, null, cancellationToken);
 
@@ -157,5 +179,13 @@ public sealed class KafkaBindingWorker(
             ProcessedAt: DateTimeOffset.UtcNow), cancellationToken);
 
         consumer.Commit(consumed);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Committed Zabbix binding event {Topic}[{Partition}]@{Offset}, success {Success}, error {ErrorCode}",
+            consumed.Topic,
+            consumed.Partition.Value,
+            consumed.Offset.Value,
+            success,
+            errorCode ?? "<none>");
     }
 }

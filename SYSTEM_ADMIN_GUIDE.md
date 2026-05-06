@@ -37,6 +37,7 @@
    - `zabbixrequests2api`: Zabbix API URL/token, validation settings, dynamic host group creation.
    - `zabbixbindings2cmdbuild`: CMDBuild REST URL, service account для записи binding-ов.
    - `monitoring-ui-api`: endpoints, Kafka Event Browser, auth, runtime settings, git settings.
+   - Для временной диагностики микросервисов включайте `DebugLogging:Enabled=true` и уровень `Basic` или `Verbose`; `Verbose` раскрывает payload/request/response JSON и не должен оставаться включенным постоянно.
    - Сборка Docker images, публикация в локальный registry, Kafka topics, секреты по сервисам и права внешних систем описаны в `DEPLOYMENT_LOCAL_REGISTRY.md`.
 
 4. Настройте роли UI.

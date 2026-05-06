@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Cmdb2Monitoring.Logging;
 using CmdbKafka2Zabbix.Configuration;
 using CmdbKafka2Zabbix.Rules;
 using Microsoft.Extensions.Options;
@@ -10,6 +11,7 @@ namespace CmdbKafka2Zabbix.Conversion;
 public sealed class CmdbSourceFieldResolver(
     HttpClient httpClient,
     IOptions<CmdbuildOptions> options,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<CmdbSourceFieldResolver> logger)
 {
     private readonly Dictionary<string, IReadOnlyDictionary<string, CmdbAttributeInfo>> attributeCache = new(StringComparer.OrdinalIgnoreCase);
@@ -47,14 +49,31 @@ public sealed class CmdbSourceFieldResolver(
 
                 try
                 {
+                    logger.LogBasic(
+                        debugLoggingOptions,
+                        "Resolving CMDBuild field {FieldName} through path {CmdbPath} with source value {SourceValue}",
+                        fieldName,
+                        string.IsNullOrWhiteSpace(fieldRule.CmdbPath) ? "<lookup>" : fieldRule.CmdbPath,
+                        sourceValue);
                     var resolvedValue = await ResolveFieldAsync(source, fieldName, fieldRule, sourceValue, cancellationToken);
                     if (!string.IsNullOrWhiteSpace(resolvedValue))
                     {
                         resolvedFields[fieldName] = resolvedValue;
+                        logger.LogBasic(
+                            debugLoggingOptions,
+                            "Resolved CMDBuild field {FieldName}: {SourceValue} -> {ResolvedValue}",
+                            fieldName,
+                            sourceValue,
+                            resolvedValue);
                     }
                     else if (isDomainPath)
                     {
                         resolvedFields.Remove(fieldName);
+                        logger.LogBasic(
+                            debugLoggingOptions,
+                            "Dropped unresolved CMDBuild domain field {FieldName} for path {CmdbPath}",
+                            fieldName,
+                            fieldRule.CmdbPath);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -295,6 +314,14 @@ public sealed class CmdbSourceFieldResolver(
         }
 
         var relatedCards = await GetRelatedCardsAsync(sourceClass, sourceCardId, targetClass, cancellationToken);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Resolved CMDBuild domain path {CmdbPath}: found {RelatedCount} related card(s) from {SourceClass}/{SourceCardId} to {TargetClass}",
+            rule.CmdbPath,
+            relatedCards.Count,
+            sourceClass,
+            sourceCardId,
+            targetClass);
         if (relatedCards.Count == 0)
         {
             return null;
@@ -699,6 +726,11 @@ public sealed class CmdbSourceFieldResolver(
 
         using var response = await httpClient.SendAsync(request, timeout.Token);
         response.EnsureSuccessStatusCode();
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "CMDBuild GET {Path} returned HTTP {StatusCode}",
+            path,
+            (int)response.StatusCode);
         await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
         return await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
     }

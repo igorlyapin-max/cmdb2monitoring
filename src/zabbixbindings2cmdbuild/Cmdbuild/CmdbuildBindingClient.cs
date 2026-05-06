@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Cmdb2Monitoring.Logging;
 using Microsoft.Extensions.Options;
 using ZabbixBindings2Cmdbuild.Models;
 
@@ -10,6 +11,7 @@ namespace ZabbixBindings2Cmdbuild.Cmdbuild;
 public sealed class CmdbuildBindingClient(
     HttpClient httpClient,
     IOptions<CmdbuildOptions> options,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<CmdbuildBindingClient> logger) : ICmdbuildBindingClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -42,6 +44,10 @@ public sealed class CmdbuildBindingClient(
             $"/classes/{Uri.EscapeDataString(bindingEvent.SourceClass)}/cards/{Uri.EscapeDataString(bindingEvent.SourceCardId)}",
             body,
             cancellationToken);
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Updated CMDBuild main host binding payload {CmdbuildPayload}",
+            body.ToJsonString(JsonOptions));
 
         logger.LogInformation(
             "Updated CMDBuild main host binding for {SourceClass}/{SourceCardId}: {Attribute}={ZabbixHostId}",
@@ -55,6 +61,13 @@ public sealed class CmdbuildBindingClient(
     {
         var existingCardId = await FindBindingCardIdAsync(bindingEvent, cancellationToken);
         var body = BuildBindingBody(bindingEvent);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "CMDBuild profile binding lookup for {SourceClass}/{SourceCardId}, profile {HostProfile}: existing card {BindingCardId}",
+            bindingEvent.SourceClass,
+            bindingEvent.SourceCardId,
+            bindingEvent.HostProfile,
+            existingCardId ?? "<new>");
         if (string.IsNullOrWhiteSpace(existingCardId))
         {
             using var createResponse = await SendAsync(
@@ -62,6 +75,10 @@ public sealed class CmdbuildBindingClient(
                 $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards",
                 body,
                 cancellationToken);
+            logger.LogVerbose(
+                debugLoggingOptions,
+                "Created CMDBuild profile binding payload {CmdbuildPayload}",
+                body.ToJsonString(JsonOptions));
             logger.LogInformation(
                 "Created CMDBuild {BindingClass} binding for {SourceClass}/{SourceCardId}, profile {HostProfile}, hostid {ZabbixHostId}",
                 options.Value.BindingClassName,
@@ -77,6 +94,10 @@ public sealed class CmdbuildBindingClient(
             $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards/{Uri.EscapeDataString(existingCardId)}",
             body,
             cancellationToken);
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Updated CMDBuild profile binding payload {CmdbuildPayload}",
+            body.ToJsonString(JsonOptions));
         logger.LogInformation(
             "Updated CMDBuild {BindingClass} binding {BindingCardId} for {SourceClass}/{SourceCardId}, profile {HostProfile}, status {BindingStatus}",
             options.Value.BindingClassName,
@@ -151,6 +172,12 @@ public sealed class CmdbuildBindingClient(
 
         using var response = await httpClient.SendAsync(request, timeout.Token);
         response.EnsureSuccessStatusCode();
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "CMDBuild {HttpMethod} {Path} returned HTTP {StatusCode}",
+            method.Method,
+            path,
+            (int)response.StatusCode);
         if (response.Content.Headers.ContentLength == 0)
         {
             return null;

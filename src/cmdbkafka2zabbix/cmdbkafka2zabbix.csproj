@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="../shared/Logging/*.cs" Link="Logging/Shared/%(Filename)%(Extension)" />
     <Compile Include="../shared/Secrets/*.cs" Link="Secrets/%(Filename)%(Extension)" />
   </ItemGroup>
 

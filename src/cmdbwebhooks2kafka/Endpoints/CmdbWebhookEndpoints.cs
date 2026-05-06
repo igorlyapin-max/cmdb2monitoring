@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cmdb2Monitoring.Logging;
 using CmdbWebhooks2Kafka.Configuration;
 using CmdbWebhooks2Kafka.Kafka;
 using CmdbWebhooks2Kafka.Models;
@@ -20,6 +21,7 @@ public static class CmdbWebhookEndpoints
             IKafkaEventPublisher publisher,
             IOptions<CmdbWebhookOptions> cmdbWebhookOptions,
             IOptions<KafkaOptions> kafkaOptions,
+            IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -42,6 +44,16 @@ public static class CmdbWebhookEndpoints
             }
 
             var envelope = CmdbWebhookEnvelope.FromPayload(payload, cmdbWebhookOptions.Value);
+            logger.LogBasic(
+                debugLoggingOptions,
+                "Received webhook payload for event {EventType}, entity type {EntityType}, entity id {EntityId}",
+                envelope.EventType,
+                envelope.EntityType ?? "<unknown>",
+                envelope.EntityId ?? "<unknown>");
+            logger.LogVerbose(
+                debugLoggingOptions,
+                "Webhook payload JSON {WebhookPayload}",
+                payload.GetRawText());
 
             logger.LogInformation(
                 "Received CMDBuild webhook event {EventType} for {EntityType} {EntityId}",
@@ -50,6 +62,13 @@ public static class CmdbWebhookEndpoints
                 envelope.EntityId ?? "<unknown>");
 
             await publisher.PublishAsync(envelope, cancellationToken);
+            logger.LogBasic(
+                debugLoggingOptions,
+                "Webhook event {EventType} for {EntityType}/{EntityId} accepted for Kafka topic {Topic}",
+                envelope.EventType,
+                envelope.EntityType ?? "<unknown>",
+                envelope.EntityId ?? "<unknown>",
+                kafkaOptions.Value.Topic);
 
             return Results.Accepted(value: new
             {

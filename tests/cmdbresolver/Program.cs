@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Cmdb2Monitoring.Logging;
 using CmdbKafka2Zabbix.Configuration;
 using CmdbKafka2Zabbix.Conversion;
 using CmdbKafka2Zabbix.Rules;
@@ -298,6 +299,7 @@ static CmdbSourceFieldResolver CreateResolver(FakeCmdbuild cmdb)
             MaxPathDepth = 2,
             Enabled = true
         }),
+        Options.Create(new ExtendedDebugLoggingOptions()),
         NullLogger<CmdbSourceFieldResolver>.Instance);
 }
 

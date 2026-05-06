@@ -1,4 +1,5 @@
 using System.Text;
+using Cmdb2Monitoring.Logging;
 using CmdbKafka2Zabbix.Conversion;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
@@ -8,6 +9,7 @@ namespace CmdbKafka2Zabbix.Kafka;
 public sealed class ZabbixRequestPublisher(
     IProducer<string, string> producer,
     IOptions<KafkaOptions> options,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<ZabbixRequestPublisher> logger) : IZabbixRequestPublisher
 {
     public async Task<DeliveryResult<string, string>> PublishAsync(
@@ -20,9 +22,18 @@ public sealed class ZabbixRequestPublisher(
         }
 
         var outputOptions = options.Value.Output;
+        var key = result.Key ?? result.EntityId ?? result.Host ?? result.EventType;
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Publishing Zabbix request to Kafka topic {Topic}, key {KafkaKey}, method {Method}, profile {ProfileName}, payload {KafkaPayload}",
+            outputOptions.Topic,
+            key,
+            result.Method,
+            result.ProfileName ?? "<default>",
+            result.Value);
         var deliveryResult = await producer.ProduceAsync(outputOptions.Topic, new Message<string, string>
         {
-            Key = result.Key ?? result.EntityId ?? result.Host ?? result.EventType,
+            Key = key,
             Value = result.Value,
             Headers = BuildHeaders(result, outputOptions)
         }, cancellationToken);
@@ -31,6 +42,15 @@ public sealed class ZabbixRequestPublisher(
             "Published Zabbix request {Method} for entity {EntityId} to Kafka topic {Topic} partition {Partition} offset {Offset}",
             result.Method,
             result.EntityId ?? "<unknown>",
+            deliveryResult.Topic,
+            deliveryResult.Partition.Value,
+            deliveryResult.Offset.Value);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Published Zabbix request {Method} for entity {EntityId}, profile {ProfileName} to {Topic}[{Partition}]@{Offset}",
+            result.Method,
+            result.EntityId ?? "<unknown>",
+            result.ProfileName ?? "<default>",
             deliveryResult.Topic,
             deliveryResult.Partition.Value,
             deliveryResult.Offset.Value);

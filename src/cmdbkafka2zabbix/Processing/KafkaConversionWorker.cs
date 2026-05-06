@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cmdb2Monitoring.Logging;
 using CmdbKafka2Zabbix.Conversion;
 using CmdbKafka2Zabbix.Kafka;
 using CmdbKafka2Zabbix.Rules;
@@ -15,6 +16,7 @@ public sealed class KafkaConversionWorker(
     CmdbToZabbixConverter converter,
     IZabbixRequestPublisher publisher,
     IProcessingStateStore stateStore,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaConversionWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -67,6 +69,18 @@ public sealed class KafkaConversionWorker(
                 {
                     continue;
                 }
+
+                logger.LogBasic(
+                    debugLoggingOptions,
+                    "Consumed CMDBuild Kafka event from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
+                    consumed.Topic,
+                    consumed.Partition.Value,
+                    consumed.Offset.Value,
+                    consumed.Message.Key ?? "<empty>");
+                logger.LogVerbose(
+                    debugLoggingOptions,
+                    "Consumed CMDBuild Kafka payload {KafkaPayload}",
+                    consumed.Message.Value);
 
                 await ProcessMessageAsync(consumed, consumer, stoppingToken);
             }
@@ -133,6 +147,19 @@ public sealed class KafkaConversionWorker(
         {
             source = eventReader.Read(consumed.Message.Value, rules);
             source = await fieldResolver.ResolveAsync(source, rules, cancellationToken);
+            logger.LogBasic(
+                debugLoggingOptions,
+                "Resolved CMDBuild event {EventType} for {ClassName}/{EntityId} with {FieldCount} source field(s)",
+                source.EventType,
+                source.ClassName ?? source.EntityType ?? "<unknown>",
+                source.EntityId ?? "<unknown>",
+                source.SourceFields.Count);
+            logger.LogVerbose(
+                debugLoggingOptions,
+                "Resolved CMDBuild source fields for {ClassName}/{EntityId}: {SourceFields}",
+                source.ClassName ?? source.EntityType ?? "<unknown>",
+                source.EntityId ?? "<unknown>",
+                JsonSerializer.Serialize(source.SourceFields));
         }
         catch (JsonException ex)
         {
@@ -157,6 +184,13 @@ public sealed class KafkaConversionWorker(
 
         var results = await converter.ConvertAsync(source, rules, cancellationToken);
         var publishableResults = results.Where(result => result.ShouldPublish).ToArray();
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Converted CMDBuild event {EventType} for {EntityId}: {PublishableCount} publishable result(s), {SkippedCount} skipped result(s)",
+            source.EventType,
+            source.EntityId ?? "<unknown>",
+            publishableResults.Length,
+            results.Count(result => !result.ShouldPublish));
         foreach (var skippedResult in results.Where(result => !result.ShouldPublish))
         {
             logger.LogInformation(
@@ -185,6 +219,12 @@ public sealed class KafkaConversionWorker(
         foreach (var result in publishableResults)
         {
             lastDeliveryResult = await publisher.PublishAsync(result, cancellationToken);
+            logger.LogVerbose(
+                debugLoggingOptions,
+                "Published conversion result for profile {ProfileName}, method {Method}, payload {ZabbixPayload}",
+                result.ProfileName ?? "<default>",
+                result.Method,
+                result.Value);
         }
 
         await WriteStateAndCommitAsync(
@@ -226,5 +266,13 @@ public sealed class KafkaConversionWorker(
             ProcessedAt: DateTimeOffset.UtcNow), cancellationToken);
 
         consumer.Commit(consumed);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Committed CMDBuild Kafka event {Topic}[{Partition}]@{Offset}, output published {OutputPublished}, skip reason {SkipReason}",
+            consumed.Topic,
+            consumed.Partition.Value,
+            consumed.Offset.Value,
+            outputPublished,
+            skipReason ?? "<none>");
     }
 }

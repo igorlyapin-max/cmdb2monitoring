@@ -390,6 +390,16 @@ cmdbwebhooks2kafka.logs
 - Environment;
 - FlushTimeoutMs.
 
+Конфиг каждого .NET-микросервиса должен содержать секцию DebugLogging:
+- Enabled;
+- Level.
+
+Поддержанные значения Level:
+- Basic;
+- Verbose.
+
+DebugLogging выключен по умолчанию. При включении debug-события пишутся через обычный ILogger на уровне Information, чтобы попадать в Docker stdout/stderr, Kafka log topic при включенном Kafka logging, ELK при включенном ELK sink и syslog при соответствующей настройке Docker logging driver. Level Basic фиксирует ключевые этапы обработки события, Level Verbose дополнительно раскрывает payload/request/response JSON и предназначен только для временной диагностики.
+
 8. Конфигурация
 
 Все настройки микросервиса должны храниться в конфиге:

@@ -2,6 +2,7 @@ using CmdbWebhooks2Kafka.Configuration;
 using CmdbWebhooks2Kafka.Endpoints;
 using CmdbWebhooks2Kafka.Kafka;
 using CmdbWebhooks2Kafka.Logging;
+using Cmdb2Monitoring.Logging;
 using Cmdb2Monitoring.Secrets;
 using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -58,6 +59,11 @@ builder.Services.AddOptions<ElkLoggingOptions>()
     .Validate(options => !options.Enabled || !options.Kafka.Enabled || options.Kafka.FlushTimeoutMs > 0, "ELK Kafka flush timeout must be greater than zero.")
     .ValidateOnStart();
 
+builder.Services.AddOptions<ExtendedDebugLoggingOptions>()
+    .Bind(builder.Configuration.GetSection(ExtendedDebugLoggingOptions.SectionName))
+    .Validate(options => options.HasValidLevel(), "Debug logging level must be Basic or Verbose.")
+    .ValidateOnStart();
+
 builder.Services.AddSingleton<IProducer<string, string>>(services =>
 {
     var options = services.GetRequiredService<IOptions<KafkaOptions>>().Value;
@@ -71,6 +77,12 @@ builder.Services.AddSingleton<IKafkaEventPublisher, KafkaEventPublisher>();
 
 var app = builder.Build();
 var serviceOptions = app.Services.GetRequiredService<IOptions<ServiceOptions>>().Value;
+var debugLoggingOptions = app.Services.GetRequiredService<IOptions<ExtendedDebugLoggingOptions>>();
+app.Logger.LogBasic(
+    debugLoggingOptions,
+    "Service {ServiceName} started with extended debug logging level {DebugLoggingLevel}",
+    serviceOptions.Name,
+    debugLoggingOptions.Value.Level);
 
 app.MapGet(serviceOptions.HealthRoute, () => Results.Ok(new
 {

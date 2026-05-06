@@ -90,6 +90,15 @@ Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v3
 Zabbix__ApiEndpoint=http://zabbix-web:8080/api_jsonrpc.php
 ```
 
+Extended diagnostic logging for microservices is controlled by the `DebugLogging` section or env overrides:
+
+```bash
+DebugLogging__Enabled=false
+DebugLogging__Level=Basic
+```
+
+Supported levels are `Basic` and `Verbose`. Events are written through regular `ILogger` at `Information`, so they go to Docker stdout/stderr, Kafka log topics when `ElkLogging:Mode=Kafka`, ELK when the ELK sink is enabled, and syslog when Docker uses the syslog logging driver. `Verbose` includes payload/request/response JSON and should only be enabled temporarily for diagnostics.
+
 The UI/BFF reads `config/appsettings.json`, then `config/appsettings.${NODE_ENV}.json`, then `state/ui-settings.json`, then env overrides. The UI Dockerfile sets `NODE_ENV=Production`; mount an override as `/app/config/appsettings.Production.json` when needed.
 
 ## Indeed PAM/AAPM Secret Provider

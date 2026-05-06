@@ -1,4 +1,5 @@
 using Cmdb2Monitoring.Secrets;
+using Cmdb2Monitoring.Logging;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ZabbixBindings2Cmdbuild.Cmdbuild;
@@ -62,6 +63,11 @@ builder.Services.AddOptions<ElkLoggingOptions>()
     .Validate(options => !options.Enabled || !options.Kafka.Enabled || options.Kafka.FlushTimeoutMs > 0, "ELK Kafka flush timeout must be greater than zero.")
     .ValidateOnStart();
 
+builder.Services.AddOptions<ExtendedDebugLoggingOptions>()
+    .Bind(builder.Configuration.GetSection(ExtendedDebugLoggingOptions.SectionName))
+    .Validate(options => options.HasValidLevel(), "Debug logging level must be Basic or Verbose.")
+    .ValidateOnStart();
+
 builder.Logging.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerProvider, KafkaElkLoggerProvider>());
 
 builder.Services.AddHttpClient<ICmdbuildBindingClient, CmdbuildBindingClient>((services, client) =>
@@ -75,6 +81,12 @@ builder.Services.AddHostedService<KafkaBindingWorker>();
 
 var app = builder.Build();
 var serviceOptions = app.Services.GetRequiredService<IOptions<ServiceOptions>>().Value;
+var debugLoggingOptions = app.Services.GetRequiredService<IOptions<ExtendedDebugLoggingOptions>>();
+app.Logger.LogBasic(
+    debugLoggingOptions,
+    "Service {ServiceName} started with extended debug logging level {DebugLoggingLevel}",
+    serviceOptions.Name,
+    debugLoggingOptions.Value.Level);
 
 app.MapGet(serviceOptions.HealthRoute, () => Results.Ok(new
 {

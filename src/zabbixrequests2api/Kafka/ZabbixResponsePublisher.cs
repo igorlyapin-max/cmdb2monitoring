@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Zabbix;
@@ -9,6 +10,7 @@ namespace ZabbixRequests2Api.Kafka;
 public sealed class ZabbixResponsePublisher(
     IProducer<string, string> producer,
     IOptions<KafkaOptions> options,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<ZabbixResponsePublisher> logger) : IZabbixResponsePublisher
 {
     public async Task<DeliveryResult<string, string>> PublishAsync(
@@ -17,16 +19,32 @@ public sealed class ZabbixResponsePublisher(
         CancellationToken cancellationToken)
     {
         var outputOptions = options.Value.Output;
+        var payload = BuildPayload(result, input);
         var message = new Message<string, string>
         {
             Key = result.EntityId ?? result.Host ?? result.Method,
-            Value = BuildPayload(result, input),
+            Value = payload,
             Headers = BuildHeaders(result, outputOptions)
         };
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Publishing Zabbix response to Kafka topic {Topic}, key {KafkaKey}, payload {KafkaPayload}",
+            outputOptions.Topic,
+            message.Key,
+            payload);
 
         var deliveryResult = await producer.ProduceAsync(outputOptions.Topic, message, cancellationToken);
         logger.LogInformation(
             "Published Zabbix API response for method {Method}, entity {EntityId}, success {Success} to Kafka topic {Topic} partition {Partition} offset {Offset}",
+            result.Method,
+            result.EntityId ?? "<unknown>",
+            result.Success,
+            deliveryResult.Topic,
+            deliveryResult.Partition.Value,
+            deliveryResult.Offset.Value);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Published Zabbix response for method {Method}, entity {EntityId}, success {Success} to {Topic}[{Partition}]@{Offset}",
             result.Method,
             result.EntityId ?? "<unknown>",
             result.Success,

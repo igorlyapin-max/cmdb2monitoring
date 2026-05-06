@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Cmdb2Monitoring.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ZabbixRequests2Api.Zabbix;
@@ -8,6 +10,7 @@ namespace ZabbixRequests2Api.Zabbix;
 public sealed class ZabbixClient(
     HttpClient httpClient,
     IOptions<ZabbixOptions> options,
+    IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<ZabbixClient> logger) : IZabbixClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -220,10 +223,17 @@ public sealed class ZabbixClient(
             return ZabbixApiCallResult.Failed("zabbix_api_endpoint_not_configured", "Zabbix API endpoint is not configured.");
         }
 
+        var requestMethod = ReadJsonRpcMethod(requestJson);
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
         };
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Sending Zabbix JSON-RPC request to {Endpoint}, authenticated {Authenticated}, payload {ZabbixRequestJson}",
+            endpoint,
+            authenticated,
+            RedactSecretJsonFields(requestJson, redactResult: false));
 
         if (authenticated)
         {
@@ -236,6 +246,17 @@ public sealed class ZabbixClient(
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Zabbix API returned HTTP {StatusCode} for authenticated {Authenticated}",
+            (int)response.StatusCode,
+            authenticated);
+        logger.LogVerbose(
+            debugLoggingOptions,
+            "Zabbix API response JSON {ZabbixResponseJson}",
+            RedactSecretJsonFields(
+                responseJson,
+                redactResult: string.Equals(requestMethod, "user.login", StringComparison.OrdinalIgnoreCase)));
         if (!response.IsSuccessStatusCode)
         {
             return ZabbixApiCallResult.Failed(
@@ -335,6 +356,76 @@ public sealed class ZabbixClient(
         }
 
         return new ZabbixApiCallResult(true, responseJson, null, null);
+    }
+
+    private static string ReadJsonRpcMethod(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return ReadString(document.RootElement, "method") ?? string.Empty;
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string RedactSecretJsonFields(string json, bool redactResult)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return json;
+        }
+
+        try
+        {
+            var node = JsonNode.Parse(json);
+            RedactNode(node, redactResult);
+            return node?.ToJsonString(JsonOptions) ?? string.Empty;
+        }
+        catch (JsonException)
+        {
+            return "<invalid-json>";
+        }
+    }
+
+    private static void RedactNode(JsonNode? node, bool redactResult)
+    {
+        if (node is JsonObject jsonObject)
+        {
+            foreach (var property in jsonObject.ToList())
+            {
+                if (IsSecretProperty(property.Key)
+                    || redactResult && string.Equals(property.Key, "result", StringComparison.OrdinalIgnoreCase))
+                {
+                    jsonObject[property.Key] = "<redacted>";
+                    continue;
+                }
+
+                RedactNode(property.Value, redactResult: false);
+            }
+
+            return;
+        }
+
+        if (node is JsonArray jsonArray)
+        {
+            foreach (var item in jsonArray)
+            {
+                RedactNode(item, redactResult: false);
+            }
+        }
+    }
+
+    private static bool IsSecretProperty(string propertyName)
+    {
+        return string.Equals(propertyName, "password", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(propertyName, "passwd", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(propertyName, "token", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(propertyName, "apiToken", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(propertyName, "authorization", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(propertyName, "auth", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string[] ReadTemplateGroupIds(JsonElement template)
