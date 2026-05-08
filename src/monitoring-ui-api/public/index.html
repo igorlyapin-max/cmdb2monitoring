@@ -407,6 +407,20 @@
                   <label><span data-i18n="mapping.classField">Атрибут класса</span><select id="mappingEditField"></select></label>
                   <label><span data-i18n="mapping.structure">Структура конвертации</span><select id="mappingEditTargetType"></select></label>
                   <label><span data-i18n="mapping.zabbixTarget">Объект/payload Zabbix</span><select id="mappingEditZabbixObject"></select></label>
+                  <div id="mappingStringBuilder" class="mapping-string-builder wide-field hidden">
+                    <label class="mapping-string-template-field">
+                      <span data-i18n="mapping.stringTemplate">Строка payload</span>
+                      <textarea id="mappingEditStringTemplate" rows="2" spellcheck="false"></textarea>
+                    </label>
+                    <div class="mapping-string-builder-grid">
+                      <label><span data-i18n="mapping.stringSourceField">Атрибут</span><select id="mappingStringSourceField"></select></label>
+                      <button id="mappingInsertStringField" class="secondary" type="button" data-i18n="mapping.insertField">Вставить field</button>
+                      <label><span data-i18n="mapping.stringRegexField">Regex field</span><select id="mappingStringRegexField"></select></label>
+                      <label><span data-i18n="mapping.stringRegexPattern">Regex pattern</span><input id="mappingStringRegexPattern" type="text"></label>
+                      <label><span data-i18n="mapping.stringRegexReplacement">Replacement</span><input id="mappingStringRegexReplacement" type="text" value="$1"></label>
+                      <button id="mappingInsertRegex" class="secondary" type="button" data-i18n="mapping.insertRegex">Вставить regex</button>
+                    </div>
+                  </div>
                   <label id="mappingProfileScopeRow" class="mapping-checkbox-row wide-field">
                     <input id="mappingProfileScope" type="checkbox">
                     <span data-i18n="mapping.profileScope">Ограничить правило выбранным hostProfile</span>

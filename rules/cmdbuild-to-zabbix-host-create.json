@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1",
-  "rulesVersion": "2026.05.04-1938-test15-profile-ip-leaf-fix",
+  "rulesVersion": "2026.05.08-143808-test15-profile-ip-leaf-fix",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
   "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
@@ -14,9 +14,25 @@
       "create"
     ],
     "entityClasses": [
+      "ApplicG",
+      "ApplicGE",
+      "ARM",
       "C2MTestCI",
+      "DBGKM",
+      "Netman",
+      "NGFW",
+      "NTbook",
+      "PrinterDWH",
+      "routerCore",
+      "routerG",
       "Server",
-      "serveri"
+      "serveri",
+      "SFR",
+      "STORAGEP",
+      "tdwifi",
+      "TKGK",
+      "VMware",
+      "VPN_HUB"
     ],
     "fields": {
       "entityId": {
@@ -252,6 +268,377 @@
         "source": "mgmt",
         "cmdbAttribute": "mgmt",
         "cmdbPath": "serveri.mgmt.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "applicGHostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "ApplicG.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "applicGEHostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "ApplicGE.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "aRMHostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "ARM.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "dBGKMHostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "DBGKM.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "netmanIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "Netman.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "nGFWIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "NGFW.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "nTbookHostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "NTbook.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "domainIpAddressIpAddr": {
+        "source": "id",
+        "cmdbAttribute": "{domain:IpAddress}.ipAddr",
+        "cmdbPath": "PrinterDWH.{domain:IpAddress}.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "collectionMode": "join",
+          "collectionSeparator": "; ",
+          "maxDepth": 2
+        }
+      },
+      "routerCoreIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "routerCore.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "routerCoreMgmtIpAddr": {
+        "source": "mgmt",
+        "cmdbAttribute": "mgmt",
+        "cmdbPath": "routerCore.mgmt.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "mgmtOStype": {
+        "source": "mgmt",
+        "cmdbAttribute": "mgmt",
+        "cmdbPath": "ApplicG.mgmt.OStype",
+        "type": "lookup",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "code",
+          "maxDepth": 2,
+          "leafType": "lookup",
+          "lookupType": "GKMOS"
+        },
+        "lookupType": "GKMOS"
+      },
+      "applicGEMgmtOStype": {
+        "source": "mgmt",
+        "cmdbAttribute": "mgmt",
+        "cmdbPath": "ApplicGE.mgmt.OStype",
+        "type": "lookup",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "code",
+          "maxDepth": 2,
+          "leafType": "lookup",
+          "lookupType": "GKMOS"
+        },
+        "lookupType": "GKMOS"
+      },
+      "ipaddressOStype": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "ARM.ipaddress.OStype",
+        "type": "lookup",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "code",
+          "maxDepth": 2,
+          "leafType": "lookup",
+          "lookupType": "GKMOS"
+        },
+        "lookupType": "GKMOS"
+      },
+      "DBtype": {
+        "source": "DBtype",
+        "cmdbAttribute": "DBtype",
+        "cmdbPath": "DBGKM.DBtype",
+        "required": false,
+        "type": "lookup",
+        "lookupType": "DBType",
+        "resolve": {
+          "mode": "lookup",
+          "lookupType": "DBType",
+          "valueMode": "code"
+        }
+      },
+      "locationOfficeDescription": {
+        "source": "Location",
+        "cmdbAttribute": "Location",
+        "cmdbPath": "Netman.Location.Office.Description",
+        "type": "string",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "Critical": {
+        "source": "Critical",
+        "cmdbAttribute": "Critical",
+        "cmdbPath": "NGFW.Critical",
+        "required": false,
+        "type": "lookup",
+        "lookupType": "GKMCritical",
+        "resolve": {
+          "mode": "lookup",
+          "lookupType": "GKMCritical",
+          "valueMode": "code"
+        }
+      },
+      "nTbookIpaddressOStype": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "NTbook.ipaddress.OStype",
+        "type": "lookup",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "code",
+          "maxDepth": 2,
+          "leafType": "lookup",
+          "lookupType": "GKMOS"
+        },
+        "lookupType": "GKMOS"
+      },
+      "Type": {
+        "source": "Type",
+        "cmdbAttribute": "Type",
+        "cmdbPath": "PrinterDWH.Type",
+        "required": false,
+        "type": "lookup",
+        "lookupType": "Printer type",
+        "resolve": {
+          "mode": "lookup",
+          "lookupType": "Printer type",
+          "valueMode": "code"
+        }
+      },
+      "routerGIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "routerG.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "OStype": {
+        "source": "OStype",
+        "cmdbAttribute": "OStype",
+        "cmdbPath": "routerG.OStype",
+        "required": false,
+        "type": "lookup",
+        "lookupType": "GKMOS",
+        "resolve": {
+          "mode": "lookup",
+          "lookupType": "GKMOS",
+          "valueMode": "code"
+        }
+      },
+      "sFRHostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "SFR.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "sFROStype": {
+        "source": "OStype",
+        "cmdbAttribute": "OStype",
+        "cmdbPath": "SFR.OStype",
+        "required": false,
+        "type": "lookup",
+        "lookupType": "GKMOS",
+        "resolve": {
+          "mode": "lookup",
+          "lookupType": "GKMOS",
+          "valueMode": "code"
+        }
+      },
+      "sTORAGEPIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "STORAGEP.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "sTORAGEPMgmtOStype": {
+        "source": "mgmt",
+        "cmdbAttribute": "mgmt",
+        "cmdbPath": "STORAGEP.mgmt.OStype",
+        "type": "lookup",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "code",
+          "maxDepth": 2,
+          "leafType": "lookup",
+          "lookupType": "GKMOS"
+        },
+        "lookupType": "GKMOS"
+      },
+      "tdwifiIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "tdwifi.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "ipaddressCritical": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "tdwifi.ipaddress.Critical",
+        "type": "lookup",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "code",
+          "maxDepth": 2,
+          "leafType": "lookup",
+          "lookupType": "GKMCritical"
+        },
+        "lookupType": "GKMCritical"
+      },
+      "tKGKHostname": {
+        "source": "hostname",
+        "cmdbAttribute": "hostname",
+        "cmdbPath": "TKGK.hostname",
+        "required": false,
+        "type": "string",
+        "resolve": {
+          "mode": "none"
+        }
+      },
+      "vMwareMgmtIpAddr": {
+        "source": "mgmt",
+        "cmdbAttribute": "mgmt",
+        "cmdbPath": "VMware.mgmt.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "ipaddressIsDisableMon": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "VMware.ipaddress.isDisableMon",
+        "type": "boolean",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "vPNHUBIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "VPN_HUB.ipaddress.ipAddr",
         "type": "ipAddress",
         "required": false,
         "resolve": {
@@ -754,33 +1141,6 @@
       ]
     },
     {
-      "name": "server-main",
-      "priority": 15,
-      "createOnUpdateWhenMissing": true,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          }
-        ]
-      },
-      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
-      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
-      "interfaces": [
-        {
-          "name": "server-main-agent-ip",
-          "priority": 10,
-          "interfaceProfileRef": "agent",
-          "mode": "ip",
-          "valueField": "ipaddressIpAddr",
-          "when": {
-            "fieldExists": "ipaddressIpAddr"
-          }
-        }
-      ]
-    },
-    {
       "name": "separate-profile-1",
       "priority": 20,
       "createOnUpdateWhenMissing": true,
@@ -813,6 +1173,33 @@
           "valueField": "c2mSeparateProfile1Ip",
           "when": {
             "fieldExists": "c2mSeparateProfile1Ip"
+          }
+        }
+      ]
+    },
+    {
+      "name": "server-main",
+      "priority": 20,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "server-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "ipAddress",
+          "when": {
+            "fieldExists": "ipAddress"
           }
         }
       ]
@@ -856,7 +1243,7 @@
     },
     {
       "name": "serveri-main",
-      "priority": 40,
+      "priority": 30,
       "createOnUpdateWhenMissing": true,
       "when": {
         "allRegex": [
@@ -882,19 +1269,262 @@
       ]
     },
     {
-      "name": "serveri-mgmt",
+      "name": "applicg-main",
+      "priority": 40,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^ApplicG$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "applicg-main-agent-dns",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "applicGHostname",
+          "when": {
+            "fieldExists": "applicGHostname"
+          }
+        }
+      ]
+    },
+    {
+      "name": "applicge-main",
       "priority": 50,
       "createOnUpdateWhenMissing": true,
       "when": {
         "allRegex": [
           {
             "field": "className",
-            "pattern": "(?i)^serveri$"
+            "pattern": "(?i)^ApplicGE$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "applicge-main-agent-dns",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "applicGEHostname",
+          "when": {
+            "fieldExists": "applicGEHostname"
+          }
+        }
+      ]
+    },
+    {
+      "name": "arm-main",
+      "priority": 60,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^ARM$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "arm-main-agent-dns",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "aRMHostname",
+          "when": {
+            "fieldExists": "aRMHostname"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dbgkm-main",
+      "priority": 70,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^DBGKM$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "dbgkm-main-agent-dns",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "dBGKMHostname",
+          "when": {
+            "fieldExists": "dBGKMHostname"
+          }
+        }
+      ]
+    },
+    {
+      "name": "netman-main",
+      "priority": 80,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Netman$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "netman-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "netmanIpaddressIpAddr",
+          "when": {
+            "fieldExists": "netmanIpaddressIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ngfw-main",
+      "priority": 90,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^NGFW$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "ngfw-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "nGFWIpaddressIpAddr",
+          "when": {
+            "fieldExists": "nGFWIpaddressIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ntbook-main",
+      "priority": 100,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^NTbook$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "ntbook-main-agent-dns",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "nTbookHostname",
+          "when": {
+            "fieldExists": "nTbookHostname"
+          }
+        }
+      ]
+    },
+    {
+      "name": "printerdwh-main",
+      "priority": 110,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^PrinterDWH$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "printerdwh-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "domainIpAddressIpAddr",
+          "when": {
+            "fieldExists": "domainIpAddressIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "routercore-main",
+      "priority": 120,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^routerCore$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "routercore-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "routerCoreIpaddressIpAddr",
+          "when": {
+            "fieldExists": "routerCoreIpaddressIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "routercore-mgmt",
+      "priority": 130,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^routerCore$"
           }
         ],
         "anyRegex": [
           {
-            "field": "mgmtIpAddr",
+            "field": "routerCoreMgmtIpAddr",
             "pattern": ".+"
           },
           {
@@ -907,13 +1537,202 @@
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> <#= Model.HostProfileName #>",
       "interfaces": [
         {
-          "name": "serveri-mgmt-agent-ip",
+          "name": "routercore-mgmt-agent-ip",
           "priority": 10,
           "interfaceProfileRef": "agent",
           "mode": "ip",
-          "valueField": "mgmtIpAddr",
+          "valueField": "routerCoreMgmtIpAddr",
           "when": {
-            "fieldExists": "mgmtIpAddr"
+            "fieldExists": "routerCoreMgmtIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "routerg-main",
+      "priority": 140,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^routerG$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "routerg-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "routerGIpaddressIpAddr",
+          "when": {
+            "fieldExists": "routerGIpaddressIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sfr-main",
+      "priority": 150,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^SFR$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "sfr-main-agent-dns",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "sFRHostname",
+          "when": {
+            "fieldExists": "sFRHostname"
+          }
+        }
+      ]
+    },
+    {
+      "name": "storagep-main",
+      "priority": 160,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^STORAGEP$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "storagep-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "sTORAGEPIpaddressIpAddr",
+          "when": {
+            "fieldExists": "sTORAGEPIpaddressIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "tdwifi-main",
+      "priority": 170,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^tdwifi$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "tdwifi-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "tdwifiIpaddressIpAddr",
+          "when": {
+            "fieldExists": "tdwifiIpaddressIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "tkgk-main",
+      "priority": 180,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^TKGK$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "tkgk-main-agent-dns",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "dns",
+          "valueField": "tKGKHostname",
+          "when": {
+            "fieldExists": "tKGKHostname"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vmware-main",
+      "priority": 190,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^VMware$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "vmware-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "vMwareMgmtIpAddr",
+          "when": {
+            "fieldExists": "vMwareMgmtIpAddr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vpn_hub-main",
+      "priority": 200,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^VPN_HUB$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "vpn_hub-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "vPNHUBIpaddressIpAddr",
+          "when": {
+            "fieldExists": "vPNHUBIpaddressIpAddr"
           }
         }
       ]
@@ -948,6 +1767,234 @@
         {
           "name": "Discovered hosts",
           "groupid": "5"
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-applicg-mgmtostype-mgmtostype",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^ApplicG$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^applicg-main$"
+          },
+          {
+            "field": "mgmtOStype",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "mgmtOStype",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"mgmtOStype\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-applicge-applicgemgmtostype-applicgemgmtostype",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^ApplicGE$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^applicge-main$"
+          },
+          {
+            "field": "applicGEMgmtOStype",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "applicGEMgmtOStype",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"applicGEMgmtOStype\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-applicge-applicgemgmtostype-applicgemgmtostype",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^ApplicGE$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^applicge-main$"
+          },
+          {
+            "field": "applicGEMgmtOStype",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "applicGEMgmtOStype",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"applicGEMgmtOStype\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-applicge-applicgemgmtostype-applicgemgmtostype",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^ApplicGE$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^applicge-main$"
+          },
+          {
+            "field": "applicGEMgmtOStype",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "applicGEMgmtOStype",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"applicGEMgmtOStype\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-arm-ipaddressostype-ipaddressostype",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^ARM$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^arm-main$"
+          },
+          {
+            "field": "ipaddressOStype",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "ipaddressOStype",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"ipaddressOStype\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-netman-locationofficedescription-locationofficedescription",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Netman$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^netman-main$"
+          },
+          {
+            "field": "locationOfficeDescription",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "locationOfficeDescription",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"locationOfficeDescription\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-server-description-description",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^Server$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "description",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"description\") #>",
+          "createIfMissing": true
+        }
+      ]
+    },
+    {
+      "name": "hostgroups-serveri-description-description",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^serveri$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^serveri-main$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "description",
+      "createIfMissing": true,
+      "hostGroups": [
+        {
+          "nameTemplate": "<#= Model.Source(\"description\") #>",
+          "createIfMissing": true
         }
       ]
     },
@@ -1003,60 +2050,6 @@
         "always": true
       },
       "hostGroupsRef": "defaults.hostGroups"
-    },
-    {
-      "name": "hostgroups-server-description-description",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
-      },
-      "targetMode": "dynamicFromLeaf",
-      "valueField": "description",
-      "createIfMissing": true,
-      "hostGroups": [
-        {
-          "nameTemplate": "<#= Model.Source(\"description\") #>",
-          "createIfMissing": true
-        }
-      ]
-    },
-    {
-      "name": "hostgroups-serveri-description-description",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^serveri$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^serveri-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
-      },
-      "targetMode": "dynamicFromLeaf",
-      "valueField": "description",
-      "createIfMissing": true,
-      "hostGroups": [
-        {
-          "nameTemplate": "<#= Model.Source(\"description\") #>",
-          "createIfMissing": true
-        }
-      ]
     }
   ],
   "templateSelectionRules": [
@@ -1209,6 +2202,240 @@
         {
           "name": "Zabbix agent",
           "templateid": "10561"
+        }
+      ]
+    },
+    {
+      "name": "templates-ntbook-ntbookipaddressostype-linux-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^NTbook$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^ntbook-main$"
+          },
+          {
+            "field": "nTbookIpaddressOStype",
+            "pattern": "(?i).*linux.*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "Linux by Zabbix agent",
+          "templateid": "10001"
+        }
+      ]
+    },
+    {
+      "name": "templates-printerdwh-type-zabbix-server-health-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^PrinterDWH$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^printerdwh-main$"
+          },
+          {
+            "field": "Type",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "Zabbix server health by Zabbix agent",
+          "templateid": "10660"
+        }
+      ]
+    },
+    {
+      "name": "templates-routerg-ostype-windows-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^routerG$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^routerg-main$"
+          },
+          {
+            "field": "OStype",
+            "pattern": "(?i).*indows.*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "Windows by Zabbix agent",
+          "templateid": "10081"
+        }
+      ]
+    },
+    {
+      "name": "templates-sfr-sfrostype-windows-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^SFR$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^sfr-main$"
+          },
+          {
+            "field": "sFROStype",
+            "pattern": "(?i).*indows.*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "Windows by Zabbix agent",
+          "templateid": "10081"
+        }
+      ]
+    },
+    {
+      "name": "templates-storagep-storagepmgmtostype-linux-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^STORAGEP$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^storagep-main$"
+          },
+          {
+            "field": "sTORAGEPMgmtOStype",
+            "pattern": "(?i).*indows.*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "Linux by Zabbix agent",
+          "templateid": "10001"
+        }
+      ]
+    },
+    {
+      "name": "templates-tdwifi-ipaddresscritical-linux-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^tdwifi$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^tdwifi-main$"
+          },
+          {
+            "field": "ipaddressCritical",
+            "pattern": "(?i).*indows.*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "Linux by Zabbix agent",
+          "templateid": "10001"
+        }
+      ]
+    },
+    {
+      "name": "templates-tkgk-description-linux-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^TKGK$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^tkgk-main$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*indows.*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "Linux by Zabbix agent",
+          "templateid": "10001"
+        }
+      ]
+    },
+    {
+      "name": "templates-vmware-ipaddressisdisablemon-vmware",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^VMware$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^vmware-main$"
+          },
+          {
+            "field": "ipaddressIsDisableMon",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "VMware",
+          "templateid": "10173"
+        }
+      ]
+    },
+    {
+      "name": "templates-vpn_hub-entityid-rabbitmq-cluster-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^VPN_HUB$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^vpn_hub-main$"
+          },
+          {
+            "field": "entityId",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "RabbitMQ cluster by Zabbix agent",
+          "templateid": "10300"
         }
       ]
     },
@@ -1517,6 +2744,66 @@
       ]
     },
     {
+      "name": "tags-dbgkm-dbtype-cmdb.dbtype",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^DBGKM$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^dbgkm-main$"
+          },
+          {
+            "field": "DBtype",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "DBtype",
+      "createIfMissing": true,
+      "tags": [
+        {
+          "tag": "cmdb.dbtype",
+          "valueTemplate": "<#= Model.Source(\"DBtype\") #>",
+          "allowMultipleValues": true
+        }
+      ]
+    },
+    {
+      "name": "tags-ngfw-critical-cmdb.critical",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^NGFW$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^ngfw-main$"
+          },
+          {
+            "field": "Critical",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "targetMode": "dynamicFromLeaf",
+      "valueField": "Critical",
+      "createIfMissing": true,
+      "tags": [
+        {
+          "tag": "cmdb.critical",
+          "valueTemplate": "<#= Model.Source(\"Critical\") #>",
+          "allowMultipleValues": true
+        }
+      ]
+    },
+    {
       "name": "default-tags",
       "priority": 1000,
       "fallback": true,
@@ -1593,53 +2880,8 @@
       }
     }
   ],
-  "hostStatusSelectionRules": [
-    {
-      "name": "c2m-demo-disabled-host",
-      "priority": 10,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          },
-          {
-            "field": "code",
-            "pattern": "(?i)^C2M-DEMO-012-DISABLED-STATUS$"
-          }
-        ]
-      },
-      "hostStatus": {
-        "name": "disabled",
-        "status": 1
-      }
-    }
-  ],
-  "tlsPskSelectionRules": [
-    {
-      "name": "c2m-demo-tls-psk",
-      "priority": 10,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          },
-          {
-            "field": "code",
-            "pattern": "(?i)^C2M-DEMO-004-DEEP-REFERENCE$"
-          }
-        ]
-      },
-      "tlsPsk": {
-        "name": "demo-psk",
-        "tls_connect": 2,
-        "tls_accept": 2,
-        "tls_psk_identity": "c2m-demo-psk",
-        "tls_psk": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-      }
-    }
-  ],
+  "hostStatusSelectionRules": [],
+  "tlsPskSelectionRules": [],
   "proxySelectionRules": [],
   "proxyGroupSelectionRules": [],
   "maintenanceSelectionRules": [],

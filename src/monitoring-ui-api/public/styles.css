@@ -822,6 +822,27 @@ h2 {
   grid-column: span 2;
 }
 
+.mapping-string-builder {
+  display: grid;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.mapping-string-template-field textarea {
+  min-height: 72px;
+}
+
+.mapping-string-builder-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
 .mapping-additional-profile-options {
   display: grid;
   gap: 10px;
@@ -910,19 +931,22 @@ h2 {
 }
 
 .mapping-editor-control-valid select,
-.mapping-editor-control-valid input {
+.mapping-editor-control-valid input,
+.mapping-editor-control-valid textarea {
   border-color: var(--ok);
   box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.16);
 }
 
 .mapping-editor-control-invalid select,
-.mapping-editor-control-invalid input {
+.mapping-editor-control-invalid input,
+.mapping-editor-control-invalid textarea {
   border-color: var(--danger);
   box-shadow: 0 0 0 1px rgba(185, 28, 28, 0.16);
 }
 
 .mapping-editor-control-stale select,
-.mapping-editor-control-stale input {
+.mapping-editor-control-stale input,
+.mapping-editor-control-stale textarea {
   border-color: #d97706;
   box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.18);
 }
@@ -1646,7 +1670,8 @@ th {
 
   .mapping-editor-grid,
   .mapping-profile-grid,
-  .mapping-profile-row {
+  .mapping-profile-row,
+  .mapping-string-builder-grid {
     grid-template-columns: 1fr;
   }
 

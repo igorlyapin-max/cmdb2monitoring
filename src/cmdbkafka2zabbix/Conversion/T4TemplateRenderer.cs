@@ -1,4 +1,5 @@
 using System.CodeDom.Compiler;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 using CmdbKafka2Zabbix.Rules;
@@ -70,12 +71,116 @@ public sealed class T4TemplateRenderer(IOptions<ConversionRulesOptions> options)
             .Replace("<#= Model.ZabbixHostId #>", model.ZabbixHostId ?? string.Empty, StringComparison.Ordinal)
             .Replace("<#= Model.Code ?? Model.EntityId #>", model.Code ?? model.EntityId ?? string.Empty, StringComparison.Ordinal);
 
+        rendered = Regex.Replace(
+            rendered,
+            "<#=\\s*Model\\.(?<function>Regex|RegexReplace)\\((?<args>.*?)\\)\\s*#>",
+            match => RenderRegexFunction(match, model),
+            RegexOptions.CultureInvariant | RegexOptions.Singleline,
+            TimeSpan.FromMilliseconds(500));
+
         return Regex.Replace(
             rendered,
             "<#=\\s*Model\\.(?:Field|Source)\\([\"'](?<name>[^\"']+)[\"']\\)\\s*#>",
             match => model.Field(match.Groups["name"].Value),
             RegexOptions.CultureInvariant,
             TimeSpan.FromMilliseconds(500));
+    }
+
+    private static string RenderRegexFunction(Match match, ZabbixHostCreateModel model)
+    {
+        var args = ParseQuotedArguments(match.Groups["args"].Value);
+        if (args.Count < 2)
+        {
+            return string.Empty;
+        }
+
+        var value = model.Field(args[0]);
+        var pattern = args[1];
+        if (args.Count >= 3 || string.Equals(match.Groups["function"].Value, "RegexReplace", StringComparison.Ordinal))
+        {
+            var replacement = args.Count >= 3 ? args[2] : string.Empty;
+            return Regex.Replace(value, pattern, replacement, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(500));
+        }
+
+        var regexMatch = Regex.Match(value, pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(500));
+        if (!regexMatch.Success)
+        {
+            return string.Empty;
+        }
+
+        return regexMatch.Groups.Count > 1 ? regexMatch.Groups[1].Value : regexMatch.Value;
+    }
+
+    private static List<string> ParseQuotedArguments(string args)
+    {
+        var result = new List<string>();
+        var index = 0;
+        while (index < args.Length)
+        {
+            while (index < args.Length && (char.IsWhiteSpace(args[index]) || args[index] == ','))
+            {
+                index++;
+            }
+
+            if (index >= args.Length)
+            {
+                break;
+            }
+
+            var quote = args[index];
+            if (quote is not ('"' or '\''))
+            {
+                break;
+            }
+
+            index++;
+            var builder = new StringBuilder();
+            while (index < args.Length)
+            {
+                var current = args[index++];
+                if (current == quote)
+                {
+                    break;
+                }
+
+                if (current == '\\' && index < args.Length)
+                {
+                    var escaped = args[index++];
+                    switch (escaped)
+                    {
+                        case 'n':
+                            builder.Append('\n');
+                            break;
+                        case 'r':
+                            builder.Append('\r');
+                            break;
+                        case 't':
+                            builder.Append('\t');
+                            break;
+                        case '\\':
+                            builder.Append('\\');
+                            break;
+                        case '"':
+                            builder.Append('"');
+                            break;
+                        case '\'':
+                            builder.Append('\'');
+                            break;
+                        default:
+                            builder.Append('\\');
+                            builder.Append(escaped);
+                            break;
+                    }
+                    continue;
+                }
+
+                builder.Append(current);
+            }
+
+            result.Add(builder.ToString());
+        }
+
+        return result;
     }
 
     private string BuildTemplateContent(string[] templateLines)

@@ -6440,8 +6440,73 @@ function renderSimple(template = '', model) {
     .replaceAll('<#= Model.OperatingSystem #>', model.OperatingSystem ?? '')
     .replaceAll('<#= Model.ZabbixTag #>', model.ZabbixTag ?? '')
     .replaceAll('<#= Model.EventType #>', model.EventType ?? '')
+    .replace(/<#=\s*Model\.(Regex|RegexReplace)\((.*?)\)\s*#>/gs, (_, functionName, argsText) =>
+      renderSimpleRegexFunction(functionName, argsText, model))
     .replace(/<#=\s*Model\.Source\(["']([^"']+)["']\)\s*#>/g, (_, name) => readSourceField(model.Fields ?? {}, name) ?? '')
     .replace(/<#=\s*Model\.Field\(["']([^"']+)["']\)\s*#>/g, (_, name) => readSourceField(model.Fields ?? {}, name) ?? '');
+}
+
+function renderSimpleRegexFunction(functionName, argsText, model) {
+  const args = parseQuotedArguments(argsText);
+  if (args.length < 2) {
+    return '';
+  }
+
+  const value = readSourceField(model.Fields ?? {}, args[0]) ?? '';
+  const regex = compileRuleRegex(args[1]);
+  if (args.length >= 3 || equalsIgnoreCase(functionName, 'RegexReplace')) {
+    const replaceRegex = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : `${regex.flags}g`);
+    return String(value).replace(replaceRegex, args[2] ?? '');
+  }
+
+  const match = String(value).match(regex);
+  if (!match) {
+    return '';
+  }
+
+  return match.length > 1 ? match[1] : match[0];
+}
+
+function parseQuotedArguments(argsText = '') {
+  const result = [];
+  let index = 0;
+  while (index < argsText.length) {
+    while (index < argsText.length && (/\s|,/.test(argsText[index]))) {
+      index++;
+    }
+    if (index >= argsText.length) {
+      break;
+    }
+
+    const quote = argsText[index];
+    if (quote !== '"' && quote !== "'") {
+      break;
+    }
+
+    index++;
+    let value = '';
+    while (index < argsText.length) {
+      const current = argsText[index++];
+      if (current === quote) {
+        break;
+      }
+      if (current === '\\' && index < argsText.length) {
+        const escaped = argsText[index++];
+        value += {
+          n: '\n',
+          r: '\r',
+          t: '\t',
+          '\\': '\\',
+          '"': '"',
+          "'": "'"
+        }[escaped] ?? `\\${escaped}`;
+        continue;
+      }
+      value += current;
+    }
+    result.push(value);
+  }
+  return result;
 }
 
 function compileRuleRegex(pattern) {

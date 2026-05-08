@@ -670,6 +670,25 @@ static async Task ValidateRulesT4Rendering(string repositoryRoot, List<string> e
         RequestId = 1001
     };
 
+    try
+    {
+        var cut = renderer.RenderSimple("<#= Model.Regex(\"code\", \"^C2M-DEMO-(\\d+)-.*$\") #>", model);
+        if (!string.Equals(cut, "001", StringComparison.Ordinal))
+        {
+            errors.Add($"Simple template regex extraction returned '{cut}', expected '001'.");
+        }
+
+        var composed = renderer.RenderSimple("cmdb-<#= Model.Regex(\"code\", \"^C2M-DEMO-(\\d+)-.*$\", \"$1\") #>-<#= Model.Source(\"hostProfile\") #>", model);
+        if (!string.Equals(composed, "cmdb-001-main", StringComparison.Ordinal))
+        {
+            errors.Add($"Simple template regex composition returned '{composed}', expected 'cmdb-001-main'.");
+        }
+    }
+    catch (Exception ex)
+    {
+        errors.Add($"Simple template regex validation failed: {ex.Message}");
+    }
+
     foreach (var (name, lines) in new Dictionary<string, string[]>
     {
         ["hostCreateJsonRpcRequestLines"] = rules.T4Templates.HostCreateJsonRpcRequestLines,

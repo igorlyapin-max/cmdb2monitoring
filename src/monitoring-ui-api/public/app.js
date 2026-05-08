@@ -22,6 +22,7 @@ import {
   sourceFieldCanUseCatalogAttribute,
   sourceFieldLabelForCmdbPath,
   sourceFieldMayReturnMultiple,
+  sourceFieldTemplate,
   sourceFieldRulesShareCmdbPath,
   uniqueTokens
 } from './lib/mapping-logic.js';
@@ -221,6 +222,7 @@ const mappingEditorFormControlSelectors = [
   '#mappingEditZabbixObject',
   '#mappingEditPriority',
   '#mappingEditRegex',
+  '#mappingEditStringTemplate',
   '#mappingEditRuleName'
 ];
 const mappingEditorVirtualSourceFields = [
@@ -714,6 +716,13 @@ const translations = {
     'mapping.classField': 'Атрибут класса',
     'mapping.structure': 'Структура конвертации',
     'mapping.zabbixTarget': 'Объект/payload Zabbix',
+    'mapping.stringTemplate': 'Строка payload',
+    'mapping.stringSourceField': 'Атрибут',
+    'mapping.stringRegexField': 'Regex field',
+    'mapping.stringRegexPattern': 'Regex pattern',
+    'mapping.stringRegexReplacement': 'Replacement',
+    'mapping.insertField': 'Вставить field',
+    'mapping.insertRegex': 'Вставить regex',
     'mapping.priority': 'Приоритет',
     'mapping.regex': 'Regex',
     'mapping.ruleName': 'Имя правила',
@@ -1024,6 +1033,13 @@ const translations = {
     'tooltip.mappingSaveAs': 'Сохраняет текущий draft JSON правил с новым rulesVersion без отправки на backend. Вторым файлом формируются только webhook Body/DELETE-инструкции по добавленным и удаленным правилам текущей сессии.',
     'tooltip.mappingAddRule': 'Добавляет новое правило или сохраняет изменения выбранного правила в draft JSON.',
     'tooltip.mappingResetForm': 'В режиме модификации очищает выбранное rule и фильтры; в режиме добавления очищает leaf field и target.',
+    'tooltip.mappingEditStringTemplate': 'Шаблон строки для создаваемого Zabbix payload/object. Пустое значение означает прямое чтение выбранного CMDBuild leaf.',
+    'tooltip.mappingStringSourceField': 'CMDBuild leaf для вставки в строку. В списке есть прямые, reference, domain и lookup-поля текущего класса.',
+    'tooltip.mappingStringRegexField': 'CMDBuild leaf, из которого regex извлекает или заменяет фрагмент строки.',
+    'tooltip.mappingStringRegexPattern': 'Regex pattern. При двух аргументах берется первая группа, при replacement выполняется regex replace.',
+    'tooltip.mappingStringRegexReplacement': 'Replacement для regex replace, например $1. Если очистить, вставляется extraction по первой группе.',
+    'tooltip.mappingInsertStringField': 'Вставляет Model.Source(...) выбранного поля в шаблон строки.',
+    'tooltip.mappingInsertRegex': 'Вставляет Model.Regex(...) по выбранному полю, pattern и replacement.',
     'tooltip.mappingProfileClass': 'Класс, события которого будут создавать или обновлять Zabbix host по этому hostProfile.',
     'tooltip.mappingProfileKind': 'Основной profile формирует базовый Zabbix host. Дополнительный profile добавляет suffix HostProfileName и используется для отдельного host lifecycle.',
     'tooltip.mappingProfileName': 'Имя hostProfile. Это же значение доступно в виртуальном поле hostProfile для правил назначения templates/groups/tags.',
@@ -1427,6 +1443,13 @@ const translations = {
     'mapping.classField': 'Class attribute field',
     'mapping.structure': 'Conversion structure',
     'mapping.zabbixTarget': 'Zabbix object / payload',
+    'mapping.stringTemplate': 'Payload string',
+    'mapping.stringSourceField': 'Field',
+    'mapping.stringRegexField': 'Regex field',
+    'mapping.stringRegexPattern': 'Regex pattern',
+    'mapping.stringRegexReplacement': 'Replacement',
+    'mapping.insertField': 'Insert field',
+    'mapping.insertRegex': 'Insert regex',
     'mapping.priority': 'Priority',
     'mapping.regex': 'Regex',
     'mapping.ruleName': 'Rule name',
@@ -1737,6 +1760,13 @@ const translations = {
     'tooltip.mappingSaveAs': 'Saves the current draft rules JSON with a new rulesVersion without sending it to the backend. A second file contains only webhook Body/DELETE instructions for rules added or removed in the current session.',
     'tooltip.mappingAddRule': 'Adds a new rule or saves changes to the selected rule in draft JSON.',
     'tooltip.mappingResetForm': 'In modify mode, clears the selected rule and filters; in add mode, clears the leaf field and target.',
+    'tooltip.mappingEditStringTemplate': 'String template for the created Zabbix payload/object. Empty means direct read from the selected CMDBuild leaf.',
+    'tooltip.mappingStringSourceField': 'CMDBuild leaf to insert into the string. The list includes direct, reference, domain, and lookup fields for the current class.',
+    'tooltip.mappingStringRegexField': 'CMDBuild leaf used by regex extraction or replacement.',
+    'tooltip.mappingStringRegexPattern': 'Regex pattern. With two arguments the first group is returned; with replacement it runs regex replace.',
+    'tooltip.mappingStringRegexReplacement': 'Regex replacement, for example $1. Clear it to insert first-group extraction.',
+    'tooltip.mappingInsertStringField': 'Inserts Model.Source(...) for the selected field into the string template.',
+    'tooltip.mappingInsertRegex': 'Inserts Model.Regex(...) using the selected field, pattern, and replacement.',
     'tooltip.mappingProfileClass': 'Class whose events will create or update a Zabbix host through this hostProfile.',
     'tooltip.mappingProfileKind': 'The main profile builds the base Zabbix host. An additional profile adds the HostProfileName suffix and is used for a separate host lifecycle.',
     'tooltip.mappingProfileName': 'hostProfile name. The same value is exposed as the virtual hostProfile field for template/group/tag assignment rules.',
@@ -2397,6 +2427,13 @@ function bindForms() {
   $('#mappingEditRegex').addEventListener('input', handleMappingEditorLeafChange);
   $('#mappingEditPriority').addEventListener('input', handleMappingEditorLeafChange);
   $('#mappingEditRuleName').addEventListener('input', handleMappingEditorLeafChange);
+  $('#mappingEditStringTemplate')?.addEventListener('input', handleMappingEditorLeafChange);
+  $('#mappingStringSourceField')?.addEventListener('change', updateMappingEditorFormState);
+  $('#mappingStringRegexField')?.addEventListener('change', updateMappingEditorFormState);
+  $('#mappingStringRegexPattern')?.addEventListener('input', updateMappingEditorFormState);
+  $('#mappingStringRegexReplacement')?.addEventListener('input', updateMappingEditorFormState);
+  $('#mappingInsertStringField')?.addEventListener('click', insertMappingStringFieldTemplate);
+  $('#mappingInsertRegex')?.addEventListener('click', insertMappingRegexTemplate);
   $('#mappingProfileClass')?.addEventListener('change', handleMappingProfileClassChange);
   $('#mappingProfileKind')?.addEventListener('change', handleMappingProfileKindChange);
   $('#mappingProfileName')?.addEventListener('input', updateMappingProfilesPanel);
@@ -5329,6 +5366,7 @@ function updateMappingEditor(message = '') {
   }
   populateMappingEditorFields();
   populateMappingEditorTargets();
+  updateMappingStringTemplateControls();
   renderMappingDeleteRules();
   updateMappingEditorSuggestedName();
   setMappingEditorStatusForDraft(message || t('mapping.status.beforeSave'));
@@ -5361,6 +5399,7 @@ function refreshMappingEditorLocalizedControls() {
   populateMappingEditorStructures({ selectedValue: selectedType, fieldValue: selectedField });
   populateMappingEditorFields({ selectedValue: selectedField });
   populateMappingEditorTargets({ selectedValue: selectedTarget });
+  updateMappingStringTemplateControls();
   updateMappingProfilesPanel();
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
@@ -5417,6 +5456,7 @@ function handleMappingEditorFieldChange() {
     ? $('#mappingEditZabbixObject').value
     : '';
   populateMappingEditorTargets({ selectedValue: targetValue });
+  updateMappingStringTemplateControls();
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
 }
@@ -5432,6 +5472,7 @@ function handleMappingEditorStructureChange() {
   state.mappingModifyTargetValue = '';
   populateMappingEditorFields({ selectedValue: $('#mappingEditField').value });
   populateMappingEditorTargets({ selectedValue: '' });
+  updateMappingStringTemplateControls({ reset: true });
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
 }
@@ -5443,6 +5484,7 @@ function handleMappingEditorTargetChange() {
   }
 
   clearMappingAdditionalProfileControls();
+  updateMappingStringTemplateControls();
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
 }
@@ -5464,6 +5506,7 @@ function refreshMappingEditorDependentControls(options = {}) {
   });
   populateMappingEditorFields({ selectedValue: selectedField });
   populateMappingEditorTargets({ selectedValue: options.selectedTarget ?? $('#mappingEditZabbixObject').value });
+  updateMappingStringTemplateControls();
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
 }
@@ -5475,6 +5518,9 @@ function clearMappingEditorRuleForm() {
   $('#mappingEditZabbixObject').value = '';
   $('#mappingEditPriority').value = '100';
   $('#mappingEditRegex').value = '(?i).*';
+  if ($('#mappingEditStringTemplate')) {
+    $('#mappingEditStringTemplate').value = '';
+  }
   $('#mappingEditRuleName').value = '';
   if ($('#mappingProfileScope')) {
     $('#mappingProfileScope').checked = false;
@@ -5500,6 +5546,9 @@ function resetMappingEditorForm() {
   $('#mappingEditZabbixObject').value = '';
   $('#mappingEditPriority').value = '100';
   $('#mappingEditRegex').value = '(?i).*';
+  if ($('#mappingEditStringTemplate')) {
+    $('#mappingEditStringTemplate').value = '';
+  }
   $('#mappingEditRuleName').value = '';
   if ($('#mappingProfileScope')) {
     $('#mappingProfileScope').checked = false;
@@ -6247,11 +6296,13 @@ function populateMappingEditorFields(options = {}) {
       label: mappingEditorSourceFieldLabel(fieldKey, field),
       meta: mappingSourceFieldPathMeta(fieldKey, field)
     }));
-  const catalogOptions = mappingEditorCatalogFieldOptions(selectedClass, sourceFields)
+  const allCatalogOptions = mappingEditorCatalogFieldOptions(selectedClass, sourceFields);
+  const allVirtualOptions = mappingEditorVirtualFieldOptions();
+  const catalogOptions = allCatalogOptions
     .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
-  const virtualOptions = mappingEditorVirtualFieldOptions()
+  const virtualOptions = allVirtualOptions
     .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
-  state.mappingEditorFieldOptions = new Map([...catalogOptions, ...virtualOptions]
+  state.mappingEditorFieldOptions = new Map([...allCatalogOptions, ...allVirtualOptions]
     .filter(option => option.fieldRule)
     .map(option => [option.value, option]));
   let fieldOptions = selectedClass
@@ -6348,8 +6399,16 @@ async function populateMappingEditorTargets(options = {}) {
   let selectedTarget = state.mappingModifyTargetValue || previous;
   let missingRuleTarget = false;
   if (selectedTarget && !items.some(item => item.value === selectedTarget)) {
-    missingRuleTarget = true;
-    selectedTarget = '';
+    const selectedKey = mappingTargetSelectionKey(type, selectedTarget);
+    const matchingOption = selectedKey
+      ? items.find(item => mappingTargetSelectionKey(type, item.value) === selectedKey)
+      : null;
+    if (matchingOption) {
+      selectedTarget = matchingOption.value;
+    } else {
+      missingRuleTarget = true;
+      selectedTarget = '';
+    }
   }
   items = [
     {
@@ -6523,6 +6582,28 @@ function optionFromPayload(label, payload) {
   return { value: JSON.stringify(payload), label };
 }
 
+function mappingTargetSelectionKey(type, value) {
+  try {
+    const target = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!target || typeof target !== 'object') {
+      return '';
+    }
+    return stableJson(stripMappingTargetStringTemplate(type, target));
+  } catch {
+    return '';
+  }
+}
+
+function stripMappingTargetStringTemplate(type, target = {}) {
+  const copy = cloneJson(target);
+  if (mappingEditorStringTemplateSupported(type, copy)) {
+    delete copy.nameTemplate;
+    delete copy.valueTemplate;
+    delete copy.value;
+  }
+  return copy;
+}
+
 function uniqueMappingObjects(items, keySelector) {
   const result = new Map();
   for (const item of items.filter(Boolean)) {
@@ -6646,6 +6727,166 @@ function setSelectOptions(select, options, selectedValue = '') {
   const firstEnabled = options.find(option => !option.disabled);
   if (firstEnabled) {
     select.value = firstEnabled.value;
+  }
+}
+
+function updateMappingStringTemplateControls(options = {}) {
+  const container = $('#mappingStringBuilder');
+  if (!container) {
+    return;
+  }
+
+  const type = $('#mappingEditTargetType')?.value ?? '';
+  const target = readMappingEditorTarget({ applyStringTemplate: false });
+  const supported = mappingEditorStringTemplateSupported(type, target);
+  container.classList.toggle('hidden', !supported);
+  populateMappingStringSourceFields();
+  if (!supported) {
+    if (options.reset && $('#mappingEditStringTemplate')) {
+      $('#mappingEditStringTemplate').value = '';
+    }
+    return;
+  }
+
+  if (options.reset && $('#mappingEditStringTemplate')) {
+    $('#mappingEditStringTemplate').value = '';
+  }
+}
+
+function populateMappingStringSourceFields() {
+  const options = mappingEditorStringSourceOptions();
+  const selected = $('#mappingEditField')?.value ?? '';
+  const selectOptions = options.length > 0
+    ? options
+    : [{ value: '', label: t('mapping.option.noFields'), status: 'invalid' }];
+  setSelectOptions($('#mappingStringSourceField'), selectOptions, selected);
+  setSelectOptions($('#mappingStringRegexField'), selectOptions, selected);
+}
+
+function mappingEditorStringSourceOptions() {
+  const rules = currentMappingRules();
+  const sourceFields = rules.source?.fields ?? {};
+  const selectedClass = $('#mappingEditClass')?.value ?? '';
+  const configuredOptions = Object.entries(sourceFields)
+    .filter(([fieldKey, field]) => isMappingSourceFieldCompatibleWithClass(selectedClass, fieldKey, field, rules))
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([fieldKey, field]) => ({
+      value: fieldKey,
+      label: mappingEditorSourceFieldLabel(fieldKey, field),
+      meta: mappingSourceFieldPathMeta(fieldKey, field)
+    }));
+  const catalogOptions = selectedClass
+    ? mappingEditorCatalogFieldOptions(selectedClass, sourceFields)
+    : [];
+  const virtualOptions = mappingEditorVirtualFieldOptions();
+  return uniqueMappingEditorFieldOptions([...configuredOptions, ...catalogOptions, ...virtualOptions])
+    .filter(option => option.value);
+}
+
+function mappingEditorStringTemplateSupported(type, target = {}) {
+  if (type === 'tags') {
+    return true;
+  }
+  if (type === 'hostGroups') {
+    return isDynamicFromLeafTarget(target);
+  }
+  return ['hostMacros', 'inventoryFields'].includes(type);
+}
+
+function mappingEditorStringTemplateValue() {
+  return $('#mappingEditStringTemplate')?.value.trim() ?? '';
+}
+
+function mappingEditorTargetStringTemplate(type, target = {}) {
+  if (type === 'hostGroups') {
+    return target.nameTemplate ?? '';
+  }
+  if (['tags', 'hostMacros', 'inventoryFields'].includes(type)) {
+    return target.valueTemplate ?? target.value ?? '';
+  }
+  return '';
+}
+
+function mappingEditorStringTemplateForRule(type, field, target = {}) {
+  if (!mappingEditorStringTemplateSupported(type, target)) {
+    return '';
+  }
+  return mappingEditorTargetStringTemplate(type, target) || sourceFieldTemplate(field);
+}
+
+function applyMappingEditorStringTemplateToTarget(type, field, target = {}) {
+  if (!mappingEditorStringTemplateSupported(type, target)) {
+    return target;
+  }
+
+  const template = mappingEditorStringTemplateValue() || sourceFieldTemplate(field);
+  if (type === 'hostGroups') {
+    target.nameTemplate = template;
+    return target;
+  }
+
+  target.valueTemplate = template;
+  return target;
+}
+
+function insertMappingStringFieldTemplate() {
+  const field = $('#mappingStringSourceField')?.value ?? '';
+  if (!field) {
+    return;
+  }
+  insertIntoMappingStringTemplate(sourceFieldTemplate(field));
+}
+
+function insertMappingRegexTemplate() {
+  const field = $('#mappingStringRegexField')?.value ?? '';
+  if (!field) {
+    return;
+  }
+  const pattern = $('#mappingStringRegexPattern')?.value ?? '';
+  const replacement = $('#mappingStringRegexReplacement')?.value ?? '$1';
+  const expression = replacement
+    ? `<#= Model.Regex("${escapeTemplateArgument(field)}", "${escapeTemplateArgument(pattern)}", "${escapeTemplateArgument(replacement)}") #>`
+    : `<#= Model.Regex("${escapeTemplateArgument(field)}", "${escapeTemplateArgument(pattern)}") #>`;
+  insertIntoMappingStringTemplate(expression);
+}
+
+function insertIntoMappingStringTemplate(text) {
+  const textarea = $('#mappingEditStringTemplate');
+  if (!textarea || !text) {
+    return;
+  }
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  textarea.value = `${textarea.value.slice(0, start)}${text}${textarea.value.slice(end)}`;
+  const cursor = start + text.length;
+  textarea.focus();
+  textarea.setSelectionRange(cursor, cursor);
+  handleMappingEditorLeafChange();
+}
+
+function escapeTemplateArgument(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+}
+
+function mappingStringTemplateSourceFields(template) {
+  const fields = [];
+  const sourceRegex = /Model\.(?:Field|Source)\(\s*["']([^"']+)["']\s*\)/g;
+  const regexRegex = /Model\.Regex(?:Replace)?\(\s*["']([^"']+)["']/g;
+  for (const regex of [sourceRegex, regexRegex]) {
+    for (const match of String(template ?? '').matchAll(regex)) {
+      if (match[1]) {
+        fields.push(match[1]);
+      }
+    }
+  }
+  return uniqueTokens(fields);
+}
+
+function ensureMappingEditorTemplateSourceFields(rules, template) {
+  for (const field of mappingStringTemplateSourceFields(template)) {
+    ensureMappingEditorSourceField(rules, field);
   }
 }
 
@@ -7757,6 +7998,7 @@ function addMappingConversionRule() {
 
   ensureMappingEditorClass(rules, className);
   ensureMappingEditorSourceField(rules, field);
+  ensureMappingEditorTemplateSourceFields(rules, mappingEditorStringTemplateForRule(type, field, target));
   const rulesKey = mappingRulesKey(type, target);
   rules[rulesKey] = Array.isArray(rules[rulesKey]) ? rules[rulesKey] : [];
   rules[rulesKey].push(rule);
@@ -8078,6 +8320,9 @@ function loadSelectedMappingRuleIntoEditor(options = {}) {
   classSelect.value = selectedClass?.value || form.className;
   $('#mappingEditPriority').value = String(form.priority);
   $('#mappingEditRegex').value = form.regex;
+  if ($('#mappingEditStringTemplate')) {
+    $('#mappingEditStringTemplate').value = form.stringTemplate;
+  }
   $('#mappingEditRuleName').value = form.ruleName;
   state.mappingModifyTargetValue = form.targetValue;
   if (form.field) {
@@ -8105,6 +8350,7 @@ function mappingRuleFormValues(item, rules) {
     priority: Number.isFinite(Number(item.rule.priority)) ? Number(item.rule.priority) : 100,
     ruleName: ruleDisplayName(item.rule),
     targetValue: JSON.stringify(mappingRuleTargetForForm(item)),
+    stringTemplate: mappingRuleStringTemplateForForm(item),
     profileName: hostProfileScopeNameForRule(item.rule)
   };
 }
@@ -8176,6 +8422,37 @@ function mappingRuleTargetForForm(item) {
   }[type] ?? {};
 }
 
+function mappingRuleStringTemplateForForm(item) {
+  const rule = item.rule;
+  const type = item.collection.type;
+  if (type === 'hostGroups' && String(rule.targetMode ?? '').toLowerCase() === 'dynamicfromleaf') {
+    return blankDefaultStringTemplate(rule.hostGroups?.[0]?.nameTemplate ?? '', type, rule.valueField);
+  }
+  if (type === 'tags') {
+    const tag = rule.tags?.[0] ?? {};
+    return blankDefaultStringTemplate(tag.valueTemplate ?? tag.value ?? '', type, rule.valueField);
+  }
+  if (type === 'hostMacros') {
+    const macro = rule.hostMacro ?? rule.hostMacros?.[0] ?? {};
+    return blankDefaultStringTemplate(macro.valueTemplate ?? macro.value ?? '', type, rule.valueField);
+  }
+  if (type === 'inventoryFields') {
+    const field = rule.inventoryField ?? rule.inventoryFields?.[0] ?? {};
+    return blankDefaultStringTemplate(field.valueTemplate ?? field.value ?? '', type, rule.valueField);
+  }
+  return '';
+}
+
+function blankDefaultStringTemplate(template, _type, field) {
+  const value = String(template ?? '');
+  return value && field && value === sourceFieldTemplate(field) ? '' : value;
+}
+
+function templateOverridesStaticValue(target = {}) {
+  return Boolean(target.valueTemplate)
+    && (!target.value || target.valueTemplate !== target.value);
+}
+
 function modifyMappingConversionRule() {
   if (!state.mappingDraftRules) {
     setMappingEditorStatus(t('mapping.status.loadMappingFirst'));
@@ -8225,6 +8502,7 @@ function modifyMappingConversionRule() {
   const rule = buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName, profileName });
   ensureMappingEditorClass(rules, className);
   ensureMappingEditorSourceField(rules, field);
+  ensureMappingEditorTemplateSourceFields(rules, mappingEditorStringTemplateForRule(type, field, target));
 
   const newRulesKey = mappingRulesKey(type, target);
   if (selected.collection.key === newRulesKey && stableJson(selected.rule) === stableJson(rule)) {
@@ -8248,9 +8526,16 @@ function modifyMappingConversionRule() {
     : tf('mapping.status.modifiedRule', { name: ruleName }));
 }
 
-function readMappingEditorTarget() {
+function readMappingEditorTarget(options = {}) {
   try {
-    return JSON.parse($('#mappingEditZabbixObject').value);
+    const target = JSON.parse($('#mappingEditZabbixObject').value);
+    if (options.applyStringTemplate === false) {
+      return target;
+    }
+    return applyMappingEditorStringTemplateToTarget(
+      $('#mappingEditTargetType')?.value ?? '',
+      $('#mappingEditField')?.value ?? '',
+      target);
   } catch {
     return {};
   }
@@ -8288,7 +8573,9 @@ function buildMappingEditorRule({ type, className, field, regex, priority, targe
         allowMultipleValues: true
       }];
     } else {
-      rule.tags = [{ tag: target.tag ?? 'cmdb.mapping', value: target.value ?? '' }];
+      rule.tags = [templateOverridesStaticValue(target)
+        ? { tag: target.tag ?? 'cmdb.mapping', valueTemplate: target.valueTemplate }
+        : { tag: target.tag ?? 'cmdb.mapping', value: target.value ?? '' }];
     }
   } else if (type === 'interfaceAddress') {
     rule.mode = target.mode ?? 'ip';
@@ -8928,19 +9215,21 @@ function applyMappingEditorExtensionTarget(rule, type, target, field) {
   } else if (type === 'proxyGroups') {
     rule.proxyGroup = { name: target.name ?? '', proxy_groupid: target.proxy_groupid ?? '' };
   } else if (type === 'hostMacros') {
+    const override = templateOverridesStaticValue(target);
     rule.hostMacro = {
       macro: target.macro ?? '{$CMDB.VALUE}',
-      value: target.value ?? '',
-      valueTemplate: target.valueTemplate || `<#= Model.Source("${field}") #>`,
+      value: override ? '' : target.value ?? '',
+      valueTemplate: override ? target.valueTemplate : target.value ? '' : target.valueTemplate || sourceFieldTemplate(field),
       description: target.description ?? '',
       type: Number(target.type ?? 0)
     };
   } else if (type === 'inventoryFields') {
+    const override = templateOverridesStaticValue(target);
     rule.inventoryField = {
       field: target.field ?? target.name ?? field,
       name: target.name ?? target.field ?? field,
-      value: target.value ?? '',
-      valueTemplate: target.valueTemplate || `<#= Model.Source("${field}") #>`
+      value: override ? '' : target.value ?? '',
+      valueTemplate: override ? target.valueTemplate : target.value ? '' : target.valueTemplate || sourceFieldTemplate(field)
     };
   } else if (type === 'interfaceProfiles') {
     rule.interfaceProfileRef = target.interfaceProfileRef ?? target.name ?? '';
@@ -14392,6 +14681,13 @@ function applyHelpText() {
     '#mappingSaveAs': 'tooltip.mappingSaveAs',
     '#mappingResetForm': 'tooltip.mappingResetForm',
     '#mappingAddRule': 'tooltip.mappingAddRule',
+    '#mappingEditStringTemplate': 'tooltip.mappingEditStringTemplate',
+    '#mappingStringSourceField': 'tooltip.mappingStringSourceField',
+    '#mappingStringRegexField': 'tooltip.mappingStringRegexField',
+    '#mappingStringRegexPattern': 'tooltip.mappingStringRegexPattern',
+    '#mappingStringRegexReplacement': 'tooltip.mappingStringRegexReplacement',
+    '#mappingInsertStringField': 'tooltip.mappingInsertStringField',
+    '#mappingInsertRegex': 'tooltip.mappingInsertRegex',
     '#mappingProfileClass': 'tooltip.mappingProfileClass',
     '#mappingProfileKind': 'tooltip.mappingProfileKind',
     '#mappingProfileName': 'tooltip.mappingProfileName',
