@@ -202,7 +202,8 @@ Rules reload:
 - `GET /admin/rules-status` возвращает текущие `name`, `schemaVersion`, `rulesVersion`, location и git/version текущего provider без reload;
 - endpoint не содержит Git-логики: текущий provider делает `git pull --ff-only` только если включены `ConversionRules:ReadFromGit=true` и `ConversionRules:PullOnReload=true`;
 - авторизация endpoint выполняется через `Authorization: Bearer <Service:RulesReloadToken>`;
-- `monitoring-ui-api` вызывает этот endpoint из dashboard-карточки `cmdbkafka2zabbix` кнопкой `Перечитать правила конвертации` для ролей `editor` и `admin`; рядом с кнопкой показываются две версии: `rulesVersion/schemaVersion` на микросервисе из `GET /admin/rules-status` и `rulesVersion/schemaVersion` текущего rules-файла, который читает система управления;
+- `monitoring-ui-api` вызывает этот endpoint из dashboard-карточки `cmdbkafka2zabbix` кнопкой `Перечитать правила конвертации` для ролей `editor` и `admin`; после успешного reload UI заново читает `/api/rules/current`, обновляет summary/preview/индикаторы источника rules-файла и затем перерисовывает dashboard;
+- рядом с кнопкой показываются две версии: `rulesVersion/schemaVersion` на микросервисе из `GET /admin/rules-status` и `rulesVersion/schemaVersion` текущего rules-файла, который читает система управления;
 - при смене места хранения правил нужно заменить/настроить provider, не меняя HTTP-контракт кнопки и BFF.
 
 Публикация rules выполняется вне `monitoring-ui-api`: оператор сохраняет JSON через браузер или через `Настройка git` записывает локальную копию, проверяет diff, кладет файл в выбранный git repository и после публикации нажимает `Перечитать правила конвертации`.

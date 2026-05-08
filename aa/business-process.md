@@ -106,6 +106,7 @@
 | Reference/domain path содержит цикл или глубже `Cmdbuild:MaxPathDepth` | `cmdbkafka2zabbix` пишет warning по полю и продолжает обработку с исходным значением |
 | Rules reload token не настроен или неверный | `cmdbkafka2zabbix` отклоняет `POST /admin/reload-rules`, BFF показывает ошибку оператору |
 | Git pull при reload не прошел | Reload endpoint возвращает ошибку, текущий cached rules остается последней успешно загруженной версией |
+| Rules reload прошел, но UI не может перечитать текущий rules-файл | BFF возвращает ошибку чтения `/api/rules/current`, действие на Панели не завершается как "готово" до обновления данных файла |
 | IdP не настроен | SAML2/OAuth2 endpoint или LDAP login возвращает конфигурационную ошибку, local login остается доступен только при `Auth:UseIdp=false` |
 | SAMLResponse не подписан доверенным IdP cert | `monitoring-ui-api` отклоняет ACS POST и не создает session |
 | AD/IdP группы не найдены или группы не попали в `RoleMapping` | Пользователь получает роль `viewer` |

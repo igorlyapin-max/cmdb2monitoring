@@ -2233,9 +2233,7 @@ function updateLocalizedDynamicUi() {
   updateMappingEditorControls();
   updateGitRulesUiState();
   renderGitSettingsStatus();
-  renderRulesSourceStatus('#rulesSourceStatus', state.currentRules);
-  renderRulesSourceStatus('#mappingRulesSourceStatus', state.mappingLoaded ? state.currentRules : null);
-  renderRulesSourceStatus('#validateMappingRulesSourceStatus', state.validateMappingLoaded ? state.currentRules : null);
+  renderRulesSourceStatuses();
   if (state.zabbixCatalog) {
     renderZabbixCatalogSummary(state.zabbixCatalog);
   }
@@ -2604,6 +2602,7 @@ async function reloadConversionRules(serviceName, button) {
       method: 'POST',
       body: {}
     });
+    await loadRules({ syncLoadedRuleEditors: true });
     toast(t('toast.rulesReloaded'));
     await loadDashboard();
     return result;
@@ -2802,26 +2801,36 @@ function formatEventValue(value) {
   }
 }
 
-async function loadRules() {
-  state.currentRules = await api('/api/rules/current');
+async function loadRules(options = {}) {
+  const rulesDocument = await api('/api/rules/current');
+  state.currentRules = rulesDocument;
   renderDefinitionList($('#rulesSummary'), {
-    path: state.currentRules.path,
-    source: rulesSourceModeLabel(state.currentRules),
-    resolvedPath: state.currentRules.resolvedPath ?? state.currentRules.path,
-    name: state.currentRules.name,
-    schemaVersion: state.currentRules.schemaVersion,
-    rulesVersion: state.currentRules.rulesVersion,
-    valid: state.currentRules.validation.valid
+    path: rulesDocument.path,
+    source: rulesSourceModeLabel(rulesDocument),
+    resolvedPath: rulesDocument.resolvedPath ?? rulesDocument.path,
+    name: rulesDocument.name,
+    schemaVersion: rulesDocument.schemaVersion,
+    rulesVersion: rulesDocument.rulesVersion,
+    valid: rulesDocument.validation.valid
   });
-  renderRulesSourceStatus('#rulesSourceStatus', state.currentRules);
-  $('#rulesPreview').textContent = JSON.stringify(state.currentRules.content, null, 2);
+  $('#rulesPreview').textContent = JSON.stringify(rulesDocument.content, null, 2);
+  renderRulesSourceStatuses(rulesDocument);
   setSessionIndicator(
     'gitRules',
     'read',
-    state.currentRules.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
-    rulesVersionLabel(state.currentRules)
+    rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    rulesVersionLabel(rulesDocument)
   );
+  if (options.syncLoadedRuleEditors) {
+    syncLoadedRuleEditorsFromRulesDocument(rulesDocument);
+  }
   return state.currentRules;
+}
+
+function renderRulesSourceStatuses(rulesDocument = state.currentRules) {
+  renderRulesSourceStatus('#rulesSourceStatus', rulesDocument);
+  renderRulesSourceStatus('#mappingRulesSourceStatus', state.mappingLoaded ? rulesDocument : null);
+  renderRulesSourceStatus('#validateMappingRulesSourceStatus', state.validateMappingLoaded ? rulesDocument : null);
 }
 
 function renderRulesSourceStatus(selector, rulesDocument) {
@@ -2865,6 +2874,42 @@ function rulesSourceModeLabel(rulesDocument) {
     return t('rules.sourceDisk');
   }
   return t('rules.sourceUnknown');
+}
+
+function syncLoadedRuleEditorsFromRulesDocument(rulesDocument) {
+  if (state.mappingLoaded && isMappingDraftClean()) {
+    initializeMappingDraft(rulesDocument.content ?? {});
+    renderMapping(
+      state.mappingDraftRules,
+      state.mappingZabbixCatalog,
+      state.mappingCmdbuildCatalog
+    );
+    updateMappingEditor();
+  }
+
+  if (state.validateMappingLoaded && isValidateMappingDraftClean()) {
+    state.validateMappingRules = cloneJson(rulesDocument.content ?? {});
+    initializeValidateMappingHistory(state.validateMappingRules);
+    renderValidateMapping(
+      state.validateMappingRules,
+      state.validateMappingZabbixCatalog ?? {},
+      state.validateMappingCmdbuildCatalog ?? {}
+    );
+  }
+}
+
+function isMappingDraftClean() {
+  return state.mappingHistoryIndex <= 0
+    && jsonEqual(state.mappingDraftRules, state.mappingHistory?.[0]);
+}
+
+function isValidateMappingDraftClean() {
+  return state.validateMappingHistoryIndex <= 0
+    && jsonEqual(state.validateMappingRules, state.validateMappingHistory?.[0]);
+}
+
+function jsonEqual(left, right) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
 async function validateRules() {
