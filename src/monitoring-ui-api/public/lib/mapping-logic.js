@@ -69,6 +69,115 @@ export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fie
   return { created: true, additional: forceAdditional, profileName, profile };
 }
 
+export function replaceHostProfileAddressFieldForClass(rules, className, fieldKey, fieldRule = {}, target = {}, options = {}) {
+  if (!rules || !className || !fieldKey) {
+    return { changed: false, count: 0, profiles: [] };
+  }
+
+  const mode = minimalHostProfileInterfaceMode(fieldKey, fieldRule, target);
+  if (!['ip', 'dns'].includes(mode)) {
+    return { changed: false, count: 0, profiles: [] };
+  }
+
+  const shouldReplace = typeof options.shouldReplace === 'function'
+    ? options.shouldReplace
+    : defaultHostProfileAddressFieldNeedsReplacement;
+  let count = 0;
+  const profiles = [];
+  for (const profile of rules.hostProfiles ?? []) {
+    if (!hostProfileAppliesToClass(profile, className)) {
+      continue;
+    }
+
+    const profileName = profile.name || 'default';
+    const originalProfileField = profile.valueField;
+    const originalProfileMode = profile.mode;
+    let profileChanged = false;
+    if (profile.valueField && shouldReplaceProfileAddressField(rules, shouldReplace, profile.valueField, {
+      mode: profile.mode || mode,
+      profile,
+      scope: 'profile'
+    })) {
+      profile.valueField = fieldKey;
+      profile.mode = mode;
+      replaceFieldExistsCondition(profile.when, originalProfileField, fieldKey);
+      count += 1;
+      profileChanged = true;
+    }
+
+    for (const item of profile.interfaces ?? []) {
+      const currentField = item.valueField || originalProfileField || profile.valueField;
+      const currentMode = item.mode || originalProfileMode || profile.mode || mode;
+      if (!currentField || shouldReplaceProfileAddressField(rules, shouldReplace, currentField, {
+        mode: currentMode,
+        profile,
+        interface: item,
+        scope: 'interface'
+      })) {
+        item.valueField = fieldKey;
+        item.mode = mode;
+        item.when ??= {};
+        replaceFieldExistsCondition(item.when, currentField, fieldKey, { setWhenMissing: true });
+        count += 1;
+        profileChanged = true;
+      }
+    }
+
+    if (profileChanged) {
+      profiles.push(profileName);
+    }
+  }
+
+  return { changed: count > 0, count, profiles: uniqueTokens(profiles) };
+}
+
+function shouldReplaceProfileAddressField(rules, shouldReplace, currentField, context) {
+  const fieldRule = rules.source?.fields?.[currentField] ?? { source: currentField };
+  return shouldReplace(currentField, fieldRule, context);
+}
+
+function defaultHostProfileAddressFieldNeedsReplacement(currentField, fieldRule = {}, context = {}) {
+  const mode = String(context.mode ?? '').toLowerCase();
+  const kind = sourceFieldAddressKind(currentField, fieldRule);
+  return !['ip', 'dns'].includes(kind)
+    || Boolean(interfaceAddressCompatibilityIssue(currentField, fieldRule, 'interfaceAddress', { mode: ['ip', 'dns'].includes(mode) ? mode : kind }));
+}
+
+function replaceFieldExistsCondition(when, oldField, newField, options = {}) {
+  if (!when || typeof when !== 'object') {
+    return false;
+  }
+
+  if (Array.isArray(when.fieldsExist)) {
+    let changed = false;
+    when.fieldsExist = when.fieldsExist.map(field => {
+      if (!sameNormalized(field, oldField)) {
+        return field;
+      }
+      changed = true;
+      return newField;
+    });
+    if (changed) {
+      return true;
+    }
+  }
+
+  if (when.fieldExists === undefined || when.fieldExists === '') {
+    if (options.setWhenMissing) {
+      when.fieldExists = newField;
+      return true;
+    }
+    return false;
+  }
+
+  if (sameNormalized(when.fieldExists, oldField)) {
+    when.fieldExists = newField;
+    return true;
+  }
+
+  return false;
+}
+
 export function minimalHostProfileInterfaceMode(fieldKey, fieldRule = {}, target = {}) {
   const targetMode = String(target?.mode ?? '').toLowerCase();
   if (targetMode === 'ip' || targetMode === 'dns') {

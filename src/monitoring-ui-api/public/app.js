@@ -14,6 +14,7 @@ import {
   normalizeRuleName,
   normalizeToken,
   regexLiteralValues,
+  replaceHostProfileAddressFieldForClass,
   ruleClassConditions,
   sameNormalized,
   sourceFieldAddressKind,
@@ -405,6 +406,8 @@ const translations = {
     'validation.deleteFromRulesHelp': 'Отметьте, чтобы удалить эту отсутствующую ссылку из JSON правил.',
     'validation.createHostProfile': 'Создать host profile',
     'validation.createHostProfileHelp': 'Отметьте, чтобы автоматически добавить минимальный host profile для этого класса в draft JSON.',
+    'validation.replaceAddressField': 'Заменить address leaf',
+    'validation.replaceAddressFieldHelp': 'Отметьте, чтобы заменить адресное поле host profile на найденный IP/DNS leaf этого класса.',
     'validation.applySelected': 'Применить выбранное',
     'validation.confirmDeleteSelected': 'Удалить выбранные элементы из JSON правил ({count}) и сохранить исправленный файл через браузер? Backend rules-файл не изменится.',
     'validation.review.title': 'Проверка удаления правила',
@@ -1117,6 +1120,8 @@ const translations = {
     'validation.deleteFromRulesHelp': 'Check this to remove the missing reference from the rules JSON.',
     'validation.createHostProfile': 'Create host profile',
     'validation.createHostProfileHelp': 'Check this to automatically add a minimal host profile for this class to the draft JSON.',
+    'validation.replaceAddressField': 'Replace address leaf',
+    'validation.replaceAddressFieldHelp': 'Check this to replace the host profile address field with a found IP/DNS leaf for this class.',
     'validation.applySelected': 'Apply selected',
     'validation.confirmDeleteSelected': 'Remove selected items from rules JSON ({count}) and save the fixed file through the browser? The backend rules file will not change.',
     'validation.review.title': 'Rule Deletion Review',
@@ -6576,13 +6581,37 @@ function isMappingSourceFieldCompatibleWithClass(className, fieldKey, field, rul
   return Boolean(mappingEditorAttributeForField(className, fieldKey, rules));
 }
 
+function sourceFieldCompatibleWithClassCatalog(rules, cmdbuildCatalog, className, fieldKey, field = {}) {
+  if (!className) {
+    return true;
+  }
+  if (isVirtualSourceFieldRule(fieldKey, field)) {
+    return true;
+  }
+  if (field?.cmdbPath) {
+    return sourceFieldPathStartsWithClassCatalog(className, field, cmdbuildCatalog);
+  }
+
+  const catalogClass = findCatalogClass(cmdbuildCatalog ?? {}, className);
+  if (!catalogClass || isCmdbCatalogSuperclass(cmdbuildCatalog ?? {}, catalogClass)) {
+    return false;
+  }
+
+  const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass);
+  const attribute = findCatalogAttributeForField(attributes, field, fieldKey);
+  return sourceFieldCanUseCatalogAttribute(attribute, field);
+}
+
 function sourceFieldPathStartsWithClass(className, field = {}) {
+  return sourceFieldPathStartsWithClassCatalog(className, field, state.mappingCmdbuildCatalog ?? state.validateMappingCmdbuildCatalog ?? {});
+}
+
+function sourceFieldPathStartsWithClassCatalog(className, field = {}, catalog = {}) {
   if (!className || !field?.cmdbPath) {
     return false;
   }
 
   const rootClass = String(field.cmdbPath).split('.')[0] ?? '';
-  const catalog = state.mappingCmdbuildCatalog ?? {};
   const selectedRuleName = catalogClassRuleName(catalog, className);
   const rootRuleName = catalogClassRuleName(catalog, rootClass);
   return normalizeClassName(selectedRuleName) === normalizeClassName(rootRuleName);
@@ -8188,7 +8217,7 @@ function hostProfileFixFieldForClass(rules, cmdbuildCatalog, className) {
   }
 
   const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass);
-  const candidates = addressCandidatesForClass(rules, attributes);
+  const candidates = addressCandidatesForClass(rules, attributes, className, cmdbuildCatalog);
   if (candidates.length > 0) {
     const candidate = candidates[0];
     return {
@@ -8198,7 +8227,59 @@ function hostProfileFixFieldForClass(rules, cmdbuildCatalog, className) {
     };
   }
 
-  return null;
+  return addressFieldFixForClass(rules, cmdbuildCatalog, className);
+}
+
+function addressFieldFixForClass(rules, cmdbuildCatalog, className) {
+  return availableAddressFieldsForClass(rules, cmdbuildCatalog, className)[0] ?? null;
+}
+
+function availableAddressFieldsForClass(rules, cmdbuildCatalog, className) {
+  return Object.entries(rules.source?.fields ?? {})
+    .flatMap(([fieldKey, fieldRule]) => {
+      if (!sourceFieldCompatibleWithClassCatalog(rules, cmdbuildCatalog, className, fieldKey, fieldRule)) {
+        return [];
+      }
+
+      const mode = sourceFieldAddressKind(fieldKey, fieldRule);
+      if (!['ip', 'dns'].includes(mode)) {
+        return [];
+      }
+      if (interfaceAddressCompatibilityIssue(fieldKey, fieldRule, 'interfaceAddress', { mode })) {
+        return [];
+      }
+
+      return [{ fieldKey, fieldRule, mode }];
+    })
+    .sort(compareAddressFieldFixCandidates);
+}
+
+function compareAddressFieldFixCandidates(left, right) {
+  return addressFieldFixPriority(left) - addressFieldFixPriority(right)
+    || compareText(left.fieldKey, right.fieldKey);
+}
+
+function addressFieldFixPriority(candidate) {
+  const text = normalizeToken([
+    candidate.fieldKey,
+    candidate.fieldRule?.source,
+    candidate.fieldRule?.cmdbAttribute,
+    candidate.fieldRule?.cmdbPath
+  ].join(' '));
+  let priority = candidate.mode === 'ip' ? 0 : 100;
+  if (text.includes('primary')) {
+    priority -= 20;
+  }
+  if (text.includes('ipaddress')) {
+    priority -= 10;
+  }
+  if (text.includes('mgmt') || text.includes('ilo')) {
+    priority += 20;
+  }
+  if (!candidate.fieldRule?.cmdbPath) {
+    priority += 5;
+  }
+  return priority;
 }
 
 function mappingEditorCatalogFieldOptions(className, sourceFields) {
@@ -9127,7 +9208,7 @@ function validateMappingDraftBeforeSave(rules, cmdbuildCatalog) {
     }
 
     const attributes = catalogAttributesForClass(cmdbuildCatalog ?? {}, catalogClass);
-    const candidates = addressCandidatesForClass(rules, attributes);
+    const candidates = addressCandidatesForClass(rules, attributes, className, cmdbuildCatalog);
     if (candidates.length === 0) {
       issues.push(`Класс ${displayName}: нет class attribute field, связанного с interfaceAddressRules как IP или DNS.`);
       continue;
@@ -9182,7 +9263,7 @@ function sourceFieldRuleByCanonicalKey(sourceFields, fieldKey) {
   return [fieldKey, {}];
 }
 
-function addressCandidatesForClass(rules, attributes) {
+function addressCandidatesForClass(rules, attributes, className = '', cmdbuildCatalog = {}) {
   return allInterfaceAddressRuleSources(rules).flatMap(rule => {
     const fieldKey = rule.valueField || rule.mode;
     if (!fieldKey) {
@@ -9195,6 +9276,10 @@ function addressCandidatesForClass(rules, attributes) {
     }
 
     const fieldRule = rules.source?.fields?.[fieldKey] ?? { source: fieldKey };
+    if (className && !sourceFieldCompatibleWithClassCatalog(rules, cmdbuildCatalog, className, fieldKey, fieldRule)) {
+      return [];
+    }
+
     const attribute = findCatalogAttributeForField(attributes, fieldRule, fieldKey);
     return sourceFieldCanUseCatalogAttribute(attribute, fieldRule)
       ? [{ mode, fieldKey, attribute, rule }]
@@ -9869,8 +9954,8 @@ function renderValidateMappingRules(container, rules, cmdbuildCatalog, validatio
       status,
       help: 'Класс источника из JSON правил. Он должен существовать в CMDBuild, иначе события этого класса нельзя корректно обработать.'
     });
-    const hostProfileIssue = validationIssueForClassHostProfile(validation, className);
-    return hostProfileIssue?.fix ? validationFixNode(node, hostProfileIssue.fix) : node;
+    const classRulesIssue = validationIssueForClassRulesFix(validation, className);
+    return classRulesIssue?.fix ? validationFixNode(node, classRulesIssue.fix) : node;
   }));
 
   appendValidationSection(container, 'Class attribute fields', Object.entries(rules.source?.fields ?? {}).map(([fieldKey, field]) => {
@@ -9960,14 +10045,14 @@ function validationRuleItem(rules, collectionKey, rule, index) {
   };
 }
 
-function validationIssueForClassHostProfile(validation, className) {
+function validationIssueForClassRulesFix(validation, className) {
   const key = normalizeToken(className);
   if (!key) {
     return null;
   }
 
   return (validation?.issues ?? []).find(issue =>
-    issue.fix?.action === 'createHostProfile'
+    ['createHostProfile', 'replaceAddressField'].includes(issue.fix?.action)
     && normalizeToken(issue.fix.className) === key) ?? null;
 }
 
@@ -10058,14 +10143,34 @@ function validationFixNode(node, fix) {
   checkbox.className = 'validation-fix-checkbox';
   checkbox.dataset.validationScope = fix.scope;
   checkbox.dataset.fix = JSON.stringify(fix);
-  const labelKey = fix.action === 'createHostProfile' ? 'validation.createHostProfile' : 'validation.deleteFromRules';
-  const helpKey = fix.action === 'createHostProfile' ? 'validation.createHostProfileHelp' : 'validation.deleteFromRulesHelp';
+  const labelKey = validationFixLabelKey(fix);
+  const helpKey = validationFixHelpKey(fix);
   setHelpKey(checkbox, helpKey);
   const label = el('span', '', t(labelKey));
   label.dataset.i18n = labelKey;
   row.append(checkbox, label);
   wrapper.append(row, node);
   return wrapper;
+}
+
+function validationFixLabelKey(fix = {}) {
+  if (fix.action === 'createHostProfile') {
+    return 'validation.createHostProfile';
+  }
+  if (fix.action === 'replaceAddressField') {
+    return 'validation.replaceAddressField';
+  }
+  return 'validation.deleteFromRules';
+}
+
+function validationFixHelpKey(fix = {}) {
+  if (fix.action === 'createHostProfile') {
+    return 'validation.createHostProfileHelp';
+  }
+  if (fix.action === 'replaceAddressField') {
+    return 'validation.replaceAddressFieldHelp';
+  }
+  return 'validation.deleteFromRulesHelp';
 }
 
 function setValidationColumnSelection(scope, checked) {
@@ -10130,8 +10235,10 @@ async function deleteSelectedValidationFixes() {
       });
     }
   }
+  changes.push(...applyReplaceAddressFieldValidationFixes(rules, operations, catalogs.cmdbuild));
 
-  const deleteOperations = operations.filter(operation => operation.action !== 'createHostProfile');
+  const localActions = new Set(['createHostProfile', 'replaceAddressField']);
+  const deleteOperations = operations.filter(operation => !localActions.has(operation.action));
   const plan = buildValidationRuleDeletePlan(rules, deleteOperations, catalogs);
   if (plan.autoDelete.length === 0 && plan.review.length === 0) {
     if (changes.length > 0) {
@@ -10179,6 +10286,72 @@ async function deleteSelectedValidationFixes() {
 
   await saveValidationRulesFixResult(rules, changes);
   return { changes };
+}
+
+function applyReplaceAddressFieldValidationFixes(rules, operations, cmdbuildCatalog) {
+  const changes = [];
+  for (const operation of operations.filter(item => item.action === 'replaceAddressField')) {
+    const className = operation.className;
+    const fieldKey = operation.fieldKey;
+    if (!className || !fieldKey) {
+      continue;
+    }
+
+    const existingFieldRule = rules.source?.fields?.[fieldKey];
+    const operationFieldRule = operation.fieldRule ? cloneJson(operation.fieldRule) : null;
+    const fieldRule = existingFieldRule ?? operationFieldRule ?? { source: fieldKey };
+    const result = replaceHostProfileAddressFieldForClass(
+      rules,
+      className,
+      fieldKey,
+      fieldRule,
+      { mode: operation.mode },
+      {
+        shouldReplace: (currentField, currentFieldRule, context) =>
+          hostProfileAddressFieldNeedsValidationFix(rules, cmdbuildCatalog, className, currentField, currentFieldRule, context)
+      });
+    if (!result.changed) {
+      continue;
+    }
+
+    rules.source ??= {};
+    rules.source.fields ??= {};
+    let sourceFieldAdded = false;
+    if (!rules.source.fields[fieldKey]) {
+      rules.source.fields[fieldKey] = cloneJson(fieldRule);
+      sourceFieldAdded = true;
+    }
+
+    changes.push({
+      action: 'replaceAddressField',
+      className,
+      fieldKey,
+      mode: operation.mode,
+      profiles: result.profiles,
+      updated: result.count,
+      sourceFieldAdded
+    });
+  }
+  return changes;
+}
+
+function hostProfileAddressFieldNeedsValidationFix(rules, cmdbuildCatalog, className, fieldKey, fieldRule = {}, context = {}) {
+  if (!fieldKey) {
+    return true;
+  }
+
+  const mode = String(context.mode ?? '').toLowerCase();
+  const kind = sourceFieldAddressKind(fieldKey, fieldRule);
+  if (!sourceFieldCompatibleWithClassCatalog(rules, cmdbuildCatalog, className, fieldKey, fieldRule)) {
+    return true;
+  }
+  if (!['ip', 'dns'].includes(kind)) {
+    return true;
+  }
+
+  return Boolean(interfaceAddressCompatibilityIssue(fieldKey, fieldRule, 'interfaceAddress', {
+    mode: ['ip', 'dns'].includes(mode) ? mode : kind
+  }));
 }
 
 async function deleteSelectedValidationReferences(operations) {
@@ -10686,11 +10859,13 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
       continue;
     }
 
-    if (!classHasHostProfile(rules, className)) {
+    const displayName = catalogClassDisplayName(cmdbuildCatalog, className);
+    const hasHostProfile = classHasHostProfile(rules, className);
+    if (!hasHostProfile) {
       const profileFixField = hostProfileFixFieldForClass(rules, cmdbuildCatalog, className);
       addIssue({
         source: 'rules',
-        message: `Для CMDBuild class не найден hostProfile: ${catalogClassDisplayName(cmdbuildCatalog, className)}`,
+        message: `Для CMDBuild class не найден hostProfile: ${displayName}`,
         tokens: [
           `class:${key}`,
           `match:className:${key}`,
@@ -10709,6 +10884,37 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
           mode: profileFixField.mode
         } : null
       });
+    } else {
+      const attributes = catalogAttributesForClass(cmdbuildCatalog, catalogClass);
+      const addressCandidates = addressCandidatesForClass(rules, attributes, className, cmdbuildCatalog);
+      if (addressCandidates.length === 0) {
+        const addressFixField = addressFieldFixForClass(rules, cmdbuildCatalog, className);
+        if (addressFixField) {
+          addIssue({
+            source: 'rules',
+            message: `Класс ${displayName}: hostProfile не использует валидный IP/DNS leaf для interface address. Доступный leaf: ${addressFixField.fieldKey}.`,
+            tokens: [
+              `class:${key}`,
+              `match:className:${key}`,
+              'target:hostProfiles',
+              'target:interfaces',
+              'target-field:interfaces.ip',
+              'target-field:interfaces.dns',
+              ...sourceFieldTokens(addressFixField.fieldKey)
+            ],
+            help: 'Адресное поле hostProfile указывает на reference id или неподходящий атрибут. Замените его на раскрытый leaf этого класса, чтобы converter мог заполнить Zabbix interface address.',
+            fix: {
+              action: 'replaceAddressField',
+              scope: 'rules',
+              kind: 'addressField',
+              className: catalogClassRuleName(cmdbuildCatalog, className),
+              fieldKey: addressFixField.fieldKey,
+              fieldRule: addressFixField.fieldRule,
+              mode: addressFixField.mode
+            }
+          });
+        }
+      }
     }
 
     const attributes = catalogAttributesForClass(cmdbuildCatalog, catalogClass);
@@ -10802,6 +11008,11 @@ function draftSaveValidationIssueAlreadyReported(message, existingIssues = []) {
   if (text.includes('нет hostProfiles')) {
     return existingIssues.some(issue =>
       issue.fix?.action === 'createHostProfile'
+      && normalizeToken(issue.fix.className) === classToken);
+  }
+  if (text.includes('нет class attribute field') && text.includes('interfaceAddressRules')) {
+    return existingIssues.some(issue =>
+      issue.fix?.action === 'replaceAddressField'
       && normalizeToken(issue.fix.className) === classToken);
   }
 

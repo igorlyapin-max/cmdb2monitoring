@@ -13,6 +13,7 @@ import {
   interfaceAddressTargetForForm,
   isDynamicFromLeafTarget,
   minimalHostProfileInterfaceMode,
+  replaceHostProfileAddressFieldForClass,
   sourceFieldTemplate,
   sourceFieldAddressKind,
   sourceFieldCanUseCatalogAttribute,
@@ -173,6 +174,56 @@ test('ensureMinimalHostProfileForClass can explicitly create an additional profi
     { field: 'eventType', pattern: '(?i)^delete$' }
   ]);
   assert.equal(rules.hostProfiles[1].interfaces[0].valueField, 'mgmtIpAddr');
+});
+
+test('replaceHostProfileAddressFieldForClass rewrites class-scoped invalid interface fields', () => {
+  const rules = {
+    source: {
+      fields: {
+        ipAddress: { source: 'ip_address', validationRegex: '^(?:\\d{1,3}\\.){3}\\d{1,3}$' },
+        ipaddressIpAddr: { cmdbPath: 'serveri.ipaddress.ipAddr', type: 'ipAddress' }
+      }
+    },
+    hostProfiles: [
+      {
+        name: 'serveri-main',
+        when: { allRegex: [{ field: 'className', pattern: '(?i)^serveri$' }] },
+        interfaces: [
+          {
+            name: 'agent',
+            mode: 'ip',
+            valueField: 'ipAddress',
+            when: { fieldExists: 'ipAddress' }
+          }
+        ]
+      },
+      {
+        name: 'server-main',
+        when: { allRegex: [{ field: 'className', pattern: '(?i)^Server$' }] },
+        interfaces: [
+          {
+            name: 'agent',
+            mode: 'ip',
+            valueField: 'ipAddress',
+            when: { fieldExists: 'ipAddress' }
+          }
+        ]
+      }
+    ]
+  };
+
+  const result = replaceHostProfileAddressFieldForClass(
+    rules,
+    'serveri',
+    'ipaddressIpAddr',
+    rules.source.fields.ipaddressIpAddr,
+    { mode: 'ip' },
+    { shouldReplace: currentField => currentField === 'ipAddress' });
+
+  assert.deepEqual(result, { changed: true, count: 1, profiles: ['serveri-main'] });
+  assert.equal(rules.hostProfiles[0].interfaces[0].valueField, 'ipaddressIpAddr');
+  assert.equal(rules.hostProfiles[0].interfaces[0].when.fieldExists, 'ipaddressIpAddr');
+  assert.equal(rules.hostProfiles[1].interfaces[0].valueField, 'ipAddress');
 });
 
 test('ensureMinimalHostProfileForClass uses selected interface profile options', () => {
