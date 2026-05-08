@@ -80,7 +80,7 @@
 5. Оператор проверяет health микросервисов, синхронизирует Zabbix catalog и CMDBuild catalog, валидирует или загружает rules JSON в пределах своей роли.
 6. Оператор просматривает настроенные Kafka topics на вкладке Events; чтение выполняет BFF, браузер не подключается к Kafka напрямую.
 7. Оператор использует `Управление правилами конвертации` для добавления или удаления rules в draft JSON, раскрывает reference attributes и domain-связи до leaf-полей, проверяет IP/DNS consistency и сохраняет draft через `Save file as`.
-8. `Save file as` формирует два локальных файла: draft rules JSON и `*-webhook-bodies.txt` только по добавленным/удаленным в текущей сессии rules/classes/source fields. Для reference/lookup/domain webhook Body остается плоским, а путь leaf сохраняется в `source.fields[].cmdbPath`.
+8. `Save file as` формирует два локальных файла: draft rules JSON с новым `rulesVersion` и `*-webhook-bodies.txt` только по добавленным/удаленным в текущей сессии rules/classes/source fields. Для reference/lookup/domain webhook Body остается плоским, а путь leaf сохраняется в `source.fields[].cmdbPath`.
 9. Оператор роли `editor` или `admin` открывает `Настройка webhooks`, загружает текущие CMDBuild webhooks, анализирует rules, выбирает операции create/update/delete и при необходимости нажимает `Загрузить в CMDB`. Только эта команда действительно меняет CMDBuild webhook records.
 10. Оператор роли `editor` или `admin` может нажать `Перечитать правила конвертации` в карточке `cmdbkafka2zabbix`; BFF отправляет Bearer-authorized reload signal на `cmdbkafka2zabbix`.
 11. `monitoring-ui-api` не обращается из браузера напрямую к CMDBuild, Zabbix или Kafka; все интеграционные вызовы выполняются на стороне BFF.

@@ -13,6 +13,7 @@ import {
   interfaceAddressTargetForForm,
   isDynamicFromLeafTarget,
   minimalHostProfileInterfaceMode,
+  nextRulesVersion,
   replaceHostProfileAddressFieldForClass,
   sourceFieldTemplate,
   sourceFieldAddressKind,
@@ -113,6 +114,20 @@ test('source field key disambiguation scopes same leaf names to CMDBuild class p
 test('source field labels render cmdbPath as an operator-facing path', () => {
   assert.equal(sourceFieldLabelForCmdbPath('routeCore.mgmt.ipAddr'), 'mgmt -> ipAddr / routeCore');
   assert.equal(sourceFieldLabelForCmdbPath('ApplicG.{domain:IS}.Name'), 'domain IS -> Name / ApplicG');
+});
+
+test('nextRulesVersion refreshes timestamp and keeps semantic suffix', () => {
+  const now = new Date(2026, 4, 8, 14, 25, 3);
+  assert.equal(
+    nextRulesVersion('2026.05.04-1938-test15-profile-ip-leaf-fix', 'rules', now),
+    '2026.05.08-142503-test15-profile-ip-leaf-fix');
+});
+
+test('nextRulesVersion falls back to rules name when current version has no suffix', () => {
+  const now = new Date(2026, 4, 8, 14, 25, 3);
+  assert.equal(
+    nextRulesVersion('', 'CMDBuild to Zabbix Rules', now),
+    '2026.05.08-142503-cmdbuild-to-zabbix-rules');
 });
 
 test('source field catalog attribute compatibility rejects raw reference ids', () => {

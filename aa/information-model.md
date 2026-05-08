@@ -188,7 +188,7 @@ Conversion rules могут содержать `source.fields[].cmdbPath`. Webho
 - diff между начальным rules JSON и draft для генерации `*-webhook-bodies.txt`.
 
 `Save file as` не пишет draft на backend. Пользователь сохраняет два локальных файла:
-- draft rules JSON;
+- draft rules JSON с новым `rulesVersion`;
 - текстовый файл с CMDBuild webhook Body snippets для добавлений и DELETE-инструкциями для удалений.
 
 ### CMDBuild webhook plan

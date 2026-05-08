@@ -580,7 +580,8 @@ rules/cmdbuild-to-zabbix-host-create.json
 В dev-режиме RepositoryPath указывает на текущий monorepo.
 В production RepositoryPath должен указывать на локальную Git working copy с правилами. Clone/fetch/commit/push этой working copy выполняются вне `monitoring-ui-api`; микросервис только делает pull/read по настройке. Если `ReadFromGit=false`, сервис читает только локальный файл и не выполняет git-команды. Если `ReadFromGit=true`, `RepositoryUrl` хранит URL источника для оператора/логов, например `https://git.example.org/cmdb2monitoring/conversion-rules.git`, а `PullOnStartup`/`PullOnReload` управляют выполнением `git pull --ff-only` в уже подготовленной working copy.
 Для нашей dev/test системы режим по умолчанию - чтение с диска из файла `rules/cmdbuild-to-zabbix-host-create.json`. При включении `ReadFromGit=true` внутри repository ожидается этот же файл по пути `RulesFilePath`; если оператор меняет `RulesFilePath`, ожидаемый путь внутри repository меняется вместе с ним.
-Rules-файл обязан содержать `schemaVersion` для совместимости формата и `rulesVersion` для визуального контроля редакции правил. `rulesVersion` должен включать дату и время изменения в человекочитаемом виде, например `2026.05.03-2027-serveri-webhook-fix`.
+Rules-файл обязан содержать `schemaVersion` для совместимости формата и `rulesVersion` для визуального контроля редакции правил. `rulesVersion` должен включать дату и время изменения в человекочитаемом виде, например `2026.05.08-142503-serveri-webhook-fix`.
+UI при `Save file as` и `Сохранить в git` должен формировать новый `rulesVersion`: обновлять префикс даты/времени до секунд и сохранять смысловой suffix предыдущей версии, например `test15-profile-ip-leaf-fix`.
 
 13.4.1. Сигнал перечитывания правил
 
@@ -1438,7 +1439,7 @@ Frontend должен уметь загружать и сохранять JSON r
 Local file save, dry-run, validate, mapping и catalog sync доступны ролям `editor` и `admin`.
 `Авторизация`, `Runtime-настройки`, `Настройка git` и сброс пароля доступны только роли `admin`.
 
-Подменю `Настройка git` должно быть отделено от `Runtime-настройки`. Оно хранит в UI settings только блок `rules`: `RulesFilePath`, `ReadFromGit`, `RepositoryPath`, `RepositoryUrl`, показывает resolved path, `schemaVersion`, `rulesVersion` и умеет загрузить текущий файл правил из выбранного источника. UI не выполняет commit/push; публикация файла остается задачей оператора. При включенном `ReadFromGit` внутри repository ожидается файл с именем/путем из `RulesFilePath`, по умолчанию `rules/cmdbuild-to-zabbix-host-create.json`. Кнопка `Сохранить в git` записывает rules JSON в локальную working copy и рядом формирует согласованный webhook artifact `*.webhooks.json`; token/password/secret/API key/Authorization значения в webhook artifact должны быть заменены на `XXXXX`.
+Подменю `Настройка git` должно быть отделено от `Runtime-настройки`. Оно хранит в UI settings только блок `rules`: `RulesFilePath`, `ReadFromGit`, `RepositoryPath`, `RepositoryUrl`, показывает resolved path, `schemaVersion`, `rulesVersion` и умеет загрузить текущий файл правил из выбранного источника. UI не выполняет commit/push; публикация файла остается задачей оператора. При включенном `ReadFromGit` внутри repository ожидается файл с именем/путем из `RulesFilePath`, по умолчанию `rules/cmdbuild-to-zabbix-host-create.json`. Кнопка `Сохранить в git` записывает rules JSON с новым `rulesVersion` в локальную working copy и рядом формирует согласованный webhook artifact `*.webhooks.json`; token/password/secret/API key/Authorization значения в webhook artifact должны быть заменены на `XXXXX`.
 
 18.4. Zabbix catalog sync
 
@@ -1694,7 +1695,7 @@ Model.Field("fieldName")
 - checkbox на группе удаления должен отмечать все вложенные rules, чтобы оператор мог удалить все rules для конкретного CMDBuild attribute, все rules для конкретного Zabbix attribute/payload field, все rules для Zabbix object group или все rules для класса;
 - удаление меняет только выбранные rules из draft JSON и не чистит classes/source fields автоматически;
 - undo/redo хранит историю текущей UI-сессии;
-- `Save file as` сохраняет draft rules JSON и второй текстовый файл для CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
+- `Save file as` сохраняет draft rules JSON с новым `rulesVersion` и второй текстовый файл для CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
 - второй webhook-файл должен явно помечать удаления и не смешивать неизмененные правила с изменениями текущей сессии;
 - webhook-файл должен показывать path metadata рядом с Body snippets, но реальный CMDBuild payload остается плоским и отправляет только source key со значением/id;
 - перед сохранением выполняется проверка: каждый мониторинговый класс из `source.entityClasses` или `className` regex rules должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`, и применимый `hostProfiles[]`;

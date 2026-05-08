@@ -11,6 +11,7 @@ import {
   interfaceAddressCompatibilityIssue,
   interfaceAddressTargetForForm,
   isDynamicFromLeafTarget,
+  nextRulesVersion,
   normalizeRuleName,
   normalizeToken,
   regexLiteralValues,
@@ -938,7 +939,7 @@ const translations = {
     'help.rules.1': 'Load загружает текущий JSON правил конвертации.',
     'help.rules.2': 'Validate проверяет структуру правил на backend.',
     'help.rules.3': 'Dry-run применяет правила к тестовому CMDBuild payload без сохранения.',
-    'help.rules.4': 'Save file as сохраняет JSON правил через браузер; backend rules-файл и git не изменяются.',
+    'help.rules.4': 'Save file as сохраняет JSON правил через браузер и обновляет rulesVersion в выгружаемом файле; backend rules-файл и git не изменяются.',
     'help.rules.5': 'Создать пустой формирует production starter из текущего окружения: endpoints/topics и справочники CMDBuild/Zabbix берутся из runtime config и catalog cache, routes остаются publish=false до осознанного включения. Если CMDBuild или Zabbix cache пустой, backend возвращает ошибку и предлагает сначала синхронизировать каталог.',
     'help.mapping.title': 'Управление правилами конвертации',
     'help.mapping.1': 'Страница показывает цепочку CMDBuild -> Conversion Rules -> Zabbix.',
@@ -947,7 +948,7 @@ const translations = {
     'help.mapping.4': 'Режим редактирования скрывает нижний просмотр и меняет draft JSON текущей сессии: можно начать с любого узла формы, а зависимые поля фильтруются и подсвечиваются.',
     'help.mapping.5': 'Действие Модификация правила начинается без автоматически выбранного rule: можно начать с rule, class, field или conversion structure. Связанные списки фильтруются, единственный найденный rule выбирается автоматически, а Сбросить поля возвращает форму к пустым фильтрам. Target, отсутствующий в Zabbix catalog, считается неконсистентным и блокирует сохранение.',
     'help.mapping.6': 'Действие Удаление правил и классов показывает rules текущего draft JSON деревом по CMDBuild, Zabbix или коллекциям правил. Можно отметить весь класс, атрибут CMDBuild, Zabbix payload field, Zabbix object group или отдельное rule; source classes/class attribute fields очищаются через логический контроль правил конвертации.',
-    'help.mapping.7': 'Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.',
+    'help.mapping.7': 'Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл с новым rulesVersion без отправки на backend.',
     'help.mapping.8': 'Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.',
     'help.mapping.9': 'Повторное нажатие на выбранный элемент снимает выделение.',
     'help.mapping.10': 'Правила выбора адреса интерфейса выбирают, чем заполнить Zabbix interfaces[]: IP target пишет в interfaces[].ip/useip=1, DNS target пишет в interfaces[].dns/useip=0. Редактор блокирует явное использование IP-атрибута как DNS и DNS/FQDN-атрибута как IP.',
@@ -994,7 +995,7 @@ const translations = {
     'help.catalogs.5': 'Для тестовой системы rules читаются с диска из rules/cmdbuild-to-zabbix-host-create.json; если включено чтение из git, этот файл ожидается внутри repository по тому же пути.',
     'help.catalogs.6': 'Галки Динамическое расширение Zabbix из CMDBuild leaf разрешают создавать или расширять только Tags и Host groups по значениям выбранного leaf. Эту функцию нужно применять ответственно: перед включением проанализируйте разнообразие содержимого атрибутов, по которым выполняется mapping, потому что неконтролируемые изменения этих атрибутов в CMDBuild дадут такой же объем динамических изменений в Zabbix. Для Host groups микросервис Zabbix writer дополнительно должен разрешать создание групп в своей конфигурации; созданный или найденный groupid подставляется в тот же host.create/host.update payload.',
     'help.catalogs.7': 'Метаданные Zabbix строятся из catalog sync и показывают template item keys, LLD rule keys, inventory links, existing host templates и конфликты templates.',
-    'help.catalogs.8': 'Настройка git отделена от Runtime-настроек: UI показывает путь файла правил, локальную repository path, режим чтения, repository URL, schemaVersion и rulesVersion. UI может записать rules и соседний webhook artifact в локальную working copy, но не выполняет commit/push; секреты в webhook artifact заменяются на XXXXX.',
+    'help.catalogs.8': 'Настройка git отделена от Runtime-настроек: UI показывает путь файла правил, локальную repository path, режим чтения, repository URL, schemaVersion и rulesVersion. UI может записать rules с новым rulesVersion и соседний webhook artifact в локальную working copy, но не выполняет commit/push; секреты в webhook artifact заменяются на XXXXX.',
     'tooltip.brand': 'Название приложения cmdb2monitoring.',
     'tooltip.sessionSummary': 'Текущий пользователь и способ авторизации.',
     'tooltip.idpLoginButton': 'Запускает вход через выбранный внешний IdP.',
@@ -1013,14 +1014,14 @@ const translations = {
     'tooltip.rulesRepositoryPath': 'Локальный путь к working copy repository, куда UI может записать rules и согласованный webhook artifact без commit/push.',
     'tooltip.dryRunPayload': 'Тестовый CMDBuild payload для dry-run конвертации.',
     'tooltip.dryRunRules': 'Выполняет пробную конвертацию без сохранения правил.',
-    'tooltip.saveRulesAs': 'Сохраняет текущий JSON правил через браузер. Backend rules-файл, git commit и git push не выполняются.',
+    'tooltip.saveRulesAs': 'Сохраняет текущий JSON правил через браузер и обновляет rulesVersion в выгружаемом файле. Backend rules-файл, git commit и git push не выполняются.',
     'tooltip.loadMapping': 'Загружает визуальную карту связей Zabbix, правил и CMDBuild.',
     'tooltip.mappingMode': 'Переключает управление правилами конвертации между просмотром и редактированием draft-правил текущей сессии.',
     'tooltip.mappingEditAction': 'Переключает действие редактора: добавление, модификация или удаление rules из draft JSON.',
     'tooltip.mappingClearSelection': 'Снимает выделение цепочки и возвращает обычный обзор.',
     'tooltip.mappingUndo': 'Отменяет последнее изменение draft-правил текущей сессии.',
     'tooltip.mappingRedo': 'Возвращает отмененное изменение draft-правил.',
-    'tooltip.mappingSaveAs': 'Сохраняет текущий draft JSON правил без отправки на backend. Вторым файлом формируются только webhook Body/DELETE-инструкции по добавленным и удаленным правилам текущей сессии.',
+    'tooltip.mappingSaveAs': 'Сохраняет текущий draft JSON правил с новым rulesVersion без отправки на backend. Вторым файлом формируются только webhook Body/DELETE-инструкции по добавленным и удаленным правилам текущей сессии.',
     'tooltip.mappingAddRule': 'Добавляет новое правило или сохраняет изменения выбранного правила в draft JSON.',
     'tooltip.mappingResetForm': 'В режиме модификации очищает выбранное rule и фильтры; в режиме добавления очищает leaf field и target.',
     'tooltip.mappingProfileClass': 'Класс, события которого будут создавать или обновлять Zabbix host по этому hostProfile.',
@@ -1067,7 +1068,7 @@ const translations = {
     'tooltip.loadRuntimeSettings': 'Загружает runtime-настройки из внешнего файла.',
     'tooltip.loadGitSettings': 'Загружает git-настройки файла правил из внешнего файла UI.',
     'tooltip.checkGitSettings': 'Загружает файл правил из выбранного источника и показывает schemaVersion/rulesVersion.',
-    'tooltip.saveGitWorkingCopy': 'Записывает текущие rules и согласованный webhook artifact в локальную git working copy. Commit и push не выполняются.',
+    'tooltip.saveGitWorkingCopy': 'Записывает текущие rules с новым rulesVersion и согласованный webhook artifact в локальную git working copy. Commit и push не выполняются.',
     'tooltip.saveGitSettings': 'Сохраняет настройки чтения rules с диска или из git working copy.',
     'tooltip.loadAuthSettings': 'Загружает настройки авторизации и локальных пользователей.',
     'tooltip.saveRuntimeSettings': 'Сохраняет runtime-настройки во внешний файл.',
@@ -1651,7 +1652,7 @@ const translations = {
     'help.rules.1': 'Load fetches the current conversion rules JSON.',
     'help.rules.2': 'Validate checks the rules structure on the backend.',
     'help.rules.3': 'Dry-run applies rules to a test CMDBuild payload without saving.',
-    'help.rules.4': 'Save file as saves the rules JSON through the browser; the backend rules file and git are not changed.',
+    'help.rules.4': 'Save file as saves the rules JSON through the browser and updates rulesVersion in the exported file; the backend rules file and git are not changed.',
     'help.rules.5': 'Create empty generates a production starter from the current environment: endpoints/topics and CMDBuild/Zabbix references come from runtime config and catalog cache, while routes stay publish=false until explicitly enabled. If the CMDBuild or Zabbix cache is empty, the backend returns an error and asks to sync the catalog first.',
     'help.mapping.title': 'Conversion Rules Management',
     'help.mapping.1': 'The page shows the CMDBuild -> Conversion Rules -> Zabbix chain.',
@@ -1660,7 +1661,7 @@ const translations = {
     'help.mapping.4': 'Edit mode hides the lower preview and changes the current session draft JSON: you can start from any form node, while dependent fields are filtered and highlighted.',
     'help.mapping.5': 'Modify rule starts without an automatically selected rule: you can start from a rule, class, field, or conversion structure. Linked lists are filtered, a single matching rule is selected automatically, and Reset fields returns the form to empty filters. A target missing from the Zabbix catalog is inconsistent and blocks saving.',
     'help.mapping.6': 'The Delete rule & classes action shows current draft rules as a CMDBuild, Zabbix, or rules tree. You can check a whole class, CMDBuild attribute, Zabbix payload field, Zabbix object group, or a single rule; source classes/class attribute fields are cleaned through Conversion Rules Logical Control.',
-    'help.mapping.7': 'Undo and Redo work with the current session history, and Save file as saves the draft to a separate JSON file without sending it to the backend.',
+    'help.mapping.7': 'Undo and Redo work with the current session history, and Save file as saves the draft to a separate JSON file with a new rulesVersion without sending it to the backend.',
     'help.mapping.8': 'Save file as also checks that every configured class has an IP or DNS class attribute field linked to Zabbix interface rules or hostProfiles[].interfaces.',
     'help.mapping.9': 'Clicking the selected item again clears the selection.',
     'help.mapping.10': 'Interface address selection rules choose how to fill Zabbix interfaces[]: the IP target writes interfaces[].ip/useip=1, and the DNS target writes interfaces[].dns/useip=0. The editor blocks explicit IP attributes as DNS and DNS/FQDN attributes as IP.',
@@ -1707,7 +1708,7 @@ const translations = {
     'help.catalogs.5': 'For the test system, rules are read from disk at rules/cmdbuild-to-zabbix-host-create.json; when git reading is enabled, the same file is expected inside the repository at that path.',
     'help.catalogs.6': 'The Dynamic Zabbix expansion from CMDBuild leaf switches allow creating or expanding only Tags and Host groups from selected leaf values. Use this function responsibly: before enabling it, analyze the variety of attribute contents used for mapping, because uncontrolled CMDBuild changes will produce the same amount of dynamic change in Zabbix. For Host groups, the Zabbix writer microservice must also allow group creation in its own configuration; the created or resolved groupid is substituted into the same host.create/host.update payload.',
     'help.catalogs.7': 'Zabbix Metadata is built from catalog sync and shows template item keys, LLD rule keys, inventory links, existing host templates, and template conflicts.',
-    'help.catalogs.8': 'Git Settings is separate from Runtime Settings: the UI shows the rules file path, local repository path, read mode, repository URL, schemaVersion, and rulesVersion. It can write rules and a neighboring webhook artifact to a local working copy, but it does not commit or push; secrets in the webhook artifact are replaced with XXXXX.',
+    'help.catalogs.8': 'Git Settings is separate from Runtime Settings: the UI shows the rules file path, local repository path, read mode, repository URL, schemaVersion, and rulesVersion. It can write rules with a new rulesVersion and a neighboring webhook artifact to a local working copy, but it does not commit or push; secrets in the webhook artifact are replaced with XXXXX.',
     'tooltip.brand': 'Application name: cmdb2monitoring.',
     'tooltip.sessionSummary': 'Current user and authentication method.',
     'tooltip.idpLoginButton': 'Starts login through the selected external IdP.',
@@ -1726,14 +1727,14 @@ const translations = {
     'tooltip.rulesRepositoryPath': 'Local repository working copy where the UI can write rules and a consistent webhook artifact without commit/push.',
     'tooltip.dryRunPayload': 'Test CMDBuild payload for dry-run conversion.',
     'tooltip.dryRunRules': 'Runs a trial conversion without saving rules.',
-    'tooltip.saveRulesAs': 'Saves the current rules JSON through the browser. The backend rules file, git commit, and git push are not changed.',
+    'tooltip.saveRulesAs': 'Saves the current rules JSON through the browser and updates rulesVersion in the exported file. The backend rules file, git commit, and git push are not changed.',
     'tooltip.loadMapping': 'Loads the visual map of Zabbix, rules, and CMDBuild links.',
     'tooltip.mappingMode': 'Switches conversion rules management between view and current-session draft editing.',
     'tooltip.mappingEditAction': 'Switches the editor action: add, modify, or delete rules from draft JSON.',
     'tooltip.mappingClearSelection': 'Clears the highlighted chain and returns the normal overview.',
     'tooltip.mappingUndo': 'Undoes the latest draft-rules change in the current session.',
     'tooltip.mappingRedo': 'Restores the reverted draft-rules change.',
-    'tooltip.mappingSaveAs': 'Saves the current draft rules JSON without sending it to the backend. A second file contains only webhook Body/DELETE instructions for rules added or removed in the current session.',
+    'tooltip.mappingSaveAs': 'Saves the current draft rules JSON with a new rulesVersion without sending it to the backend. A second file contains only webhook Body/DELETE instructions for rules added or removed in the current session.',
     'tooltip.mappingAddRule': 'Adds a new rule or saves changes to the selected rule in draft JSON.',
     'tooltip.mappingResetForm': 'In modify mode, clears the selected rule and filters; in add mode, clears the leaf field and target.',
     'tooltip.mappingProfileClass': 'Class whose events will create or update a Zabbix host through this hostProfile.',
@@ -1780,7 +1781,7 @@ const translations = {
     'tooltip.loadRuntimeSettings': 'Loads runtime settings from the external file.',
     'tooltip.loadGitSettings': 'Loads conversion-rules git settings from the external UI settings file.',
     'tooltip.checkGitSettings': 'Loads the rules file from the selected source and shows schemaVersion/rulesVersion.',
-    'tooltip.saveGitWorkingCopy': 'Writes current rules and a consistent webhook artifact to the local git working copy. Commit and push are not performed.',
+    'tooltip.saveGitWorkingCopy': 'Writes current rules with a new rulesVersion and a consistent webhook artifact to the local git working copy. Commit and push are not performed.',
     'tooltip.saveGitSettings': 'Saves settings for reading rules from disk or from a git working copy.',
     'tooltip.loadAuthSettings': 'Loads authorization settings and local users.',
     'tooltip.saveRuntimeSettings': 'Saves runtime settings to the external file.',
@@ -2804,15 +2805,7 @@ function formatEventValue(value) {
 async function loadRules(options = {}) {
   const rulesDocument = await api('/api/rules/current');
   state.currentRules = rulesDocument;
-  renderDefinitionList($('#rulesSummary'), {
-    path: rulesDocument.path,
-    source: rulesSourceModeLabel(rulesDocument),
-    resolvedPath: rulesDocument.resolvedPath ?? rulesDocument.path,
-    name: rulesDocument.name,
-    schemaVersion: rulesDocument.schemaVersion,
-    rulesVersion: rulesDocument.rulesVersion,
-    valid: rulesDocument.validation.valid
-  });
+  renderCurrentRulesSummary(rulesDocument);
   $('#rulesPreview').textContent = JSON.stringify(rulesDocument.content, null, 2);
   renderRulesSourceStatuses(rulesDocument);
   setSessionIndicator(
@@ -2825,6 +2818,18 @@ async function loadRules(options = {}) {
     syncLoadedRuleEditorsFromRulesDocument(rulesDocument);
   }
   return state.currentRules;
+}
+
+function renderCurrentRulesSummary(rulesDocument) {
+  renderDefinitionList($('#rulesSummary'), {
+    path: rulesDocument?.path,
+    source: rulesSourceModeLabel(rulesDocument),
+    resolvedPath: rulesDocument?.resolvedPath ?? rulesDocument?.path,
+    name: rulesDocument?.name,
+    schemaVersion: rulesDocument?.schemaVersion,
+    rulesVersion: rulesDocument?.rulesVersion,
+    valid: rulesDocument?.validation?.valid
+  });
 }
 
 function renderRulesSourceStatuses(rulesDocument = state.currentRules) {
@@ -2874,6 +2879,52 @@ function rulesSourceModeLabel(rulesDocument) {
     return t('rules.sourceDisk');
   }
   return t('rules.sourceUnknown');
+}
+
+function rulesWithNextRulesVersionForSave(rules) {
+  const next = cloneJson(rules);
+  next.rulesVersion = nextRulesVersion(next.rulesVersion, next.name);
+  return next;
+}
+
+function rememberSavedRulesContent(rules, options = {}) {
+  const savedRules = cloneJson(rules);
+  if (options.updateCurrent !== false && state.currentRules) {
+    state.currentRules = {
+      ...state.currentRules,
+      name: savedRules.name ?? state.currentRules.name,
+      schemaVersion: savedRules.schemaVersion ?? state.currentRules.schemaVersion,
+      rulesVersion: savedRules.rulesVersion ?? state.currentRules.rulesVersion,
+      content: savedRules
+    };
+    renderCurrentRulesSummary(state.currentRules);
+    $('#rulesPreview').textContent = JSON.stringify(savedRules, null, 2);
+  }
+
+  if (options.updateUploaded) {
+    state.uploadedRulesText = JSON.stringify(savedRules, null, 2);
+    $('#rulesPreview').textContent = state.uploadedRulesText;
+  }
+
+  if (options.updateMapping && state.mappingDraftRules) {
+    state.mappingDraftRules = cloneJson(savedRules);
+    replaceHistoryEntry(state.mappingHistory, state.mappingHistoryIndex, savedRules);
+  }
+
+  if (options.updateValidateMapping && state.validateMappingRules) {
+    state.validateMappingRules = cloneJson(savedRules);
+    replaceHistoryEntry(state.validateMappingHistory, state.validateMappingHistoryIndex, savedRules);
+  }
+
+  renderRulesSourceStatuses();
+}
+
+function replaceHistoryEntry(history, index, value) {
+  if (!Array.isArray(history) || index < 0 || index >= history.length) {
+    return;
+  }
+
+  history[index] = cloneJson(value);
 }
 
 function syncLoadedRuleEditorsFromRulesDocument(rulesDocument) {
@@ -2965,15 +3016,17 @@ async function saveRulesAsFile() {
     toast('Rules JSON is not loaded');
     return false;
   }
+  const rulesToSave = rulesWithNextRulesVersionForSave(rules);
 
   const validation = await api('/api/rules/validate', {
     method: 'POST',
-    body: { content: rules }
+    body: { content: rulesToSave }
   });
   $('#rulesResult').textContent = JSON.stringify({
     saved: false,
     note: 'Rules JSON saved through the browser only. Publish the file to git outside the application, then reload rules on the microservice.',
-    validation
+    validation,
+    content: rulesToSave
   }, null, 2);
   if (!validation.valid) {
     const confirmed = window.confirm('Rules JSON has validation errors. Save file anyway?');
@@ -2982,10 +3035,14 @@ async function saveRulesAsFile() {
     }
   }
 
-  const defaultName = `${normalizeRuleName(rules.name || 'cmdbuild-to-zabbix-rules')}.json`;
-  const content = `${JSON.stringify(rules, null, 2)}\n`;
+  const defaultName = `${normalizeRuleName(rulesToSave.name || 'cmdbuild-to-zabbix-rules')}.json`;
+  const content = `${JSON.stringify(rulesToSave, null, 2)}\n`;
   const result = await saveTextAsFile(content, defaultName, 'JSON rules', { 'application/json': ['.json'] });
   if (!result.cancelled) {
+    rememberSavedRulesContent(rulesToSave, {
+      updateCurrent: !state.uploadedRulesText,
+      updateUploaded: Boolean(state.uploadedRulesText)
+    });
     toast(`Rules file saved: ${result.name}`);
   }
   return result;
@@ -8994,7 +9051,8 @@ async function saveMappingDraftAsFile() {
     return false;
   }
 
-  const validation = validateMappingDraftBeforeSave(state.mappingDraftRules, state.mappingCmdbuildCatalog);
+  const rulesToSave = rulesWithNextRulesVersionForSave(state.mappingDraftRules);
+  const validation = validateMappingDraftBeforeSave(rulesToSave, state.mappingCmdbuildCatalog);
   const changes = mappingSessionChanges(initialMappingRules(), state.mappingDraftRules);
   if (validation.issues.length > 0) {
     setMappingEditorStatusForDraft(tf('mapping.status.saveIpDnsInconsistent', { count: sessionWebhookChangeCount(changes) }));
@@ -9012,10 +9070,10 @@ async function saveMappingDraftAsFile() {
     }
   }
 
-  const defaultName = `${normalizeRuleName(state.mappingDraftRules.name || 'cmdbuild-to-zabbix-rules')}.json`;
-  const content = `${JSON.stringify(state.mappingDraftRules, null, 2)}\n`;
+  const defaultName = `${normalizeRuleName(rulesToSave.name || 'cmdbuild-to-zabbix-rules')}.json`;
+  const content = `${JSON.stringify(rulesToSave, null, 2)}\n`;
   const webhookBodiesName = defaultName.replace(/\.json$/i, '-webhook-bodies.txt');
-  const webhookBodies = buildWebhookBodiesFile(state.mappingDraftRules, state.mappingCmdbuildCatalog, validation, changes);
+  const webhookBodies = buildWebhookBodiesFile(rulesToSave, state.mappingCmdbuildCatalog, validation, changes);
   setMappingEditorStatusForDraft(tf('mapping.status.saveReady', { count: sessionWebhookChangeCount(changes) }));
 
   const rulesResult = await saveTextAsFile(content, defaultName, 'JSON rules', { 'application/json': ['.json'] });
@@ -9033,6 +9091,7 @@ async function saveMappingDraftAsFile() {
   const warningText = validation.issues.length > 0
     ? tf('mapping.status.saveWarnings', { count: validation.issues.length })
     : '';
+  rememberSavedRulesContent(rulesToSave, { updateMapping: true });
   setMappingEditorStatus(tf('mapping.status.filesSaved', {
     rulesName: rulesResult.name,
     webhookName: webhookResult.name,
@@ -9047,16 +9106,17 @@ async function saveValidateMappingDraftAsFile() {
     toast('Rules JSON is not loaded');
     return false;
   }
+  const rulesToSave = rulesWithNextRulesVersionForSave(rules);
 
   const validation = await api('/api/rules/validate', {
     method: 'POST',
-    body: { content: rules }
+    body: { content: rulesToSave }
   });
   $('#rulesResult').textContent = JSON.stringify({
     saved: false,
     note: 'Logical Control draft saved through the browser only. Publish the file to git outside the application, then reload rules on the microservice.',
     validation,
-    content: rules
+    content: rulesToSave
   }, null, 2);
   if (!validation.valid) {
     const confirmed = window.confirm('Rules JSON has validation errors. Save file anyway?');
@@ -9065,13 +9125,14 @@ async function saveValidateMappingDraftAsFile() {
     }
   }
 
-  const defaultName = `${normalizeRuleName(rules.name || 'cmdbuild-to-zabbix-rules')}.json`;
+  const defaultName = `${normalizeRuleName(rulesToSave.name || 'cmdbuild-to-zabbix-rules')}.json`;
   const result = await saveTextAsFile(
-    `${JSON.stringify(rules, null, 2)}\n`,
+    `${JSON.stringify(rulesToSave, null, 2)}\n`,
     defaultName,
     'JSON rules',
     { 'application/json': ['.json'] });
   if (!result.cancelled) {
+    rememberSavedRulesContent(rulesToSave, { updateValidateMapping: true });
     toast(tf('toast.rulesFileSaved', { name: result.name }));
   }
   return result;
@@ -13733,7 +13794,9 @@ async function checkGitSettingsFromButton() {
 
 async function saveGitWorkingCopy() {
   try {
-    const rules = await currentRulesContentForGitExport();
+    const updateMapping = state.mappingLoaded;
+    const updateValidateMapping = !updateMapping && state.validateMappingLoaded && Boolean(state.validateMappingRules);
+    const rules = rulesWithNextRulesVersionForSave(await currentRulesContentForGitExport());
     const webhooks = await buildWebhookArtifactForGitExport(rules);
     const result = await api('/api/settings/git/export', {
       method: 'POST',
@@ -13746,6 +13809,7 @@ async function saveGitWorkingCopy() {
     fillGitSettingsStatusFields(result);
     const rulesPath = result.written?.rulesPath ?? result.resolvedPath ?? '';
     const webhooksPath = result.written?.webhooksPath ?? '';
+    rememberSavedRulesContent(rules, { updateMapping, updateValidateMapping });
     setGitSettingsStatus('gitSettings.exported', 'success', { rulesPath, webhooksPath });
     setSessionIndicator('gitRules', 'saved', 'sessionTraffic.savedGit', rules.rulesVersion ?? rulesPath);
     toast(tf('gitSettings.exported', { rulesPath, webhooksPath }));

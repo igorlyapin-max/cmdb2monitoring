@@ -975,7 +975,7 @@
                   <li data-i18n="help.rules.1">Load загружает текущий JSON правил конвертации.</li>
                   <li data-i18n="help.rules.2">Validate проверяет структуру правил на backend.</li>
                   <li data-i18n="help.rules.3">Dry-run применяет правила к тестовому CMDBuild payload без сохранения.</li>
-                  <li data-i18n="help.rules.4">Save file as сохраняет JSON правил через браузер; backend rules-файл и git не изменяются.</li>
+                  <li data-i18n="help.rules.4">Save file as сохраняет JSON правил через браузер и обновляет rulesVersion в выгружаемом файле; backend rules-файл и git не изменяются.</li>
                   <li data-i18n="help.rules.5">Создать пустой формирует production starter из текущего окружения: endpoints/topics и справочники CMDBuild/Zabbix берутся из runtime config и catalog cache, routes остаются publish=false до осознанного включения. Если CMDBuild или Zabbix cache пустой, backend возвращает ошибку и предлагает сначала синхронизировать каталог.</li>
                 </ul>
               </div>
@@ -988,7 +988,7 @@
                   <li data-i18n="help.mapping.4">Режим редактирования скрывает нижний просмотр и меняет draft JSON текущей сессии: можно начать с любого узла формы, а зависимые поля фильтруются и подсвечиваются.</li>
                   <li data-i18n="help.mapping.5">Действие Модификация правила начинается без автоматически выбранного rule: можно начать с rule, class, field или conversion structure. Связанные списки фильтруются, единственный найденный rule выбирается автоматически, а Сбросить поля возвращает форму к пустым фильтрам. Target, отсутствующий в Zabbix catalog, считается неконсистентным и блокирует сохранение.</li>
                   <li data-i18n="help.mapping.6">Действие Удаление правил и классов показывает rules текущего draft JSON деревом по CMDBuild, Zabbix или коллекциям правил. Можно отметить весь класс, атрибут CMDBuild, Zabbix payload field, Zabbix object group или отдельное rule; source classes/class attribute fields очищаются через логический контроль правил конвертации.</li>
-                  <li data-i18n="help.mapping.7">Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл без отправки на backend.</li>
+                  <li data-i18n="help.mapping.7">Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл с новым rulesVersion без отправки на backend.</li>
                   <li data-i18n="help.mapping.8">Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.</li>
                   <li data-i18n="help.mapping.9">Повторное нажатие на выбранный элемент снимает выделение.</li>
                   <li data-i18n="help.mapping.10">Правила выбора адреса интерфейса выбирают, чем заполнить Zabbix interfaces[]: ipAddress дает useip=1, dnsName дает useip=0.</li>
@@ -1051,7 +1051,7 @@
                   <li data-i18n="help.catalogs.5">Для тестовой системы rules читаются с диска из rules/cmdbuild-to-zabbix-host-create.json; если включено чтение из git, этот файл ожидается внутри repository по тому же пути.</li>
                   <li data-i18n="help.catalogs.6">Галки Динамическое расширение Zabbix из CMDBuild leaf разрешают создавать или расширять только Tags и Host groups по значениям выбранного leaf. Эту функцию нужно применять ответственно: перед включением проанализируйте разнообразие содержимого атрибутов, по которым выполняется mapping, потому что неконтролируемые изменения этих атрибутов в CMDBuild дадут такой же объем динамических изменений в Zabbix. Для Host groups микросервис Zabbix writer дополнительно должен разрешать создание групп в своей конфигурации; созданный или найденный groupid подставляется в тот же host.create/host.update payload.</li>
                   <li data-i18n="help.catalogs.7">Метаданные Zabbix строятся из catalog sync и показывают template item keys, LLD rule keys, inventory links, existing host templates и конфликты templates.</li>
-                  <li data-i18n="help.catalogs.8">Настройка git отделена от Runtime-настроек: UI показывает путь файла правил, режим чтения, repository URL, schemaVersion и rulesVersion, но не выполняет commit/push.</li>
+                  <li data-i18n="help.catalogs.8">Настройка git отделена от Runtime-настроек: UI показывает путь файла правил, режим чтения, repository URL, schemaVersion и rulesVersion; запись в локальную working copy обновляет rulesVersion, но не выполняет commit/push.</li>
                 </ul>
               </div>
             </div>

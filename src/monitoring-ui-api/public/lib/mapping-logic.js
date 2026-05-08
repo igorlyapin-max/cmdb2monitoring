@@ -416,6 +416,37 @@ export function normalizeRuleName(value) {
     .toLowerCase();
 }
 
+export function nextRulesVersion(currentVersion, fallbackName = 'rules-save', now = new Date()) {
+  const prefix = formatRulesVersionTimestamp(now);
+  const suffix = rulesVersionSuffix(currentVersion) || normalizeRuleName(fallbackName) || 'rules-save';
+  const maxSuffixLength = Math.max(1, 128 - prefix.length - 1);
+  const trimmedSuffix = suffix.slice(0, maxSuffixLength).replace(/-+$/g, '') || 'rules-save';
+  return `${prefix}-${trimmedSuffix}`;
+}
+
+function rulesVersionSuffix(currentVersion) {
+  const value = String(currentVersion ?? '').trim();
+  const dated = value.match(/^\d{4}\.\d{2}\.\d{2}-\d{4}(?:\d{2})?-(.+)$/);
+  if (dated?.[1]) {
+    return normalizeRuleName(dated[1]);
+  }
+
+  return normalizeRuleName(value);
+}
+
+function formatRulesVersionTimestamp(date) {
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate())
+  ].join('.')
+    + `-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
 export function ruleClassConditions(rule) {
   const matchers = [
     ...(rule?.when?.anyRegex ?? []),

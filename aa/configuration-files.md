@@ -441,7 +441,7 @@ Rules UI:
 - edit mode раскрывает CMDBuild domains как `Класс.{domain:СвязанныйКласс}.Атрибут`, но скрывает 1:N domains, уже представленные reference attribute выбранного class, и скрывает потенциально множественные domain fields для скалярных Zabbix structures;
 - rules могут содержать `monitoringSuppressionRules` для случаев, когда атрибуты экземпляра запрещают постановку на мониторинг;
 - edit mode позволяет добавлять rules в draft JSON, удалять rules по группам, выполнять undo/redo и сохранять draft через `Save file as`;
-- `Save file as` дополнительно формирует текстовый файл CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
+- `Save file as` обновляет `rulesVersion` в выгружаемом draft JSON и дополнительно формирует текстовый файл CMDBuild webhook Body/DELETE-инструкций только по добавленным и удаленным в текущей UI-сессии rules/classes/source fields;
 - перед сохранением проверяется IP/DNS binding: каждый мониторинговый класс из `source.entityClasses` или `className` regex должен иметь IP или DNS class attribute field, связанный с `interfaceAddressRules` или `hostProfiles[].interfaces`;
 - `Логический контроль правил конвертации` подсвечивает отсутствующие элементы, создает недостающий `hostProfiles[]`, заменяет некорректный address field существующего profile на class-scoped IP/DNS leaf и позволяет удалить выбранные элементы после подтверждения;
 - удаление выбранных элементов формирует исправленный JSON в памяти и сохраняет его через браузер; backend rules-файл и git не изменяются.
