@@ -836,6 +836,13 @@ h2 {
   min-height: 72px;
 }
 
+.mapping-string-template-help {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
 .mapping-string-builder-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;

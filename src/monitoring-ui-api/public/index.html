@@ -410,7 +410,8 @@
                   <div id="mappingStringBuilder" class="mapping-string-builder wide-field hidden">
                     <label class="mapping-string-template-field">
                       <span data-i18n="mapping.stringTemplate">Строка payload</span>
-                      <textarea id="mappingEditStringTemplate" rows="2" spellcheck="false"></textarea>
+                      <textarea id="mappingEditStringTemplate" rows="2" spellcheck="false" placeholder="если пустая, используется выбранный атрибут" data-i18n-placeholder="mapping.stringTemplatePlaceholder"></textarea>
+                      <small class="mapping-string-template-help" data-i18n="mapping.stringTemplateHelp">Если строка пустая, в payload будет использоваться выбранный атрибут класса без преобразования.</small>
                     </label>
                     <div class="mapping-string-builder-grid">
                       <label><span data-i18n="mapping.stringSourceField">Атрибут</span><select id="mappingStringSourceField"></select></label>
