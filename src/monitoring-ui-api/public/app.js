@@ -19,6 +19,7 @@ import {
   sameNormalized,
   sourceFieldAddressKind,
   sourceFieldCanUseCatalogAttribute,
+  sourceFieldLabelForCmdbPath,
   sourceFieldMayReturnMultiple,
   sourceFieldRulesShareCmdbPath,
   uniqueTokens
@@ -6126,7 +6127,8 @@ function populateMappingEditorFields(options = {}) {
     .sort(([left], [right]) => compareText(left, right))
     .map(([fieldKey, field]) => ({
       value: fieldKey,
-      label: mappingEditorSourceFieldLabel(fieldKey, field)
+      label: mappingEditorSourceFieldLabel(fieldKey, field),
+      meta: mappingSourceFieldPathMeta(fieldKey, field)
     }));
   const catalogOptions = mappingEditorCatalogFieldOptions(selectedClass, sourceFields)
     .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
@@ -6539,8 +6541,18 @@ function mappingEditorSourceFieldLabel(fieldKey, field) {
   const attribute = findCatalogAttributeForField(mappingEditorClassAttributes($('#mappingEditClass').value), field, fieldKey);
   const compatibleAttribute = sourceFieldCanUseCatalogAttribute(attribute, field) ? attribute : null;
   return field.cmdbPath
-    ? `${fieldKey} / ${field.cmdbPath}`
+    ? mappingSourceFieldPathLabel(fieldKey, field)
     : compatibleAttribute?.name ?? fieldKey;
+}
+
+function mappingSourceFieldPathLabel(fieldKey, field = {}) {
+  return sourceFieldLabelForCmdbPath(field.cmdbPath) || fieldKey;
+}
+
+function mappingSourceFieldPathMeta(fieldKey, field = {}) {
+  return field.cmdbPath
+    ? `source field ${fieldKey}; CMDB path ${field.cmdbPath}`
+    : '';
 }
 
 function mappingEditorAttributeForField(className, fieldKey, rules = currentMappingRules()) {
@@ -6701,7 +6713,8 @@ function mappingProfileAddressFieldOptions(className) {
     .filter(([fieldKey, field]) => isMappingSourceFieldCompatibleWithClass(className, fieldKey, field, rules))
     .map(([fieldKey, field]) => ({
       value: fieldKey,
-      label: field.cmdbPath ? `${fieldKey} / ${field.cmdbPath}` : fieldKey,
+      label: field.cmdbPath ? mappingSourceFieldPathLabel(fieldKey, field) : fieldKey,
+      meta: mappingSourceFieldPathMeta(fieldKey, field),
       fieldRule: field
     }));
   const catalog = mappingEditorCatalogFieldOptions(className, sourceFields);

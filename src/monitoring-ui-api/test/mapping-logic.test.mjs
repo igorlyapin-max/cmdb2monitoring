@@ -18,6 +18,7 @@ import {
   sourceFieldAddressKind,
   sourceFieldCanUseCatalogAttribute,
   sourceFieldKeyForCmdbPath,
+  sourceFieldLabelForCmdbPath,
   sourceFieldMayReturnMultiple
 } from '../public/lib/mapping-logic.js';
 
@@ -107,6 +108,11 @@ test('source field key disambiguation scopes same leaf names to CMDBuild class p
   assert.equal(disambiguateSourceFieldKey('hostname', { cmdbPath: 'ApplicG.hostname' }, sourceFields), 'applicGHostname');
   assert.equal(disambiguateSourceFieldKey('ipaddressIpAddr', { cmdbPath: 'ApplicG.ipaddress.ipAddr' }, sourceFields), 'applicGIpaddressIpAddr');
   assert.equal(disambiguateSourceFieldKey('hostname', { cmdbPath: 'serveri.hostname' }, sourceFields), 'hostname');
+});
+
+test('source field labels render cmdbPath as an operator-facing path', () => {
+  assert.equal(sourceFieldLabelForCmdbPath('routeCore.mgmt.ipAddr'), 'mgmt -> ipAddr / routeCore');
+  assert.equal(sourceFieldLabelForCmdbPath('ApplicG.{domain:IS}.Name'), 'domain IS -> Name / ApplicG');
 });
 
 test('source field catalog attribute compatibility rejects raw reference ids', () => {

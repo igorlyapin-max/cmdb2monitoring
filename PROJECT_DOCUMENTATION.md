@@ -398,7 +398,7 @@ Events:
 Управление правилами конвертации:
 - левая колонка показывает CMDBuild classes/attributes/lookups;
 - reference attributes раскрываются итеративно до читаемых leaf-полей; сам raw reference id не предлагается как IP/DNS leaf, а выбранное leaf-поле сохраняет `source.fields[].cmdbPath`;
-- если разные CMDBuild classes имеют leaf с одинаковым именем, редактор сравнивает корень `cmdbPath` с выбранным class и для нового class генерирует отдельный `source.fields` key, чтобы `Application.hostname` не переиспользовал уже настроенный `serveri.hostname`;
+- если разные CMDBuild classes имеют leaf с одинаковым именем, редактор сравнивает корень `cmdbPath` с выбранным class и для нового class генерирует отдельный `source.fields` key, чтобы `Application.hostname` не переиспользовал уже настроенный `serveri.hostname`; в выпадающих списках такие fields показываются как читаемый путь `mgmt -> ipAddr / routeCore`, а внутренний key вроде `routeCoreMgmtIpAddr` остается только в JSON/tooltip;
 - domains раскрываются как `Класс.{domain:СвязанныйКласс}.Атрибут`; 1:N domains, которые CMDBuild уже показывает как reference attribute текущего class, в списке leaf-полей скрываются, чтобы не дублировать те же attributes через reference и domain; настоящие N:N relations остаются доступными;
 - центральная колонка показывает conversion fields, regex, selection rules и T4 blocks;
 - Host profiles в центральной колонке показывают fan-out и конкретные связи `профиль Zabbix interfaces[]`/`valueField`;

@@ -319,6 +319,22 @@ export function sourceFieldKeyForCmdbPath(cmdbPath, fallback = 'cmdbPathField') 
     .join('') || fallback || 'cmdbPathField';
 }
 
+export function sourceFieldLabelForCmdbPath(cmdbPath) {
+  const segments = String(cmdbPath ?? '')
+    .split('.')
+    .map(segment => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0) {
+    return '';
+  }
+
+  const root = segments[0];
+  const leafPath = segments.slice(1).map(cmdbPathSegmentForDisplay);
+  return leafPath.length > 0
+    ? `${leafPath.join(' -> ')} / ${root}`
+    : root;
+}
+
 export function sourceFieldRulesShareCmdbPath(left = {}, right = {}) {
   const leftPath = normalizeCmdbPath(left.cmdbPath);
   const rightPath = normalizeCmdbPath(right.cmdbPath);
@@ -532,6 +548,10 @@ function cmdbPathSegmentForFieldKey(segment) {
   const text = String(segment ?? '').trim();
   const domain = text.match(/^\{domain:(.+)\}$/i);
   return domain ? `domain ${domain[1]}` : text;
+}
+
+function cmdbPathSegmentForDisplay(segment) {
+  return cmdbPathSegmentForFieldKey(segment);
 }
 
 function camelFieldKeySegment(value, lowerFirst) {
