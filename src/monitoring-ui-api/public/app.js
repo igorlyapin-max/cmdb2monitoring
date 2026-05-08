@@ -17,6 +17,7 @@ import {
   ruleClassConditions,
   sameNormalized,
   sourceFieldAddressKind,
+  sourceFieldCanUseCatalogAttribute,
   sourceFieldMayReturnMultiple,
   sourceFieldRulesShareCmdbPath,
   uniqueTokens
@@ -6531,9 +6532,10 @@ function mappingEditorSourceFieldLabel(fieldKey, field) {
   }
 
   const attribute = findCatalogAttributeForField(mappingEditorClassAttributes($('#mappingEditClass').value), field, fieldKey);
+  const compatibleAttribute = sourceFieldCanUseCatalogAttribute(attribute, field) ? attribute : null;
   return field.cmdbPath
     ? `${fieldKey} / ${field.cmdbPath}`
-    : attribute?.name ?? fieldKey;
+    : compatibleAttribute?.name ?? fieldKey;
 }
 
 function mappingEditorAttributeForField(className, fieldKey, rules = currentMappingRules()) {
@@ -6543,7 +6545,8 @@ function mappingEditorAttributeForField(className, fieldKey, rules = currentMapp
 
   const attributes = mappingEditorClassAttributes(className);
   const field = rules.source?.fields?.[fieldKey] ?? { source: fieldKey };
-  return findCatalogAttributeForField(attributes, field, fieldKey);
+  const attribute = findCatalogAttributeForField(attributes, field, fieldKey);
+  return sourceFieldCanUseCatalogAttribute(attribute, field) ? attribute : null;
 }
 
 function isMappingEditorFieldValidForClass(className, fieldKey) {
@@ -9193,7 +9196,9 @@ function addressCandidatesForClass(rules, attributes) {
 
     const fieldRule = rules.source?.fields?.[fieldKey] ?? { source: fieldKey };
     const attribute = findCatalogAttributeForField(attributes, fieldRule, fieldKey);
-    return attribute ? [{ mode, fieldKey, attribute, rule }] : [];
+    return sourceFieldCanUseCatalogAttribute(attribute, fieldRule)
+      ? [{ mode, fieldKey, attribute, rule }]
+      : [];
   });
 }
 
@@ -11209,7 +11214,7 @@ function renderMappingCmdbuild(container, rules, catalog) {
       const attribute = isVirtualSourceFieldRule(fieldKey, field)
         ? null
         : findCatalogAttributeForField(classAttributes, field, fieldKey);
-      if (!attribute) {
+      if (!sourceFieldCanUseCatalogAttribute(attribute, field)) {
         return [];
       }
 

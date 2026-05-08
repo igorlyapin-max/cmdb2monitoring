@@ -33,6 +33,7 @@
 
 ### Fixed
 
+- Conversion Rules Management no longer treats a raw CMDBuild reference id such as `ipaddress` as a direct IP/DNS leaf; operators must choose the resolved nested leaf like `ipaddress -> ipAddr`.
 - Conversion Rules Management no longer offers CMDBuild 1:N domains that are already represented by reference attributes, preventing duplicate leaf choices such as both `ipaddress -> ipAddr` and `domain IpAddress -> ipAddr`.
 - Conversion Rules Management now scopes catalog leaf options by `cmdbPath` root class, so adding an `Application.hostname` monitoring profile no longer reuses an existing `hostname / serveri.hostname` source field.
 - Conversion Rules Logical Control now includes the same pre-save IP/DNS and host profile consistency checks as Mapping `Save file as`, so classes left without applicable rules are visible before saving.

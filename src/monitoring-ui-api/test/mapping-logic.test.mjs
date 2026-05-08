@@ -15,6 +15,7 @@ import {
   minimalHostProfileInterfaceMode,
   sourceFieldTemplate,
   sourceFieldAddressKind,
+  sourceFieldCanUseCatalogAttribute,
   sourceFieldKeyForCmdbPath,
   sourceFieldMayReturnMultiple
 } from '../public/lib/mapping-logic.js';
@@ -90,6 +91,15 @@ test('source field key disambiguation scopes same leaf names to CMDBuild class p
   assert.equal(disambiguateSourceFieldKey('hostname', { cmdbPath: 'ApplicG.hostname' }, sourceFields), 'applicGHostname');
   assert.equal(disambiguateSourceFieldKey('ipaddressIpAddr', { cmdbPath: 'ApplicG.ipaddress.ipAddr' }, sourceFields), 'applicGIpaddressIpAddr');
   assert.equal(disambiguateSourceFieldKey('hostname', { cmdbPath: 'serveri.hostname' }, sourceFields), 'hostname');
+});
+
+test('source field catalog attribute compatibility rejects raw reference ids', () => {
+  const referenceAttribute = { name: 'ipaddress', type: 'reference', targetClass: 'IpAddress' };
+  const stringAttribute = { name: 'hostname', type: 'string' };
+
+  assert.equal(sourceFieldCanUseCatalogAttribute(referenceAttribute, { source: 'ip_address' }), false);
+  assert.equal(sourceFieldCanUseCatalogAttribute(referenceAttribute, { cmdbPath: 'serveri.ipaddress.ipAddr' }), true);
+  assert.equal(sourceFieldCanUseCatalogAttribute(stringAttribute, { source: 'hostname' }), true);
 });
 
 test('ensureMinimalHostProfileForClass creates an IP profile for a new class', () => {

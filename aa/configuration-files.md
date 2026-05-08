@@ -436,7 +436,7 @@ Events:
 
 Rules UI:
 - `Управление правилами конвертации` показывает CMDBuild, rules и Zabbix в трех колонках;
-- edit mode раскрывает reference attributes до scalar/lookup leaf-полей и сохраняет путь в `cmdbPath`;
+- edit mode раскрывает reference attributes до scalar/lookup leaf-полей, не предлагает raw reference id как IP/DNS leaf и сохраняет путь в `cmdbPath`;
 - при совпадении имени leaf в нескольких CMDBuild classes UI привязывает вариант к корню `cmdbPath` и создает отдельный source key для нового class, а не переиспользует уже настроенный field другого class;
 - edit mode раскрывает CMDBuild domains как `Класс.{domain:СвязанныйКласс}.Атрибут`, но скрывает 1:N domains, уже представленные reference attribute выбранного class, и скрывает потенциально множественные domain fields для скалярных Zabbix structures;
 - rules могут содержать `monitoringSuppressionRules` для случаев, когда атрибуты экземпляра запрещают постановку на мониторинг;

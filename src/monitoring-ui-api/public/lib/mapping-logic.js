@@ -216,6 +216,14 @@ export function sourceFieldRulesShareCmdbPath(left = {}, right = {}) {
   return Boolean(leftPath && rightPath && leftPath === rightPath);
 }
 
+export function sourceFieldCanUseCatalogAttribute(attribute, fieldRule = {}) {
+  return Boolean(attribute) && !sourceFieldUsesReferenceAttributeDirectly(attribute, fieldRule);
+}
+
+export function sourceFieldUsesReferenceAttributeDirectly(attribute, fieldRule = {}) {
+  return sourceFieldAttributeIsReference(attribute) && !fieldRule?.cmdbPath;
+}
+
 export function sourceFieldAddressKind(fieldKey, fieldRule = {}) {
   const type = String(fieldRule.type ?? '').toLowerCase();
   const resolveLeafType = String(fieldRule.resolve?.leafType ?? '').toLowerCase();
@@ -355,6 +363,10 @@ export function normalizeToken(value) {
 
 export function sameNormalized(left, right) {
   return normalizeToken(left) === normalizeToken(right);
+}
+
+function sourceFieldAttributeIsReference(attribute = {}) {
+  return String(attribute?.type ?? '').toLowerCase() === 'reference';
 }
 
 function sourceFieldRuleByKey(sourceFields = {}, fieldKey = '') {
