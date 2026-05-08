@@ -393,7 +393,7 @@ Supported data groups include base fields, dynamic source fields through `Model.
 - one CMDB object -> one Zabbix host with several `interfaces[]`;
 - one CMDB object -> several Zabbix hosts through fan-out when profiles need different names, templates, groups, or lifecycle.
 
-CMDBuild class names, attributes, and source field names are not built-in product constraints. They are defined by webhook body and rules: `source.fields`, `source.fields[].source`, `source.fields[].cmdbAttribute`, `source.fields[].cmdbPath`, `hostProfiles[].interfaces[].valueField`, selection rules, and T4.
+CMDBuild class names, attributes, and source field names are not built-in product constraints. They are defined by webhook body and rules: `source.fields`, `source.fields[].source`, `source.fields[].cmdbAttribute`, `source.fields[].cmdbPath`, `hostProfiles[].interfaces[].valueField`, selection rules, and T4. When different CMDBuild classes expose a leaf with the same name, the rules UI scopes catalog choices by the `cmdbPath` root class and creates a separate source key for the new class instead of reusing an existing path from another class.
 
 The active demo/e2e file `rules/cmdbuild-to-zabbix-host-create.json` remains a dev verification ruleset. Its base model is the abstract `C2MTest*` test model, but concrete classes from the current CMDBuild catalog can be added during smoke checks. That is not a product constraint or a hard-coded model dependency: each added class must have `source.entityClasses`, an IP/DNS source field, a matching `hostProfiles[]` entry, and webhooks.
 

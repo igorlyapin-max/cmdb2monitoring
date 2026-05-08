@@ -2,6 +2,7 @@ import {
   canonicalSourceField,
   classHasHostProfile,
   cmdbPathIncludesDomain,
+  disambiguateSourceFieldKey,
   dynamicTargetForField,
   dynamicZabbixTargetAllowed,
   ensureMinimalHostProfileForClass,
@@ -17,6 +18,7 @@ import {
   sameNormalized,
   sourceFieldAddressKind,
   sourceFieldMayReturnMultiple,
+  sourceFieldRulesShareCmdbPath,
   uniqueTokens
 } from './lib/mapping-logic.js';
 import {
@@ -6420,14 +6422,6 @@ function mappingEditorClassAttributes(className) {
   return catalogAttributesForClass(state.mappingCmdbuildCatalog ?? {}, catalogClass);
 }
 
-function sourceFieldHasCatalogAttribute(sourceFields, attributeName) {
-  return Object.entries(sourceFields ?? {}).some(([fieldKey, field]) => {
-    const names = [fieldKey, canonicalSourceField(fieldKey), ...sourceFieldSources(field), ...sourceFieldCatalogSources(field)]
-      .map(normalizeToken);
-    return names.includes(normalizeToken(attributeName));
-  });
-}
-
 function mappingEditorExtensionTarget(definition, item) {
   if (!item) {
     return null;
@@ -6562,18 +6556,21 @@ function isMappingEditorFieldValidForClass(className, fieldKey) {
   }
 
   const field = currentMappingRules().source?.fields?.[fieldKey] ?? { source: fieldKey };
-  return isVirtualSourceFieldRule(fieldKey, field)
-    || sourceFieldPathStartsWithClass(className, field)
-    || Boolean(mappingEditorAttributeForField(className, fieldKey));
+  return isMappingSourceFieldCompatibleWithClass(className, fieldKey, field);
 }
 
 function isMappingSourceFieldCompatibleWithClass(className, fieldKey, field, rules = currentMappingRules()) {
   if (!className) {
     return true;
   }
-  return isVirtualSourceFieldRule(fieldKey, field)
-    || Boolean(mappingEditorAttributeForField(className, fieldKey, rules))
-    || sourceFieldPathStartsWithClass(className, field);
+  if (isVirtualSourceFieldRule(fieldKey, field)) {
+    return true;
+  }
+  if (field?.cmdbPath) {
+    return sourceFieldPathStartsWithClass(className, field);
+  }
+
+  return Boolean(mappingEditorAttributeForField(className, fieldKey, rules));
 }
 
 function sourceFieldPathStartsWithClass(className, field = {}) {
@@ -6728,8 +6725,15 @@ function mappingProfileFieldRule(field) {
   if (!field) {
     return {};
   }
-  return currentMappingRules().source?.fields?.[field]
-    ?? state.mappingProfileFieldOptions?.get(field)?.fieldRule
+  const rules = currentMappingRules();
+  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingProfileClass')?.value ?? '');
+  const configured = rules.source?.fields?.[field];
+  if (configured && isMappingSourceFieldCompatibleWithClass(className, field, configured, rules)) {
+    return configured;
+  }
+
+  return state.mappingProfileFieldOptions?.get(field)?.fieldRule
+    ?? configured
     ?? {};
 }
 
@@ -8223,8 +8227,16 @@ function mappingEditorCatalogFieldOptions(className, sourceFields) {
   options.push(...domainLeafFieldOptions(rootClass));
 
   return options
+    .map(option => disambiguateMappingEditorCatalogFieldOption(option, sourceFields))
     .filter(option => !sourceFieldHasCatalogOption(sourceFields, option))
     .sort((left, right) => compareText(left.label, right.label));
+}
+
+function disambiguateMappingEditorCatalogFieldOption(option, sourceFields = {}) {
+  return {
+    ...option,
+    value: disambiguateSourceFieldKey(option.value, option.fieldRule ?? {}, sourceFields)
+  };
 }
 
 function mappingEditorVirtualFieldOptions() {
@@ -8537,16 +8549,27 @@ function camelPathSegment(value, lowerFirst) {
 }
 
 function sourceFieldHasCatalogOption(sourceFields, option) {
-  if (sourceFields?.[option.value]) {
+  return Object.entries(sourceFields ?? {}).some(([fieldKey, field]) =>
+    sourceFieldMatchesCatalogOption(fieldKey, field, option));
+}
+
+function sourceFieldMatchesCatalogOption(fieldKey, field, option) {
+  if (!field || !option) {
+    return false;
+  }
+
+  if (option.fieldRule?.cmdbPath || field.cmdbPath) {
+    return sourceFieldRulesShareCmdbPath(field, option.fieldRule ?? {});
+  }
+
+  if (normalizeToken(fieldKey) === normalizeToken(option.value)) {
     return true;
   }
 
-  const cmdbPath = option.fieldRule?.cmdbPath;
-  if (cmdbPath) {
-    return Object.values(sourceFields ?? {}).some(field => equalsIgnoreCase(field.cmdbPath, cmdbPath));
-  }
-
-  return sourceFieldHasCatalogAttribute(sourceFields, option.fieldRule?.cmdbAttribute ?? option.value);
+  const attributeName = option.fieldRule?.cmdbAttribute ?? option.value;
+  const names = [fieldKey, canonicalSourceField(fieldKey), ...sourceFieldSources(field), ...sourceFieldCatalogSources(field)]
+    .map(normalizeToken);
+  return names.includes(normalizeToken(attributeName));
 }
 
 function isMappingFieldAllowedForTarget(_fieldKey, fieldRule = {}, targetType = '') {
@@ -10657,11 +10680,67 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
   }
 
   addWebhookPayloadValidationIssues(rules, cmdbuildCatalog, addIssue);
+  addDraftSaveValidationIssues(rules, cmdbuildCatalog, addIssue, issues);
 
   return {
     issues,
     issueTokens: buildIssueTokenMap(issues)
   };
+}
+
+function addDraftSaveValidationIssues(rules, cmdbuildCatalog, addIssue, existingIssues = []) {
+  const existingMessages = new Set(existingIssues.map(issue => issue.message));
+  for (const message of validateMappingDraftBeforeSave(rules, cmdbuildCatalog).issues) {
+    if (existingMessages.has(message) || draftSaveValidationIssueAlreadyReported(message, existingIssues)) {
+      continue;
+    }
+
+    addIssue({
+      source: 'rules',
+      message,
+      tokens: draftSaveValidationIssueTokens(message),
+      help: 'Та же проверка выполняется перед Save file as. Исправьте rules перед сохранением или осознанно подтвердите сохранение с предупреждениями.'
+    });
+    existingMessages.add(message);
+  }
+}
+
+function draftSaveValidationIssueAlreadyReported(message, existingIssues = []) {
+  const text = String(message ?? '');
+  const classMatch = text.match(/^Класс\s+(.+?):/);
+  if (!classMatch) {
+    return false;
+  }
+
+  const classToken = normalizeToken(classMatch[1]);
+  if (!classToken) {
+    return false;
+  }
+
+  if (text.includes('нет hostProfiles')) {
+    return existingIssues.some(issue =>
+      issue.fix?.action === 'createHostProfile'
+      && normalizeToken(issue.fix.className) === classToken);
+  }
+
+  return false;
+}
+
+function draftSaveValidationIssueTokens(message) {
+  const text = String(message ?? '');
+  const classMatch = text.match(/^Класс\s+(.+?):/);
+  const className = classMatch?.[1]?.trim();
+  const tokens = [];
+  if (className) {
+    tokens.push(`class:${normalizeToken(className)}`, `match:className:${normalizeToken(className)}`);
+  }
+  if (text.includes('hostProfiles')) {
+    tokens.push('target:hostProfiles', 'target:interfaces');
+  }
+  if (text.includes('interfaceAddress') || text.includes('IP') || text.includes('DNS')) {
+    tokens.push('target:interfaces', 'target-field:interfaces.ip', 'target-field:interfaces.dns', 'target-field:interfaces.useip');
+  }
+  return uniqueTokens(tokens);
 }
 
 function addWebhookPayloadValidationIssues(rules, cmdbuildCatalog, addIssue) {

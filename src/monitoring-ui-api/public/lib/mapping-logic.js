@@ -187,6 +187,35 @@ export function sourceFieldMayReturnMultiple(field = {}) {
   return mode !== 'first';
 }
 
+export function disambiguateSourceFieldKey(defaultFieldKey, fieldRule = {}, sourceFields = {}) {
+  const existing = sourceFieldRuleByKey(sourceFields, defaultFieldKey);
+  if (!existing?.cmdbPath || sourceFieldRulesShareCmdbPath(existing, fieldRule)) {
+    return defaultFieldKey;
+  }
+
+  return uniqueSourceFieldKey(sourceFields, sourceFieldKeyForCmdbPath(fieldRule.cmdbPath, defaultFieldKey), fieldRule);
+}
+
+export function sourceFieldKeyForCmdbPath(cmdbPath, fallback = 'cmdbPathField') {
+  const segments = String(cmdbPath ?? '')
+    .split('.')
+    .map(cmdbPathSegmentForFieldKey)
+    .filter(Boolean);
+  if (segments.length === 0) {
+    return fallback || 'cmdbPathField';
+  }
+
+  return segments
+    .map((segment, index) => camelFieldKeySegment(segment, index === 0))
+    .join('') || fallback || 'cmdbPathField';
+}
+
+export function sourceFieldRulesShareCmdbPath(left = {}, right = {}) {
+  const leftPath = normalizeCmdbPath(left.cmdbPath);
+  const rightPath = normalizeCmdbPath(right.cmdbPath);
+  return Boolean(leftPath && rightPath && leftPath === rightPath);
+}
+
 export function sourceFieldAddressKind(fieldKey, fieldRule = {}) {
   const type = String(fieldRule.type ?? '').toLowerCase();
   const resolveLeafType = String(fieldRule.resolve?.leafType ?? '').toLowerCase();
@@ -326,6 +355,54 @@ export function normalizeToken(value) {
 
 export function sameNormalized(left, right) {
   return normalizeToken(left) === normalizeToken(right);
+}
+
+function sourceFieldRuleByKey(sourceFields = {}, fieldKey = '') {
+  if (sourceFields[fieldKey]) {
+    return sourceFields[fieldKey];
+  }
+
+  const wanted = normalizeToken(fieldKey);
+  return Object.entries(sourceFields)
+    .find(([key]) => normalizeToken(key) === wanted)
+    ?.[1];
+}
+
+function uniqueSourceFieldKey(sourceFields = {}, baseKey = '', fieldRule = {}) {
+  const base = baseKey || 'cmdbPathField';
+  let candidate = base;
+  let index = 2;
+  while (sourceFieldRuleByKey(sourceFields, candidate)
+    && !sourceFieldRulesShareCmdbPath(sourceFieldRuleByKey(sourceFields, candidate), fieldRule)) {
+    candidate = `${base}${index}`;
+    index += 1;
+  }
+
+  return candidate;
+}
+
+function normalizeCmdbPath(cmdbPath) {
+  return String(cmdbPath ?? '')
+    .split('.')
+    .map(segment => segment.trim())
+    .filter(Boolean)
+    .map(segment => segment.toLowerCase())
+    .join('.');
+}
+
+function cmdbPathSegmentForFieldKey(segment) {
+  const text = String(segment ?? '').trim();
+  const domain = text.match(/^\{domain:(.+)\}$/i);
+  return domain ? `domain ${domain[1]}` : text;
+}
+
+function camelFieldKeySegment(value, lowerFirst) {
+  const text = String(value ?? '')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
+  return lowerFirst ? text.charAt(0).toLowerCase() + text.slice(1) : text;
 }
 
 function escapeTemplateString(value) {

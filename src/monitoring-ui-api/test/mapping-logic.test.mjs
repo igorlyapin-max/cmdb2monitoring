@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   classHasHostProfile,
+  disambiguateSourceFieldKey,
   dynamicTagNameForField,
   dynamicTargetForField,
   dynamicZabbixTargetAllowed,
@@ -14,6 +15,7 @@ import {
   minimalHostProfileInterfaceMode,
   sourceFieldTemplate,
   sourceFieldAddressKind,
+  sourceFieldKeyForCmdbPath,
   sourceFieldMayReturnMultiple
 } from '../public/lib/mapping-logic.js';
 
@@ -67,6 +69,27 @@ test('sourceFieldMayReturnMultiple blocks domain collections unless collectionMo
     cmdbPath: 'Class.{domain:Endpoint}.AddressValue',
     resolve: { collectionMode: 'first' }
   }), false);
+});
+
+test('source field key disambiguation scopes same leaf names to CMDBuild class paths', () => {
+  const sourceFields = {
+    hostname: {
+      source: 'hostname',
+      cmdbAttribute: 'hostname',
+      cmdbPath: 'serveri.hostname'
+    },
+    ipaddressIpAddr: {
+      source: 'ipaddress',
+      cmdbAttribute: 'ipaddress',
+      cmdbPath: 'serveri.ipaddress.ipAddr'
+    }
+  };
+
+  assert.equal(sourceFieldKeyForCmdbPath('ApplicG.hostname'), 'applicGHostname');
+  assert.equal(sourceFieldKeyForCmdbPath('ApplicG.{domain:IS}.Name'), 'applicGDomainISName');
+  assert.equal(disambiguateSourceFieldKey('hostname', { cmdbPath: 'ApplicG.hostname' }, sourceFields), 'applicGHostname');
+  assert.equal(disambiguateSourceFieldKey('ipaddressIpAddr', { cmdbPath: 'ApplicG.ipaddress.ipAddr' }, sourceFields), 'applicGIpaddressIpAddr');
+  assert.equal(disambiguateSourceFieldKey('hostname', { cmdbPath: 'serveri.hostname' }, sourceFields), 'hostname');
 });
 
 test('ensureMinimalHostProfileForClass creates an IP profile for a new class', () => {
