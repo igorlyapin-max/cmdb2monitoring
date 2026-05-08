@@ -8374,6 +8374,10 @@ function domainTargetClassesForSourceClass(rootClass) {
   const catalog = state.mappingCmdbuildCatalog ?? {};
   const targets = new Map();
   for (const domain of catalog.domains ?? []) {
+    if (cmdbDomainIsCoveredByReferenceAttribute(rootClass, domain)) {
+      continue;
+    }
+
     const otherClass = cmdbDomainOtherClass(domain, rootClass);
     if (!otherClass) {
       continue;
@@ -8392,6 +8396,79 @@ function domainTargetClassesForSourceClass(rootClass) {
   }
 
   return [...targets.values()].sort(compareText);
+}
+
+function cmdbDomainIsCoveredByReferenceAttribute(rootClass, domain) {
+  if (cmdbDomainIsManyToMany(domain)) {
+    return false;
+  }
+
+  const otherClass = cmdbDomainOtherClass(domain, rootClass);
+  if (!otherClass) {
+    return false;
+  }
+
+  return mappingEditorClassAttributes(rootClass).some(attribute =>
+    isReferenceAttribute(attribute)
+    && sameCatalogClass(attribute.targetClass, otherClass)
+    && cmdbDomainMatchesReferenceAttribute(rootClass, domain, attribute));
+}
+
+function cmdbDomainIsManyToMany(domain = {}) {
+  const cardinality = normalizeToken(domain.cardinality ?? domain.raw?.cardinality ?? domain.type ?? domain.raw?.type);
+  return cardinality === 'nn' || cardinality === 'manytomany';
+}
+
+function cmdbDomainMatchesReferenceAttribute(rootClass, domain, attribute) {
+  const domainNames = cmdbDomainNameTokens(domain);
+  const referenceDomainNames = cmdbReferenceAttributeDomainTokens(attribute);
+  if (referenceDomainNames.some(name => domainNames.includes(name))) {
+    return true;
+  }
+
+  const description = normalizeToken([
+    domain.description,
+    domain.raw?.description,
+    domain.raw?._description,
+    domain.raw?.label
+  ].filter(Boolean).join(' '));
+  const rootTokens = catalogClassAliases(findCatalogClass(state.mappingCmdbuildCatalog ?? {}, rootClass) ?? { name: rootClass })
+    .map(normalizeToken)
+    .filter(Boolean);
+  const attributeToken = normalizeToken(attribute.name);
+  return Boolean(description && attributeToken)
+    && description.includes('reference')
+    && description.includes(attributeToken)
+    && rootTokens.some(rootToken => description.includes(rootToken));
+}
+
+function cmdbDomainNameTokens(domain = {}) {
+  return [
+    domain.name,
+    domain.id,
+    domain._id,
+    domain.raw?.name,
+    domain.raw?.id,
+    domain.raw?._id
+  ].map(normalizeToken).filter(Boolean);
+}
+
+function cmdbReferenceAttributeDomainTokens(attribute = {}) {
+  return [
+    attribute.domain,
+    attribute.domainName,
+    attribute._domain,
+    attribute.raw?.domain,
+    attribute.raw?.domainName,
+    attribute.raw?._domain
+  ].map(normalizeToken).filter(Boolean);
+}
+
+function sameCatalogClass(left, right) {
+  const catalog = state.mappingCmdbuildCatalog ?? {};
+  const leftRuleName = catalogClassRuleName(catalog, left);
+  const rightRuleName = catalogClassRuleName(catalog, right);
+  return normalizeClassName(leftRuleName) === normalizeClassName(rightRuleName);
 }
 
 function cmdbDomainOtherClass(domain, rootClass) {
