@@ -89,7 +89,7 @@
 
 | Сценарий | Поведение |
 | --- | --- |
-| Неверный Bearer token webhook | `cmdbwebhooks2kafka` отклоняет запрос |
+| Неверный или отсутствующий Bearer token webhook | `cmdbwebhooks2kafka` возвращает `401` и не публикует событие в Kafka |
 | Webhook-сервис слушает только `localhost:5080` | CMDBuild в Docker не может вызвать webhook; dev bind должен быть `0.0.0.0:5080`, URL в CMDBuild `http://192.168.202.100:5080/webhooks/cmdbuild` |
 | Некорректный JSON webhook | `cmdbwebhooks2kafka` возвращает ошибку и пишет лог |
 | Неизвестный eventType | `cmdbkafka2zabbix` пропускает событие со state `skipReason` |

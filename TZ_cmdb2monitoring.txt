@@ -278,7 +278,13 @@ Content-Type вручную в CMDBuild webhook headers не указывать.
 
 Режимы токена:
 - static: токен хранится в конфиге микросервиса;
+- disabled: только для окружений, где входящий webhook защищен внешним gateway/reverse proxy;
 - dynamic: заглушка под будущую реализацию, источник динамического токена пока не определен.
+
+Реализация static mode:
+- `CmdbWebhook:AuthorizationMode=Static`;
+- `CmdbWebhook:BearerToken` или env `CmdbWebhook__BearerToken`;
+- при отсутствующем или неверном `Authorization: Bearer ...` сервис должен вернуть `401` и не публиковать событие в Kafka.
 
 На стороне CMDBuild токен прописывается вручную в webhook header Authorization.
 
@@ -490,7 +496,7 @@ http://192.168.202.100:5080/webhooks/cmdbuild
 
 11. Известные ограничения и следующие задачи
 
-1. Реализовать полноценную Bearer token validation в микросервисе.
+1. Проверить ротацию и доставку `CmdbWebhook__BearerToken` через deployment secret storage.
 2. Добавить конфиг static/dynamic token mode.
 3. Добавить тесты на разбор payload и выбор entityId.
 4. Добавить тесты на Kafka publisher через mock/abstraction.

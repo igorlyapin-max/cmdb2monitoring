@@ -2,7 +2,7 @@
 
 | Secret ID | Information flows | Где используется | Конфиг/env | Ротация | Комментарий |
 | --- | --- | --- | --- | --- | --- |
-| SEC-001 | IF-001 | CMDBuild -> cmdbwebhooks2kafka | `CmdbWebhook` token или env | По политике ИБ | Static token сейчас, dynamic mode зарезервирован |
+| SEC-001 | IF-001 | CMDBuild -> cmdbwebhooks2kafka | `CmdbWebhook__BearerToken`, `CmdbWebhook:BearerToken` или secret reference | По политике ИБ | Static Bearer token проверяется микросервисом до чтения body и публикации в Kafka |
 | SEC-002 | IF-002, IF-006 | Kafka SASL для cmdbwebhooks2kafka | `Kafka__Username`, `Kafka__Password` | По политике Kafka | В dev не используется |
 | SEC-003 | IF-002, IF-003, IF-006 | Kafka SASL для cmdbkafka2zabbix input/output/logs | `Kafka__Input__*`, `Kafka__Output__*`, `ElkLogging__Kafka__*` | По политике Kafka | В dev не используется |
 | SEC-004 | IF-003, IF-005, IF-006, IF-021 | Kafka SASL для zabbixrequests2api input/output/binding-output/logs | `Kafka__Input__*`, `Kafka__Output__*`, `Kafka__BindingOutput__*`, `ElkLogging__Kafka__*` | По политике Kafka | В dev не используется |

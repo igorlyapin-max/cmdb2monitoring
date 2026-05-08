@@ -146,6 +146,7 @@ static void ValidateServiceConfig(
         case ServiceKind.Webhook:
             RequireRoute(config, "CmdbWebhook:Route", context, errors);
             RequireNonEmpty(config, "CmdbWebhook:Source", context, errors);
+            ValidateCmdbWebhookAuthorization(config, environment, context, errors, warnings);
             ValidateStringArray(config, "CmdbWebhook:EventTypeFields", context, errors);
             ValidateStringArray(config, "CmdbWebhook:EntityTypeFields", context, errors);
             ValidateStringArray(config, "CmdbWebhook:EntityIdFields", context, errors);
@@ -1581,7 +1582,8 @@ static void ValidateNoProductionSecrets(ServiceDefinition service, JsonObject ba
         "ElkLogging:Elk:ApiKey",
         "Zabbix:ApiToken",
         "Zabbix:Password",
-        "Cmdbuild:Password"
+        "Cmdbuild:Password",
+        "CmdbWebhook:BearerToken"
     })
     {
         var value = GetString(baseConfig, path);
@@ -1590,6 +1592,39 @@ static void ValidateNoProductionSecrets(ServiceDefinition service, JsonObject ba
             errors.Add($"{service.Name}:base must not contain production secret in {path}; use env/secret storage.");
         }
     }
+}
+
+static void ValidateCmdbWebhookAuthorization(
+    JsonObject config,
+    string environment,
+    string context,
+    List<string> errors,
+    List<string> warnings)
+{
+    var mode = GetString(config, "CmdbWebhook:AuthorizationMode") ?? "Static";
+    if (!IsOneOf(mode, "Static", "Disabled"))
+    {
+        errors.Add($"{context} CmdbWebhook:AuthorizationMode has unsupported value '{mode}'.");
+        return;
+    }
+
+    if (!IsOneOf(mode, "Static"))
+    {
+        return;
+    }
+
+    if (!string.IsNullOrWhiteSpace(GetString(config, "CmdbWebhook:BearerToken")))
+    {
+        return;
+    }
+
+    if (environment.Equals("base", StringComparison.OrdinalIgnoreCase))
+    {
+        warnings.Add($"{context} uses Static webhook authorization with an empty CmdbWebhook:BearerToken; provide it through env/secret storage for deployment.");
+        return;
+    }
+
+    errors.Add($"{context} CmdbWebhook:BearerToken is required when AuthorizationMode is Static.");
 }
 
 static bool IsSecretReference(string value)

@@ -98,6 +98,7 @@ SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles
 | `Service:Name` | Имя сервиса в health/logs | При смене окружения или имени deployment |
 | `Service:HealthRoute` | Health endpoint | Если меняется route healthcheck |
 | `CmdbWebhook:Route` | Endpoint приема webhook | Если CMDBuild должен вызывать другой путь |
+| `CmdbWebhook:AuthorizationMode`, `CmdbWebhook:BearerToken` | Проверка `Authorization: Bearer ...` от CMDBuild | В production задавать token через env/secret storage |
 | `CmdbWebhook:EventTypeFields` | Поля поиска event type | Если CMDBuild меняет body webhook |
 | `CmdbWebhook:EntityTypeFields` | Поля поиска класса/типа объекта | Если меняется payload |
 | `CmdbWebhook:EntityIdFields` | Приоритет выбора id | Если меняется источник идентификатора |
@@ -114,6 +115,7 @@ Dev запуск:
 
 ```bash
 ASPNETCORE_URLS=http://0.0.0.0:5080
+CmdbWebhook__BearerToken=<secret>
 Kafka__BootstrapServers=kafka:29092
 Kafka__Topic=cmdbuild.webhooks
 ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs

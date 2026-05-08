@@ -279,7 +279,7 @@ Log topics нужны, если `ElkLogging:Enabled=true`, `ElkLogging:Mode=Kafk
 | --- | --- | --- | --- |
 | `cmdbwebhooks2kafka` | Kafka SASL user/password | `Kafka__Username`, `Kafka__Password`, `ElkLogging__Kafka__Username`, `ElkLogging__Kafka__Password` | Публикация CMDBuild events и logs в Kafka |
 | `cmdbwebhooks2kafka` | ELK API key, если используется прямой ELK sink | `ElkLogging__Elk__ApiKey` | Запись logs в ELK |
-| `cmdbwebhooks2kafka` | Встроенный webhook Bearer token отсутствует | Нет встроенного config-поля | Входящий webhook защищается сетью, reverse proxy или внешним gateway, если это требуется политикой безопасности |
+| `cmdbwebhooks2kafka` | CMDBuild webhook Bearer token | `CmdbWebhook__BearerToken`, optional `CmdbWebhook__AuthorizationMode=Static` | Проверка входящего `Authorization: Bearer ...` от CMDBuild перед чтением body и публикацией в Kafka |
 | `cmdbkafka2zabbix` | CMDBuild service login/password | `Cmdbuild__Username`, `Cmdbuild__Password` | Чтение карточек, attributes, lookup/reference/domain leaves и `ZabbixHostBinding` |
 | `cmdbkafka2zabbix` | Rules reload/status Bearer tokens | `Service__RulesReloadToken`, `Service__RulesStatusToken` | Защита `/admin/reload-rules` и `/admin/rules-status`; эти же значения настраиваются в UI `Services:HealthEndpoints` |
 | `cmdbkafka2zabbix` | Kafka SASL user/password | `Kafka__Input__Username`, `Kafka__Input__Password`, `Kafka__Output__Username`, `Kafka__Output__Password`, `ElkLogging__Kafka__Username`, `ElkLogging__Kafka__Password` | Чтение CMDBuild events, публикация Zabbix requests и logs |

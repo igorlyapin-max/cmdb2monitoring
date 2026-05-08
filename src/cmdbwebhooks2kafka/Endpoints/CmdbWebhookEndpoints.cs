@@ -1,3 +1,6 @@
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Cmdb2Monitoring.Logging;
 using CmdbWebhooks2Kafka.Configuration;
@@ -26,6 +29,14 @@ public static class CmdbWebhookEndpoints
             CancellationToken cancellationToken) =>
         {
             var logger = loggerFactory.CreateLogger("CmdbWebhookEndpoints");
+            var options = cmdbWebhookOptions.Value;
+            if (!ValidateWebhookAuthorization(request, options))
+            {
+                logger.LogWarning("Rejected CMDBuild webhook with missing or invalid Bearer token");
+
+                return Results.Unauthorized();
+            }
+
             JsonElement payload;
 
             try
@@ -43,7 +54,7 @@ public static class CmdbWebhookEndpoints
                 });
             }
 
-            var envelope = CmdbWebhookEnvelope.FromPayload(payload, cmdbWebhookOptions.Value);
+            var envelope = CmdbWebhookEnvelope.FromPayload(payload, options);
             logger.LogBasic(
                 debugLoggingOptions,
                 "Received webhook payload for event {EventType}, entity type {EntityType}, entity id {EntityId}",
@@ -82,5 +93,30 @@ public static class CmdbWebhookEndpoints
         });
 
         return endpoints;
+    }
+
+    private static bool ValidateWebhookAuthorization(HttpRequest request, CmdbWebhookOptions options)
+    {
+        if (!options.RequiresBearerToken())
+        {
+            return true;
+        }
+
+        if (!AuthenticationHeaderValue.TryParse(request.Headers.Authorization.ToString(), out var header)
+            || !string.Equals(header.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(header.Parameter))
+        {
+            return false;
+        }
+
+        return FixedTimeEquals(header.Parameter, options.BearerToken);
+    }
+
+    private static bool FixedTimeEquals(string actual, string expected)
+    {
+        var actualBytes = Encoding.UTF8.GetBytes(actual);
+        var expectedBytes = Encoding.UTF8.GetBytes(expected);
+        return actualBytes.Length == expectedBytes.Length
+            && CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
     }
 }

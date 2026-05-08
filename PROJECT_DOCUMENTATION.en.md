@@ -142,6 +142,7 @@ Main settings:
 | --- | --- |
 | `Service` | Service name and health route |
 | `CmdbWebhook:Route` | Webhook receive URL, currently `/webhooks/cmdbuild` |
+| `CmdbWebhook:AuthorizationMode`, `CmdbWebhook:BearerToken` | Validates inbound `Authorization: Bearer ...`; in production provide the token through env/secret storage, for example `CmdbWebhook__BearerToken` |
 | `CmdbWebhook:*Fields` | Fields used to detect event type, class, and id in webhook body |
 | `Kafka` | Bootstrap servers, output topic, client id, auth/security |
 | `ElkLogging` | Kafka log sink or future ELK endpoint |
