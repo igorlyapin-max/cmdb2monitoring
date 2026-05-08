@@ -166,6 +166,7 @@ Webhooks должны передавать плоский JSON. Reference/lookup
 Особенности:
 - undo/redo в UI не откатывают уже выполненную загрузку в CMDBuild;
 - `Save file as` может сохранять рядом с rules файл webhook-инструкций, но token/secret значения маскируются как `XXXXX`;
+- `Загрузить в CMDB` изменяет только managed webhooks с префиксом `cmdbwebhooks2kafka-`; для update/delete BFF перед применением перечитывает CMDBuild webhooks и использует запись, найденную по managed `code`, а не `id` из JSON-плана;
 - если rule требует новый source field, а webhook не обновлен, converter получит пустое или отсутствующее поле и rule не сработает;
 - после изменения правил всегда повторяйте анализ webhooks.
 

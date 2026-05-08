@@ -32,6 +32,7 @@
 
 ### Fixed
 
+- Hardened Webhook Setup apply so update/delete operations reload CMDBuild webhooks and resolve the target by managed `code`, preventing a crafted client payload from applying a managed-code operation to an unrelated webhook id.
 - Dashboard rules-version rows now show the exact disk/git source path and warn when the converter-loaded rules version differs from the management UI source.
 - Conversion Rules Management view now keeps the Zabbix side visible when selecting a CMDBuild attribute, including ordinary payload mappings and dynamic Host group mappings from CMDBuild leaf values.
 - Conversion Rules Management now identifies `interfaceAddress` targets by address mode (`ip`/`dns`), so editing a DNS rule that uses a concrete CMDBuild leaf such as `hostname` no longer blocks save because the target option used a different default leaf.

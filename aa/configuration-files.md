@@ -402,7 +402,7 @@ CMDBuild/Zabbix login/password не задаются в runtime config. Вход
 - CMDBuild для `Настройка webhooks` / `Загрузить из CMDB`: read-доступ к ETL/webhook records через `/etl/webhook/?detailed=true`.
 - CMDBuild для `Настройка webhooks` / `Загрузить в CMDB`: create/update/delete или эквивалентные modify-права на ETL/webhook records через `/etl/webhook/`.
 - CMDBuild для `zabbixbindings2cmdbuild`: read/update права на карточки участвующих классов для `zabbix_main_hostid` и read/create/update права на класс `ZabbixHostBinding`.
-- Ограничение записи managed-префиксом `cmdbwebhooks2kafka-*` выполняется приложением, но не заменяет CMDBuild permission model; учетную запись CMDBuild нужно ограничивать на стороне CMDBuild.
+- Ограничение записи managed-префиксом `cmdbwebhooks2kafka-*` выполняется приложением. Для `update`/`delete` BFF дополнительно перечитывает `/etl/webhook/?detailed=true` и применяет операцию к record, найденному по managed `code`, а не по `current.id` из browser payload. Это не заменяет CMDBuild permission model; учетную запись CMDBuild нужно ограничивать на стороне CMDBuild.
 - Zabbix для UI/catalog sync: API access и read-only доступ к host groups, template groups, templates, hosts/tags и optional catalogs, читаемым через `*.get`, включая `template.get` subselects для item keys, LLD rules, inventory links, parent templates и template groups.
 - Write-права Zabbix нужны не UI catalog sync, а сервису `zabbixrequests2api`, если он создает/обновляет/удаляет hosts.
 
@@ -448,7 +448,7 @@ Webhook Setup UI:
 - `Загрузить из CMDB` читает `/etl/webhook/?detailed=true`;
 - `Сохранить файл как` сохраняет только JSON-план через браузер;
 - `Загрузить в CMDB` применяет выбранные create/update/delete операции к CMDBuild `/etl/webhook/` и требует у пользователя CMDBuild create/update/delete или эквивалентные modify-права на ETL/webhook records;
-- apply ограничен managed-префиксом `cmdbwebhooks2kafka-`.
+- apply ограничен managed-префиксом `cmdbwebhooks2kafka-`; для update/delete BFF сверяет операцию с актуальным CMDBuild record по `code`.
 
 Runtime cache:
 - `src/monitoring-ui-api/data/zabbix-catalog-cache.json`;

@@ -202,3 +202,28 @@ test('obsolete managed webhooks are proposed for explicit delete only', () => {
   assert.equal(deleted.action, 'delete');
   assert.equal(deleted.selected, false);
 });
+
+test('unmanaged current webhooks are not matched, deleted, or used as defaults', () => {
+  const rules = baseRules();
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [
+    {
+      code: 'other-system-class-update',
+      event: 'card_update_after',
+      target: 'Class',
+      method: 'post',
+      url: 'http://foreign.example/webhook',
+      headers: { Authorization: 'Bearer foreign' },
+      body: {
+        source: 'foreign',
+        id: '{card:Id}',
+        code: '{card:Code}'
+      }
+    }
+  ]);
+
+  assert.equal(operations.length, 1);
+  assert.equal(operations[0].action, 'create');
+  assert.equal(operations[0].code, 'cmdbwebhooks2kafka-class-update');
+  assert.equal(operations[0].desired.url, 'http://192.168.202.100:5080/webhooks/cmdbuild');
+  assert.equal(operations.some(item => item.code === 'other-system-class-update'), false);
+});

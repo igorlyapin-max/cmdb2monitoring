@@ -112,6 +112,7 @@
 | Catalog sync недоступен | UI показывает ошибку BFF, runtime cache не обновляется |
 | Применение webhooks без CMDBuild modify прав | BFF возвращает ошибку CMDBuild API; план остается в UI и может быть сохранен через браузер |
 | План webhooks содержит чужой code без префикса `cmdbwebhooks2kafka-` | Backend отклоняет apply, чтобы не изменить посторонние CMDBuild webhooks |
+| План webhooks подменяет `current.id` для update/delete | Backend перед применением перечитывает CMDBuild `/etl/webhook/?detailed=true` и применяет операцию только к найденной managed-записи с тем же `code` |
 | Правило в `Управление правилами конвертации` добавляет класс без IP/DNS binding | UI показывает предупреждение save validation; `Save file as` требует подтверждения перед сохранением |
 | CMDBuild class name записан как `NetworkDevice`, а catalog содержит `Network device` | UI нормализует имя класса и предпочитает отображение из CMDBuild catalog |
 | Переключен язык интерфейса | Меню, Help и всплывающие подсказки перестраиваются по словарю `ru/en`; серверные контракты не меняются |

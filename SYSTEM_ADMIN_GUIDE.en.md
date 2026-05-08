@@ -166,6 +166,7 @@ Workflow:
 Notes:
 - UI undo/redo does not roll back changes already loaded into CMDBuild;
 - `Save file as` can write a neighboring webhook-instructions file, but token/secret values are masked as `XXXXX`;
+- `Load into CMDB` changes only managed webhooks with the `cmdbwebhooks2kafka-` prefix; for update/delete, the BFF reloads CMDBuild webhooks before applying and uses the record found by managed `code`, not the `id` from the JSON plan;
 - if a rule requires a new source field and the webhook is not updated, the converter receives an empty or missing field and the rule will not fire;
 - analyze webhooks again after each rules change.
 

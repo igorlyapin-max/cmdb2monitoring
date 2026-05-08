@@ -382,7 +382,7 @@ CMDBuild/Zabbix credentials:
 - CMDBuild user, который нажимает `Применить подготовку CMDBuild` в разделе `Аудит`, должен иметь права администратора модели CMDBuild на создание класса и атрибутов: `POST /classes?scope=service` и `POST /classes/{class}/attributes`. Эти права не нужны для обычной проверки плана аудита.
 - CMDBuild service account для `cmdbkafka2zabbix` должен иметь read-only права на исходные карточки и `ZabbixHostBinding`, если включено `Cmdbuild:HostBindingLookupEnabled`; эти права дополняют уже нужные права resolver-а на attributes/cards/relations/lookups при `cmdbPath`.
 - CMDBuild service account для `zabbixbindings2cmdbuild` должен иметь read/update права на карточки классов, участвующих в conversion rules, чтобы записывать/очищать `zabbix_main_hostid`; а также read/create/update права на служебный класс `ZabbixHostBinding`. Если используются дополнительные профили, сервису нужен read list cards на этот класс для поиска существующей связи.
-- Backend ограничивает запись managed-префиксом `cmdbwebhooks2kafka-*`, но это защитное ограничение приложения, а не замена правам CMDBuild. CMDBuild service account все равно должен быть ограничен на уровне CMDBuild настолько узко, насколько позволяет модель прав.
+- Backend ограничивает запись managed-префиксом `cmdbwebhooks2kafka-*`, а для `Изменить`/`Удалить` перед применением заново читает `/etl/webhook/?detailed=true` и выбирает CMDBuild record по managed `code`; `current.id` из browser payload не используется как источник истины. Это защитное ограничение приложения, а не замена правам CMDBuild. CMDBuild service account все равно должен быть ограничен на уровне CMDBuild настолько узко, насколько позволяет модель прав.
 - Zabbix user/API token для UI/catalog sync должен иметь API access и read-only доступ к используемым host groups, template groups, templates, hosts/tags и справочникам, которые UI читает через `*.get` методы (`hostgroup.get`, `templategroup.get`, `template.get` с subselects item keys/LLD/inventory/template groups, `host.get`, optional `proxy*.get`, `globalmacro.get`, `usermacro.get`, `maintenance.get`, `valuemap.get`); host create/update/delete для чтения каталогов не нужны.
 - Отдельный сервис `zabbixrequests2api`, который реально применяет мониторинг, требует уже write-права на host create/update/delete и чтение связанных groups/templates. Так как `Zabbix:AllowDynamicHostGroupCreate` в поставляемых конфигах включен, этому API user также нужно право на `hostgroup.create`.
 
@@ -461,7 +461,7 @@ Events:
 - `Undo`/`Redo` работают с выбором операций в текущей browser-сессии;
 - `Undo`/`Redo` не откатывают уже выполненную команду `Загрузить в CMDB`, потому что она меняет управляемую систему;
 - `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git; token/password/secret/API key/Authorization значения в export заменяются на `XXXXX`;
-- `Загрузить в CMDB` применяет только выбранные операции и действительно меняет CMDBuild records через REST v3 `/etl/webhook/`; backend ограничивает операции managed-префиксом `cmdbwebhooks2kafka-`.
+- `Загрузить в CMDB` применяет только выбранные операции и действительно меняет CMDBuild records через REST v3 `/etl/webhook/`; backend ограничивает операции managed-префиксом `cmdbwebhooks2kafka-`, а для `update`/`delete` перечитывает текущие CMDBuild webhooks и применяет действие только к найденной managed-записи с тем же `code`.
 
 Поддержанные env vars:
 

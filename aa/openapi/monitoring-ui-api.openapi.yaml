@@ -552,7 +552,9 @@ paths:
         Applies create/update/delete operations selected on the Webhook Setup
         page. The backend restricts operations to the managed
         `cmdbwebhooks2kafka-` prefix so unrelated CMDBuild webhooks are not
-        changed by this workflow.
+        changed by this workflow. For update/delete, the backend reloads the
+        current CMDBuild webhook list and resolves the target record by managed
+        `code` instead of trusting `current.id` from the client payload.
       requestBody:
         required: true
         content:

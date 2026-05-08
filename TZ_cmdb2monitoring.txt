@@ -1743,6 +1743,7 @@ Model.Field("fieldName")
 - `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git;
 - `Загрузить в CMDB` после подтверждения применяет только выбранные операции и действительно меняет CMDBuild через REST v3 `/etl/webhook/`;
 - backend должен ограничивать apply workflow управляемым префиксом `cmdbwebhooks2kafka-`, чтобы не удалить или изменить чужие CMDBuild webhooks;
+- для `Изменить` и `Удалить` backend перед записью должен перечитывать текущие CMDBuild webhooks через `/etl/webhook/?detailed=true` и выбирать целевой record по managed `code`; `current.id` из browser payload не должен использоваться как доверенный идентификатор целевой записи;
 - для новых или изменяемых hooks body остается плоским: reference/domain/lookup leaf path хранится в `rules.source.fields[].cmdbPath`, а CMDBuild webhook передает scalar/id текущего атрибута или id текущей карточки для domain path.
 
 Для проверки полноты редактора правил ведется отдельный план `TEST_PLAN_MAPPING_EDITOR.md`. Тестовая модель строится под абстрактным `CI` / `КЕ` и использует scripts:

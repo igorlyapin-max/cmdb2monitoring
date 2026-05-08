@@ -201,7 +201,7 @@ Conversion rules могут содержать `source.fields[].cmdbPath`. Webho
 - операции `create`, `update`, `delete` с checkbox выбора;
 - current/desired JSON для проверки оператором.
 
-`Save file as` сохраняет только JSON-план локально. `Загрузить в CMDB` отправляет выбранные операции на BFF, а BFF применяет их к CMDBuild REST `/etl/webhook/`. Backend принимает к apply только records с префиксом `cmdbwebhooks2kafka-`, чтобы не менять чужие CMDBuild webhooks.
+`Save file as` сохраняет только JSON-план локально. `Загрузить в CMDB` отправляет выбранные операции на BFF, а BFF применяет их к CMDBuild REST `/etl/webhook/`. Backend принимает к apply только records с префиксом `cmdbwebhooks2kafka-`, чтобы не менять чужие CMDBuild webhooks. Для `update` и `delete` BFF перед записью перечитывает `/etl/webhook/?detailed=true` и выбирает целевой CMDBuild record по managed `code`; `current.id` из browser plan не считается доверенным идентификатором.
 
 ### Interface language preference
 

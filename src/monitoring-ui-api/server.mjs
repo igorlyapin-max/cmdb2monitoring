@@ -2646,18 +2646,20 @@ async function applyCmdbuildWebhookOperations(session, payload) {
 
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const existingByCode = await readCmdbuildWebhooksByCode(baseUrl, credentials);
   const results = [];
   for (const operation of operations) {
     const action = String(operation?.action ?? '').trim().toLowerCase();
     const desiredInput = isPlainObject(operation?.desired) ? operation.desired : {};
     const current = normalizeCmdbuildWebhook(operation?.current ?? {});
-    const code = firstNonBlank(desiredInput.code, desiredInput._id, desiredInput.id, current.code, operation?.code);
+    const code = firstNonBlank(desiredInput.code, desiredInput._id, desiredInput.id, operation?.code, current.code);
     if (!String(code).startsWith(managedCmdbuildWebhookPrefix)) {
       throw httpError(400, 'unsafe_webhook_operation', `Webhook '${code}' is outside managed prefix '${managedCmdbuildWebhookPrefix}'.`);
     }
 
     if (action === 'create') {
       const desired = normalizeCmdbuildWebhookPayload(desiredInput);
+      requireManagedCmdbuildWebhookPayload(desired, code);
       await cmdbuildRequest(baseUrl, '/etl/webhook/', credentials, {
         method: 'POST',
         body: desired,
@@ -2669,7 +2671,9 @@ async function applyCmdbuildWebhookOperations(session, payload) {
 
     if (action === 'update') {
       const desired = normalizeCmdbuildWebhookPayload(desiredInput);
-      const id = encodeURIComponent(current._id || current.id || code);
+      requireManagedCmdbuildWebhookPayload(desired, code);
+      const existing = requireExistingManagedCmdbuildWebhook(existingByCode, code);
+      const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
       await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
         method: 'PUT',
         body: desired,
@@ -2680,7 +2684,8 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     }
 
     if (action === 'delete') {
-      const id = encodeURIComponent(current._id || current.id || code);
+      const existing = requireExistingManagedCmdbuildWebhook(existingByCode, code);
+      const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
       await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
         method: 'DELETE',
         headers: { 'CMDBuild-View': 'admin' }
@@ -2698,6 +2703,31 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     count: results.length,
     results
   };
+}
+
+async function readCmdbuildWebhooksByCode(baseUrl, credentials) {
+  const result = await cmdbuildGet(baseUrl, '/etl/webhook/?detailed=true', credentials, {
+    'CMDBuild-View': 'admin'
+  });
+  return new Map(normalizeCmdbuildList(result)
+    .map(normalizeCmdbuildWebhook)
+    .filter(item => item.code)
+    .map(item => [normalizeCmdbuildWebhookCode(item.code), item]));
+}
+
+function requireManagedCmdbuildWebhookPayload(payload, expectedCode) {
+  if (!String(payload.code).startsWith(managedCmdbuildWebhookPrefix)
+    || normalizeCmdbuildWebhookCode(payload.code) !== normalizeCmdbuildWebhookCode(expectedCode)) {
+    throw httpError(400, 'unsafe_webhook_operation', `Webhook '${payload.code}' does not match managed operation '${expectedCode}'.`);
+  }
+}
+
+function requireExistingManagedCmdbuildWebhook(existingByCode, code) {
+  const existing = existingByCode.get(normalizeCmdbuildWebhookCode(code));
+  if (!existing || !String(existing.code).startsWith(managedCmdbuildWebhookPrefix)) {
+    throw httpError(404, 'webhook_not_found', `Managed webhook '${code}' was not found in CMDBuild.`);
+  }
+  return existing;
 }
 
 async function analyzeCmdbuildAuditModel(session, payload = {}) {
@@ -3813,6 +3843,13 @@ function normalizeCmdbuildWebhookPayload(item = {}) {
     language: item.language ?? '',
     active: item.active !== false
   };
+}
+
+function normalizeCmdbuildWebhookCode(code) {
+  return String(code ?? '')
+    .replace(/[^A-Za-z0-9_.-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
 }
 
 function parseJsonObject(value) {
