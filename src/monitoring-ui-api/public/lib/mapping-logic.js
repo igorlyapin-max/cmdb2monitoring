@@ -343,15 +343,7 @@ export function sourceFieldAddressKind(fieldKey, fieldRule = {}) {
     return 'reference';
   }
 
-  const tokens = [
-    fieldKey,
-    canonicalSourceField(fieldKey),
-    fieldRule.source,
-    fieldRule.cmdbAttribute,
-    ...(Array.isArray(fieldRule.sources) ? fieldRule.sources : []),
-    ...(Array.isArray(fieldRule.cmdbAttributes) ? fieldRule.cmdbAttributes : []),
-    ...String(fieldRule.cmdbPath ?? '').split('.')
-  ].map(value => String(value ?? '').toLowerCase());
+  const tokens = sourceFieldAddressTokens(fieldKey, fieldRule);
   const joined = tokens.join(' ');
   const compact = normalizeToken(joined);
   const validationRegex = String(fieldRule.validationRegex ?? '').toLowerCase();
@@ -368,6 +360,31 @@ export function sourceFieldAddressKind(fieldKey, fieldRule = {}) {
   }
 
   return 'unknown';
+}
+
+function sourceFieldAddressTokens(fieldKey, fieldRule = {}) {
+  const cmdbPathSegments = String(fieldRule.cmdbPath ?? '')
+    .split('.')
+    .map(segment => segment.trim())
+    .filter(Boolean)
+    .filter(segment => !segment.toLowerCase().startsWith('{domain:'));
+  if (cmdbPathSegments.length > 1) {
+    const leaf = cmdbPathSegments[cmdbPathSegments.length - 1];
+    return [
+      leaf,
+      fieldRule.type,
+      fieldRule.validationRegex
+    ].map(value => String(value ?? '').toLowerCase());
+  }
+
+  return [
+    fieldKey,
+    canonicalSourceField(fieldKey),
+    fieldRule.source,
+    fieldRule.cmdbAttribute,
+    ...(Array.isArray(fieldRule.sources) ? fieldRule.sources : []),
+    ...(Array.isArray(fieldRule.cmdbAttributes) ? fieldRule.cmdbAttributes : [])
+  ].map(value => String(value ?? '').toLowerCase());
 }
 
 export function cmdbPathIncludesDomain(cmdbPath) {

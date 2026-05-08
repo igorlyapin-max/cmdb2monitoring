@@ -37,6 +37,21 @@ test('sourceFieldAddressKind classifies lookup and reference leaves before addre
   assert.equal(sourceFieldAddressKind('AddressRef', { type: 'reference', source: 'IPAddress' }), 'reference');
 });
 
+test('sourceFieldAddressKind uses cmdbPath leaf instead of reference root', () => {
+  assert.equal(sourceFieldAddressKind('ipaddressIpAddr', {
+    cmdbPath: 'serveri.ipaddress.ipAddr',
+    type: 'ipAddress'
+  }), 'ip');
+  assert.equal(sourceFieldAddressKind('ipaddressCode', {
+    cmdbPath: 'serveri.ipaddress.Code',
+    type: 'string'
+  }), 'unknown');
+  assert.equal(sourceFieldAddressKind('mgmtIpAddr', {
+    cmdbPath: 'serveri.mgmt.ipAddr',
+    type: 'ipAddress'
+  }), 'ip');
+});
+
 test('interfaceAddressCompatibilityIssue blocks IP-looking fields in DNS target', () => {
   assert.deepEqual(
     interfaceAddressCompatibilityIssue('ipAddress', { source: 'ip_address' }, 'interfaceAddress', { mode: 'dns' }),
