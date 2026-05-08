@@ -40,6 +40,7 @@
 - Conversion Rules Logical Control can now fix an existing host profile whose interface address still points to an invalid/raw field by replacing it with a class-scoped IP/DNS leaf.
 - Conversion Rules Management now classifies `cmdbPath` address fields by the final leaf instead of the reference root, so `ipaddress.Code` is no longer treated as an IP candidate while `mgmt.ipAddr` remains valid.
 - Conversion Rules Management now shows configured `cmdbPath` fields in editor/profile dropdowns as readable paths such as `mgmt -> ipAddr / routeCore`, keeping generated source keys like `routeCoreMgmtIpAddr` only in tooltips/JSON.
+- Conversion Rules Management now preselects the rule class from the selected monitoring profile when adding a rule, avoiding a duplicate class choice for profile-scoped assignments.
 - Hardened Webhook Setup apply so update/delete operations reload CMDBuild webhooks and resolve the target by managed `code`, preventing a crafted client payload from applying a managed-code operation to an unrelated webhook id.
 - Dashboard rules-version rows now show the exact disk/git source path and warn when the converter-loaded rules version differs from the management UI source.
 - Conversion Rules Management view now keeps the Zabbix side visible when selecting a CMDBuild attribute, including ordinary payload mappings and dynamic Host group mappings from CMDBuild leaf values.

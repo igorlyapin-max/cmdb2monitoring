@@ -5961,7 +5961,8 @@ function deleteSelectedMappingRules() {
 
 function populateMappingEditorClasses() {
   const select = $('#mappingEditClass');
-  const previous = select.value;
+  const profileClass = mappingEditorSelectedProfileClassForAdd();
+  const previous = profileClass || select.value;
   const rules = currentMappingRules();
   const classes = mappingEditorClassOptions(rules, state.mappingCmdbuildCatalog ?? {});
 
@@ -5969,6 +5970,20 @@ function populateMappingEditorClasses() {
     { value: '', label: t('mapping.option.anyClass') },
     ...classes
   ], previous, state.mappingCmdbuildCatalog ?? {});
+}
+
+function mappingEditorSelectedProfileClassForAdd() {
+  if (state.mappingEditAction !== 'add') {
+    return '';
+  }
+
+  const profile = selectedMappingHostProfile();
+  const classes = profile ? ruleClassConditions(profile) : [];
+  if (classes.length !== 1) {
+    return '';
+  }
+
+  return catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, classes[0]);
 }
 
 function setClassSelectOptions(select, options, selectedValue = '', catalog = {}) {
@@ -7042,6 +7057,13 @@ function loadMappingHostProfileIntoForm(profileName) {
     $('#mappingProfileScope').dataset.userTouched = '';
   }
   renderMappingProfilesList();
+  if (state.mappingEditAction === 'add' && className) {
+    $('#mappingEditClass').value = className;
+    refreshMappingEditorDependentControls({
+      selectedField: '',
+      selectedTarget: ''
+    });
+  }
   updateMappingProfileControls();
   updateMappingEditorFormState();
   setMappingProfileStatus(tf('mapping.status.profileLoaded', { profile: profile.name || 'default' }), 'success');
