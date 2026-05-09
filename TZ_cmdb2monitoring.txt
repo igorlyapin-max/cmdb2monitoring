@@ -1,7 +1,7 @@
 Техническое задание
 Проект: cmdb2monitoring
-Версия: 0.8.2
-Дата: 2026-05-05
+Версия: 0.8.3
+Дата: 2026-05-09
 
 1. Назначение проекта
 
@@ -1238,6 +1238,7 @@ GET http://localhost:5083/health
 - читать binding events, опубликованные zabbixrequests2api после успешного host.create/update/delete;
 - для `isMainProfile=true` обновлять исходную карточку CMDBuild и писать `zabbix_main_hostid=<hostid>`, а при `host.delete` очищать это поле;
 - для дополнительных профилей искать карточку класса `ZabbixHostBinding` по `OwnerClass + OwnerCardId + HostProfile` и создавать или обновлять связь;
+- перед `PUT` сравнивать текущее состояние CMDBuild с binding event и пропускать запись, если `zabbix_main_hostid` или существующая карточка `ZabbixHostBinding` уже совпадает;
 - начиная со второго этапа обеспечивать данные для прямой идентификации update/delete: `cmdbkafka2zabbix` читает `zabbix_main_hostid` и `ZabbixHostBinding` перед fallback `host.get`;
 - invalid JSON пропускать как poison message с фиксацией state/offset;
 - ошибки записи в CMDBuild считать retryable и не коммитить Kafka offset.

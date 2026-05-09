@@ -15,6 +15,7 @@ This file records mandatory project development rules. If a rule conflicts with 
 - Logs are designed for ELK. Until ELK is available, structured JSON logs are written to Kafka log topics.
 - Runtime state is stored in `state/*.json` and must not be committed.
 - Production secrets must not be stored in git. Use environment variables, secret storage, or local config excluded from git.
+- Until an explicit instruction changes this, release version `z.x.y` must be bumped only in the patch component `y`; do not change `z` or `x`.
 - Frontend credentials must not be stored in the browser; use a server-side session.
 - `monitoring-ui-api` main menu text, Help text, and base selector tooltips must support Russian and English locales. When adding a menu item, Help text, or selector tooltip, update both `ru` and `en` dictionaries.
 - SAML2 must be implemented through a proven library with mandatory IdP signing certificate validation and InResponseTo validation. Do not hand-roll XML signature checks.

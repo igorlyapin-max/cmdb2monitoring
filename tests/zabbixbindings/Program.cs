@@ -19,9 +19,13 @@ var tests = new (string Name, Func<Task> Run)[]
     ("binding event reader applies defaults", BindingEventReaderAppliesDefaults),
     ("binding event reader rejects missing required fields", BindingEventReaderRejectsMissingRequiredFields),
     ("binding client writes main zabbix_main_hostid", BindingClientWritesMainHostId),
+    ("binding client skips unchanged main zabbix_main_hostid", BindingClientSkipsUnchangedMainHostId),
     ("binding client clears main zabbix_main_hostid on delete", BindingClientClearsMainHostIdOnDelete),
+    ("binding client skips already cleared main zabbix_main_hostid", BindingClientSkipsAlreadyClearedMainHostId),
+    ("binding client still clears main zabbix_main_hostid when read fails", BindingClientClearsMainHostIdWhenReadFails),
     ("binding client creates additional profile card", BindingClientCreatesAdditionalProfileCard),
     ("binding client updates existing additional profile card", BindingClientUpdatesExistingAdditionalProfileCard),
+    ("binding client skips unchanged additional profile card", BindingClientSkipsUnchangedAdditionalProfileCard),
     ("host binding resolver reads main zabbix_main_hostid", HostBindingResolverReadsMainHostId),
     ("host binding resolver reads active additional profile binding", HostBindingResolverReadsAdditionalBinding),
     ("host binding resolver ignores deleted additional profile binding", HostBindingResolverIgnoresDeletedAdditionalBinding),
@@ -103,6 +107,11 @@ static async Task BindingClientWritesMainHostId()
 {
     var handler = new FakeHttpMessageHandler();
     handler.ExpectJson(
+        HttpMethod.Get,
+        "/classes/CIClass/cards/101",
+        AssertCmdbHeaders,
+        """{"data":{"zabbix_main_hostid":"old"}}""");
+    handler.ExpectJson(
         HttpMethod.Put,
         "/classes/CIClass/cards/101",
         request =>
@@ -121,9 +130,71 @@ static async Task BindingClientWritesMainHostId()
     handler.AssertAllRequestsConsumed();
 }
 
+static async Task BindingClientSkipsUnchangedMainHostId()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Get,
+        "/classes/CIClass/cards/101",
+        AssertCmdbHeaders,
+        """{"data":{"zabbix_main_hostid":"501"}}""");
+
+    var client = CreateBindingClient(handler);
+    await client.ApplyAsync(BindingEvent(isMainProfile: true, operation: "host.create", status: "active"), CancellationToken.None);
+
+    handler.AssertAllRequestsConsumed();
+    AssertEqual(1, handler.Requests.Count, "HTTP call count");
+}
+
 static async Task BindingClientClearsMainHostIdOnDelete()
 {
     var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Get,
+        "/classes/CIClass/cards/101",
+        _ => { },
+        """{"data":{"zabbix_main_hostid":"501"}}""");
+    handler.ExpectJson(
+        HttpMethod.Put,
+        "/classes/CIClass/cards/101",
+        request => AssertJsonBody(request, body =>
+        {
+            AssertTrue(body.ContainsKey("zabbix_main_hostid"), "delete body must include zabbix_main_hostid");
+            AssertTrue(body["zabbix_main_hostid"] is null, "delete must clear zabbix_main_hostid");
+        }),
+        """{"data":{}}""");
+
+    var client = CreateBindingClient(handler);
+    await client.ApplyAsync(BindingEvent(isMainProfile: true, operation: "host.delete", status: "deleted"), CancellationToken.None);
+
+    handler.AssertAllRequestsConsumed();
+}
+
+static async Task BindingClientSkipsAlreadyClearedMainHostId()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Get,
+        "/classes/CIClass/cards/101",
+        _ => { },
+        """{"data":{}}""");
+
+    var client = CreateBindingClient(handler);
+    await client.ApplyAsync(BindingEvent(isMainProfile: true, operation: "host.delete", status: "deleted"), CancellationToken.None);
+
+    handler.AssertAllRequestsConsumed();
+    AssertEqual(1, handler.Requests.Count, "HTTP call count");
+}
+
+static async Task BindingClientClearsMainHostIdWhenReadFails()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Get,
+        "/classes/CIClass/cards/101",
+        _ => { },
+        """{"error":"unavailable"}""",
+        HttpStatusCode.InternalServerError);
     handler.ExpectJson(
         HttpMethod.Put,
         "/classes/CIClass/cards/101",
@@ -198,6 +269,39 @@ static async Task BindingClientUpdatesExistingAdditionalProfileCard()
     await client.ApplyAsync(BindingEvent(isMainProfile: false, profile: "management"), CancellationToken.None);
 
     handler.AssertAllRequestsConsumed();
+}
+
+static async Task BindingClientSkipsUnchangedAdditionalProfileCard()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Get,
+        "/classes/ZabbixHostBinding/cards?limit=1000",
+        _ => { },
+        """
+        {
+          "data": [
+            {
+              "_id": "binding-9",
+              "OwnerClass": "CIClass",
+              "OwnerCardId": "101",
+              "OwnerCode": "CI-101",
+              "HostProfile": "management",
+              "ZabbixHostId": "501",
+              "ZabbixHostName": "cmdb-ci-101-management",
+              "BindingStatus": "active",
+              "RulesVersion": "rv-1",
+              "LastSyncAt": "2026-05-05T12:00:00Z"
+            }
+          ]
+        }
+        """);
+
+    var client = CreateBindingClient(handler);
+    await client.ApplyAsync(BindingEvent(isMainProfile: false, profile: "management"), CancellationToken.None);
+
+    handler.AssertAllRequestsConsumed();
+    AssertEqual(1, handler.Requests.Count, "HTTP call count");
 }
 
 static async Task HostBindingResolverReadsMainHostId()

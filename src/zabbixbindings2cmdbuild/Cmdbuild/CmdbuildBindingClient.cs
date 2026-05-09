@@ -29,15 +29,24 @@ public sealed class CmdbuildBindingClient(
 
     private async Task UpdateMainHostIdAsync(ZabbixBindingEvent bindingEvent, CancellationToken cancellationToken)
     {
-        var body = new JsonObject();
-        if (IsDeleted(bindingEvent))
+        var attributeName = options.Value.MainHostIdAttributeName;
+        var desiredHostId = IsDeleted(bindingEvent) ? null : bindingEvent.ZabbixHostId;
+        var currentHostId = await TryReadCurrentMainHostIdAsync(bindingEvent, cancellationToken);
+        if (currentHostId is not null && BindingValueMatches(currentHostId.Value.HostId, desiredHostId))
         {
-            body[options.Value.MainHostIdAttributeName] = null;
+            logger.LogInformation(
+                "Skipped CMDBuild main host binding write for {SourceClass}/{SourceCardId}: {Attribute} is already {ZabbixHostId}",
+                bindingEvent.SourceClass,
+                bindingEvent.SourceCardId,
+                attributeName,
+                IsDeleted(bindingEvent) ? "<cleared>" : desiredHostId);
+            return;
         }
-        else
+
+        var body = new JsonObject
         {
-            body[options.Value.MainHostIdAttributeName] = bindingEvent.ZabbixHostId;
-        }
+            [attributeName] = desiredHostId
+        };
 
         using var updateResponse = await SendAsync(
             HttpMethod.Put,
@@ -53,13 +62,13 @@ public sealed class CmdbuildBindingClient(
             "Updated CMDBuild main host binding for {SourceClass}/{SourceCardId}: {Attribute}={ZabbixHostId}",
             bindingEvent.SourceClass,
             bindingEvent.SourceCardId,
-            options.Value.MainHostIdAttributeName,
-            IsDeleted(bindingEvent) ? "<cleared>" : bindingEvent.ZabbixHostId);
+            attributeName,
+            IsDeleted(bindingEvent) ? "<cleared>" : desiredHostId);
     }
 
     private async Task UpsertProfileBindingAsync(ZabbixBindingEvent bindingEvent, CancellationToken cancellationToken)
     {
-        var existingCardId = await FindBindingCardIdAsync(bindingEvent, cancellationToken);
+        var existingCard = await FindBindingCardAsync(bindingEvent, cancellationToken);
         var body = BuildBindingBody(bindingEvent);
         logger.LogBasic(
             debugLoggingOptions,
@@ -67,8 +76,8 @@ public sealed class CmdbuildBindingClient(
             bindingEvent.SourceClass,
             bindingEvent.SourceCardId,
             bindingEvent.HostProfile,
-            existingCardId ?? "<new>");
-        if (string.IsNullOrWhiteSpace(existingCardId))
+            existingCard?.CardId ?? "<new>");
+        if (existingCard is null)
         {
             using var createResponse = await SendAsync(
                 HttpMethod.Post,
@@ -89,9 +98,20 @@ public sealed class CmdbuildBindingClient(
             return;
         }
 
+        if (ProfileBindingMatches(existingCard.Value.Card, bindingEvent))
+        {
+            logger.LogInformation(
+                "Skipped CMDBuild {BindingClass} binding write for {SourceClass}/{SourceCardId}, profile {HostProfile}: binding is already current",
+                options.Value.BindingClassName,
+                bindingEvent.SourceClass,
+                bindingEvent.SourceCardId,
+                bindingEvent.HostProfile);
+            return;
+        }
+
         using var updateResponse = await SendAsync(
             HttpMethod.Put,
-            $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards/{Uri.EscapeDataString(existingCardId)}",
+            $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards/{Uri.EscapeDataString(existingCard.Value.CardId)}",
             body,
             cancellationToken);
         logger.LogVerbose(
@@ -101,14 +121,39 @@ public sealed class CmdbuildBindingClient(
         logger.LogInformation(
             "Updated CMDBuild {BindingClass} binding {BindingCardId} for {SourceClass}/{SourceCardId}, profile {HostProfile}, status {BindingStatus}",
             options.Value.BindingClassName,
-            existingCardId,
+            existingCard.Value.CardId,
             bindingEvent.SourceClass,
             bindingEvent.SourceCardId,
             bindingEvent.HostProfile,
             bindingEvent.BindingStatus);
     }
 
-    private async Task<string?> FindBindingCardIdAsync(ZabbixBindingEvent bindingEvent, CancellationToken cancellationToken)
+    private async Task<CurrentMainHostId?> TryReadCurrentMainHostIdAsync(ZabbixBindingEvent bindingEvent, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var document = await SendAsync(
+                HttpMethod.Get,
+                $"/classes/{Uri.EscapeDataString(bindingEvent.SourceClass)}/cards/{Uri.EscapeDataString(bindingEvent.SourceCardId)}",
+                null,
+                cancellationToken);
+            var data = ReadDataObject(document?.RootElement);
+            return data is null
+                ? null
+                : new CurrentMainHostId(ReadString(data.Value, options.Value.MainHostIdAttributeName));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to read current CMDBuild main host binding for {SourceClass}/{SourceCardId}; binding writer will perform the write",
+                bindingEvent.SourceClass,
+                bindingEvent.SourceCardId);
+            return null;
+        }
+    }
+
+    private async Task<ExistingBindingCard?> FindBindingCardAsync(ZabbixBindingEvent bindingEvent, CancellationToken cancellationToken)
     {
         using var document = await SendAsync(
             HttpMethod.Get,
@@ -126,7 +171,10 @@ public sealed class CmdbuildBindingClient(
                 && Same(ReadString(card, "OwnerCardId"), bindingEvent.SourceCardId)
                 && Same(ReadString(card, "HostProfile"), bindingEvent.HostProfile))
             {
-                return ReadString(card, "_id") ?? ReadString(card, "id");
+                var cardId = ReadString(card, "_id") ?? ReadString(card, "id");
+                return string.IsNullOrWhiteSpace(cardId)
+                    ? null
+                    : new ExistingBindingCard(cardId, card.Clone());
             }
         }
 
@@ -147,6 +195,18 @@ public sealed class CmdbuildBindingClient(
             ["RulesVersion"] = bindingEvent.RulesVersion,
             ["LastSyncAt"] = DateTimeOffset.UtcNow.ToString("O")
         };
+    }
+
+    private static bool ProfileBindingMatches(JsonElement card, ZabbixBindingEvent bindingEvent)
+    {
+        return Same(ReadString(card, "OwnerClass"), bindingEvent.SourceClass)
+            && Same(ReadString(card, "OwnerCardId"), bindingEvent.SourceCardId)
+            && Same(ReadString(card, "OwnerCode"), bindingEvent.SourceCode)
+            && Same(ReadString(card, "HostProfile"), bindingEvent.HostProfile)
+            && Same(ReadString(card, "ZabbixHostId"), bindingEvent.ZabbixHostId)
+            && Same(ReadString(card, "ZabbixHostName"), bindingEvent.ZabbixHostName)
+            && Same(ReadString(card, "BindingStatus"), bindingEvent.BindingStatus)
+            && Same(ReadString(card, "RulesVersion"), bindingEvent.RulesVersion);
     }
 
     private async Task<JsonDocument?> SendAsync(
@@ -209,6 +269,18 @@ public sealed class CmdbuildBindingClient(
         return [];
     }
 
+    private static JsonElement? ReadDataObject(JsonElement? root)
+    {
+        if (root is { ValueKind: JsonValueKind.Object } rootObject
+            && rootObject.TryGetProperty("data", out var data)
+            && data.ValueKind == JsonValueKind.Object)
+        {
+            return data;
+        }
+
+        return null;
+    }
+
     private static string? ReadString(JsonElement element, string propertyName)
     {
         if (element.ValueKind != JsonValueKind.Object)
@@ -241,9 +313,19 @@ public sealed class CmdbuildBindingClient(
         return string.Equals(left ?? string.Empty, right ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool BindingValueMatches(string? left, string? right)
+    {
+        return string.IsNullOrWhiteSpace(left) && string.IsNullOrWhiteSpace(right)
+            || Same(left, right);
+    }
+
     private static bool IsDeleted(ZabbixBindingEvent bindingEvent)
     {
         return string.Equals(bindingEvent.BindingStatus, "deleted", StringComparison.OrdinalIgnoreCase)
             || string.Equals(bindingEvent.Operation, "host.delete", StringComparison.OrdinalIgnoreCase);
     }
+
+    private readonly record struct CurrentMainHostId(string? HostId);
+
+    private readonly record struct ExistingBindingCard(string CardId, JsonElement Card);
 }

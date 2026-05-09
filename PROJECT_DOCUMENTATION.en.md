@@ -290,6 +290,7 @@ The service consumes `zabbix.host.bindings.*` and applies reverse writes:
 
 - when `isMainProfile=true`, it runs `PUT /classes/{sourceClass}/cards/{sourceCardId}` and writes `zabbix_main_hostid=<hostid>`; for `host.delete` it clears the value;
 - for additional `hostProfiles`, it finds a `ZabbixHostBinding` card by `OwnerClass + OwnerCardId + HostProfile` and creates or updates `OwnerClass`, `OwnerCardId`, `OwnerCode`, `HostProfile`, `ZabbixHostId`, `ZabbixHostName`, `BindingStatus`, `RulesVersion`, and `LastSyncAt`;
+- before writing, the service compares current CMDBuild state with the binding event and skips `PUT` when `zabbix_main_hostid` or the found `ZabbixHostBinding` card already matches. This reduces duplicate binding-event noise and avoids unnecessary CMDBuild update webhooks;
 - invalid JSON is treated as a poison message: a warning is logged, state/offset are recorded, and the message is skipped;
 - CMDBuild write failures do not commit the Kafka offset, so the event is retried after the service or CMDBuild recovers.
 

@@ -1,7 +1,7 @@
 cmdb2monitoring Technical Specification
 
-Document version: 0.8.2
-Last updated: 2026-05-05
+Document version: 0.8.3
+Last updated: 2026-05-09
 English companion for TZ_cmdb2monitoring.txt. Architecture artifacts under aa/ are intentionally not translated in this pass.
 
 1. Project Purpose
@@ -384,6 +384,7 @@ Responsibilities:
 - consume binding events published by `zabbixrequests2api`;
 - for `isMainProfile=true`, update the source CMDBuild card and write `zabbix_main_hostid=<hostid>`; on `host.delete`, clear the field;
 - for additional profiles, find a `ZabbixHostBinding` card by `OwnerClass + OwnerCardId + HostProfile` and create or update the binding;
+- before `PUT`, compare the current CMDBuild state with the binding event and skip the write when `zabbix_main_hostid` or the existing `ZabbixHostBinding` card already matches;
 - starting with stage 2, provide data for direct update/delete identification: `cmdbkafka2zabbix` reads `zabbix_main_hostid` and `ZabbixHostBinding` before fallback `host.get`;
 - skip invalid JSON as poison messages with state/offset recorded;
 - treat CMDBuild write errors as retryable and do not commit the Kafka offset.

@@ -2,11 +2,19 @@
 
 ## Unreleased
 
+No unreleased changes.
+
+## 0.8.3 - 2026-05-09
+
 ### Added
 
 - Added `DebugLogging` settings for all .NET microservices with `Basic` and `Verbose` levels; extended debug events are emitted through regular `ILogger` at `Information`.
 - Added static Bearer-token validation to `cmdbwebhooks2kafka` for inbound CMDBuild webhooks before JSON parsing and Kafka publish.
 - Added a Conversion Rules Management payload string builder for dynamic Zabbix objects and scalar payload objects, including `Model.Source(...)` and `Model.Regex(...)` templates over direct, reference, domain, and lookup CMDBuild leaf fields.
+
+### Changed
+
+- `zabbixbindings2cmdbuild` now skips idempotent CMDBuild binding writes when `zabbix_main_hostid` or an existing `ZabbixHostBinding` card already matches the binding event.
 
 ## 0.8.2 - 2026-05-05
 
