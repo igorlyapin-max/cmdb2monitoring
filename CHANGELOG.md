@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-No unreleased changes.
+### Fixed
+
+- Rules dry run now writes JSON/API errors into the result panel and returns a `results` array with a summary.
 
 ## 0.8.3 - 2026-05-09
 

@@ -3040,13 +3040,23 @@ async function createEmptyRulesStarter() {
 }
 
 async function dryRunRules() {
-  const payload = JSON.parse($('#dryRunPayload').value);
-  const body = state.uploadedRulesText
-    ? { rules: JSON.parse(state.uploadedRulesText), payload }
-    : { payload };
-  const result = await api('/api/rules/dry-run', { method: 'POST', body });
-  $('#rulesResult').textContent = JSON.stringify(result, null, 2);
-  return result;
+  const resultPanel = $('#rulesResult');
+
+  try {
+    const payload = JSON.parse($('#dryRunPayload').value);
+    const body = state.uploadedRulesText
+      ? { rules: JSON.parse(state.uploadedRulesText), payload }
+      : { payload };
+    const result = await api('/api/rules/dry-run', { method: 'POST', body });
+    resultPanel.textContent = JSON.stringify(result, null, 2);
+    return result;
+  } catch (error) {
+    const details = error instanceof SyntaxError
+      ? { error: 'invalid_dry_run_json', message: error.message }
+      : error.payload ?? { error: 'dry_run_failed', message: error.message ?? String(error) };
+    resultPanel.textContent = JSON.stringify(details, null, 2);
+    throw error;
+  }
 }
 
 async function saveRulesAsFile() {

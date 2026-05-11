@@ -1979,6 +1979,12 @@ async function dryRunRules(payload) {
   const normalized = resolveLookupFieldsFromCatalog(normalizeSourcePayload(source, rules), rules, cmdbuildCatalog);
   const route = (rules.eventRoutingRules ?? []).find(item => equalsIgnoreCase(item.eventType, normalized.eventType));
   const model = buildDryRunModel(rules, normalized, route);
+  const skipReason = !route
+    ? `event type '${normalized.eventType || ''}' is not routed`
+    : route.publish === false
+      ? `event type '${route.eventType}' is disabled for publishing`
+      : null;
+  const results = skipReason ? [] : [model];
 
   return {
     validation,
@@ -1990,7 +1996,13 @@ async function dryRunRules(payload) {
       fallbackMethod: route.fallbackMethod || null,
       fallbackForMethod: route.requiresZabbixHostId && !normalized.zabbixHostId ? route.method : null
     } : null,
-    result: model
+    summary: {
+      resultCount: results.length,
+      skipReason
+    },
+    result: results[0] ?? null,
+    results,
+    preview: model
   };
 }
 
