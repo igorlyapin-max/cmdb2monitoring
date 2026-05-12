@@ -146,6 +146,7 @@ test('ensureMinimalHostProfileForClass creates an IP profile for a new class', (
   assert.equal(result.created, true);
   assert.equal(result.profileName, 'server-main');
   assert.equal(rules.hostProfiles.length, 1);
+  assert.equal(rules.hostProfiles[0].isMainProfile, true);
   assert.equal(rules.hostProfiles[0].createOnUpdateWhenMissing, true);
   assert.equal(rules.hostProfiles[0].when.allRegex[0].pattern, '(?i)^Server$');
   assert.deepEqual(rules.hostProfiles[0].interfaces[0], {
@@ -204,6 +205,7 @@ test('ensureMinimalHostProfileForClass can explicitly create an additional profi
   assert.equal(result.additional, true);
   assert.equal(result.profileName, 'serveri-mgmt');
   assert.equal(rules.hostProfiles.length, 2);
+  assert.equal(rules.hostProfiles[1].isMainProfile, false);
   assert.equal(rules.hostProfiles[1].hostNameTemplate, 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-<#= Model.HostProfileName #>');
   assert.deepEqual(rules.hostProfiles[1].when.anyRegex, [
     { field: 'mgmtIpAddr', pattern: '.+' },
@@ -273,6 +275,7 @@ test('ensureMinimalHostProfileForClass uses selected interface profile options',
     { profileName: 'network-device-mgmt', interfaceProfileRef: 'snmp', createOnUpdateWhenMissing: false });
 
   assert.equal(result.created, true);
+  assert.equal(rules.hostProfiles[0].isMainProfile, true);
   assert.equal(rules.hostProfiles[0].createOnUpdateWhenMissing, false);
   assert.equal(rules.hostProfiles[0].interfaces[0].name, 'network-device-mgmt-snmp-dns');
   assert.equal(rules.hostProfiles[0].interfaces[0].interfaceProfileRef, 'snmp');

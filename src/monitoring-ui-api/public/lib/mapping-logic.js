@@ -43,6 +43,7 @@ export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fie
   const profile = {
     name: profileName,
     priority: nextPriority,
+    isMainProfile: !forceAdditional,
     createOnUpdateWhenMissing,
     when,
     hostNameTemplate: forceAdditional

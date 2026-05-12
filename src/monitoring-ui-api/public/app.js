@@ -7444,7 +7444,9 @@ function loadMappingHostProfileIntoForm(profileName) {
     $('#mappingProfileField').value = field;
   }
   if ($('#mappingProfileKind')) {
-    $('#mappingProfileKind').value = String(profile.hostNameTemplate ?? '').includes('HostProfileName') ? 'additional' : 'main';
+    $('#mappingProfileKind').value = typeof profile.isMainProfile === 'boolean'
+      ? (profile.isMainProfile ? 'main' : 'additional')
+      : String(profile.hostNameTemplate ?? '').includes('HostProfileName') ? 'additional' : 'main';
   }
   if ($('#mappingProfileName')) {
     $('#mappingProfileName').value = profile.name || '';
@@ -7614,6 +7616,7 @@ function ensureMappingProfileSourceField(rules, className, field) {
 function buildUpdatedHostProfile(existing, values) {
   const profile = cloneJson(existing);
   profile.name = values.profileName;
+  profile.isMainProfile = values.kind !== 'additional';
   profile.createOnUpdateWhenMissing = values.createOnUpdateWhenMissing;
   profile.when = {
     allRegex: [

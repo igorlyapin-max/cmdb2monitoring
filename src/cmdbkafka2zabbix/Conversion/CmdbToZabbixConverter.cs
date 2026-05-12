@@ -45,6 +45,7 @@ public sealed class CmdbToZabbixConverter(
         foreach (var profile in profiles)
         {
             var profileName = ProfileName(profile);
+            var isMainProfile = IsMainProfile(profile);
             var profiledSource = AddHostProfileFields(source, profileName);
             var zabbixHostId = ResolveProfileZabbixHostId(
                 profiledSource,
@@ -55,7 +56,7 @@ public sealed class CmdbToZabbixConverter(
                 zabbixHostId = await hostBindingResolver.ResolveHostIdAsync(
                     profiledSource,
                     profileName,
-                    IsMainProfileName(profileName),
+                    isMainProfile,
                     cancellationToken);
             }
 
@@ -95,7 +96,7 @@ public sealed class CmdbToZabbixConverter(
             }
 
             var request = await templateRenderer.RenderAsync(templateLines, model, cancellationToken);
-            request = EnrichCmdb2MonitoringMetadata(request, model, rules);
+            request = EnrichCmdb2MonitoringMetadata(request, model, rules, isMainProfile);
 
             using (JsonDocument.Parse(request))
             {
@@ -425,6 +426,22 @@ public sealed class CmdbToZabbixConverter(
         return string.IsNullOrWhiteSpace(profile.Name) ? "default" : profile.Name;
     }
 
+    private static bool IsMainProfile(HostProfileRule profile)
+    {
+        if (profile.IsMainProfile.HasValue)
+        {
+            return profile.IsMainProfile.Value;
+        }
+
+        if (IsMainProfileName(profile.Name))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(profile.HostNameTemplate)
+            && !profile.HostNameTemplate.Contains("HostProfileName", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static CmdbSourceEvent AddHostProfileFields(CmdbSourceEvent source, string profileName)
     {
         var sourceFields = new Dictionary<string, string>(source.SourceFields, StringComparer.OrdinalIgnoreCase)
@@ -446,13 +463,14 @@ public sealed class CmdbToZabbixConverter(
             return ReadField(source, profile.ZabbixHostIdField);
         }
 
-        return allowSourceHostId || IsMainProfileName(ProfileName(profile)) ? source.ZabbixHostId : null;
+        return allowSourceHostId || IsMainProfile(profile) ? source.ZabbixHostId : null;
     }
 
     private static string EnrichCmdb2MonitoringMetadata(
         string requestJson,
         ZabbixHostCreateModel model,
-        ConversionRulesDocument rules)
+        ConversionRulesDocument rules,
+        bool isMainProfile)
     {
         var root = JsonNode.Parse(requestJson) as JsonObject
             ?? throw new JsonException("Rendered Zabbix request must be a JSON object.");
@@ -471,7 +489,7 @@ public sealed class CmdbToZabbixConverter(
         WriteMetadata(metadata, "eventType", model.EventType);
         WriteMetadata(metadata, "rulesVersion", rules.RulesVersion);
         WriteMetadata(metadata, "schemaVersion", rules.SchemaVersion);
-        metadata["isMainProfile"] = IsMainProfileName(model.HostProfileName);
+        metadata["isMainProfile"] = isMainProfile;
 
         return root.ToJsonString();
     }

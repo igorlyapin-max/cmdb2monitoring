@@ -245,6 +245,7 @@ static async Task UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface()
 
     var converted = await converter.ConvertAsync(resolved, rules, CancellationToken.None);
     AssertInterfaceIp(converted, "10.20.0.10");
+    AssertMainProfileMetadata(converted, expected: true);
 }
 
 static async Task UpdateRereadsDomainLeafCards()
@@ -537,6 +538,30 @@ static void AssertInterfaceIp(IReadOnlyList<ZabbixConversionResult> results, str
     {
         throw new InvalidOperationException(
             $"Expected interface IP '{expectedIp}', got [{string.Join(", ", ips)}].");
+    }
+}
+
+static void AssertMainProfileMetadata(IReadOnlyList<ZabbixConversionResult> results, bool expected)
+{
+    if (results.Count != 1)
+    {
+        throw new InvalidOperationException($"Expected one conversion result, got {results.Count}.");
+    }
+
+    var result = results[0];
+    if (!result.ShouldPublish || string.IsNullOrWhiteSpace(result.Value))
+    {
+        throw new InvalidOperationException($"Expected publishable conversion result, got skip '{result.SkipReason}'.");
+    }
+
+    using var document = JsonDocument.Parse(result.Value);
+    var actual = document.RootElement
+        .GetProperty("cmdb2monitoring")
+        .GetProperty("isMainProfile")
+        .GetBoolean();
+    if (actual != expected)
+    {
+        throw new InvalidOperationException($"Expected isMainProfile={expected}, got {actual}.");
     }
 }
 

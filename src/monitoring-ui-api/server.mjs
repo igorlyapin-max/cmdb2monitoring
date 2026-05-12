@@ -3203,6 +3203,24 @@ function auditBindingKey(className, cardId, hostProfile) {
   return parts.some(isBlank) ? '' : parts.map(auditComparableKey).join(':');
 }
 
+function auditHostProfileIsMain(profile, index) {
+  if (typeof profile?.isMainProfile === 'boolean') {
+    return profile.isMainProfile;
+  }
+
+  const profileName = normalizeToken(profile?.name ?? '');
+  if (!profileName || profileName === 'default' || profileName === 'main') {
+    return true;
+  }
+
+  const hostNameTemplate = String(profile?.hostNameTemplate ?? '');
+  if (hostNameTemplate) {
+    return !hostNameTemplate.includes('HostProfileName');
+  }
+
+  return index === 0;
+}
+
 function buildQuickAuditItemsForCard({ rules, catalog, cmdbClass, card, bindingMap }) {
   const source = normalizeAuditCardSource(card, rules, catalog, cmdbClass.name);
   const cardId = source.entityId || source.id || readCmdbuildCardField(card, 'id');
@@ -3229,7 +3247,7 @@ function buildQuickAuditItemsForCard({ rules, catalog, cmdbClass, card, bindingM
   }
 
   return profiles.map((profile, index) => {
-    const isMainProfile = index === 0;
+    const isMainProfile = auditHostProfileIsMain(profile, index);
     const profileName = stringOrDefault(profile.name, isMainProfile ? 'main' : `profile-${index + 1}`);
     const profileSource = {
       ...source,

@@ -38,6 +38,7 @@ public sealed class ZabbixRequestReader
                 : default;
 
         var hostProfileName = ReadString(metadata, "hostProfile");
+        var isMainProfile = ReadOptionalBool(metadata, "isMainProfile") ?? IsMainProfileName(hostProfileName);
         return new ZabbixRequestDocument
         {
             RawJson = messageValue,
@@ -53,7 +54,7 @@ public sealed class ZabbixRequestReader
             SourceClass = ReadString(metadata, "sourceClass") ?? ReadString(metadata, "className"),
             SourceCardId = ReadString(metadata, "sourceCardId") ?? ReadString(metadata, "entityId") ?? key,
             SourceCode = ReadString(metadata, "sourceCode") ?? ReadString(metadata, "code"),
-            IsMainProfile = ReadBool(metadata, "isMainProfile") || IsMainProfileName(hostProfileName),
+            IsMainProfile = isMainProfile,
             RulesVersion = ReadString(metadata, "rulesVersion"),
             SchemaVersion = ReadString(metadata, "schemaVersion"),
             FallbackForMethod = ReadString(metadata, "fallbackForMethod"),
@@ -126,17 +127,22 @@ public sealed class ZabbixRequestReader
 
     private static bool ReadBool(JsonElement element, string propertyName)
     {
+        return ReadOptionalBool(element, propertyName) ?? false;
+    }
+
+    private static bool? ReadOptionalBool(JsonElement element, string propertyName)
+    {
         if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
         {
-            return false;
+            return null;
         }
 
         return value.ValueKind switch
         {
             JsonValueKind.True => true,
             JsonValueKind.False => false,
-            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
-            _ => false
+            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) ? parsed : null,
+            _ => null
         };
     }
 

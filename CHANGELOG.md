@@ -8,6 +8,7 @@
 - Conversion Rules Management modify mode now keeps the current Zabbix object/payload target visible when it is not found in catalog options.
 - CMDBuild webhook management now uses an explicit `managedIdentifier` owner marker and avoids updating/deleting webhooks owned by other microservices.
 - CMDBuild webhook payload generation now keeps reference-root payload keys such as `ipaddress` distinct from literal `ip_address`, while the converter can still resolve old `ip_address=<reference id>` events through `cmdbPath` leaves.
+- `hostProfiles[]` marked as main in Conversion Rules Management now publish `isMainProfile=true`, so writeback updates `zabbix_main_hostid` instead of creating only `ZabbixHostBinding` rows.
 
 ## 0.8.3 - 2026-05-09
 

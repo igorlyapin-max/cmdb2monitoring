@@ -99,6 +99,8 @@ public sealed class HostProfileRule
 
     public bool Enabled { get; init; } = true;
 
+    public bool? IsMainProfile { get; init; }
+
     public RuleCondition When { get; init; } = new();
 
     public string HostNameTemplate { get; init; } = string.Empty;

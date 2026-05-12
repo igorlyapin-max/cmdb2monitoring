@@ -18,6 +18,7 @@ var tests = new (string Name, Func<Task> Run)[]
 {
     ("binding event reader applies defaults", BindingEventReaderAppliesDefaults),
     ("binding event reader rejects missing required fields", BindingEventReaderRejectsMissingRequiredFields),
+    ("zabbix request reader honors explicit non-main metadata", ZabbixRequestReaderHonorsExplicitNonMainMetadata),
     ("binding client writes main zabbix_main_hostid", BindingClientWritesMainHostId),
     ("binding client skips unchanged main zabbix_main_hostid", BindingClientSkipsUnchangedMainHostId),
     ("binding client clears main zabbix_main_hostid on delete", BindingClientClearsMainHostIdOnDelete),
@@ -100,6 +101,30 @@ static Task BindingEventReaderRejectsMissingRequiredFields()
           "sourceCardId": "101"
         }
         """));
+    return Task.CompletedTask;
+}
+
+static Task ZabbixRequestReaderHonorsExplicitNonMainMetadata()
+{
+    var request = new ZabbixRequestReader().Read(
+        "101",
+        """
+        {
+          "jsonrpc": "2.0",
+          "method": "host.create",
+          "params": { "host": "cmdb-ci-101-main" },
+          "cmdb2monitoring": {
+            "sourceClass": "CIClass",
+            "sourceCardId": "101",
+            "hostProfile": "main",
+            "isMainProfile": false
+          },
+          "id": 1
+        }
+        """);
+
+    AssertEqual("main", request.HostProfileName, "HostProfileName");
+    AssertTrue(!request.IsMainProfile, "IsMainProfile");
     return Task.CompletedTask;
 }
 
