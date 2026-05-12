@@ -5,6 +5,8 @@
 ### Fixed
 
 - Rules dry run now writes JSON/API errors into the result panel and returns a `results` array with a summary.
+- Conversion Rules Management modify mode now keeps the current Zabbix object/payload target visible when it is not found in catalog options.
+- CMDBuild webhook management now uses an explicit `managedIdentifier` owner marker and avoids updating/deleting webhooks owned by other microservices.
 
 ## 0.8.3 - 2026-05-09
 

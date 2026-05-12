@@ -7,6 +7,8 @@ import {
 
 const defaultManagedPrefix = 'cmdbwebhooks2kafka-';
 const defaultWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
+const defaultManagedIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
+const defaultManagedCodeSegment = 'zabbix-host';
 
 const ruleCollections = [
   { key: 'eventRoutingRules', label: 'Event routing' },
@@ -45,12 +47,16 @@ export function buildDesiredCmdbuildWebhooks(rules = {}, cmdbuildCatalog = {}, c
   const requirements = buildWebhookRequirements(rules, cmdbuildCatalog);
   const events = webhookEventsForRules(rules);
   const defaults = currentWebhookDefaults(currentHooks, options);
-  const currentByCode = new Map(currentHooks.map(hook => [normalizeWebhookCode(hook.code), normalizeWebhookItem(hook)]));
+  const currentItems = currentHooks.map(normalizeWebhookItem);
+  const currentByCode = new Map(currentItems
+    .filter(hook => isManagedWebhook(hook, options))
+    .map(hook => [normalizeWebhookCode(hook.code), hook]));
+  const allCurrentByCode = new Map(currentItems.map(hook => [normalizeWebhookCode(hook.code), hook]));
   const desired = [];
 
   for (const classRequirements of requirements) {
     for (const event of events) {
-      const code = cmdbuildWebhookCode(classRequirements.className, event.eventType, options);
+      const code = desiredWebhookCode(classRequirements.className, event.eventType, allCurrentByCode, currentByCode, options);
       const current = currentByCode.get(normalizeWebhookCode(code));
       const currentPrefix = currentWebhookPlaceholderPrefix(current);
       const prefix = webhookPlaceholderPrefixMatchesClass(currentPrefix, classRequirements.className)
@@ -65,7 +71,7 @@ export function buildDesiredCmdbuildWebhooks(rules = {}, cmdbuildCatalog = {}, c
         method: current?.method || defaults.method,
         url: current?.url || defaults.url,
         headers: current?.headers ?? defaults.headers,
-        body: webhookBodyForRequirements(event, prefix, current?.body, classRequirements.fields, classRequirements.className),
+        body: webhookBodyForRequirements(event, prefix, current?.body, classRequirements.fields, classRequirements.className, options),
         requirements: classRequirements.fields,
         language: current?.language ?? defaults.language,
         active: current?.active ?? true
@@ -78,7 +84,10 @@ export function buildDesiredCmdbuildWebhooks(rules = {}, cmdbuildCatalog = {}, c
 
 export function buildCmdbuildWebhookOperations(rules = {}, cmdbuildCatalog = {}, currentHooks = [], options = {}) {
   const desired = buildDesiredCmdbuildWebhooks(rules, cmdbuildCatalog, currentHooks, options);
-  const currentByCode = new Map(currentHooks.map(hook => [normalizeWebhookCode(hook.code), normalizeWebhookItem(hook)]));
+  const currentItems = currentHooks.map(normalizeWebhookItem);
+  const currentByCode = new Map(currentItems
+    .filter(hook => isManagedWebhook(hook, options))
+    .map(hook => [normalizeWebhookCode(hook.code), hook]));
   const desiredByCode = new Map(desired.map(hook => [normalizeWebhookCode(hook.code), normalizeWebhookItem(hook)]));
   const operations = [];
 
@@ -120,7 +129,7 @@ export function buildCmdbuildWebhookOperations(rules = {}, cmdbuildCatalog = {},
     }
   }
 
-  for (const currentHook of currentHooks.map(normalizeWebhookItem)) {
+  for (const currentHook of currentItems) {
     if (!isManagedWebhook(currentHook, options) || desiredByCode.has(normalizeWebhookCode(currentHook.code))) {
       continue;
     }
@@ -262,7 +271,7 @@ function sourceFieldUsageForClass(rules, className) {
   return usage;
 }
 
-function webhookBodyForRequirements(event, prefix, baseBody = {}, requirements = [], className = '') {
+function webhookBodyForRequirements(event, prefix, baseBody = {}, requirements = [], className = '', options = {}) {
   const body = {
     ...plainObjectOrEmpty(baseBody),
     source: 'cmdbuild',
@@ -270,6 +279,10 @@ function webhookBodyForRequirements(event, prefix, baseBody = {}, requirements =
     eventType: event.eventType,
     cmdbuildEvent: event.cmdbuildEvent
   };
+  const identifier = managedIdentifier(options);
+  if (identifier) {
+    body.managedIdentifier = identifier;
+  }
 
   for (const requirement of requirements) {
     if (!requirement.payloadKey || !requirement.placeholderAttribute) {
@@ -291,6 +304,7 @@ function missingPayloadRequirements(currentHook, desiredHook) {
   const requirementsByPayload = new Map((desiredHook?.requirements ?? [])
     .map(item => [normalizeToken(item.payloadKey), item]));
   return Object.keys(desiredBody)
+    .filter(key => normalizeToken(key) !== 'managedidentifier')
     .filter(key => !Object.prototype.hasOwnProperty.call(currentBody, key))
     .map(key => requirementsByPayload.get(normalizeToken(key)) ?? { payloadKey: key, requiredByRules: [] })
     .sort((left, right) => compareText(left.payloadKey, right.payloadKey));
@@ -562,8 +576,28 @@ function webhookPlaceholderPrefixMatchesClass(prefix, className) {
     && (normalizeToken(prefix) === 'card' || normalizeToken(prefix) === normalizeToken(className));
 }
 
+function desiredWebhookCode(className, eventType, allCurrentByCode, ownedCurrentByCode, options) {
+  const baseCode = cmdbuildWebhookCode(className, eventType, options);
+  const baseKey = normalizeWebhookCode(baseCode);
+  if (ownedCurrentByCode.has(baseKey) || !allCurrentByCode.has(baseKey)) {
+    return baseCode;
+  }
+
+  const ownedCode = cmdbuildWebhookCode(className, eventType, {
+    ...options,
+    managedCodeSegment: options.managedCodeSegment ?? defaultManagedCodeSegment
+  });
+  return ownedCode;
+}
+
 function cmdbuildWebhookCode(className, eventType, options) {
-  return `${options.managedPrefix ?? defaultManagedPrefix}${normalizeRuleName(className)}-${normalizeRuleName(eventType)}`;
+  return [
+    options.managedPrefix ?? defaultManagedPrefix,
+    options.managedCodeSegment ? `${normalizeRuleName(options.managedCodeSegment)}-` : '',
+    normalizeRuleName(className),
+    '-',
+    normalizeRuleName(eventType)
+  ].join('');
 }
 
 function normalizeWebhookItem(item = {}) {
@@ -631,8 +665,38 @@ function collectWebhookBodyValues(value, result) {
   result.push(value);
 }
 
+function managedIdentifier(options = {}) {
+  return options.managedIdentifier ?? defaultManagedIdentifier;
+}
+
+function ownedWebhookUrls(options = {}) {
+  return uniqueTokens([
+    options.defaultUrl || defaultWebhookUrl,
+    ...(Array.isArray(options.ownedUrls) ? options.ownedUrls : [])
+  ].filter(Boolean).map(normalizeWebhookUrl));
+}
+
+function normalizeWebhookUrl(value) {
+  return String(value ?? '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
 function isManagedWebhook(hook, options) {
-  return String(hook?.code ?? '').startsWith(options.managedPrefix ?? defaultManagedPrefix);
+  if (!String(hook?.code ?? '').startsWith(options.managedPrefix ?? defaultManagedPrefix)) {
+    return false;
+  }
+
+  const body = plainObjectOrEmpty(hook?.body);
+  const identifier = firstText([body.managedIdentifier, body.ManagedIdentifier]);
+  if (identifier) {
+    return identifier === managedIdentifier(options);
+  }
+
+  if (firstText([body.targetTopic, body.TargetTopic])) {
+    return false;
+  }
+
+  const ownedUrls = ownedWebhookUrls(options);
+  return ownedUrls.length === 0 || ownedUrls.includes(normalizeWebhookUrl(hook?.url));
 }
 
 function normalizeWebhookCode(code) {

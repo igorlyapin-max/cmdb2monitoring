@@ -40,6 +40,7 @@ const roles = {
 };
 
 const managedCmdbuildWebhookPrefix = 'cmdbwebhooks2kafka-';
+const ownedCmdbuildWebhookIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 const auditMainHostIdAttributeName = 'zabbix_main_hostid';
 const auditBindingClassName = 'ZabbixHostBinding';
 const auditBindingAttributes = [
@@ -2672,6 +2673,7 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     if (action === 'create') {
       const desired = normalizeCmdbuildWebhookPayload(desiredInput);
       requireManagedCmdbuildWebhookPayload(desired, code);
+      rejectConflictingForeignCmdbuildWebhook(existingByCode, code);
       await cmdbuildRequest(baseUrl, '/etl/webhook/', credentials, {
         method: 'POST',
         body: desired,
@@ -2684,7 +2686,7 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     if (action === 'update') {
       const desired = normalizeCmdbuildWebhookPayload(desiredInput);
       requireManagedCmdbuildWebhookPayload(desired, code);
-      const existing = requireExistingManagedCmdbuildWebhook(existingByCode, code);
+      const existing = requireExistingManagedCmdbuildWebhook(existingByCode, code, desired);
       const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
       await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
         method: 'PUT',
@@ -2732,14 +2734,54 @@ function requireManagedCmdbuildWebhookPayload(payload, expectedCode) {
     || normalizeCmdbuildWebhookCode(payload.code) !== normalizeCmdbuildWebhookCode(expectedCode)) {
     throw httpError(400, 'unsafe_webhook_operation', `Webhook '${payload.code}' does not match managed operation '${expectedCode}'.`);
   }
+  const identifier = cmdbuildWebhookManagedIdentifier(payload);
+  if (identifier !== ownedCmdbuildWebhookIdentifier) {
+    throw httpError(400, 'unsafe_webhook_operation', `Webhook '${payload.code}' is not owned by '${ownedCmdbuildWebhookIdentifier}'.`);
+  }
 }
 
-function requireExistingManagedCmdbuildWebhook(existingByCode, code) {
+function rejectConflictingForeignCmdbuildWebhook(existingByCode, code) {
   const existing = existingByCode.get(normalizeCmdbuildWebhookCode(code));
-  if (!existing || !String(existing.code).startsWith(managedCmdbuildWebhookPrefix)) {
+  if (existing && !isOwnedCmdbuildWebhook(existing)) {
+    throw httpError(409, 'foreign_webhook_conflict', `Webhook '${code}' already exists but is owned by another service.`);
+  }
+}
+
+function requireExistingManagedCmdbuildWebhook(existingByCode, code, desired = null) {
+  const existing = existingByCode.get(normalizeCmdbuildWebhookCode(code));
+  if (!existing || !isOwnedCmdbuildWebhook(existing, desired)) {
     throw httpError(404, 'webhook_not_found', `Managed webhook '${code}' was not found in CMDBuild.`);
   }
   return existing;
+}
+
+function isOwnedCmdbuildWebhook(webhook, desired = null) {
+  if (!String(webhook?.code ?? '').startsWith(managedCmdbuildWebhookPrefix)) {
+    return false;
+  }
+
+  const identifier = cmdbuildWebhookManagedIdentifier(webhook);
+  if (identifier) {
+    return identifier === ownedCmdbuildWebhookIdentifier;
+  }
+
+  const body = parseJsonObject(webhook?.body);
+  if (!isBlank(firstNonBlank(body.targetTopic, body.TargetTopic))) {
+    return false;
+  }
+
+  // Legacy monitoring webhooks did not have managedIdentifier. Only allow
+  // migration when the existing record still points at the desired endpoint.
+  if (desired?.url && normalizeWebhookUrl(webhook.url) !== normalizeWebhookUrl(desired.url)) {
+    return false;
+  }
+
+  return desired !== null;
+}
+
+function cmdbuildWebhookManagedIdentifier(webhook) {
+  const body = parseJsonObject(webhook?.body);
+  return String(firstNonBlank(body.managedIdentifier, body.ManagedIdentifier) ?? '').trim();
 }
 
 async function analyzeCmdbuildAuditModel(session, payload = {}) {
@@ -6655,6 +6697,10 @@ function trimTrailingSlash(path) {
 
 function withoutTrailingSlash(value) {
   return String(value).replace(/\/+$/, '');
+}
+
+function normalizeWebhookUrl(value) {
+  return withoutTrailingSlash(value).trim().toLowerCase();
 }
 
 function isPlainObject(value) {

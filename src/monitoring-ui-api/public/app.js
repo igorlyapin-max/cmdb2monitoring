@@ -890,9 +890,10 @@ const translations = {
     'mapping.option.noFields': 'Нет доступных CMDBuild fields',
     'mapping.option.currentFieldMissing': 'Текущее поле rule: {field} / не подтверждено catalog',
     'mapping.option.currentTargetMissing': 'Текущий target rule / отсутствует в Zabbix catalog',
+    'mapping.option.currentTargetMissingValue': 'Текущий target rule: {target} / отсутствует в Zabbix catalog/options',
     'mapping.option.currentTargetMissingChooseNew': 'Текущий target rule отсутствует в Zabbix catalog: выберите новый target',
     'mapping.option.currentFieldMissingMeta': 'Значение загружено из существующего rule, но не найдено в текущих совместимых CMDBuild fields.',
-    'mapping.option.currentTargetMissingMeta': 'Target загружен из существующего rule, но не найден в текущем Zabbix catalog/options. Поле оставлено пустым для выбора нового target.',
+    'mapping.option.currentTargetMissingMeta': 'Target загружен из существующего rule, но не найден в текущем Zabbix catalog/options. Он показан как текущий target, чтобы его можно было проверить или заменить.',
     'mapping.option.chooseLeafMeta': 'Сохранение доступно после выбора конечного leaf/source field.',
     'mapping.option.chooseStructureMeta': 'Сохранение доступно после выбора conversion structure.',
     'mapping.option.chooseTargetMeta': 'Сохранение доступно после выбора совместимого Zabbix target.',
@@ -1619,9 +1620,10 @@ const translations = {
     'mapping.option.noFields': 'No available CMDBuild fields',
     'mapping.option.currentFieldMissing': 'Current rule field: {field} / not confirmed by catalog',
     'mapping.option.currentTargetMissing': 'Current rule target / missing from Zabbix catalog',
+    'mapping.option.currentTargetMissingValue': 'Current rule target: {target} / missing from Zabbix catalog/options',
     'mapping.option.currentTargetMissingChooseNew': 'Current rule target is missing from the Zabbix catalog: choose a new target',
     'mapping.option.currentFieldMissingMeta': 'The value was loaded from an existing rule but was not found in the current compatible CMDBuild fields.',
-    'mapping.option.currentTargetMissingMeta': 'Target was loaded from an existing rule but was not found in the current Zabbix catalog/options. The field is left empty so a new target can be chosen.',
+    'mapping.option.currentTargetMissingMeta': 'Target was loaded from an existing rule but was not found in the current Zabbix catalog/options. It is shown as the current target so it can be reviewed or replaced.',
     'mapping.option.chooseLeafMeta': 'Saving is available after choosing the final leaf/source field.',
     'mapping.option.chooseStructureMeta': 'Saving is available after choosing a conversion structure.',
     'mapping.option.chooseTargetMeta': 'Saving is available after choosing a compatible Zabbix target.',
@@ -6411,7 +6413,7 @@ async function populateMappingEditorTargets(options = {}) {
 
   let items = mappingEditorTargetOptions(type, currentMappingRules());
   let selectedTarget = state.mappingModifyTargetValue || previous;
-  let missingRuleTarget = false;
+  let missingRuleTargetOption = null;
   if (selectedTarget && !items.some(item => item.value === selectedTarget)) {
     const selectedKey = mappingTargetSelectionKey(type, selectedTarget);
     const matchingOption = selectedKey
@@ -6420,21 +6422,17 @@ async function populateMappingEditorTargets(options = {}) {
     if (matchingOption) {
       selectedTarget = matchingOption.value;
     } else {
-      missingRuleTarget = true;
-      selectedTarget = '';
+      missingRuleTargetOption = mappingEditorStaleTargetOption(type, selectedTarget);
     }
   }
   items = [
     {
       value: '',
-      label: missingRuleTarget
-        ? t('mapping.option.currentTargetMissingChooseNew')
-        : t('mapping.option.chooseTarget'),
+      label: t('mapping.option.chooseTarget'),
       status: 'invalid',
-      meta: missingRuleTarget
-        ? t('mapping.option.currentTargetMissingMeta')
-        : t('mapping.option.chooseTargetMeta')
+      meta: t('mapping.option.chooseTargetMeta')
     },
+    ...(missingRuleTargetOption ? [missingRuleTargetOption] : []),
     ...items.filter(item => item.value !== '')
   ];
   state.mappingEditorTargetOptionStates = new Map(items.map(option => [option.value, option.status ?? 'valid']));
@@ -6596,9 +6594,33 @@ function optionFromPayload(label, payload) {
   return { value: JSON.stringify(payload), label };
 }
 
-function mappingTargetSelectionKey(type, value) {
+function mappingEditorStaleTargetOption(type, value) {
+  const target = parseMappingTargetValue(value);
+  const label = target
+    ? mappingEditorTargetDisplayLabel(type, target)
+    : '';
+  return {
+    value,
+    label: label
+      ? tf('mapping.option.currentTargetMissingValue', { target: label })
+      : t('mapping.option.currentTargetMissing'),
+    status: 'stale',
+    meta: t('mapping.option.currentTargetMissingMeta')
+  };
+}
+
+function parseMappingTargetValue(value) {
   try {
     const target = typeof value === 'string' ? JSON.parse(value) : value;
+    return target && typeof target === 'object' ? target : null;
+  } catch {
+    return null;
+  }
+}
+
+function mappingTargetSelectionKey(type, value) {
+  try {
+    const target = parseMappingTargetValue(value);
     if (!target || typeof target !== 'object') {
       return '';
     }
@@ -6712,6 +6734,32 @@ function mappingEditorTargetLabel(definition, target) {
     || target.maintenanceId
     || target.valueMapId
     || 'target';
+}
+
+function mappingEditorTargetDisplayLabel(type, target = {}) {
+  if (type === 'hostGroups') {
+    return target.name || target.groupid || target.nameTemplate || 'host group';
+  }
+  if (type === 'templates') {
+    return target.name || target.host || target.templateid || 'template';
+  }
+  if (type === 'tags') {
+    return [target.tag, target.value ?? target.valueTemplate].filter(Boolean).join('=')
+      || target.tag
+      || 'tag';
+  }
+  if (type === 'interfaceAddress') {
+    return target.mode === 'dns' ? t('mapping.option.dnsName') : t('mapping.option.ipAddress');
+  }
+  if (type === 'interface') {
+    return target.interfaceProfileRef || target.interfaceRef || 'interface';
+  }
+  if (type === 'monitoringSuppression') {
+    return target.reason || 'monitoring suppression';
+  }
+
+  const definition = mappingEditorExtensionDefinition(type);
+  return definition ? mappingEditorTargetLabel(definition, target) : '';
 }
 
 function setSelectOptions(select, options, selectedValue = '') {
@@ -14935,7 +14983,7 @@ function el(tag, className, text) {
 function uniqueById(items, idField) {
   const values = new Map();
   for (const item of items) {
-    const key = normalizeToken(item?.[idField] ?? item?.name ?? item?.host ?? item?.value);
+    const key = normalizeToken(item?.[idField] ?? item?.name ?? item?.host ?? item?.macro ?? item?.field ?? item?.value ?? item?.status);
     if (key && !values.has(key)) {
       values.set(key, item);
     }

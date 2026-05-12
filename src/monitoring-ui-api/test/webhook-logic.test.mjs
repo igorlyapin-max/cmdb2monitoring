@@ -29,6 +29,8 @@ const catalog = {
     }
   ]
 };
+const defaultWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
+const managedIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 
 function baseRules(overrides = {}) {
   return {
@@ -51,7 +53,7 @@ function currentUpdateWebhook(body = {}) {
     event: 'card_update_after',
     target: 'Class',
     method: 'post',
-    url: 'http://localhost/webhook',
+    url: defaultWebhookUrl,
     body: {
       source: 'cmdbuild',
       className: 'Class',
@@ -193,6 +195,7 @@ test('obsolete managed webhooks are proposed for explicit delete only', () => {
       code: 'cmdbwebhooks2kafka-obsolete-update',
       event: 'card_update_after',
       target: 'Obsolete',
+      url: defaultWebhookUrl,
       body: {}
     }
   ]);
@@ -201,6 +204,63 @@ test('obsolete managed webhooks are proposed for explicit delete only', () => {
 
   assert.equal(deleted.action, 'delete');
   assert.equal(deleted.selected, false);
+});
+
+test('foreign managed webhook with same base code is not updated', () => {
+  const rules = baseRules();
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [
+    {
+      code: 'cmdbwebhooks2kafka-class-update',
+      event: 'card_update_after',
+      target: 'Class',
+      method: 'post',
+      url: 'http://172.18.0.1:5180/webhooks/cmdbuild',
+      body: {
+        source: 'cmdbuild',
+        managedIdentifier: 'cmdb2monitoring-service-suppression',
+        targetTopic: 'service-suppression.cmdb.events.raw',
+        className: 'Class',
+        eventType: 'update',
+        id: '{card:Id}',
+        code: '{card:Code}'
+      }
+    }
+  ]);
+
+  assert.equal(operations.length, 1);
+  assert.equal(operations[0].action, 'create');
+  assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
+  assert.equal(operations[0].desired.body.managedIdentifier, managedIdentifier);
+});
+
+test('foreign managed obsolete webhooks are ignored', () => {
+  const rules = baseRules();
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [
+    currentUpdateWebhook(),
+    {
+      code: 'cmdbwebhooks2kafka-obsolete-update',
+      event: 'card_update_after',
+      target: 'Obsolete',
+      body: {
+        source: 'cmdbuild',
+        managedIdentifier: 'cmdb2monitoring-service-suppression',
+        targetTopic: 'service-suppression.cmdb.events.raw'
+      }
+    }
+  ]);
+
+  assert.equal(operations.some(item => item.code === 'cmdbwebhooks2kafka-obsolete-update'), false);
+});
+
+test('legacy owned webhooks are migrated to explicit managed identifier', () => {
+  const rules = baseRules();
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [currentUpdateWebhook()]);
+  const update = operations.find(item => item.action === 'update');
+
+  assert.ok(update);
+  assert.equal(update.code, 'cmdbwebhooks2kafka-class-update');
+  assert.equal(update.desired.body.managedIdentifier, managedIdentifier);
+  assert.equal(update.missingPayloadRequirements.some(item => item.payloadKey === 'managedIdentifier'), false);
 });
 
 test('unmanaged current webhooks are not matched, deleted, or used as defaults', () => {
