@@ -91,6 +91,125 @@ test('webhook requirements derive reference leaf payload from the root reference
   assert.match(addressRequirement.reason, /Host profiles: class-main/);
 });
 
+test('cmdbPath reference root payload shadows normalized generic ipAddress requirement', () => {
+  const vpnCatalog = {
+    classes: [{ name: 'VPN_HUB' }],
+    attributes: [
+      {
+        className: 'VPN_HUB',
+        items: [
+          { name: 'Id' },
+          { name: 'Code' },
+          { name: 'ipaddress', alias: 'ip_address', type: 'reference', targetClass: 'IpAddress' }
+        ]
+      }
+    ]
+  };
+  const rules = {
+    source: {
+      entityClasses: ['VPN_HUB'],
+      supportedEvents: ['update'],
+      fields: {
+        entityId: { source: 'id', required: true },
+        code: { source: 'code' },
+        className: { source: 'className', required: true },
+        ipAddress: {
+          source: 'ip_address',
+          sources: ['ip_address', 'PrimaryIp'],
+          cmdbAttribute: 'PrimaryIp',
+          validationRegex: '^(?:\\d{1,3}\\.){3}\\d{1,3}$'
+        },
+        vPNHUBIpaddressIpAddr: {
+          source: 'ipaddress',
+          cmdbAttribute: 'ipaddress',
+          cmdbPath: 'VPN_HUB.ipaddress.ipAddr',
+          type: 'ipAddress',
+          resolve: { mode: 'cmdbPath', valueMode: 'leaf', maxDepth: 2 }
+        }
+      }
+    },
+    hostProfiles: [
+      {
+        name: 'vpn_hub-main',
+        when: { allRegex: [{ field: 'className', pattern: '(?i)^VPN_HUB$' }] },
+        interfaces: [
+          {
+            name: 'vpn_hub-main-agent-ip',
+            mode: 'ip',
+            valueField: 'vPNHUBIpaddressIpAddr',
+            when: { fieldExists: 'vPNHUBIpaddressIpAddr' }
+          }
+        ]
+      }
+    ],
+    interfaceAddressRules: [
+      {
+        name: 'prefer-ip-address',
+        mode: 'ip',
+        valueField: 'ipAddress',
+        when: { fieldExists: 'ipAddress' }
+      }
+    ]
+  };
+
+  const requirements = buildWebhookRequirements(rules, vpnCatalog)[0].fields;
+  const ipRequirement = requirements.find(item => item.payloadKey === 'ipaddress');
+  const operations = buildCmdbuildWebhookOperations(rules, vpnCatalog, []);
+  const create = operations.find(item => item.action === 'create');
+
+  assert.ok(ipRequirement);
+  assert.equal(requirements.some(item => item.payloadKey === 'ip_address'), false);
+  assert.equal(ipRequirement.placeholderAttribute, 'ipaddress');
+  assert.match(ipRequirement.reason, /Host profiles: vpn_hub-main/);
+  assert.match(ipRequirement.reason, /Interface address rules: prefer-ip-address/);
+  assert.equal(create.desired.body.ipaddress, '{card:ipaddress}');
+  assert.equal(Object.prototype.hasOwnProperty.call(create.desired.body, 'ip_address'), false);
+});
+
+test('literal ipAddress payload keeps the generic ip_address key', () => {
+  const rules = baseRules({
+    fields: {
+      ipAddress: {
+        source: 'ip_address',
+        cmdbAttribute: 'ip_address',
+        validationRegex: '^(?:\\d{1,3}\\.){3}\\d{1,3}$'
+      }
+    },
+    rules: {
+      interfaceAddressRules: [
+        {
+          name: 'prefer-ip-address',
+          mode: 'ip',
+          valueField: 'ipAddress',
+          when: { fieldExists: 'ipAddress' }
+        }
+      ]
+    }
+  });
+  const literalCatalog = {
+    classes: [{ name: 'Class' }],
+    attributes: [
+      {
+        className: 'Class',
+        items: [
+          { name: 'Id' },
+          { name: 'Code' },
+          { name: 'ip_address', type: 'inet' }
+        ]
+      }
+    ]
+  };
+
+  const requirement = buildWebhookRequirements(rules, literalCatalog)[0].fields
+    .find(item => item.payloadKey === 'ip_address');
+  const operations = buildCmdbuildWebhookOperations(rules, literalCatalog, []);
+  const create = operations.find(item => item.action === 'create');
+
+  assert.ok(requirement);
+  assert.equal(requirement.placeholderAttribute, 'ip_address');
+  assert.equal(create.desired.body.ip_address, '{card:ip_address}');
+});
+
 test('webhook operations report missing payload requirements with rule context', () => {
   const rules = baseRules({
     fields: {

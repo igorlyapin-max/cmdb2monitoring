@@ -158,7 +158,6 @@ function requirementsForClass(rules, cmdbuildCatalog, className) {
   const sourceFields = rules.source?.fields ?? {};
   const usage = sourceFieldUsageForClass(rules, className);
   const result = [];
-  const byPayloadKey = new Map();
   const catalogClass = findCatalogClass(cmdbuildCatalog, className);
   const attributes = catalogAttributesForClass(cmdbuildCatalog, catalogClass ?? className);
 
@@ -182,16 +181,77 @@ function requirementsForClass(rules, cmdbuildCatalog, className) {
       continue;
     }
 
-    const existing = byPayloadKey.get(normalizeToken(requirement.payloadKey));
+    const existing = result.find(item => requirementsCanMerge(item, requirement));
     if (existing) {
       mergeRequirement(existing, requirement);
     } else {
-      byPayloadKey.set(normalizeToken(requirement.payloadKey), requirement);
       result.push(requirement);
     }
   }
 
+  return pruneShadowedPayloadRequirements(result);
+}
+
+function requirementsCanMerge(left, right) {
+  if (equalsIgnoreCase(left.payloadKey, right.payloadKey)) {
+    return true;
+  }
+
+  if (normalizeToken(left.payloadKey) !== normalizeToken(right.payloadKey)) {
+    return false;
+  }
+
+  return !left.cmdbPath && !right.cmdbPath;
+}
+
+function pruneShadowedPayloadRequirements(requirements) {
+  const result = [];
+
+  for (const requirement of requirements) {
+    if (!requirement.cmdbPath) {
+      const shadow = result.find(item => cmdbPathRequirementShadowsPayloadRequirement(item, requirement));
+      if (shadow) {
+        absorbRequirementReason(shadow, requirement);
+        continue;
+      }
+    } else {
+      for (let index = result.length - 1; index >= 0; index -= 1) {
+        const existing = result[index];
+        if (cmdbPathRequirementShadowsPayloadRequirement(requirement, existing)) {
+          absorbRequirementReason(requirement, existing);
+          result.splice(index, 1);
+        }
+      }
+    }
+
+    result.push(requirement);
+  }
+
   return result;
+}
+
+function cmdbPathRequirementShadowsPayloadRequirement(cmdbPathRequirement, payloadRequirement) {
+  if (!cmdbPathRequirement.cmdbPath || payloadRequirement.cmdbPath) {
+    return false;
+  }
+
+  const cmdbPathTokens = requirementIdentityTokens(cmdbPathRequirement);
+  const payloadTokens = requirementIdentityTokens(payloadRequirement);
+  return cmdbPathTokens.some(token => payloadTokens.includes(token));
+}
+
+function requirementIdentityTokens(requirement) {
+  return uniqueTokens([
+    requirement.payloadKey,
+    requirement.source,
+    requirement.cmdbAttribute,
+    requirement.placeholderAttribute
+  ].map(normalizeToken).filter(Boolean));
+}
+
+function absorbRequirementReason(target, source) {
+  target.requiredByRules = uniqueTokens([...(target.requiredByRules ?? []), ...(source.requiredByRules ?? [])]);
+  target.reason = target.requiredByRules.join(', ');
 }
 
 function requirementForField(className, attributes, fieldKey, field, usageItem) {
@@ -301,12 +361,16 @@ function webhookBodyForRequirements(event, prefix, baseBody = {}, requirements =
 function missingPayloadRequirements(currentHook, desiredHook) {
   const currentBody = plainObjectOrEmpty(currentHook?.body);
   const desiredBody = plainObjectOrEmpty(desiredHook?.body);
+  const requirementsByExactPayload = new Map((desiredHook?.requirements ?? [])
+    .map(item => [String(item.payloadKey ?? '').toLowerCase(), item]));
   const requirementsByPayload = new Map((desiredHook?.requirements ?? [])
     .map(item => [normalizeToken(item.payloadKey), item]));
   return Object.keys(desiredBody)
     .filter(key => normalizeToken(key) !== 'managedidentifier')
     .filter(key => !Object.prototype.hasOwnProperty.call(currentBody, key))
-    .map(key => requirementsByPayload.get(normalizeToken(key)) ?? { payloadKey: key, requiredByRules: [] })
+    .map(key => requirementsByExactPayload.get(key.toLowerCase())
+      ?? requirementsByPayload.get(normalizeToken(key))
+      ?? { payloadKey: key, requiredByRules: [] })
     .sort((left, right) => compareText(left.payloadKey, right.payloadKey));
 }
 

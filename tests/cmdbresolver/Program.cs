@@ -12,6 +12,7 @@ var tests = new (string Name, Func<Task> Run)[]
 {
     ("update rereads lookup values", UpdateRereadsLookupValues),
     ("update rereads reference leaf cards", UpdateRereadsReferenceLeafCards),
+    ("reference leaf payload key resolves before interface validation", UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface),
     ("update rereads domain leaf cards", UpdateRereadsDomainLeafCards),
     ("update maps reread domain leaf into dynamic host groups", UpdateMapsRereadDomainLeafIntoDynamicHostGroups)
 };
@@ -120,6 +121,130 @@ static async Task UpdateRereadsReferenceLeafCards()
         ["referenceIp"] = "address-1"
     }), rules, CancellationToken.None);
     AssertField(second, "referenceIp", "10.20.0.20");
+}
+
+static async Task UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface()
+{
+    var cmdb = new FakeCmdbuild();
+    var resolver = CreateResolver(cmdb);
+    var converter = CreateConverter();
+    var rules = new ConversionRulesDocument
+    {
+        SchemaVersion = "test",
+        RulesVersion = "test",
+        Name = "cmdb-resolver-reference-ip-tests",
+        Source = new SourceRules
+        {
+            Fields = new Dictionary<string, SourceFieldRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["entityId"] = new() { Source = "id", Required = true },
+                ["className"] = new() { Source = "className", Required = true },
+                ["code"] = new() { Source = "code" },
+                ["ipAddress"] = new()
+                {
+                    Source = "ip_address",
+                    ValidationRegex = "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$"
+                },
+                ["referenceIp"] = new()
+                {
+                    Source = "ipaddress",
+                    CmdbPath = "Server.addressRef.Ip",
+                    Type = "ipAddress",
+                    Resolve = new SourceFieldResolveRule
+                    {
+                        Mode = "cmdbPath",
+                        ValueMode = "leaf",
+                        MaxDepth = 2
+                    }
+                }
+            }
+        },
+        Zabbix = new ZabbixRules
+        {
+            Method = "host.update"
+        },
+        EventRoutingRules =
+        [
+            new EventRoutingRule
+            {
+                EventType = "update",
+                Method = "host.update",
+                TemplateName = "hostUpdateJsonRpcRequestLines",
+                RequiredFields = ["entityId", "className", "interfaceAddress"],
+                Publish = true
+            }
+        ],
+        HostProfiles =
+        [
+            new HostProfileRule
+            {
+                Name = "server-main",
+                Priority = 10,
+                Enabled = true,
+                When = new RuleCondition
+                {
+                    AllRegex =
+                    [
+                        new RegexCondition { Field = "className", Pattern = "(?i)^Server$" }
+                    ]
+                },
+                HostNameTemplate = "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+                VisibleNameTemplate = "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+                Interfaces =
+                [
+                    new HostProfileInterfaceRule
+                    {
+                        Name = "server-main-agent-ip",
+                        Priority = 10,
+                        Mode = "ip",
+                        ValueField = "referenceIp",
+                        When = new RuleCondition { FieldExists = "referenceIp" }
+                    }
+                ]
+            }
+        ],
+        T4Templates = new T4TemplateSet
+        {
+            HostUpdateJsonRpcRequestLines =
+            [
+                "{",
+                "  \"jsonrpc\": \"2.0\",",
+                "  \"method\": \"<#= Model.CurrentMethod #>\",",
+                "  \"params\": {",
+                "    \"interfaces\": [",
+                "<# for (var i = 0; i < Model.Interfaces.Count; i++) { var item = Model.Interfaces[i]; #>",
+                "      { \"ip\": \"<#= item.Ip #>\", \"dns\": \"<#= item.Dns #>\" }<#= i == Model.Interfaces.Count - 1 ? \"\" : \",\" #>",
+                "<# } #>",
+                "    ]",
+                "  },",
+                "  \"id\": <#= Model.RequestId #>",
+                "}"
+            ]
+        }
+    };
+
+    var source = new CmdbEventReader().Read(JsonSerializer.Serialize(new
+    {
+        payload = new Dictionary<string, string>
+        {
+            ["id"] = "server-1",
+            ["eventType"] = "update",
+            ["className"] = "Server",
+            ["code"] = "server-1",
+            ["ip_address"] = "address-1"
+        }
+    }), rules);
+
+    if (source.SourceFields.ContainsKey("referenceIp"))
+    {
+        throw new InvalidOperationException("referenceIp must not require an ip_address alias in source field rules.");
+    }
+
+    var resolved = await resolver.ResolveAsync(source, rules, CancellationToken.None);
+    AssertField(resolved, "referenceIp", "10.20.0.10");
+
+    var converted = await converter.ConvertAsync(resolved, rules, CancellationToken.None);
+    AssertInterfaceIp(converted, "10.20.0.10");
 }
 
 static async Task UpdateRereadsDomainLeafCards()
@@ -386,6 +511,32 @@ static void AssertDynamicGroup(IReadOnlyList<ZabbixConversionResult> results, st
     {
         throw new InvalidOperationException(
             $"Expected dynamic host group '{expectedName}', got [{string.Join(", ", names)}].");
+    }
+}
+
+static void AssertInterfaceIp(IReadOnlyList<ZabbixConversionResult> results, string expectedIp)
+{
+    if (results.Count != 1)
+    {
+        throw new InvalidOperationException($"Expected one conversion result, got {results.Count}.");
+    }
+
+    var result = results[0];
+    if (!result.ShouldPublish || string.IsNullOrWhiteSpace(result.Value))
+    {
+        throw new InvalidOperationException($"Expected publishable conversion result, got skip '{result.SkipReason}'.");
+    }
+
+    using var document = JsonDocument.Parse(result.Value);
+    var interfaces = document.RootElement.GetProperty("params").GetProperty("interfaces");
+    var ips = interfaces.EnumerateArray()
+        .Select(item => item.GetProperty("ip").GetString())
+        .Where(item => !string.IsNullOrWhiteSpace(item))
+        .ToArray();
+    if (!ips.Contains(expectedIp, StringComparer.Ordinal))
+    {
+        throw new InvalidOperationException(
+            $"Expected interface IP '{expectedIp}', got [{string.Join(", ", ips)}].");
     }
 }
 

@@ -927,7 +927,50 @@ public sealed class CmdbSourceFieldResolver(
             return sourceFieldValue;
         }
 
-        return sourceFields.TryGetValue(fieldName, out var value) ? value : null;
+        foreach (var candidate in SourceValueFieldCandidates(fieldName, fieldRule))
+        {
+            if (sourceFields.TryGetValue(candidate, out var value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> SourceValueFieldCandidates(string fieldName, SourceFieldRule fieldRule)
+    {
+        var candidates = new[]
+        {
+            fieldName,
+            fieldRule.Source,
+            CanonicalSourceFieldName(fieldRule.Source)
+        }.Concat(fieldRule.Sources.SelectMany(source => new[] { source, CanonicalSourceFieldName(source) }));
+
+        return candidates
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string CanonicalSourceFieldName(string? fieldName)
+    {
+        var value = fieldName ?? string.Empty;
+        return value.Replace("_", string.Empty, StringComparison.Ordinal).ToLowerInvariant() switch
+        {
+            "entityid" or "id" => "entityId",
+            "classname" or "class" => "className",
+            "ipaddress" => "ipAddress",
+            "dnsname" or "fqdn" or "hostname" or "hostdns" => "dnsName",
+            "profileipaddress" or "profileip" or "profile" => "profileIpAddress",
+            "profile2ipaddress" or "profile2ip" or "profile2" => "profile2IpAddress",
+            "interfaceipaddress" or "interfaceip" or "interface" => "interfaceIpAddress",
+            "interface2ipaddress" or "interface2ip" or "interface2" => "interface2IpAddress",
+            "profilednsname" or "profiledns" => "profileDnsName",
+            "zabbixhostid" => "zabbixHostId",
+            "os" or "operatingsystem" => "os",
+            "zabbixtag" => "zabbixTag",
+            _ => value
+        };
     }
 
     private static CmdbSourceEvent UpdateSourceFields(
