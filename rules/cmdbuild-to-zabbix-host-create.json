@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1",
-  "rulesVersion": "2026.05.08-143808-test15-profile-ip-leaf-fix",
+  "rulesVersion": "2026.05.12-091152-test15-profile-ip-leaf-fix",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
   "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
@@ -982,46 +982,12 @@
       "publish": true
     }
   ],
-  "monitoringSuppressionRules": [
-    {
-      "name": "object-policy-do-not-monitor",
-      "priority": 10,
-      "reason": "object_policy_do_not_monitor",
-      "when": {
-        "allRegex": [
-          {
-            "field": "eventType",
-            "pattern": "(?i)^(create|update)$"
-          },
-          {
-            "field": "monitoringPolicy",
-            "pattern": "(?i)^(do_not_monitor|dont_monitor|do not monitor|not_monitored|false|0)$"
-          }
-        ]
-      }
-    },
-    {
-      "name": "lifecycle-do-not-monitor",
-      "priority": 20,
-      "reason": "lifecycle_do_not_monitor",
-      "when": {
-        "allRegex": [
-          {
-            "field": "eventType",
-            "pattern": "(?i)^(create|update)$"
-          },
-          {
-            "field": "lifecycleState",
-            "pattern": "(?i)^(do_not_monitor|retired|decommissioned|archived)$"
-          }
-        ]
-      }
-    }
-  ],
+  "monitoringSuppressionRules": [],
   "hostProfiles": [
     {
-      "name": "main",
+      "name": "c2mtestci-main",
       "priority": 10,
+      "createOnUpdateWhenMissing": true,
       "when": {
         "allRegex": [
           {
@@ -1034,145 +1000,13 @@
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
       "interfaces": [
         {
-          "name": "main-agent-ip",
+          "name": "c2mtestci-main-agent-ip",
           "priority": 10,
           "interfaceProfileRef": "agent",
           "mode": "ip",
           "valueField": "ipAddress",
           "when": {
             "fieldExists": "ipAddress"
-          }
-        },
-        {
-          "name": "main-agent-dns",
-          "priority": 20,
-          "fallback": true,
-          "interfaceProfileRef": "agent",
-          "mode": "dns",
-          "valueField": "dnsName",
-          "when": {
-            "fieldExists": "dnsName"
-          }
-        },
-        {
-          "name": "c2m-extra1-snmp-ip",
-          "priority": 30,
-          "interfaceProfileRef": "c2mSnmpMain",
-          "mode": "ip",
-          "valueField": "c2mExtraInterface1Ip",
-          "when": {
-            "fieldExists": "c2mExtraInterface1Ip",
-            "allRegex": [
-              {
-                "field": "className",
-                "pattern": "(?i)^C2MTestCI$"
-              }
-            ]
-          }
-        },
-        {
-          "name": "c2m-extra2-snmp-ip",
-          "priority": 40,
-          "interfaceProfileRef": "c2mSnmpSecondary",
-          "mode": "ip",
-          "valueField": "c2mExtraInterface2Ip",
-          "when": {
-            "fieldExists": "c2mExtraInterface2Ip",
-            "allRegex": [
-              {
-                "field": "className",
-                "pattern": "(?i)^C2MTestCI$"
-              }
-            ]
-          }
-        },
-        {
-          "name": "c2m-address-ref-snmp-ip",
-          "priority": 50,
-          "interfaceProfileRef": "c2mSnmpMain",
-          "mode": "ip",
-          "valueField": "c2mAddressRefIp",
-          "when": {
-            "fieldExists": "c2mAddressRefIp",
-            "allRegex": [
-              {
-                "field": "className",
-                "pattern": "(?i)^C2MTestCI$"
-              }
-            ]
-          }
-        },
-        {
-          "name": "c2m-deep-reference-snmp-ip",
-          "priority": 60,
-          "interfaceProfileRef": "c2mSnmpMain",
-          "mode": "ip",
-          "valueField": "c2mDeepReferenceIp",
-          "when": {
-            "fieldExists": "c2mDeepReferenceIp",
-            "allRegex": [
-              {
-                "field": "className",
-                "pattern": "(?i)^C2MTestCI$"
-              }
-            ]
-          }
-        },
-        {
-          "name": "c2m-domain-address-snmp-ip",
-          "priority": 70,
-          "interfaceProfileRef": "c2mSnmpMain",
-          "mode": "ip",
-          "valueField": "c2mDomainAddressFirstIp",
-          "when": {
-            "fieldExists": "c2mDomainAddressFirstIp",
-            "allRegex": [
-              {
-                "field": "className",
-                "pattern": "(?i)^C2MTestCI$"
-              },
-              {
-                "field": "c2mDomainAddressState",
-                "pattern": "(?i)^active$"
-              }
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "separate-profile-1",
-      "priority": 20,
-      "createOnUpdateWhenMissing": true,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          }
-        ],
-        "anyRegex": [
-          {
-            "field": "c2mSeparateProfile1Ip",
-            "pattern": ".+"
-          },
-          {
-            "field": "eventType",
-            "pattern": "(?i)^delete$"
-          }
-        ]
-      },
-      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-separate-profile-1",
-      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> separate profile 1",
-      "interfaces": [
-        {
-          "name": "separate-profile-1-snmp-ip",
-          "priority": 10,
-          "interfaceProfileRef": "snmp",
-          "mode": "ip",
-          "valueField": "c2mSeparateProfile1Ip",
-          "when": {
-            "fieldExists": "c2mSeparateProfile1Ip"
           }
         }
       ]
@@ -1200,43 +1034,6 @@
           "valueField": "ipAddress",
           "when": {
             "fieldExists": "ipAddress"
-          }
-        }
-      ]
-    },
-    {
-      "name": "separate-profile-2",
-      "priority": 30,
-      "createOnUpdateWhenMissing": true,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          }
-        ],
-        "anyRegex": [
-          {
-            "field": "c2mSeparateProfile2Ip",
-            "pattern": ".+"
-          },
-          {
-            "field": "eventType",
-            "pattern": "(?i)^delete$"
-          }
-        ]
-      },
-      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-separate-profile-2",
-      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> separate profile 2",
-      "interfaces": [
-        {
-          "name": "separate-profile-2-snmp-ip",
-          "priority": 10,
-          "interfaceProfileRef": "snmp",
-          "mode": "ip",
-          "valueField": "c2mSeparateProfile2Ip",
-          "when": {
-            "fieldExists": "c2mSeparateProfile2Ip"
           }
         }
       ]
@@ -1771,6 +1568,15 @@
       ]
     },
     {
+      "name": "default-linux",
+      "priority": 1000,
+      "fallback": true,
+      "when": {
+        "always": true
+      },
+      "hostGroupsRef": "defaults.hostGroups"
+    },
+    {
       "name": "hostgroups-applicg-mgmtostype-mgmtostype",
       "priority": 100,
       "when": {
@@ -1943,194 +1749,9 @@
           "createIfMissing": true
         }
       ]
-    },
-    {
-      "name": "hostgroups-server-description-description",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
-      },
-      "targetMode": "dynamicFromLeaf",
-      "valueField": "description",
-      "createIfMissing": true,
-      "hostGroups": [
-        {
-          "nameTemplate": "<#= Model.Source(\"description\") #>",
-          "createIfMissing": true
-        }
-      ]
-    },
-    {
-      "name": "hostgroups-serveri-description-description",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^serveri$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^serveri-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
-      },
-      "targetMode": "dynamicFromLeaf",
-      "valueField": "description",
-      "createIfMissing": true,
-      "hostGroups": [
-        {
-          "nameTemplate": "<#= Model.Source(\"description\") #>",
-          "createIfMissing": true
-        }
-      ]
-    },
-    {
-      "name": "server-os-windows-hosts",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "os",
-            "pattern": "(?i)^windows"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Discovered hosts",
-          "groupid": "5"
-        }
-      ]
-    },
-    {
-      "name": "server-os-vmware-hosts",
-      "priority": 110,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "os",
-            "pattern": "(?i)^(vmware|esxi|vsphere)"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Hypervisors",
-          "groupid": "7"
-        }
-      ]
-    },
-    {
-      "name": "default-linux",
-      "priority": 1000,
-      "fallback": true,
-      "when": {
-        "always": true
-      },
-      "hostGroupsRef": "defaults.hostGroups"
     }
   ],
   "templateSelectionRules": [
-    {
-      "name": "c2m-main-extra-snmp",
-      "priority": 10,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^main$"
-          }
-        ],
-        "anyRegex": [
-          {
-            "field": "c2mExtraInterface1Ip",
-            "pattern": ".+"
-          },
-          {
-            "field": "c2mExtraInterface2Ip",
-            "pattern": ".+"
-          },
-          {
-            "field": "c2mAddressRefIp",
-            "pattern": ".+"
-          },
-          {
-            "field": "c2mDeepReferenceIp",
-            "pattern": ".+"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "HP iLO by SNMP",
-          "templateid": "10256"
-        }
-      ]
-    },
-    {
-      "name": "c2m-main-domain-snmp",
-      "priority": 15,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^main$"
-          },
-          {
-            "field": "c2mDomainAddressFirstIp",
-            "pattern": ".+"
-          },
-          {
-            "field": "c2mDomainAddressState",
-            "pattern": "(?i)^active$"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "HP iLO by SNMP",
-          "templateid": "10256"
-        }
-      ]
-    },
     {
       "name": "separate-profile-snmp",
       "priority": 20,
@@ -2154,56 +1775,13 @@
       ]
     },
     {
-      "name": "server-os-windows-agent",
-      "priority": 25,
+      "name": "default-linux-agent",
+      "priority": 1000,
+      "fallback": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "os",
-            "pattern": "(?i)^windows"
-          }
-        ]
+        "always": true
       },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Windows by Zabbix agent",
-          "templateid": "10081"
-        }
-      ]
-    },
-    {
-      "name": "server-os-vmware-agent",
-      "priority": 26,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "os",
-            "pattern": "(?i)^(vmware|esxi|vsphere)"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Zabbix agent",
-          "templateid": "10561"
-        }
-      ]
+      "templatesRef": "defaults.templates"
     },
     {
       "name": "templates-ntbook-ntbookipaddressostype-linux-by-zabbix-agent",
@@ -2434,19 +2012,10 @@
       },
       "templates": [
         {
-          "name": "RabbitMQ cluster by Zabbix agent",
-          "templateid": "10300"
+          "name": "ICMP Ping",
+          "templateid": "10564"
         }
       ]
-    },
-    {
-      "name": "default-linux-agent",
-      "priority": 1000,
-      "fallback": true,
-      "when": {
-        "always": true
-      },
-      "templatesRef": "defaults.templates"
     }
   ],
   "templateConflictRules": [
@@ -2522,25 +2091,6 @@
       "when": {
         "fieldExists": "dnsName"
       }
-    },
-    {
-      "name": "interfaceaddress-server-ipaddress-ipaddress",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "ipAddress",
-            "pattern": "(?i).*"
-          }
-        ],
-        "fieldExists": "ipAddress"
-      },
-      "mode": "ip",
-      "valueField": "ipAddress"
     }
   ],
   "interfaceSelectionRules": [
@@ -2664,84 +2214,13 @@
       ]
     },
     {
-      "name": "c2m-business-hours",
-      "priority": 50,
+      "name": "default-tags",
+      "priority": 1000,
+      "fallback": true,
       "when": {
-        "anyRegex": [
-          {
-            "field": "monitoringPolicy",
-            "pattern": "(?i)^monitor_business_hours$"
-          }
-        ]
+        "always": true
       },
-      "tags": [
-        {
-          "tag": "monitoring.policy",
-          "value": "business_hours_08_18"
-        }
-      ]
-    },
-    {
-      "name": "c2m-deep-reference-lookup",
-      "priority": 60,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "c2mDeepReferenceLookup",
-            "pattern": ".+"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.deepReference.lookup",
-          "valueTemplate": "<#= Model.Field(\"c2mDeepReferenceLookup\") #>"
-        }
-      ]
-    },
-    {
-      "name": "server-os-tag",
-      "priority": 70,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "os",
-            "pattern": ".+"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.os",
-          "valueTemplate": "<#= Model.Field(\"os\") #>"
-        }
-      ]
-    },
-    {
-      "name": "server-zabbix-tag",
-      "priority": 80,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          },
-          {
-            "field": "zabbixTag",
-            "pattern": ".+"
-          }
-        ]
-      },
-      "tags": [
-        {
-          "tag": "cmdb.zabbixTag",
-          "valueTemplate": "<#= Model.Field(\"zabbixTag\") #>"
-        }
-      ]
+      "tagsRef": "defaults.tags"
     },
     {
       "name": "tags-dbgkm-dbtype-cmdb.dbtype",
@@ -2802,84 +2281,10 @@
           "allowMultipleValues": true
         }
       ]
-    },
-    {
-      "name": "default-tags",
-      "priority": 1000,
-      "fallback": true,
-      "when": {
-        "always": true
-      },
-      "tagsRef": "defaults.tags"
     }
   ],
-  "hostMacroSelectionRules": [
-    {
-      "name": "c2m-demo-code-macro",
-      "priority": 10,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          }
-        ]
-      },
-      "hostMacros": [
-        {
-          "macro": "{$C2M_DEMO_CODE}",
-          "valueTemplate": "<#= Model.Code #>",
-          "description": "Demo CMDBuild object code"
-        }
-      ]
-    }
-  ],
-  "inventorySelectionRules": [
-    {
-      "name": "c2m-demo-code-inventory-alias",
-      "priority": 10,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          }
-        ]
-      },
-      "inventoryFields": [
-        {
-          "field": "alias",
-          "valueTemplate": "<#= Model.Code #>"
-        }
-      ]
-    },
-    {
-      "name": "inventoryfields-serveri-serialnum-serialno_a",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^serveri$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^serveri-main$"
-          },
-          {
-            "field": "serialnum",
-            "pattern": "(?i).*"
-          }
-        ]
-      },
-      "inventoryField": {
-        "field": "serialno_a",
-        "name": "serialno_a",
-        "value": "",
-        "valueTemplate": "<#= Model.Source(\"serialnum\") #>"
-      }
-    }
-  ],
+  "hostMacroSelectionRules": [],
+  "inventorySelectionRules": [],
   "hostStatusSelectionRules": [],
   "tlsPskSelectionRules": [],
   "proxySelectionRules": [],
