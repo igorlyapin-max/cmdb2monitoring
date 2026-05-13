@@ -12,6 +12,8 @@ var tests = new (string Name, Func<Task> Run)[]
 {
     ("update rereads lookup values", UpdateRereadsLookupValues),
     ("update rereads reference leaf cards", UpdateRereadsReferenceLeafCards),
+    ("update skips foreign class-prefixed cmdb paths", UpdateSkipsForeignClassPrefixedCmdbPaths),
+    ("update resolves unrooted reference leaf cards", UpdateResolvesUnrootedReferenceLeafCards),
     ("reference leaf payload key resolves before interface validation", UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface),
     ("update rereads domain leaf cards", UpdateRereadsDomainLeafCards),
     ("update maps reread domain leaf into dynamic host groups", UpdateMapsRereadDomainLeafIntoDynamicHostGroups)
@@ -121,6 +123,92 @@ static async Task UpdateRereadsReferenceLeafCards()
         ["referenceIp"] = "address-1"
     }), rules, CancellationToken.None);
     AssertField(second, "referenceIp", "10.20.0.20");
+}
+
+static async Task UpdateSkipsForeignClassPrefixedCmdbPaths()
+{
+    var cmdb = new FakeCmdbuild();
+    var resolver = CreateResolver(cmdb);
+    var rules = RulesWithFields(new Dictionary<string, SourceFieldRule>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["serveriIp"] = new()
+        {
+            Source = "ipaddress",
+            CmdbPath = "serveri.ipaddress.ipAddr",
+            Type = "ipAddress",
+            Resolve = new SourceFieldResolveRule
+            {
+                Mode = "cmdbPath",
+                ValueMode = "leaf",
+                MaxDepth = 2
+            }
+        },
+        ["ntbookHostname"] = new()
+        {
+            Source = "hostname",
+            CmdbPath = "NTbook.hostname",
+            Type = "string",
+            Resolve = new SourceFieldResolveRule
+            {
+                Mode = "none"
+            }
+        }
+    });
+
+    var resolved = await resolver.ResolveAsync(new CmdbSourceEvent(
+        Source: "cmdbuild",
+        EventType: "update",
+        EntityType: "NTbook",
+        EntityId: "ntbook-1",
+        Code: "ntbook-1",
+        ClassName: "NTbook",
+        IpAddress: null,
+        DnsName: null,
+        ZabbixHostId: null,
+        Description: null,
+        OperatingSystem: null,
+        ZabbixTag: null,
+        SourceFields: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["serveriIp"] = "192.168.202.1",
+            ["ntbookHostname"] = "ntbook-1.gkm.ru"
+        },
+        ReceivedAt: DateTimeOffset.UtcNow,
+        Payload: JsonDocument.Parse("{}").RootElement.Clone()), rules, CancellationToken.None);
+
+    AssertFieldMissing(resolved, "serveriIp");
+    AssertField(resolved, "ntbookHostname", "ntbook-1.gkm.ru");
+    AssertNoRequests(cmdb);
+}
+
+static async Task UpdateResolvesUnrootedReferenceLeafCards()
+{
+    var cmdb = new FakeCmdbuild();
+    var resolver = CreateResolver(cmdb);
+    var rules = RulesWithFields(new Dictionary<string, SourceFieldRule>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["referenceIp"] = new()
+        {
+            Source = "addressRef",
+            CmdbPath = "addressRef.Ip",
+            Type = "ipAddress",
+            Resolve = new SourceFieldResolveRule
+            {
+                Mode = "cmdbPath",
+                ValueMode = "leaf",
+                MaxDepth = 2
+            }
+        }
+    });
+
+    var resolved = await resolver.ResolveAsync(UpdateEvent(new()
+    {
+        ["id"] = "server-1",
+        ["className"] = "Server",
+        ["referenceIp"] = "address-1"
+    }), rules, CancellationToken.None);
+
+    AssertField(resolved, "referenceIp", "10.20.0.10");
 }
 
 static async Task UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface()
@@ -489,6 +577,22 @@ static void AssertField(CmdbSourceEvent source, string fieldName, string expecte
     }
 }
 
+static void AssertFieldMissing(CmdbSourceEvent source, string fieldName)
+{
+    if (source.SourceFields.ContainsKey(fieldName))
+    {
+        throw new InvalidOperationException($"Expected field '{fieldName}' to be removed.");
+    }
+}
+
+static void AssertNoRequests(FakeCmdbuild cmdb)
+{
+    if (cmdb.RequestPaths.Count != 0)
+    {
+        throw new InvalidOperationException($"Expected no CMDBuild requests, got [{string.Join(", ", cmdb.RequestPaths)}].");
+    }
+}
+
 static void AssertDynamicGroup(IReadOnlyList<ZabbixConversionResult> results, string expectedName)
 {
     if (results.Count != 1)
@@ -569,9 +673,12 @@ sealed class FakeCmdbuild : HttpMessageHandler
 {
     public int Revision { get; set; } = 1;
 
+    public List<string> RequestPaths { get; } = [];
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+        RequestPaths.Add(path);
         var json = path switch
         {
             "/classes/Server/attributes" => DataArray(

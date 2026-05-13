@@ -35,6 +35,18 @@ public sealed class CmdbSourceFieldResolver(
                     continue;
                 }
 
+                if (!CmdbPathAppliesToSource(source, fieldName, fieldRule, resolvedFields))
+                {
+                    resolvedFields.Remove(fieldName);
+                    logger.LogBasic(
+                        debugLoggingOptions,
+                        "Skipping CMDBuild source field {FieldName}: path {CmdbPath} does not apply to event class {ClassName}",
+                        fieldName,
+                        fieldRule.CmdbPath,
+                        FirstNonEmpty(source.ClassName, source.EntityType, "<unknown>"));
+                    continue;
+                }
+
                 var isDomainPath = IsDomainPath(fieldRule.CmdbPath);
                 var sourceValue = ReadSourceValue(fieldName, fieldRule, resolvedFields);
                 if (string.IsNullOrWhiteSpace(sourceValue) && isDomainPath)
@@ -106,6 +118,34 @@ public sealed class CmdbSourceFieldResolver(
         return !string.IsNullOrWhiteSpace(rule.CmdbPath)
             || !string.IsNullOrWhiteSpace(rule.Resolve.Mode)
             || string.Equals(rule.Type, "lookup", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool CmdbPathAppliesToSource(
+        CmdbSourceEvent source,
+        string fieldName,
+        SourceFieldRule fieldRule,
+        IReadOnlyDictionary<string, string> sourceFields)
+    {
+        var path = SplitPath(fieldRule.CmdbPath);
+        if (path.Length == 0)
+        {
+            return true;
+        }
+
+        var root = path[0];
+        if (TryReadDomainSegment(root, out _))
+        {
+            return true;
+        }
+
+        var sourceClass = FirstNonEmpty(source.ClassName, source.EntityType);
+        if (string.IsNullOrWhiteSpace(sourceClass) || string.Equals(root, sourceClass, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return SourceValueFieldCandidates(fieldName, fieldRule).Contains(root, StringComparer.OrdinalIgnoreCase)
+            || sourceFields.ContainsKey(root);
     }
 
     private async Task<string?> ResolveFieldAsync(
