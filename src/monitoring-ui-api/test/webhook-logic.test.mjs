@@ -3,7 +3,8 @@ import test from 'node:test';
 
 import {
   buildCmdbuildWebhookOperations,
-  buildWebhookRequirements
+  buildWebhookRequirements,
+  webhookDiffFields
 } from '../public/lib/webhook-logic.js';
 
 const catalog = {
@@ -64,6 +65,13 @@ function currentUpdateWebhook(body = {}) {
       ...body
     },
     active: true
+  };
+}
+
+function currentNamespacedUpdateWebhook(body = {}) {
+  return {
+    ...currentUpdateWebhook(body),
+    code: 'cmdbwebhooks2kafka-zabbix-host-class-update'
   };
 }
 
@@ -226,7 +234,7 @@ test('webhook operations report missing payload requirements with rule context',
     }
   });
 
-  const operations = buildCmdbuildWebhookOperations(rules, catalog, [currentUpdateWebhook()]);
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [currentNamespacedUpdateWebhook()]);
   const update = operations.find(item => item.action === 'update');
 
   assert.ok(update);
@@ -253,7 +261,7 @@ test('domain leaf requirements use the current card id as resolver payload', () 
 
   const requirement = buildWebhookRequirements(rules, catalog)[0].fields
     .find(item => item.payloadKey === 'domainState');
-  const operations = buildCmdbuildWebhookOperations(rules, catalog, [currentUpdateWebhook()]);
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [currentNamespacedUpdateWebhook()]);
   const update = operations.find(item => item.action === 'update');
 
   assert.equal(requirement.placeholderAttribute, 'Id');
@@ -371,15 +379,18 @@ test('foreign managed obsolete webhooks are ignored', () => {
   assert.equal(operations.some(item => item.code === 'cmdbwebhooks2kafka-obsolete-update'), false);
 });
 
-test('legacy owned webhooks are migrated to explicit managed identifier', () => {
+test('legacy owned webhooks are replaced by namespaced lifecycle webhooks', () => {
   const rules = baseRules();
   const operations = buildCmdbuildWebhookOperations(rules, catalog, [currentUpdateWebhook()]);
-  const update = operations.find(item => item.action === 'update');
+  const create = operations.find(item => item.action === 'create');
+  const removeLegacy = operations.find(item => item.action === 'delete');
 
-  assert.ok(update);
-  assert.equal(update.code, 'cmdbwebhooks2kafka-class-update');
-  assert.equal(update.desired.body.managedIdentifier, managedIdentifier);
-  assert.equal(update.missingPayloadRequirements.some(item => item.payloadKey === 'managedIdentifier'), false);
+  assert.ok(create);
+  assert.equal(create.code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
+  assert.equal(create.desired.body.managedIdentifier, managedIdentifier);
+  assert.ok(removeLegacy);
+  assert.equal(removeLegacy.code, 'cmdbwebhooks2kafka-class-update');
+  assert.equal(removeLegacy.selected, false);
 });
 
 test('unmanaged current webhooks are not matched, deleted, or used as defaults', () => {
@@ -402,7 +413,43 @@ test('unmanaged current webhooks are not matched, deleted, or used as defaults',
 
   assert.equal(operations.length, 1);
   assert.equal(operations[0].action, 'create');
-  assert.equal(operations[0].code, 'cmdbwebhooks2kafka-class-update');
+  assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
   assert.equal(operations[0].desired.url, 'http://192.168.202.100:5080/webhooks/cmdbuild');
   assert.equal(operations.some(item => item.code === 'other-system-class-update'), false);
+});
+
+test('new managed webhooks use zabbix host code segment', () => {
+  const rules = baseRules();
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, []);
+
+  assert.equal(operations.length, 1);
+  assert.equal(operations[0].action, 'create');
+  assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
+});
+
+test('authorization header drift is outside normal webhook configuration diff', () => {
+  const current = {
+    ...currentUpdateWebhook({ managedIdentifier }),
+    headers: {
+      Authorization: 'Bearer old',
+      'X-Webhook-Mode': 'managed'
+    }
+  };
+  const desiredWithNewToken = {
+    ...current,
+    headers: {
+      Authorization: 'Bearer new',
+      'X-Webhook-Mode': 'managed'
+    }
+  };
+  const desiredWithHeaderConfigChange = {
+    ...current,
+    headers: {
+      Authorization: 'Bearer old',
+      'X-Webhook-Mode': 'manual'
+    }
+  };
+
+  assert.deepEqual(webhookDiffFields(current, desiredWithNewToken), []);
+  assert.deepEqual(webhookDiffFields(current, desiredWithHeaderConfigChange), ['headers']);
 });

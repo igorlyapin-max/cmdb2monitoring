@@ -41,6 +41,7 @@ const roles = {
 
 const managedCmdbuildWebhookPrefix = 'cmdbwebhooks2kafka-';
 const ownedCmdbuildWebhookIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
+const cmdbuildWebhookAuthorizationHeaderName = 'Authorization';
 const auditMainHostIdAttributeName = 'zabbix_main_hostid';
 const auditBindingClassName = 'ZabbixHostBinding';
 const auditBindingAttributes = [
@@ -444,6 +445,17 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'POST' && path === '/api/cmdbuild/catalog/lookup-bulk-change') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await applyCmdbuildLookupBulkChange(session, payload));
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/cmdbuild/webhooks') {
     requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
@@ -462,6 +474,17 @@ async function routeApi(request, response, url, path) {
 
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
     sendJson(response, 200, await applyCmdbuildWebhookOperations(session, payload));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/cmdbuild/webhooks/sync-authorization') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await syncCmdbuildWebhookAuthorization(session, payload));
     return;
   }
 
@@ -1026,6 +1049,8 @@ function applyEnvOverrides(target) {
     LDAP_GROUPS_ATTRIBUTE: ['Idp', 'Ldap', 'GroupsAttribute'],
     LDAP_TLS_REJECT_UNAUTHORIZED: ['Idp', 'Ldap', 'TlsRejectUnauthorized'],
     CMDBUILD_BASE_URL: ['Cmdbuild', 'BaseUrl'],
+    CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER: ['Cmdbuild', 'Webhooks', 'AuthorizationHeader'],
+    CMDBUILD_WEBHOOK_BEARER_TOKEN: ['Cmdbuild', 'Webhooks', 'BearerToken'],
     ZABBIX_API_ENDPOINT: ['Zabbix', 'ApiEndpoint'],
     ZABBIX_API_TOKEN: ['Zabbix', 'ApiToken'],
     RULES_READ_FROM_GIT: ['Rules', 'ReadFromGit'],
@@ -2622,6 +2647,247 @@ async function syncCmdbuildCatalog(session) {
   return catalog;
 }
 
+async function applyCmdbuildLookupBulkChange(session, payload = {}) {
+  const credentials = requireCmdbuildSessionCredentials(session);
+  const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const className = String(payload.className ?? '').trim();
+  const attributeName = String(payload.attributeName ?? '').trim();
+  const onlyEmptyMainHostId = payload.onlyEmptyMainHostId === true;
+  if (isBlank(className) || isBlank(attributeName)) {
+    throw httpError(400, 'missing_lookup_bulk_parameters', 'CMDBuild className and attributeName are required.');
+  }
+
+  if (onlyEmptyMainHostId) {
+    await ensureCmdbuildAttributeExists(baseUrl, credentials, className, auditMainHostIdAttributeName);
+  }
+
+  const attribute = normalizeCmdbuildItem(await cmdbuildGet(
+    baseUrl,
+    `/classes/${encodeURIComponent(className)}/attributes/${encodeURIComponent(attributeName)}`,
+    credentials
+  ));
+  if (!isCmdbuildWritableLookupAttribute(attribute)) {
+    throw httpError(400, 'not_writable_lookup_attribute', `Attribute ${className}.${attributeName} is not a writable lookup attribute.`);
+  }
+
+  const lookupType = cmdbuildAttributeLookupType(attribute);
+  if (isBlank(lookupType)) {
+    throw httpError(400, 'missing_lookup_type', `Attribute ${className}.${attributeName} does not expose lookupType.`);
+  }
+
+  const values = normalizeCmdbuildList(await cmdbuildGet(
+    baseUrl,
+    `/lookup_types/${encodeURIComponent(lookupType)}/values?limit=500`,
+    credentials
+  ))
+    .filter(item => item.active !== false)
+    .map(item => ({
+      id: normalizeCmdbuildLookupId(item._id ?? item.id),
+      code: item.code ?? '',
+      description: item.description ?? item._description ?? ''
+    }))
+    .filter(item => item.id !== null);
+  if (values.length < 2) {
+    throw httpError(400, 'not_enough_lookup_values', `Lookup ${lookupType} must contain at least two active values.`);
+  }
+
+  const batchSize = 100;
+  const maxCards = normalizePositiveInteger(payload.maxCards, 10000, 10000);
+  let offset = 0;
+  const cardsById = new Map();
+  let duplicateCardsSkipped = 0;
+  let paginationStopped = false;
+  let reportedTotal = null;
+
+  while (cardsById.size < maxCards) {
+    const page = await readCmdbuildCardsPage(baseUrl, credentials, className, Math.min(batchSize, maxCards - cardsById.size), offset);
+    const batch = page.cards;
+    reportedTotal = page.total ?? reportedTotal;
+    if (batch.length === 0) {
+      break;
+    }
+
+    let added = 0;
+    for (const card of batch) {
+      const cardId = readCmdbuildCardIdentifier(card);
+      if (isBlank(cardId)) {
+        duplicateCardsSkipped += 1;
+        continue;
+      }
+
+      const key = String(cardId);
+      if (cardsById.has(key)) {
+        duplicateCardsSkipped += 1;
+        continue;
+      }
+
+      cardsById.set(key, card);
+      added += 1;
+    }
+
+    if (added === 0) {
+      paginationStopped = true;
+      break;
+    }
+
+    offset += batch.length;
+    if (batch.length < batchSize || (reportedTotal !== null && offset >= reportedTotal)) {
+      break;
+    }
+  }
+
+  const cards = [...cardsById.values()];
+  const total = cards.length;
+  let changed = 0;
+  let skipped = 0;
+  let filteredOutByMainHostId = 0;
+  const failures = [];
+  const samples = [];
+
+  for (const card of cards) {
+    const cardId = readCmdbuildCardIdentifier(card);
+    if (onlyEmptyMainHostId && !isBlank(readCmdbuildCardField(card, auditMainHostIdAttributeName))) {
+      filteredOutByMainHostId += 1;
+      continue;
+    }
+
+    const currentValue = normalizeCmdbuildLookupId(readCmdbuildCardField(card, attributeName));
+    const nextValue = nextCmdbuildLookupValue(currentValue, values);
+    if (nextValue === null || sameCmdbuildLookupId(currentValue, nextValue)) {
+      skipped += 1;
+      continue;
+    }
+
+    if (isBlank(cardId)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      await cmdbuildRequest(
+        baseUrl,
+        `/classes/${encodeURIComponent(className)}/cards/${encodeURIComponent(cardId)}`,
+        credentials,
+        {
+          method: 'PUT',
+          body: { [attributeName]: nextValue }
+        }
+      );
+      changed += 1;
+      if (samples.length < 20) {
+        samples.push({
+          cardId,
+          code: readCmdbuildCardField(card, 'Code') ?? '',
+          from: currentValue,
+          to: nextValue
+        });
+      }
+    } catch (error) {
+      failures.push({
+        cardId,
+        code: readCmdbuildCardField(card, 'Code') ?? '',
+        message: error instanceof Error ? error.message : 'request_failed'
+      });
+    }
+  }
+
+  return {
+    className,
+    attributeName,
+    lookupType,
+    total,
+    changed,
+    skipped,
+    failed: failures.length,
+    cmdbuildReportedTotal: reportedTotal,
+    duplicateCardsSkipped,
+    onlyEmptyMainHostId,
+    mainHostIdAttributeName: auditMainHostIdAttributeName,
+    filteredOutByMainHostId,
+    paginationStopped,
+    failures: failures.slice(0, 50),
+    samples
+  };
+}
+
+async function ensureCmdbuildAttributeExists(baseUrl, credentials, className, attributeName) {
+  try {
+    await cmdbuildGet(
+      baseUrl,
+      `/classes/${encodeURIComponent(className)}/attributes/${encodeURIComponent(attributeName)}`,
+      credentials
+    );
+  } catch (error) {
+    throw httpError(
+      400,
+      'missing_cmdbuild_attribute',
+      `Class ${className} does not expose required attribute ${attributeName}. Apply the audit model before using this filter.`
+    );
+  }
+}
+
+function isCmdbuildWritableLookupAttribute(attribute) {
+  const type = String(attribute?.type ?? '').toLowerCase();
+  const lookupType = cmdbuildAttributeLookupType(attribute);
+  if (!attribute || type === 'lookuparray') {
+    return false;
+  }
+
+  return (type === 'lookup' || !isBlank(lookupType))
+    && String(attribute.mode ?? '').toLowerCase() !== 'read'
+    && attribute._can_update !== false
+    && attribute.writable !== false
+    && attribute.hidden !== true;
+}
+
+function cmdbuildAttributeLookupType(attribute) {
+  return String(firstNonBlank(attribute?.lookupType, attribute?.lookup_type, attribute?._lookupType)).trim();
+}
+
+function normalizeCmdbuildLookupId(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    return Number(value.trim());
+  }
+  if (isPlainObject(value)) {
+    return normalizeCmdbuildLookupId(value._id ?? value.id);
+  }
+  return String(value);
+}
+
+function nextCmdbuildLookupValue(currentValue, values) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  const currentIndex = values.findIndex(item => sameCmdbuildLookupId(item.id, currentValue));
+  if (currentIndex < 0) {
+    return values[0].id;
+  }
+
+  return values[(currentIndex + 1) % values.length].id;
+}
+
+function sameCmdbuildLookupId(left, right) {
+  return String(left ?? '') === String(right ?? '');
+}
+
+function readCmdbuildCardIdentifier(card) {
+  return readCmdbuildCardField(card, '_id') ?? readCmdbuildCardField(card, 'id') ?? readCmdbuildCardField(card, 'Id');
+}
+
+function normalizePositiveInteger(value, fallback, maximum = fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(Math.floor(parsed), maximum)
+    : fallback;
+}
+
 function normalizeCmdbuildDomain(item = {}) {
   return {
     name: item.name ?? item._id ?? item.id ?? '',
@@ -2684,9 +2950,10 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     }
 
     if (action === 'update') {
-      const desired = normalizeCmdbuildWebhookPayload(desiredInput);
+      let desired = normalizeCmdbuildWebhookPayload(desiredInput);
       requireManagedCmdbuildWebhookPayload(desired, code);
       const existing = requireExistingManagedCmdbuildWebhook(existingByCode, code, desired);
+      desired = preserveExistingCmdbuildWebhookAuthorization(desired, existing);
       const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
       await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
         method: 'PUT',
@@ -2715,6 +2982,57 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     appliedAt: new Date().toISOString(),
     cmdbuildEndpoint: baseUrl,
     count: results.length,
+    results
+  };
+}
+
+async function syncCmdbuildWebhookAuthorization(session, payload = {}) {
+  const authorization = configuredCmdbuildWebhookAuthorization();
+  if (isBlank(authorization)) {
+    throw httpError(
+      400,
+      'webhook_authorization_not_configured',
+      'CMDBuild webhook Authorization sync is not configured.'
+    );
+  }
+
+  const credentials = requireCmdbuildSessionCredentials(session);
+  const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
+  const existingByCode = await readCmdbuildWebhooksByCode(baseUrl, credentials);
+  const requestedCodes = new Set(normalizeStringArray(payload?.codes).map(normalizeCmdbuildWebhookCode));
+  const candidates = [...existingByCode.values()]
+    .filter(webhook => isOwnedCmdbuildWebhook(webhook))
+    .filter(webhook => requestedCodes.size === 0 || requestedCodes.has(normalizeCmdbuildWebhookCode(webhook.code)));
+  const results = [];
+
+  for (const existing of candidates) {
+    const code = existing.code;
+    const currentAuthorization = cmdbuildWebhookAuthorization(existing.headers);
+    if (currentAuthorization === authorization) {
+      results.push({ action: 'syncAuthorization', code, status: 'unchanged' });
+      continue;
+    }
+
+    const desired = normalizeCmdbuildWebhookPayload({
+      ...existing,
+      headers: setCmdbuildWebhookAuthorization(existing.headers, authorization)
+    });
+    requireManagedCmdbuildWebhookPayload(desired, code);
+    const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
+    await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
+      method: 'PUT',
+      body: desired,
+      headers: { 'CMDBuild-View': 'admin' }
+    });
+    results.push({ action: 'syncAuthorization', code, status: 'applied' });
+  }
+
+  return {
+    appliedAt: new Date().toISOString(),
+    cmdbuildEndpoint: baseUrl,
+    count: results.filter(item => item.status === 'applied').length,
+    skipped: results.filter(item => item.status === 'unchanged').length,
+    total: results.length,
     results
   };
 }
@@ -2782,6 +3100,55 @@ function isOwnedCmdbuildWebhook(webhook, desired = null) {
 function cmdbuildWebhookManagedIdentifier(webhook) {
   const body = parseJsonObject(webhook?.body);
   return String(firstNonBlank(body.managedIdentifier, body.ManagedIdentifier) ?? '').trim();
+}
+
+function preserveExistingCmdbuildWebhookAuthorization(desired, existing) {
+  const currentAuthorization = cmdbuildWebhookAuthorization(existing?.headers);
+  return {
+    ...desired,
+    headers: setCmdbuildWebhookAuthorization(desired.headers, currentAuthorization)
+  };
+}
+
+function configuredCmdbuildWebhookAuthorization() {
+  const webhooksConfig = config.Cmdbuild?.Webhooks ?? config.Cmdbuild?.webhooks ?? {};
+  const explicitHeader = firstNonBlank(
+    webhooksConfig.AuthorizationHeader,
+    webhooksConfig.authorizationHeader,
+    webhooksConfig.Authorization,
+    webhooksConfig.authorization
+  );
+  if (!isBlank(explicitHeader)) {
+    return String(explicitHeader).trim();
+  }
+
+  const bearerToken = firstNonBlank(
+    webhooksConfig.BearerToken,
+    webhooksConfig.bearerToken,
+    config.CmdbWebhook?.BearerToken,
+    config.CmdbWebhook?.bearerToken
+  );
+  return isBlank(bearerToken) ? '' : `Bearer ${String(bearerToken).trim()}`;
+}
+
+function cmdbuildWebhookAuthorization(headers) {
+  const normalizedHeaders = parseJsonObject(headers);
+  const key = Object.keys(normalizedHeaders)
+    .find(item => item.toLowerCase() === cmdbuildWebhookAuthorizationHeaderName.toLowerCase());
+  return key ? String(normalizedHeaders[key] ?? '').trim() : '';
+}
+
+function setCmdbuildWebhookAuthorization(headers, authorization) {
+  const normalizedHeaders = { ...parseJsonObject(headers) };
+  for (const key of Object.keys(normalizedHeaders)) {
+    if (key.toLowerCase() === cmdbuildWebhookAuthorizationHeaderName.toLowerCase()) {
+      delete normalizedHeaders[key];
+    }
+  }
+  if (!isBlank(authorization)) {
+    normalizedHeaders[cmdbuildWebhookAuthorizationHeaderName] = String(authorization).trim();
+  }
+  return normalizedHeaders;
 }
 
 async function analyzeCmdbuildAuditModel(session, payload = {}) {
@@ -3158,13 +3525,20 @@ function cmdbuildCatalogClassParent(item = {}) {
   return raw.superclass ?? raw.prototype ?? '';
 }
 
-async function readCmdbuildCards(baseUrl, credentials, className, limit, offset = 0) {
+async function readCmdbuildCardsPage(baseUrl, credentials, className, limit, offset = 0) {
   const params = new URLSearchParams({
     limit: String(limit),
-    offset: String(offset)
+    start: String(offset)
   });
   const result = await cmdbuildGet(baseUrl, `/classes/${encodeURIComponent(className)}/cards?${params}`, credentials);
-  return normalizeCmdbuildList(result);
+  return {
+    cards: normalizeCmdbuildList(result),
+    total: normalizeCmdbuildResultTotal(result)
+  };
+}
+
+async function readCmdbuildCards(baseUrl, credentials, className, limit, offset = 0) {
+  return (await readCmdbuildCardsPage(baseUrl, credentials, className, limit, offset)).cards;
 }
 
 async function readAuditBindingCards(baseUrl, credentials, catalog = {}) {
@@ -6450,6 +6824,13 @@ function normalizeCmdbuildList(result) {
   }
 
   return [];
+}
+
+function normalizeCmdbuildResultTotal(result) {
+  const total = Number(result?.meta?.total ?? result?.total ?? result?.count);
+  return Number.isFinite(total) && total >= 0
+    ? Math.floor(total)
+    : null;
 }
 
 function normalizeCmdbuildItem(result) {

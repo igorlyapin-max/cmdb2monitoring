@@ -754,6 +754,11 @@ h2 {
 .mapping-profile-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-areas:
+    "class kind name address"
+    "recognized mode interface create"
+    "actions actions actions actions"
+    "status status status status";
   gap: 12px;
   align-items: end;
 }
@@ -762,15 +767,52 @@ h2 {
   grid-column: span 2;
 }
 
+.mapping-profile-class-field {
+  grid-area: class;
+}
+
+.mapping-profile-kind-field {
+  grid-area: kind;
+}
+
+.mapping-profile-name-field {
+  grid-area: name;
+}
+
+.mapping-profile-address-field {
+  grid-area: address;
+}
+
+.mapping-profile-recognized-only {
+  grid-area: recognized;
+  align-self: center;
+  margin-bottom: 2px;
+}
+
+.mapping-profile-mode-field {
+  grid-area: mode;
+}
+
+.mapping-profile-interface-field {
+  grid-area: interface;
+}
+
 .mapping-profile-create-on-update {
+  grid-area: create;
   align-self: center;
   margin-bottom: 2px;
 }
 
 .mapping-profile-actions {
+  grid-area: actions;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-start;
+}
+
+#mappingProfileStatus {
+  grid-area: status;
 }
 
 .mapping-profiles-list {
@@ -820,6 +862,23 @@ h2 {
 .mapping-editor-grid .wide-field {
   margin-top: 0;
   grid-column: span 2;
+}
+
+#mappingModifyRuleField,
+.mapping-modify-context {
+  grid-column: 1 / -1;
+}
+
+.mapping-modify-context {
+  margin: -4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #f6d28b;
+  border-left: 3px solid #a15c00;
+  border-radius: 6px;
+  background: #fff7d6;
+  color: #713f12;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .mapping-string-builder {
@@ -1685,6 +1744,18 @@ th {
   .mapping-editor-grid .wide-field,
   .mapping-profile-grid .wide-field {
     grid-column: auto;
+  }
+
+  .mapping-profile-grid {
+    grid-template-areas: none;
+  }
+
+  .mapping-profile-grid > * {
+    grid-area: auto;
+  }
+
+  #mappingProfileStatus {
+    grid-area: auto;
   }
 
   .mapping-profile-row-actions {

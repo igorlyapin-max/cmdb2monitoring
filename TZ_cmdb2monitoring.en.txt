@@ -330,6 +330,8 @@ Production should use secrets/env for API token or credentials.
 
 Requests must be valid JSON-RPC and contain method, params, id, and all fields required by the Zabbix method. Internal `cmdb2monitoring` metadata must be removed before the Zabbix API call.
 
+When `Processing:ProtectManagedAggregateHosts=true`, `zabbixrequests2api` must block `host.create/update/delete` if the payload or the Zabbix host found before update/delete has the aggregate marker `cmdb2monitoring:aggregate=true` or a protected aggregate host name. The response error code is `protected_aggregate_host` and `zabbixRequestSent=false`. Normal CMDB source hosts without this marker remain lifecycle-managed; the suppression contour recalculates aggregate dependencies from the changed source trigger set.
+
 14.5. Zabbix Catalog Validation
 
 Before host create/update, the service validates referenced host groups, templates, and template groups when validation is enabled. With `Zabbix:ValidateTemplateCompatibility=true`, it also reads template metadata through `template.get` with `selectTemplateGroups`, `selectItems`, and `selectDiscoveryRules` and blocks the final template set when two or more templates contain the same item key, LLD rule key, or inventory binding through `inventory_link`.
@@ -498,6 +500,7 @@ UI reads Zabbix catalogs through API and caches them for validation and mapping.
 18.5. CMDBuild Catalog Sync
 
 UI reads CMDBuild classes, attributes, lookup types/values, domains, and reference/domain metadata through CMDBuild REST. For domains, catalog sync must read detailed `/domains/{domain}` records so the cache includes `source`/`destination` endpoints; otherwise N:N domain paths cannot be offered in the rule editor. Session CMDBuild credentials are requested when needed.
+The CMDBuild catalog view must provide an editor/admin utility for bulk-changing a writable lookup attribute of the selected class. By default it must filter only cards with empty `zabbix_main_hostid`; when this filter is enabled, the backend must require this attribute to exist in the selected class. After confirmation, the backend must read class cards, de-duplicate them by id, and send per-card `PUT /classes/{class}/cards/{id}` calls, replacing the current lookup value with the next active lookup value and empty values with the first active value; the operation requires CMDBuild update permission for the selected attribute.
 When a domain path does not return a leaf, the converter must treat the source field as absent and must not use the current card id as the leaf value. `cmdbkafka2zabbix` must not cache CMDBuild relations across events because relations can be created after `card_create_after`; a later `card_update_after` must read the current relations.
 `cmdbkafka2zabbix` must also not keep runtime CMDBuild card or lookup-value caches across events. On `card_update_after` for the source card, lookup, reference leaf, and domain leaf values are reread through CMDBuild REST. A change to only the linked card or only the domain relation, without a source-card webhook/event, does not initiate monitoring recalculation.
 
@@ -518,7 +521,7 @@ Behavior:
 - `Analyze rules` reloads the current rules JSON and CMDBuild catalog cache every time, treats conversion rules as the source of truth for webhook payload composition, builds `webhook requirements` from the used source fields, and derives the desired webhook set from those requirements without creating or changing CMDBuild records;
 - when rules use a leaf through lookup/reference/domain, the desired webhook must send only the nearest scalar/id for the current card: the CMDBuild attribute for lookup/reference paths or the current card `Id` for domain paths; the converter resolves the concrete leaf through `rules.source.fields[].cmdbPath` metadata;
 - a missing managed webhook becomes a `Create` operation;
-- an existing managed webhook with different body/event/target/method/url/headers/active/language becomes an `Update` operation;
+- an existing managed webhook with different body/event/target/method/url/non-authorization headers/active/language becomes an `Update` operation; a difference only in `headers.Authorization` must stay outside the normal create/update/delete plan;
 - an existing managed webhook with prefix `cmdbwebhooks2kafka-` that is no longer required by current rules becomes a `Delete` operation;
 - if an existing CMDBuild webhook lacks payload fields required by rules for the selected class, the UI must explicitly show these keys and the requiring rules in the summary, row details, and operation reason; this reminder means the converter will not receive the corresponding values until the operator runs `Load into CMDB` or updates the webhook manually;
 - each table row must allow payload expansion; added values are green, deleted values are red, and current values are black;
@@ -534,6 +537,7 @@ Behavior:
 - undo/redo must not promise or perform rollback of configuration already loaded into CMDBuild;
 - `Save file as` exports the JSON webhook plan through the browser and does not change CMDBuild, the backend rules file, or git;
 - `Load into CMDB` applies only selected operations after confirmation and really changes CMDBuild through REST v3 `/etl/webhook/`;
+- `Load into CMDB` must not change `headers.Authorization` on existing webhooks; a separate `Sync Authorization` command must change only that header on owned managed webhooks and must not change payload/rules;
 - the backend must restrict apply operations to the managed prefix `cmdbwebhooks2kafka-`;
 - new or updated webhook bodies remain flat: reference/domain/lookup leaf paths stay in `rules.source.fields[].cmdbPath`, while the CMDBuild webhook sends the scalar/id of the current attribute or current card id for a domain path.
 

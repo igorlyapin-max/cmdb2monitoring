@@ -75,6 +75,7 @@
 - Если в Zabbix payload передается объект `inventory`, `inventory_mode` не должен быть `-1`, потому что `-1` отключает inventory и Zabbix отклоняет inventory fields.
 - При `host.update` поля `groups[]`, `templates[]`, `tags[]`, `macros[]` и `inventory` должны сохранять внешние значения Zabbix, если rules их явно не заменяют; `interfaces[]` остаются authoritative и задаются rules.
 - Dynamic host groups из CMDBuild leaf должны не только создаваться/находиться в Zabbix, но и подставляться как `groupid` в тот же `host.create`/`host.update` payload; dynamic tags сразу передаются в `params.tags[]` текущего host payload.
+- `zabbixrequests2api` не должен выполнять `host.create/update/delete` для host payload или найденного host с aggregate marker `cmdb2monitoring:aggregate=true` либо защищенным aggregate host name; это не запрещает lifecycle-изменения обычных CMDB source hosts.
 
 ## Rules и T4
 
@@ -88,6 +89,7 @@
 - Имена классов CMDBuild, attributes и source fields не должны считаться встроенными ограничениями продукта. Конкретная модель задается webhook body и rules: `source.entityClasses`, `source.fields`, `source.fields[].source`, `source.fields[].cmdbAttribute`, `source.fields[].cmdbPath`, `hostProfiles[]`, selection rules и T4. Имена вроде `Computer`, `Notebook`, `Server`, `zabbixTag`, `iLo`, `mgmt`, `interface` или `profile` являются примерами dev-модели, если явно не указано иное.
 - Webhook payload остается плоским. Reference/lookup metadata хранится в rules: `source.fields[].cmdbPath`, `lookupType` и `resolve`; converter поднимает leaf через CMDBuild REST по пути вида `Server.adr.Ip` или `Server.ref1.ref2.lookup`.
 - `Настройка webhooks` может применять в CMDBuild только records с managed-префиксом `cmdbwebhooks2kafka-`; для update/delete backend обязан перечитать CMDBuild `/etl/webhook/?detailed=true` и выбрать целевую запись по managed `code`, а не доверять `current.id` из browser payload.
+- Обычное применение webhook-плана не должно менять `headers.Authorization` у существующих CMDBuild webhook. Ротация токена допускается только отдельной операцией синхронизации Authorization и только для owned managed records.
 - Для lookup source fields `OS` и `zabbixTag` штатное значение перед regex/T4 должно быть lookup `code`; numeric id допускаются только как fallback, если CMDBuild resolver не настроен.
 - Для нескольких Zabbix interfaces одного type в одном host только один interface должен иметь `main=1`, остальные должны иметь `main=0`.
 - Несовместимые Zabbix templates должны разрешаться через `templateConflictRules`; для update fallback конфликтующие уже привязанные templates передаются в `templates_clear`.

@@ -2,11 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- CMDBuild Catalog now has an editor/admin bulk lookup-change action: select a class and writable lookup attribute, confirm, and the UI sends per-card PUT updates that rotate each card to the next active lookup value.
+
 ### Fixed
 
+- CMDBuild Catalog bulk lookup-change now uses CMDBuild `start` pagination and de-duplicates card ids before PUT, so ignored pagination cannot update the same cards until the 10000-card safety cap.
+- CMDBuild Catalog bulk lookup-change now defaults to filtering only cards with empty `zabbix_main_hostid`, with an explicit checkbox to include already monitored cards.
 - Rules dry run now writes JSON/API errors into the result panel and returns a `results` array with a summary.
+- Conversion Rules Management now treats CMDBuild classes with subclasses as selectable concrete classes unless CMDBuild marks them as prototype/abstract.
+- Conversion Rules Management edit mode now keeps monitoring profile buttons on their own row and shows the selected rule context above Regex while modifying rules.
+- Conversion Rules Management modify mode now keeps classes that are present only in `hostProfiles[]` or `source.entityClasses` visible in the class filter and no longer replaces a selected concrete parent class with its child class.
 - Conversion Rules Management modify mode now keeps the current Zabbix object/payload target visible when it is not found in catalog options.
 - CMDBuild webhook management now uses an explicit `managedIdentifier` owner marker and avoids updating/deleting webhooks owned by other microservices.
+- `zabbixrequests2api` now blocks lifecycle writes to suppression aggregate resources marked with `cmdb2monitoring:aggregate=true` or the protected aggregate host name, without blocking normal CMDB source hosts used by suppression dependency recalculation.
+- CMDBuild lifecycle webhook management now always generates `cmdbwebhooks2kafka-zabbix-host-<class>-<event>` records and treats old owned short-code records as obsolete.
+- CMDBuild webhook management now separates normal create/update/delete from Authorization synchronization; regular updates preserve existing `headers.Authorization`, while a dedicated action rotates only owned managed webhook tokens.
 - CMDBuild webhook payload generation now keeps reference-root payload keys such as `ipaddress` distinct from literal `ip_address`, while the converter can still resolve old `ip_address=<reference id>` events through `cmdbPath` leaves.
 - `hostProfiles[]` marked as main in Conversion Rules Management now publish `isMainProfile=true`, so writeback updates `zabbix_main_hostid` instead of creating only `ZabbixHostBinding` rows.
 

@@ -986,6 +986,8 @@ Tags не создаются отдельным справочником Zabbix.
 Для tags проверяется наличие непустого поля tag.
 Для dynamic host groups `zabbixrequests2api` перед host.create/host.update обязан выполнить `hostgroup.get` по имени. Если group найдена, writer подставляет `groupid`; если group не найдена и `Zabbix:AllowDynamicHostGroupCreate=true`, writer вызывает `hostgroup.create` и подставляет новый `groupid` в тот же host payload, чтобы текущий host сразу попал в созданную group; если создание выключено, writer не вызывает host.create/update и публикует ошибку `auto_expand_disabled`.
 
+При `Processing:ProtectManagedAggregateHosts=true` `zabbixrequests2api` должен блокировать `host.create/update/delete`, если payload или найденный перед update/delete Zabbix host имеет aggregate marker `cmdb2monitoring:aggregate=true` либо защищенное имя aggregate host. Ошибка публикуется как `protected_aggregate_host`, `zabbixRequestSent=false`. Обычные CMDB source hosts без такого marker остаются управляемыми lifecycle-контуром; suppression-контур пересчитывает свои aggregate dependencies по изменившемуся набору source triggers.
+
 14.5. Проверка справочников Zabbix
 
 Перед host.create и host.update сервис должен проверять:
@@ -1486,6 +1488,8 @@ monitoring-ui-api должен загружать из CMDBuild:
 - attributes классов;
 - lookup values, если доступны.
 
+Раздел CMDBuild catalog должен предоставлять ролям `editor` и `admin` утилиту массового изменения writable lookup-атрибута выбранного класса. По умолчанию должен быть включен фильтр только по карточкам с пустым `zabbix_main_hostid`; при включенном фильтре backend должен требовать наличие этого атрибута в выбранном классе. После подтверждения backend должен читать карточки класса, дедуплицировать их по id и выполнять поштучные `PUT /classes/{class}/cards/{id}`, заменяя текущее lookup-значение следующим active lookup value, а пустое - первым active value; операция требует прав CMDBuild на изменение выбранного атрибута.
+
 Catalog cache:
 
 src/monitoring-ui-api/data/cmdbuild-catalog-cache.json
@@ -1735,7 +1739,7 @@ Model.Field("fieldName")
 - `Проанализировать rules` каждый раз заново читает актуальный rules JSON и CMDBuild catalog cache, считает conversion rules источником правды для состава webhook payload, строит `webhook requirements` по используемым source fields и уже из них формирует желаемый набор webhooks, не создавая и не меняя records в CMDBuild;
 - если rules используют leaf через lookup/reference/domain, desired webhook должен передавать только ближайший scalar/id текущей карточки: CMDBuild attribute для lookup/reference path или `Id` текущей карточки для domain path; конкретный leaf поднимает converter по metadata `rules.source.fields[].cmdbPath`;
 - для отсутствующего managed webhook формируется операция `Создать`;
-- для существующего managed webhook с отличиями в body/event/target/method/url/headers/active/language формируется операция `Изменить`;
+- для существующего managed webhook с отличиями в body/event/target/method/url/неавторизационных headers/active/language формируется операция `Изменить`; отличие только `headers.Authorization` не должно входить в обычный план create/update/delete;
 - для существующего managed webhook с префиксом `cmdbwebhooks2kafka-`, который больше не нужен текущим rules, формируется операция `Удалить`;
 - если в существующем CMDBuild webhook отсутствуют payload-поля, которые нужны rules выбранного класса, UI должен явно показывать эти ключи и правила-источники требования в summary, деталях строки и причине операции; это напоминание означает, что без `Загрузить в CMDB` или ручной правки webhook converter не получит соответствующие значения;
 - каждая строка таблицы должна позволять раскрыть payload; добавляемые значения показываются зеленым, удаляемые красным, актуальные черным;
@@ -1751,6 +1755,7 @@ Model.Field("fieldName")
 - undo/redo не должны обещать и выполнять откат уже выполненной загрузки конфигурации в CMDBuild;
 - `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git;
 - `Загрузить в CMDB` после подтверждения применяет только выбранные операции и действительно меняет CMDBuild через REST v3 `/etl/webhook/`;
+- `Загрузить в CMDB` не должен менять `headers.Authorization` у существующих webhook; отдельная команда `Синхронизировать Authorization` должна менять только этот заголовок у owned managed webhook и не менять payload/rules;
 - backend должен ограничивать apply workflow управляемым префиксом `cmdbwebhooks2kafka-`, чтобы не удалить или изменить чужие CMDBuild webhooks;
 - для `Изменить` и `Удалить` backend перед записью должен перечитывать текущие CMDBuild webhooks через `/etl/webhook/?detailed=true` и выбирать целевой record по managed `code`; `current.id` из browser payload не должен использоваться как доверенный идентификатор целевой записи;
 - для новых или изменяемых hooks body остается плоским: reference/domain/lookup leaf path хранится в `rules.source.fields[].cmdbPath`, а CMDBuild webhook передает scalar/id текущего атрибута или id текущей карточки для domain path.

@@ -10,5 +10,53 @@
 #
 # Save validation: критичных предупреждений по IP/DNS -> Zabbix interface binding нет.
 
-# В текущей сессии нет добавленных или удаленных rules/class attribute fields/classes.
-# Body snippets не сформированы, чтобы не смешивать текущие настройки с неизмененными webhook-записями.
+## ADD rule / Template rules / templates-routercore-description-icmp-ping
+# Rule collection: templateSelectionRules
+# Affected class rules: routerCore
+
+## ADD rule templates-routercore-description-icmp-ping / routerCore / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "routerCore",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+## ADD rule templates-routercore-description-icmp-ping / routerCore / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "routerCore",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD rule templates-routercore-description-icmp-ping / routerCore / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "routerCore",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}

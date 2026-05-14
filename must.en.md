@@ -62,10 +62,12 @@ This file records mandatory project development rules. If a rule conflicts with 
 - The current contract models IP addresses through explicit named rules/webhook fields. Arbitrary IP arrays are not supported without a separate model change.
 - CMDBuild class names, attribute names, and source field names are not product constraints. The concrete model is defined by webhook body and rules: `source.entityClasses`, `source.fields`, `source.fields[].source`, `source.fields[].cmdbAttribute`, `source.fields[].cmdbPath`, `hostProfiles[]`, selection rules, and T4. Names such as `Computer`, `Notebook`, `Server`, `zabbixTag`, `iLo`, `mgmt`, `interface`, or `profile` are dev-model examples unless explicitly stated otherwise.
 - Webhook payload remains flat. Reference/lookup metadata is stored in rules: `source.fields[].cmdbPath`, `lookupType`, and `resolve`; the converter resolves the leaf through CMDBuild REST by paths such as `Class.ReferenceAttribute.LeafAttribute`.
+- Normal webhook-plan apply must not change `headers.Authorization` on existing CMDBuild webhooks. Token rotation is allowed only through a separate Authorization synchronization operation and only for owned managed records.
 - For lookup source fields, the normal value before regex/T4 is lookup `code`; numeric ids are only fallback values when the CMDBuild resolver is not configured.
 - For multiple Zabbix interfaces of the same type in one host, exactly one interface must have `main=1`; the rest must have `main=0`.
 - Incompatible Zabbix templates must be handled through `templateConflictRules`; update fallback passes already linked conflicting templates through `templates_clear`.
 - Dynamic host groups from a CMDBuild leaf must not only be created/resolved in Zabbix; their `groupid` must be substituted into the same `host.create`/`host.update` payload. Dynamic tags are sent directly in `params.tags[]` of the current host payload.
+- `zabbixrequests2api` must not execute `host.create/update/delete` for a host payload or found host with the aggregate marker `cmdb2monitoring:aggregate=true` or a protected aggregate host name; this does not prohibit lifecycle changes to normal CMDB source hosts.
 - New T4 templates must use `Model.Interfaces`; `Model.Interface` is kept only for backward compatibility with the first interface.
 - Final JSON-RPC payload is rendered by T4 templates from the rules file.
 - After changing a rules file, run `./scripts/test-configs.sh` and build affected `.csproj` files through `./scripts/dotnet build <project>.csproj -v minimal`.

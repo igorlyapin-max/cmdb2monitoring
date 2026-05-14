@@ -374,18 +374,22 @@
                   </div>
                 </div>
                 <div class="mapping-profile-grid">
-                  <label><span data-i18n="mapping.profileClass">Класс CMDBuild</span><select id="mappingProfileClass"></select></label>
-                  <label><span data-i18n="mapping.profileKind">Тип профиля</span><select id="mappingProfileKind">
+                  <label class="mapping-profile-class-field"><span data-i18n="mapping.profileClass">Класс CMDBuild</span><select id="mappingProfileClass"></select></label>
+                  <label class="mapping-profile-kind-field"><span data-i18n="mapping.profileKind">Тип профиля</span><select id="mappingProfileKind">
                     <option value="main" data-i18n="mapping.profileKindMain">Основной</option>
                     <option value="additional" data-i18n="mapping.profileKindAdditional">Дополнительный</option>
                   </select></label>
-                  <label><span data-i18n="mapping.profileName">Имя hostProfile</span><input id="mappingProfileName" type="text" placeholder="class-main" data-i18n-placeholder="mapping.profileNamePlaceholder"></label>
-                  <label><span data-i18n="mapping.profileAddressField">Адресный leaf</span><select id="mappingProfileField"></select></label>
-                  <label><span data-i18n="mapping.profileAddressMode">Режим адреса</span><select id="mappingProfileMode">
+                  <label class="mapping-profile-name-field"><span data-i18n="mapping.profileName">Имя hostProfile</span><input id="mappingProfileName" type="text" placeholder="class-main" data-i18n-placeholder="mapping.profileNamePlaceholder"></label>
+                  <label class="mapping-profile-address-field"><span data-i18n="mapping.profileAddressField">Адресный leaf</span><select id="mappingProfileField"></select></label>
+                  <label class="mapping-checkbox-row mapping-profile-recognized-only">
+                    <input id="mappingProfileRecognizedOnly" type="checkbox" checked>
+                    <span data-i18n="mapping.profileRecognizedOnly">Предлагать распознанные IP/DNS</span>
+                  </label>
+                  <label class="mapping-profile-mode-field"><span data-i18n="mapping.profileAddressMode">Режим адреса</span><select id="mappingProfileMode">
                     <option value="ip" data-i18n="mapping.profileAddressModeIp">IP</option>
                     <option value="dns" data-i18n="mapping.profileAddressModeDns">DNS</option>
                   </select></label>
-                  <label><span data-i18n="mapping.profileInterfaceProfile">Профиль interfaces[]</span><select id="mappingProfileInterfaceProfile"></select></label>
+                  <label class="mapping-profile-interface-field"><span data-i18n="mapping.profileInterfaceProfile">Профиль interfaces[]</span><select id="mappingProfileInterfaceProfile"></select></label>
                   <label class="mapping-checkbox-row mapping-profile-create-on-update">
                     <input id="mappingProfileCreateOnUpdate" type="checkbox" checked>
                     <span data-i18n="mapping.profileCreateOnUpdate">Создавать host при update, если он отсутствует</span>
@@ -403,6 +407,7 @@
               <div id="mappingAddPanel" class="mapping-editor-panel">
                 <div class="mapping-editor-grid">
                   <label id="mappingModifyRuleField" class="wide-field hidden"><span data-i18n="mapping.modifyRule">Правило для изменения</span><select id="mappingModifyRule"></select></label>
+                  <p id="mappingModifyRuleContext" class="mapping-modify-context wide-field hidden"></p>
                   <label><span data-i18n="mapping.cmdbClass">Класс CMDBuild</span><select id="mappingEditClass"></select></label>
                   <label><span data-i18n="mapping.classField">Атрибут класса</span><select id="mappingEditField"></select></label>
                   <label><span data-i18n="mapping.structure">Структура конвертации</span><select id="mappingEditTargetType"></select></label>
@@ -531,6 +536,7 @@
                 <button id="webhooksRedo" class="secondary" type="button" disabled data-i18n="common.redo">Вернуть</button>
                 <button id="webhooksAnalyze" class="secondary" type="button" data-i18n="webhooks.analyze">Проанализировать rules</button>
                 <button id="webhooksLoadCmdb" type="button" data-i18n="webhooks.loadFromCmdb">Загрузить из CMDB</button>
+                <button id="webhooksSyncAuthorization" class="secondary" type="button" disabled data-i18n="webhooks.syncAuthorization">Синхронизировать Authorization</button>
                 <button id="webhooksSaveAs" class="secondary" type="button" disabled data-i18n="common.saveFileAs">Сохранить файл как</button>
                 <button id="webhooksDeleteSelected" class="danger" type="button" disabled data-i18n="webhooks.deleteSelected">Удалить выбранные</button>
                 <button id="webhooksApplyCmdb" class="danger" type="button" disabled data-i18n="webhooks.applyToCmdb">Загрузить в CMDB</button>
@@ -654,6 +660,27 @@
             </div>
             <p id="cmdbuildActionStatus" class="mapping-editor-status action-status" aria-live="polite"></p>
             <div id="cmdbuildCatalogSummary" class="surface validation-summary"></div>
+            <form id="cmdbuildLookupBulkForm" class="surface settings-stack">
+              <h2 data-i18n="catalog.lookupBulkTitle">Массовое изменение lookup</h2>
+              <div class="settings-grid">
+                <label>
+                  <span data-i18n="catalog.lookupBulkClass">Класс CMDBuild</span>
+                  <select id="cmdbuildLookupBulkClass" name="className"></select>
+                </label>
+                <label>
+                  <span data-i18n="catalog.lookupBulkAttribute">Lookup атрибут</span>
+                  <select id="cmdbuildLookupBulkAttribute" name="attributeName"></select>
+                </label>
+                <label class="mapping-checkbox-row">
+                  <input id="cmdbuildLookupBulkOnlyEmptyMainHostId" type="checkbox" checked>
+                  <span data-i18n="catalog.lookupBulkOnlyEmptyMainHostId">Только где пустой zabbix_main_hostid</span>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="cmdbuildLookupBulkApply" type="button" data-i18n="catalog.lookupBulkApply">Поменять все значения карточек класса</button>
+              </div>
+              <p id="cmdbuildLookupBulkStatus" class="settings-note" aria-live="polite"></p>
+            </form>
             <div class="split-layout">
               <div class="surface">
                 <h2>Classes</h2>

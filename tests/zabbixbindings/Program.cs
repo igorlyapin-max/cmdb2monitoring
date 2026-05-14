@@ -24,6 +24,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("binding client clears main zabbix_main_hostid on delete", BindingClientClearsMainHostIdOnDelete),
     ("binding client skips already cleared main zabbix_main_hostid", BindingClientSkipsAlreadyClearedMainHostId),
     ("binding client still clears main zabbix_main_hostid when read fails", BindingClientClearsMainHostIdWhenReadFails),
+    ("binding client skips main zabbix_main_hostid when source card is unavailable", BindingClientSkipsMainHostIdWhenSourceCardIsUnavailable),
     ("binding client creates additional profile card", BindingClientCreatesAdditionalProfileCard),
     ("binding client updates existing additional profile card", BindingClientUpdatesExistingAdditionalProfileCard),
     ("binding client skips unchanged additional profile card", BindingClientSkipsUnchangedAdditionalProfileCard),
@@ -234,6 +235,23 @@ static async Task BindingClientClearsMainHostIdWhenReadFails()
     await client.ApplyAsync(BindingEvent(isMainProfile: true, operation: "host.delete", status: "deleted"), CancellationToken.None);
 
     handler.AssertAllRequestsConsumed();
+}
+
+static async Task BindingClientSkipsMainHostIdWhenSourceCardIsUnavailable()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Get,
+        "/classes/CIClass/cards/101",
+        _ => { },
+        """{"success":false,"messages":[{"message":"generic error"}]}""",
+        HttpStatusCode.BadRequest);
+
+    var client = CreateBindingClient(handler);
+    await client.ApplyAsync(BindingEvent(isMainProfile: true, operation: "host.update", status: "active"), CancellationToken.None);
+
+    handler.AssertAllRequestsConsumed();
+    AssertEqual(1, handler.Requests.Count, "HTTP call count");
 }
 
 static async Task BindingClientCreatesAdditionalProfileCard()

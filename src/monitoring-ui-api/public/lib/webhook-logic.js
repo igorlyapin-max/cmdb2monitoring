@@ -641,17 +641,10 @@ function webhookPlaceholderPrefixMatchesClass(prefix, className) {
 }
 
 function desiredWebhookCode(className, eventType, allCurrentByCode, ownedCurrentByCode, options) {
-  const baseCode = cmdbuildWebhookCode(className, eventType, options);
-  const baseKey = normalizeWebhookCode(baseCode);
-  if (ownedCurrentByCode.has(baseKey) || !allCurrentByCode.has(baseKey)) {
-    return baseCode;
-  }
-
-  const ownedCode = cmdbuildWebhookCode(className, eventType, {
+  return cmdbuildWebhookCode(className, eventType, {
     ...options,
     managedCodeSegment: options.managedCodeSegment ?? defaultManagedCodeSegment
   });
-  return ownedCode;
 }
 
 function cmdbuildWebhookCode(className, eventType, options) {
@@ -684,7 +677,7 @@ function normalizeWebhookItem(item = {}) {
   };
 }
 
-function webhookDiffFields(current, desired) {
+export function webhookDiffFields(current, desired) {
   const currentComparable = webhookComparable(current);
   const desiredComparable = webhookComparable(desired);
   return Object.keys(desiredComparable).filter(key => stableJson(currentComparable[key]) !== stableJson(desiredComparable[key]));
@@ -698,11 +691,16 @@ function webhookComparable(hook) {
     target: normalized.target,
     method: normalized.method,
     url: normalized.url,
-    headers: normalized.headers,
+    headers: webhookComparableHeaders(normalized.headers),
     body: normalized.body,
     language: normalized.language,
     active: normalized.active
   };
+}
+
+function webhookComparableHeaders(headers = {}) {
+  return Object.fromEntries(Object.entries(headers)
+    .filter(([key]) => String(key).toLowerCase() !== 'authorization'));
 }
 
 function currentWebhookPlaceholderPrefix(hook) {

@@ -62,6 +62,7 @@ builder.Services.AddOptions<ProcessingOptions>()
     .Validate(options => options.DelayBetweenObjectsMs >= 0, "Delay between objects cannot be negative.")
     .Validate(options => options.MaxRetryAttempts > 0, "Max retry attempts must be greater than zero.")
     .Validate(options => options.RetryDelayMs >= 0, "Retry delay cannot be negative.")
+    .Validate(options => !options.ProtectManagedAggregateHosts || options.HasProtectedHostMarkers(), "Protected aggregate host guard requires at least one protected host name or tag.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ProcessingStateOptions>()

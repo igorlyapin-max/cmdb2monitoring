@@ -425,6 +425,7 @@ const translations = {
     'webhooks.analyze': 'Проанализировать rules',
     'webhooks.loadFromCmdb': 'Загрузить из CMDB',
     'webhooks.applyToCmdb': 'Загрузить в CMDB',
+    'webhooks.syncAuthorization': 'Синхронизировать Authorization',
     'webhooks.deleteSelected': 'Удалить выбранные',
     'webhooks.operations': 'Операции',
     'webhooks.details': 'Детали',
@@ -447,7 +448,9 @@ const translations = {
     'webhooks.statusSelectionChanged': 'Выбор операций изменен.',
     'webhooks.statusApplied': 'Операции применены в CMDB: {count}.',
     'webhooks.statusDeleted': 'Удаление применено в CMDB: {count}.',
+    'webhooks.statusAuthorizationSynced': 'Authorization синхронизирован: изменено {count}, без изменений {skipped}.',
     'webhooks.confirmApply': 'Применить выбранные операции к CMDBuild webhooks? Это изменит управляемую систему. Операций: {count}.',
+    'webhooks.confirmSyncAuthorization': 'Синхронизировать Authorization у всех наших CMDBuild webhooks? Это отдельная операция: payload/rules не меняются. Загружено записей: {count}.',
     'webhooks.confirmNoSelection': 'Выберите хотя бы одну операцию.',
     'webhooks.confirmDeleteSelected': 'Удалить выбранные CMDBuild webhooks? Это изменит управляемую систему. Операций удаления: {count}.',
     'webhooks.confirmNoDeleteSelection': 'Выберите хотя бы одну операцию удаления.',
@@ -632,6 +635,19 @@ const translations = {
     'zabbixMetadata.conflictEditor': 'Несовместимые Zabbix templates: {message}',
     'catalog.zabbixSummary': 'Получено: {syncedAt}. Zabbix {version}. Host groups: {hostGroups}. Templates: {templates}. Template groups: {templateGroups}. Hosts: {hosts}. Tags: {tags}.',
     'catalog.cmdbuildSummary': 'Получено: {syncedAt}. Classes: {classes}. Attributes: {attributes}. Domains: {domains}. Lookups: {lookups}.',
+    'catalog.lookupBulkTitle': 'Массовое изменение lookup',
+    'catalog.lookupBulkClass': 'Класс CMDBuild',
+    'catalog.lookupBulkAttribute': 'Lookup атрибут',
+    'catalog.lookupBulkApply': 'Поменять все значения карточек класса',
+    'catalog.lookupBulkOnlyEmptyMainHostId': 'Только где пустой zabbix_main_hostid',
+    'catalog.lookupBulkSelectClass': 'Выберите класс',
+    'catalog.lookupBulkSelectAttribute': 'Выберите lookup атрибут',
+    'catalog.lookupBulkNoAttributes': 'У выбранного класса нет writable lookup-атрибутов.',
+    'catalog.lookupBulkReady': 'Будет выполнен поштучный PUT карточек: текущее значение lookup заменяется следующим активным значением справочника, пустое - первым.',
+    'catalog.lookupBulkConfirm': 'Будут изменены lookup-значения карточек класса {className} в атрибуте {attributeName}. Текущее значение заменится следующим активным значением справочника. Фильтр zabbix_main_hostid: {mainHostIdFilter}. Продолжить?',
+    'catalog.lookupBulkFilterEmpty': 'только пустой',
+    'catalog.lookupBulkFilterAll': 'все карточки',
+    'catalog.lookupBulkDone': 'Готово: в CMDBuild {cmdbuildTotal}, обработано уникальных {total}, отфильтровано {filtered}, изменено {changed}, пропущено {skipped}, ошибок {failed}.',
     'catalog.notLoaded': 'Каталог еще не загружен.',
     'settings.kafkaEvents': 'Kafka Events',
     'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
@@ -738,6 +754,7 @@ const translations = {
     'mapping.profileName': 'Имя hostProfile',
     'mapping.profileNamePlaceholder': 'class-main',
     'mapping.profileAddressField': 'Адресный leaf',
+    'mapping.profileRecognizedOnly': 'Предлагать распознанные IP/DNS',
     'mapping.profileAddressMode': 'Режим адреса',
     'mapping.profileAddressModeIp': 'IP',
     'mapping.profileAddressModeDns': 'DNS',
@@ -804,6 +821,8 @@ const translations = {
     'mapping.status.resetModify': 'Поля модификации сброшены. Начните с правила, класса, атрибута или структуры конвертации.',
     'mapping.status.resetAdd': 'Поля формы очищены. Выберите leaf field и Zabbix target.',
     'mapping.status.noModifyRule': 'Выберите правило для модификации.',
+    'mapping.status.noModifyRuleContext': 'Сначала выберите правило для изменения. Поле Regex ниже относится к condition выбранного rule.',
+    'mapping.status.modifyRuleContext': 'Редактируется: {collection} -> {rule}. {meta}',
     'mapping.status.ruleResetNeeded': 'Форма совпадает с выбранным правилом: измените поле или нажмите "Сбросить поля".',
     'mapping.status.noRuleChanges': 'Изменений для сохранения нет: правило совпадает с текущим draft JSON.',
     'mapping.status.canModify': 'Можно редактировать: цепочка однозначна, target совместим, изменения готовы к сохранению.',
@@ -881,6 +900,9 @@ const translations = {
     'mapping.option.chooseFieldFilter': 'Выберите атрибут класса или оставьте фильтр пустым',
     'mapping.option.chooseStructureFilter': 'Выберите структуру конвертации или оставьте фильтр пустым',
     'mapping.option.chooseTargetFilter': 'Выберите объект/payload Zabbix или оставьте фильтр пустым',
+    'mapping.option.profileOnlyClassSuffix': 'только profile',
+    'mapping.option.sourceOnlyClassSuffix': 'только source',
+    'mapping.option.noEditableRulesForClass': 'Для этого класса нет rules, доступных в "Модификация правила"; hostProfiles меняются в блоке "Профили мониторинга".',
     'mapping.option.chooseLeaf': 'Выберите leaf/source field',
     'mapping.option.chooseProfileAddressField': 'Выберите IP/DNS leaf для профиля',
     'mapping.option.chooseStructure': 'Выберите структуру конвертации',
@@ -991,6 +1013,7 @@ const translations = {
     'help.webhooks.8': 'В таблице можно раскрыть payload каждой строки: зеленым показано добавление, красным удаление, черным актуальное значение. Нажатие на значение в столбце "Действие" открывает детали под этой строкой, а общий блок деталей находится под таблицей и использует ту же подсветку. Редактировать меняет JSON конкретного webhook в текущем плане.',
     'help.webhooks.9': 'Если текущий CMDBuild webhook не передает payload-поля, которые нужны rules, summary, детали и причина операции показывают конкретные отсутствующие ключи и правила, из-за которых они нужны. Без загрузки операции в CMDB или ручной правки webhook converter не получит эти значения.',
     'help.webhooks.10': '`Удалить выбранные` применяет только отмеченные операции удаления CMDBuild webhooks и не отправляет create/update операции. Остальные изменения применяются отдельной командой `Загрузить в CMDB`.',
+    'help.webhooks.11': '`Загрузить в CMDB` не ротирует Authorization у существующих webhook: backend сохраняет текущий Authorization при обычном update. Для смены токена используется отдельная кнопка `Синхронизировать Authorization`, которая меняет только этот заголовок у owned managed webhooks.',
     'help.audit.title': 'Аудит',
     'help.audit.1': 'Раздел аудита готовит CMDBuild model для обратной связи с Zabbix: проверяет классы, участвующие в conversion rules, и строит план добавления управляемого атрибута и служебного класса.',
     'help.audit.2': 'Атрибут zabbix_main_hostid создается в карточке каждого участвующего класса. Он нужен для хранения Zabbix hostid основного host объекта и прямой диагностики, какая карточка CMDBuild уже поставлена на мониторинг.',
@@ -1047,6 +1070,7 @@ const translations = {
     'tooltip.mappingProfileKind': 'Основной profile формирует базовый Zabbix host. Дополнительный profile добавляет suffix HostProfileName и используется для отдельного host lifecycle.',
     'tooltip.mappingProfileName': 'Имя hostProfile. Это же значение доступно в виртуальном поле hostProfile для правил назначения templates/groups/tags.',
     'tooltip.mappingProfileField': 'IP/DNS leaf, который попадет в interfaces[].ip или interfaces[].dns выбранного profile.',
+    'tooltip.mappingProfileRecognizedOnly': 'Когда включено, список адресного leaf показывает только поля, распознанные как IP или DNS. Когда выключено, доступны все совместимые leaf/source fields класса; выбранный режим IP/DNS применяется вручную.',
     'tooltip.mappingProfileMode': 'Определяет, будет ли leaf записан как IP с useip=1 или DNS с useip=0.',
     'tooltip.mappingProfileInterfaceProfile': 'Локальный профиль Zabbix interfaces[]: agent, SNMP, IPMI или JMX параметры.',
     'tooltip.mappingProfileCreateOnUpdate': 'Если объект уже существует в CMDBuild, но Zabbix host для profile еще не создан, update-событие выполнит fallback host.get -> host.create.',
@@ -1066,6 +1090,7 @@ const translations = {
     'tooltip.webhooksAnalyze': 'Строит план CMDBuild webhooks по текущим conversion rules и загруженному каталогу CMDBuild.',
     'tooltip.webhooksLoadCmdb': 'Загружает текущие CMDBuild webhooks из управляемой системы.',
     'tooltip.webhooksSaveAs': 'Сохраняет JSON-план webhooks через браузер. CMDBuild, backend rules-файл и git не изменяются.',
+    'tooltip.webhooksSyncAuthorization': 'Отдельно синхронизирует только Authorization у наших managed webhooks. Payload, rules и create/update/delete-план не меняются.',
     'tooltip.webhooksDeleteSelected': 'Применяет только выбранные операции удаления CMDBuild webhooks. Это изменяет управляемую систему.',
     'tooltip.webhooksApplyCmdb': 'Применяет выбранные операции create/update/delete к CMDBuild webhooks. Это изменяет управляемую систему.',
     'tooltip.webhooksSelectAll': 'Выбирает все операции плана webhooks.',
@@ -1156,6 +1181,7 @@ const translations = {
     'webhooks.analyze': 'Analyze rules',
     'webhooks.loadFromCmdb': 'Load from CMDB',
     'webhooks.applyToCmdb': 'Load into CMDB',
+    'webhooks.syncAuthorization': 'Sync Authorization',
     'webhooks.deleteSelected': 'Delete selected',
     'webhooks.operations': 'Operations',
     'webhooks.details': 'Details',
@@ -1178,7 +1204,9 @@ const translations = {
     'webhooks.statusSelectionChanged': 'Operation selection changed.',
     'webhooks.statusApplied': 'Operations applied to CMDB: {count}.',
     'webhooks.statusDeleted': 'Delete operations applied to CMDB: {count}.',
+    'webhooks.statusAuthorizationSynced': 'Authorization synchronized: changed {count}, unchanged {skipped}.',
     'webhooks.confirmApply': 'Apply selected operations to CMDBuild webhooks? This changes the managed system. Operations: {count}.',
+    'webhooks.confirmSyncAuthorization': 'Synchronize Authorization on all owned CMDBuild webhooks? This is a separate operation: payload/rules are not changed. Loaded records: {count}.',
     'webhooks.confirmNoSelection': 'Select at least one operation.',
     'webhooks.confirmDeleteSelected': 'Delete selected CMDBuild webhooks? This changes the managed system. Delete operations: {count}.',
     'webhooks.confirmNoDeleteSelection': 'Select at least one delete operation.',
@@ -1362,6 +1390,19 @@ const translations = {
     'zabbixMetadata.conflictEditor': 'Incompatible Zabbix templates: {message}',
     'catalog.zabbixSummary': 'Obtained: {syncedAt}. Zabbix {version}. Host groups: {hostGroups}. Templates: {templates}. Template groups: {templateGroups}. Hosts: {hosts}. Tags: {tags}.',
     'catalog.cmdbuildSummary': 'Obtained: {syncedAt}. Classes: {classes}. Attributes: {attributes}. Domains: {domains}. Lookups: {lookups}.',
+    'catalog.lookupBulkTitle': 'Bulk lookup change',
+    'catalog.lookupBulkClass': 'CMDBuild class',
+    'catalog.lookupBulkAttribute': 'Lookup attribute',
+    'catalog.lookupBulkApply': 'Change all card values in class',
+    'catalog.lookupBulkOnlyEmptyMainHostId': 'Only where zabbix_main_hostid is empty',
+    'catalog.lookupBulkSelectClass': 'Select a class',
+    'catalog.lookupBulkSelectAttribute': 'Select a lookup attribute',
+    'catalog.lookupBulkNoAttributes': 'The selected class has no writable lookup attributes.',
+    'catalog.lookupBulkReady': 'The action will run per-card PUT calls: each lookup value is replaced with the next active lookup value, empty values with the first one.',
+    'catalog.lookupBulkConfirm': 'This will change lookup values for cards in class {className}, attribute {attributeName}. The current value will be replaced with the next active lookup value. zabbix_main_hostid filter: {mainHostIdFilter}. Continue?',
+    'catalog.lookupBulkFilterEmpty': 'empty only',
+    'catalog.lookupBulkFilterAll': 'all cards',
+    'catalog.lookupBulkDone': 'Done: CMDBuild total {cmdbuildTotal}, unique processed {total}, filtered {filtered}, changed {changed}, skipped {skipped}, failed {failed}.',
     'catalog.notLoaded': 'Catalog is not loaded yet.',
     'settings.kafkaEvents': 'Kafka Events',
     'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
@@ -1468,6 +1509,7 @@ const translations = {
     'mapping.profileName': 'hostProfile name',
     'mapping.profileNamePlaceholder': 'class-main',
     'mapping.profileAddressField': 'Address leaf',
+    'mapping.profileRecognizedOnly': 'Suggest recognized IP/DNS',
     'mapping.profileAddressMode': 'Address mode',
     'mapping.profileAddressModeIp': 'IP',
     'mapping.profileAddressModeDns': 'DNS',
@@ -1534,6 +1576,8 @@ const translations = {
     'mapping.status.resetModify': 'Modification fields were reset. Start from a rule, class, attribute, or conversion structure.',
     'mapping.status.resetAdd': 'Form fields were cleared. Choose a leaf field and Zabbix target.',
     'mapping.status.noModifyRule': 'Choose a rule to modify.',
+    'mapping.status.noModifyRuleContext': 'Choose a rule to modify first. The Regex field below belongs to the selected rule condition.',
+    'mapping.status.modifyRuleContext': 'Editing: {collection} -> {rule}. {meta}',
     'mapping.status.ruleResetNeeded': 'The form matches the selected rule: change a field or press "Reset fields".',
     'mapping.status.noRuleChanges': 'There are no changes to save: the rule matches the current draft JSON.',
     'mapping.status.canModify': 'Ready to edit: the chain is unambiguous, the target is compatible, and changes can be saved.',
@@ -1611,6 +1655,9 @@ const translations = {
     'mapping.option.chooseFieldFilter': 'Choose class attribute field or leave the filter empty',
     'mapping.option.chooseStructureFilter': 'Choose conversion structure or leave the filter empty',
     'mapping.option.chooseTargetFilter': 'Choose Zabbix object / payload or leave the filter empty',
+    'mapping.option.profileOnlyClassSuffix': 'profile only',
+    'mapping.option.sourceOnlyClassSuffix': 'source only',
+    'mapping.option.noEditableRulesForClass': 'This class has no rules available in "Modify rule"; edit hostProfiles in the "Monitoring profiles" block.',
     'mapping.option.chooseLeaf': 'Choose leaf / source field',
     'mapping.option.chooseProfileAddressField': 'Choose an IP/DNS leaf for the profile',
     'mapping.option.chooseStructure': 'Choose conversion structure',
@@ -1721,6 +1768,7 @@ const translations = {
     'help.webhooks.8': 'Each table row can expand its payload: green means added, red means deleted, and black means current value. Clicking the Action value opens details under that row, while the shared details panel is below the table and uses the same highlighting. Edit changes JSON for that concrete webhook in the current plan.',
     'help.webhooks.9': 'If a current CMDBuild webhook does not send payload fields required by rules, the summary, details, and operation reason show the concrete missing keys and the rules that require them. Until the operation is loaded into CMDB or the webhook is updated manually, the converter will not receive those values.',
     'help.webhooks.10': '`Delete selected` applies only selected CMDBuild webhook delete operations and does not send create/update operations. Other changes are applied separately with `Load into CMDB`.',
+    'help.webhooks.11': '`Load into CMDB` does not rotate Authorization on existing webhooks: the backend preserves the current Authorization during a normal update. Token changes use the separate `Sync Authorization` button, which changes only that header on owned managed webhooks.',
     'help.audit.title': 'Audit',
     'help.audit.1': 'The Audit section prepares the CMDBuild model for reverse links to Zabbix: it checks classes participating in conversion rules and builds a plan for adding a managed attribute and service class.',
     'help.audit.2': 'The zabbix_main_hostid attribute is created on each participating class card. It stores the Zabbix hostid of the main host object and makes it clear which CMDBuild card is already monitored.',
@@ -1777,6 +1825,7 @@ const translations = {
     'tooltip.mappingProfileKind': 'The main profile builds the base Zabbix host. An additional profile adds the HostProfileName suffix and is used for a separate host lifecycle.',
     'tooltip.mappingProfileName': 'hostProfile name. The same value is exposed as the virtual hostProfile field for template/group/tag assignment rules.',
     'tooltip.mappingProfileField': 'IP/DNS leaf that will be written to interfaces[].ip or interfaces[].dns for the selected profile.',
+    'tooltip.mappingProfileRecognizedOnly': 'When enabled, the address leaf list shows only fields recognized as IP or DNS. When disabled, all compatible class leaf/source fields are available; the selected IP/DNS mode is applied manually.',
     'tooltip.mappingProfileMode': 'Defines whether the leaf is sent as IP with useip=1 or DNS with useip=0.',
     'tooltip.mappingProfileInterfaceProfile': 'Local Zabbix interfaces[] profile: agent, SNMP, IPMI, or JMX parameters.',
     'tooltip.mappingProfileCreateOnUpdate': 'If the CMDBuild object already exists but the Zabbix host for this profile is missing, update events run fallback host.get -> host.create.',
@@ -1796,6 +1845,7 @@ const translations = {
     'tooltip.webhooksAnalyze': 'Builds the CMDBuild webhook plan from current conversion rules and the loaded CMDBuild catalog.',
     'tooltip.webhooksLoadCmdb': 'Loads current CMDBuild webhooks from the managed system.',
     'tooltip.webhooksSaveAs': 'Saves the webhook JSON plan through the browser. CMDBuild, backend rules file, and git are not changed.',
+    'tooltip.webhooksSyncAuthorization': 'Separately synchronizes only Authorization on owned managed webhooks. Payload, rules, and the create/update/delete plan are not changed.',
     'tooltip.webhooksDeleteSelected': 'Applies only selected CMDBuild webhook delete operations. This changes the managed system.',
     'tooltip.webhooksApplyCmdb': 'Applies selected create/update/delete operations to CMDBuild webhooks. This changes the managed system.',
     'tooltip.webhooksSelectAll': 'Selects all webhook plan operations.',
@@ -2444,6 +2494,7 @@ function bindForms() {
   $('#mappingProfileKind')?.addEventListener('change', handleMappingProfileKindChange);
   $('#mappingProfileName')?.addEventListener('input', updateMappingProfilesPanel);
   $('#mappingProfileField')?.addEventListener('change', handleMappingProfileFieldChange);
+  $('#mappingProfileRecognizedOnly')?.addEventListener('change', handleMappingProfileRecognizedOnlyChange);
   $('#mappingProfileMode')?.addEventListener('change', () => {
     $('#mappingProfileMode').dataset.userTouched = '1';
     updateMappingProfilesPanel();
@@ -2484,6 +2535,7 @@ function bindForms() {
   bindAction('#webhooksAnalyze', analyzeCmdbuildWebhooks);
   bindAction('#webhooksLoadCmdb', loadCmdbuildWebhooks);
   bindAction('#webhooksSaveAs', saveWebhooksAsFile);
+  bindAction('#webhooksSyncAuthorization', syncCmdbuildWebhookAuthorization, { restoreDisabled: false });
   bindAction('#webhooksDeleteSelected', deleteSelectedCmdbuildWebhooks, { restoreDisabled: false });
   bindAction('#webhooksApplyCmdb', applyCmdbuildWebhooks, { restoreDisabled: false });
   bindAction('#auditAnalyzeModel', analyzeAuditModel, { success: false });
@@ -2506,6 +2558,13 @@ function bindForms() {
   bindAction('#loadZabbixMetadata', loadZabbixMetadata, { success: false });
   bindAction('#syncCmdbuild', syncCmdbuild);
   bindAction('#loadCmdbuild', loadCmdbuild);
+  $('#cmdbuildLookupBulkClass')?.addEventListener('change', updateCmdbuildLookupBulkAttributes);
+  $('#cmdbuildLookupBulkAttribute')?.addEventListener('change', updateCmdbuildLookupBulkAttributes);
+  bindAction('#cmdbuildLookupBulkApply', applyCmdbuildLookupBulkChange, {
+    restoreDisabled: true,
+    success: false,
+    statusSelector: '#cmdbuildLookupBulkStatus'
+  });
   bindAction('#loadRuntimeSettings', loadRuntimeSettingsFromButton, { success: false });
   bindAction('#loadAuthSettings', loadAuthSettings);
   bindAction('#saveRuntimeSettings', saveRuntimeSettings, { success: false });
@@ -3378,6 +3437,7 @@ async function loadCmdbuild() {
 function renderCmdbuild(catalog) {
   state.cmdbuildCatalog = catalog;
   renderCmdbuildCatalogSummary(catalog);
+  renderCmdbuildLookupBulkForm(catalog);
   renderRows($('#cmdbClasses'), catalog.classes ?? [], item => [
     item.name,
     item.active === false ? 'false' : 'true',
@@ -3393,6 +3453,114 @@ function renderCmdbuild(catalog) {
     cmdbDomainEndpointClass(item, 'source'),
     cmdbDomainEndpointClass(item, 'destination')
   ]);
+}
+
+function renderCmdbuildLookupBulkForm(catalog = {}) {
+  const classSelect = $('#cmdbuildLookupBulkClass');
+  if (!classSelect) {
+    return;
+  }
+
+  const previousClass = classSelect.value;
+  const classes = (catalog.classes ?? [])
+    .filter(item => item?.name && item.active !== false)
+    .sort((left, right) => String(left.name).localeCompare(String(right.name)));
+  classSelect.replaceChildren(el('option', '', t('catalog.lookupBulkSelectClass')));
+  classSelect.options[0].value = '';
+  for (const item of classes) {
+    const option = el('option', '', catalogClassDisplayName(catalog, item));
+    option.value = item.name;
+    classSelect.append(option);
+  }
+  if ([...classSelect.options].some(option => option.value === previousClass)) {
+    classSelect.value = previousClass;
+  }
+
+  updateCmdbuildLookupBulkAttributes();
+}
+
+function updateCmdbuildLookupBulkAttributes() {
+  const catalog = state.cmdbuildCatalog ?? {};
+  const className = $('#cmdbuildLookupBulkClass')?.value ?? '';
+  const attributeSelect = $('#cmdbuildLookupBulkAttribute');
+  const button = $('#cmdbuildLookupBulkApply');
+  const status = $('#cmdbuildLookupBulkStatus');
+  if (!attributeSelect || !button) {
+    return;
+  }
+
+  const previousAttribute = attributeSelect.value;
+  const classItem = className ? findCatalogClass(catalog, className) : null;
+  const attributes = classItem
+    ? catalogAttributesForClass(catalog, classItem)
+      .filter(isWritableLookupAttribute)
+      .sort((left, right) => String(left.name).localeCompare(String(right.name)))
+    : [];
+  attributeSelect.replaceChildren(el('option', '', t('catalog.lookupBulkSelectAttribute')));
+  attributeSelect.options[0].value = '';
+  for (const attribute of attributes) {
+    const option = el('option', '', `${attribute.name} (${lookupAttributeTypeName(attribute)})`);
+    option.value = attribute.name;
+    attributeSelect.append(option);
+  }
+  if ([...attributeSelect.options].some(option => option.value === previousAttribute)) {
+    attributeSelect.value = previousAttribute;
+  }
+
+  const hasClass = hasText(className);
+  const hasAttribute = hasText(attributeSelect.value);
+  button.disabled = !hasClass || !hasAttribute || attributes.length === 0;
+  if (!hasClass) {
+    status.textContent = t('catalog.lookupBulkSelectClass');
+  } else if (attributes.length === 0) {
+    status.textContent = t('catalog.lookupBulkNoAttributes');
+  } else if (!hasAttribute) {
+    status.textContent = t('catalog.lookupBulkSelectAttribute');
+  } else {
+    status.textContent = t('catalog.lookupBulkReady');
+  }
+}
+
+function isWritableLookupAttribute(attribute) {
+  return isLookupAttribute(attribute)
+    && !equalsIgnoreCase(attribute.type, 'lookupArray')
+    && !equalsIgnoreCase(attribute.mode, 'read')
+    && attribute._can_update !== false
+    && attribute.writable !== false
+    && attribute.hidden !== true;
+}
+
+async function applyCmdbuildLookupBulkChange() {
+  const className = $('#cmdbuildLookupBulkClass')?.value ?? '';
+  const attributeName = $('#cmdbuildLookupBulkAttribute')?.value ?? '';
+  const onlyEmptyMainHostId = $('#cmdbuildLookupBulkOnlyEmptyMainHostId')?.checked === true;
+  if (!hasText(className) || !hasText(attributeName)) {
+    throw new Error(t('catalog.lookupBulkSelectAttribute'));
+  }
+  const confirmed = window.confirm(tf('catalog.lookupBulkConfirm', {
+    className,
+    attributeName,
+    mainHostIdFilter: onlyEmptyMainHostId ? t('catalog.lookupBulkFilterEmpty') : t('catalog.lookupBulkFilterAll')
+  }));
+  if (!confirmed) {
+    return { cancelled: true };
+  }
+
+  const result = await api('/api/cmdbuild/catalog/lookup-bulk-change', {
+    method: 'POST',
+    body: { className, attributeName, onlyEmptyMainHostId }
+  });
+  const message = tf('catalog.lookupBulkDone', {
+    cmdbuildTotal: result.cmdbuildReportedTotal ?? '-',
+    total: result.total ?? 0,
+    filtered: result.filteredOutByMainHostId ?? 0,
+    changed: result.changed ?? 0,
+    skipped: result.skipped ?? 0,
+    failed: result.failed ?? 0
+  });
+  setActionStatus($('#cmdbuildLookupBulkStatus'), message, result.failed || result.paginationStopped ? 'warning' : 'success');
+  toast(message);
+  return result;
 }
 
 function renderCmdbuildCatalogSummary(catalog = {}) {
@@ -4237,6 +4405,7 @@ function updateWebhooksHistoryControls() {
   $('#webhooksUndo').disabled = !hasPlan || state.webhooksHistoryIndex <= 0;
   $('#webhooksRedo').disabled = !hasPlan || state.webhooksHistoryIndex >= state.webhooksHistory.length - 1;
   $('#webhooksSaveAs').disabled = !hasPlan;
+  $('#webhooksSyncAuthorization').disabled = !state.webhooksLoaded || state.webhooksCurrent.length === 0;
   $('#webhooksDeleteSelected').disabled = selectedDeleteCount === 0;
   $('#webhooksApplyCmdb').disabled = selectedCount === 0;
   $('#webhooksSelectAll').disabled = state.webhooksOperations.length === 0;
@@ -4878,6 +5047,32 @@ async function applyCmdbuildWebhooks() {
   return result;
 }
 
+async function syncCmdbuildWebhookAuthorization() {
+  if (!state.webhooksLoaded) {
+    await loadCmdbuildWebhooks();
+  }
+
+  const ownedCount = state.webhooksCurrent.filter(isManagedWebhook).length;
+  if (!window.confirm(tf('webhooks.confirmSyncAuthorization', { count: ownedCount }))) {
+    return false;
+  }
+
+  const hadPlan = state.webhooksHistoryIndex >= 0;
+  const result = await api('/api/cmdbuild/webhooks/sync-authorization', {
+    method: 'POST',
+    body: {}
+  });
+  toast(tf('webhooks.statusAuthorizationSynced', {
+    count: result.count ?? 0,
+    skipped: result.skipped ?? 0
+  }));
+  await loadCmdbuildWebhooks();
+  if (hadPlan) {
+    await analyzeCmdbuildWebhooks();
+  }
+  return result;
+}
+
 async function deleteSelectedCmdbuildWebhooks() {
   const operations = selectedWebhookDeleteOperations();
   if (operations.length === 0) {
@@ -5280,11 +5475,16 @@ function webhookComparable(hook) {
     target: normalized.target,
     method: normalized.method,
     url: normalized.url,
-    headers: normalized.headers,
+    headers: webhookComparableHeaders(normalized.headers),
     body: normalized.body,
     language: normalized.language,
     active: normalized.active
   };
+}
+
+function webhookComparableHeaders(headers = {}) {
+  return Object.fromEntries(Object.entries(headers)
+    .filter(([key]) => String(key).toLowerCase() !== 'authorization'));
 }
 
 function currentWebhookPlaceholderPrefix(hook) {
@@ -7129,6 +7329,7 @@ function mappingProfileAddressFieldOptions(className) {
 
   const rules = currentMappingRules();
   const sourceFields = rules.source?.fields ?? {};
+  const recognizedOnly = mappingProfileRecognizedOnly();
   const configured = Object.entries(sourceFields)
     .filter(([fieldKey, field]) => isMappingSourceFieldCompatibleWithClass(className, fieldKey, field, rules))
     .map(([fieldKey, field]) => ({
@@ -7139,8 +7340,12 @@ function mappingProfileAddressFieldOptions(className) {
     }));
   const catalog = mappingEditorCatalogFieldOptions(className, sourceFields);
   return uniqueMappingEditorFieldOptions([...configured, ...catalog])
-    .filter(option => ['ip', 'dns'].includes(sourceFieldAddressKind(option.value, option.fieldRule ?? {})))
+    .filter(option => !recognizedOnly || ['ip', 'dns'].includes(sourceFieldAddressKind(option.value, option.fieldRule ?? {})))
     .sort((left, right) => compareText(left.label, right.label));
+}
+
+function mappingProfileRecognizedOnly() {
+  return $('#mappingProfileRecognizedOnly')?.checked !== false;
 }
 
 function populateMappingProfileInterfaceProfiles(options = {}) {
@@ -7242,11 +7447,12 @@ function validateMappingProfileForm(options = {}) {
     return { valid: false, message: t('mapping.status.profileNameRequired') };
   }
   const detectedKind = sourceFieldAddressKind(values.field, values.fieldRule);
-  if (!['ip', 'dns'].includes(detectedKind)) {
+  const recognizedOnly = mappingProfileRecognizedOnly();
+  if (recognizedOnly && !['ip', 'dns'].includes(detectedKind)) {
     return { valid: false, message: tf('mapping.status.profileFieldNotAddress', { field: values.field }) };
   }
   const compatibility = interfaceAddressCompatibilityIssue(values.field, values.fieldRule, 'interfaceAddress', { mode: values.mode });
-  if (compatibility) {
+  if (compatibility && (recognizedOnly || compatibility.code !== 'unknownFieldForInterfaceTarget')) {
     return { valid: false, message: mappingFieldTargetCompatibilityMessage(values.field, values.fieldRule, 'interfaceAddress', { mode: values.mode }) };
   }
   if (options.action === 'create' && hostProfileNameExists(currentMappingRules(), values.profileName)) {
@@ -7400,6 +7606,12 @@ function handleMappingProfileFieldChange() {
   updateMappingProfilesPanel();
 }
 
+function handleMappingProfileRecognizedOnlyChange() {
+  populateMappingProfileFields();
+  syncMappingProfileSuggestedValues();
+  updateMappingProfileControls();
+}
+
 function syncMappingProfileKindDefault() {
   const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingProfileClass')?.value ?? '');
   const kind = $('#mappingProfileKind');
@@ -7434,12 +7646,18 @@ function loadMappingHostProfileIntoForm(profileName) {
   }
 
   const className = ruleClassConditions(profile)[0] ?? $('#mappingProfileClass')?.value ?? '';
+  const item = mappingProfilePrimaryInterface(profile);
+  const field = item.valueField || profile.valueField || '';
   if ($('#mappingProfileClass')) {
     $('#mappingProfileClass').value = className;
   }
-  populateMappingProfileFields();
-  const item = mappingProfilePrimaryInterface(profile);
-  const field = item.valueField || profile.valueField || '';
+  if (field && mappingProfileRecognizedOnly()) {
+    const fieldRule = currentMappingRules().source?.fields?.[field] ?? {};
+    if (!['ip', 'dns'].includes(sourceFieldAddressKind(field, fieldRule)) && $('#mappingProfileRecognizedOnly')) {
+      $('#mappingProfileRecognizedOnly').checked = false;
+    }
+  }
+  populateMappingProfileFields({ selectedValue: field });
   if ($('#mappingProfileField')) {
     $('#mappingProfileField').value = field;
   }
@@ -7782,7 +8000,35 @@ function updateMappingProfileScopeControls() {
   status.classList.toggle('is-invalid', false);
 }
 
+function updateMappingModifyRuleContext() {
+  const node = $('#mappingModifyRuleContext');
+  if (!node) {
+    return;
+  }
+
+  const visible = state.mappingMode === 'edit' && state.mappingEditAction === 'modify';
+  node.classList.toggle('hidden', !visible);
+  if (!visible) {
+    node.textContent = '';
+    return;
+  }
+
+  const item = selectedMappingModifyItem(currentMappingRules());
+  if (!item) {
+    node.textContent = t('mapping.status.noModifyRuleContext');
+    return;
+  }
+
+  const meta = mappingDeleteRuleMeta(item.rule, item.collection.type, currentMappingRules());
+  node.textContent = tf('mapping.status.modifyRuleContext', {
+    collection: item.collection.label,
+    rule: ruleDisplayName(item.rule),
+    meta
+  });
+}
+
 function updateMappingEditorFormState() {
+  updateMappingModifyRuleContext();
   updateMappingProfileScopeControls();
   const formState = mappingEditorFormValidation();
   for (const selector of mappingEditorFormControlSelectors) {
@@ -8217,24 +8463,57 @@ function mappingModifyItemTargetValue(item) {
 function populateMappingModifyClassFilter(items, selectedValue) {
   const classes = uniqueTokens(items.flatMap(item => mappingModifyItemClasses(item)))
     .sort(compareText);
-  const options = mappingModifyClassOptions(classes);
+  const options = mappingModifyClassOptions(classes, currentMappingRules());
   setClassSelectOptions($('#mappingEditClass'), [
     { value: '', label: t('mapping.option.chooseClassFilter') },
     ...options
   ], selectedValue, state.mappingCmdbuildCatalog ?? {});
 }
 
-function mappingModifyClassOptions(classNames) {
-  const allowed = new Set(classNames.map(normalizeClassName));
-  const hierarchy = cmdbClassHierarchyFilteredSelectOptions(state.mappingCmdbuildCatalog ?? {}, allowed);
+function mappingModifyClassOptions(classNames, rules = currentMappingRules()) {
+  const editable = new Set(classNames.map(normalizeClassName));
+  const profileOnly = new Set((rules.hostProfiles ?? [])
+    .flatMap(profile => ruleClassConditions(profile))
+    .map(normalizeClassName));
+  const sourceOnly = new Set((rules.source?.entityClasses ?? []).map(normalizeClassName));
+  const visibleClassNames = uniqueTokens([
+    ...classNames,
+    ...(rules.hostProfiles ?? []).flatMap(profile => ruleClassConditions(profile)),
+    ...(rules.source?.entityClasses ?? [])
+  ]);
+  const visible = new Set(visibleClassNames.map(normalizeClassName));
+  const hierarchy = cmdbClassHierarchyFilteredSelectOptions(state.mappingCmdbuildCatalog ?? {}, visible);
   const known = new Set(hierarchy.map(option => normalizeClassName(option.value)));
-  const rulesOnly = classNames
+  const rulesOnly = visibleClassNames
     .filter(className => !known.has(normalizeClassName(className)))
-    .map(className => ({
+    .map(className => markMappingModifyClassOption({
       value: className,
-      label: `${className} / rules only`
-    }));
-  return [...hierarchy, ...rulesOnly];
+      label: editable.has(normalizeClassName(className)) ? `${className} / rules only` : className
+    }, editable, profileOnly, sourceOnly));
+  return [
+    ...hierarchy.map(option => markMappingModifyClassOption(option, editable, profileOnly, sourceOnly)),
+    ...rulesOnly
+  ];
+}
+
+function markMappingModifyClassOption(option, editable, profileOnly, sourceOnly) {
+  const normalized = normalizeClassName(option.value);
+  if (!normalized || editable.has(normalized) || option.disabled) {
+    return option;
+  }
+
+  const suffix = profileOnly.has(normalized)
+    ? t('mapping.option.profileOnlyClassSuffix')
+    : sourceOnly.has(normalized)
+      ? t('mapping.option.sourceOnlyClassSuffix')
+      : '';
+  return suffix
+    ? {
+      ...option,
+      label: `${option.label} (${suffix})`,
+      meta: option.meta ?? t('mapping.option.noEditableRulesForClass')
+    }
+    : option;
 }
 
 function cmdbClassHierarchyFilteredSelectOptions(catalog = {}, allowed = new Set()) {
@@ -8374,15 +8653,21 @@ function loadSelectedMappingRuleIntoEditor(options = {}) {
   $('#mappingEditTargetType').value = form.type;
   populateMappingEditorClasses();
   const classSelect = $('#mappingEditClass');
-  const selectedClass = nearestConcreteClassOption(
-    [...classSelect.options].map(option => ({
-      value: option.value,
-      disabled: option.disabled
-    })),
-    state.mappingCmdbuildCatalog ?? {},
-    form.className
-  );
-  classSelect.value = selectedClass?.value || form.className;
+  const classOptions = [...classSelect.options].map(option => ({
+    value: option.value,
+    disabled: option.disabled
+  }));
+  const exactClass = classOptions.find(option => normalizeClassName(option.value) === normalizeClassName(form.className));
+  if (exactClass && !exactClass.disabled) {
+    classSelect.value = exactClass.value;
+  } else {
+    const selectedClass = nearestConcreteClassOption(
+      classOptions,
+      state.mappingCmdbuildCatalog ?? {},
+      form.className
+    );
+    classSelect.value = selectedClass?.value || form.className;
+  }
   $('#mappingEditPriority').value = String(form.priority);
   $('#mappingEditRegex').value = form.regex;
   if ($('#mappingEditStringTemplate')) {
@@ -12072,7 +12357,7 @@ function cmdbParentClassName(item) {
 }
 
 function isCmdbSuperclass(item, children = []) {
-  return item.raw?.prototype === true || children.length > 0;
+  return isCmdbPrototypeClass(item);
 }
 
 function isCmdbCatalogSuperclass(catalog, item) {
@@ -12080,12 +12365,24 @@ function isCmdbCatalogSuperclass(catalog, item) {
     return false;
   }
 
-  return item.raw?.prototype === true || hasCmdbSubclass(catalog, item.name);
+  return isCmdbPrototypeClass(item);
 }
 
-function hasCmdbSubclass(catalog, className) {
-  const normalizedName = normalizeClassName(className);
-  return (catalog.classes ?? []).some(item => cmdbParentClassName(item) === normalizedName);
+function isCmdbPrototypeClass(item = {}) {
+  const sources = [item, item.raw].filter(source => source && typeof source === 'object');
+  return sources.some(source => {
+    if (
+      source.prototype === true
+      || source.isPrototype === true
+      || source.abstract === true
+      || source.isAbstract === true
+    ) {
+      return true;
+    }
+
+    const type = String(source.type ?? source._type ?? source.classType ?? '').toLowerCase();
+    return ['prototype', 'abstract'].includes(type);
+  });
 }
 
 function compareCmdbClasses(left, right) {
@@ -13567,7 +13864,15 @@ function isLookupAttribute(attribute) {
   return Boolean(attribute)
     && (equalsIgnoreCase(attribute.type, 'lookup')
       || equalsIgnoreCase(attribute.type, 'lookupArray')
-      || Boolean(attribute.lookupType));
+      || hasText(lookupAttributeMetadata(attribute)));
+}
+
+function lookupAttributeMetadata(attribute) {
+  return firstNonBlankValue(attribute?.lookupType, attribute?.lookup_type, attribute?._lookupType);
+}
+
+function lookupAttributeTypeName(attribute) {
+  return firstNonBlankValue(lookupAttributeMetadata(attribute), attribute?.type, 'lookup');
 }
 
 function cmdbLookupNodes(rules, catalog, lookupName, className, level = 1) {
@@ -14757,6 +15062,7 @@ function applyHelpText() {
     '#mappingProfileKind': 'tooltip.mappingProfileKind',
     '#mappingProfileName': 'tooltip.mappingProfileName',
     '#mappingProfileField': 'tooltip.mappingProfileField',
+    '#mappingProfileRecognizedOnly': 'tooltip.mappingProfileRecognizedOnly',
     '#mappingProfileMode': 'tooltip.mappingProfileMode',
     '#mappingProfileInterfaceProfile': 'tooltip.mappingProfileInterfaceProfile',
     '#mappingProfileCreateOnUpdate': 'tooltip.mappingProfileCreateOnUpdate',
@@ -14774,6 +15080,7 @@ function applyHelpText() {
     '#webhooksRedo': 'tooltip.webhooksRedo',
     '#webhooksAnalyze': 'tooltip.webhooksAnalyze',
     '#webhooksLoadCmdb': 'tooltip.webhooksLoadCmdb',
+    '#webhooksSyncAuthorization': 'tooltip.webhooksSyncAuthorization',
     '#webhooksSaveAs': 'tooltip.webhooksSaveAs',
     '#webhooksDeleteSelected': 'tooltip.webhooksDeleteSelected',
     '#webhooksApplyCmdb': 'tooltip.webhooksApplyCmdb',

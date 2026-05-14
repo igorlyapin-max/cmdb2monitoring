@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -32,6 +33,15 @@ public sealed class CmdbuildBindingClient(
         var attributeName = options.Value.MainHostIdAttributeName;
         var desiredHostId = IsDeleted(bindingEvent) ? null : bindingEvent.ZabbixHostId;
         var currentHostId = await TryReadCurrentMainHostIdAsync(bindingEvent, cancellationToken);
+        if (currentHostId is { SourceCardAvailable: false })
+        {
+            logger.LogWarning(
+                "Skipped CMDBuild main host binding write for {SourceClass}/{SourceCardId}: source card is unavailable",
+                bindingEvent.SourceClass,
+                bindingEvent.SourceCardId);
+            return;
+        }
+
         if (currentHostId is not null && BindingValueMatches(currentHostId.Value.HostId, desiredHostId))
         {
             logger.LogInformation(
@@ -140,9 +150,18 @@ public sealed class CmdbuildBindingClient(
             var data = ReadDataObject(document?.RootElement);
             return data is null
                 ? null
-                : new CurrentMainHostId(ReadString(data.Value, options.Value.MainHostIdAttributeName));
+                : new CurrentMainHostId(true, ReadString(data.Value, options.Value.MainHostIdAttributeName));
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (CmdbuildRequestException ex) when (IsUnavailableCardStatus(ex.ResponseStatusCode))
+        {
+            logger.LogWarning(
+                ex,
+                "CMDBuild source card {SourceClass}/{SourceCardId} is unavailable for main host binding read; binding write will be skipped",
+                bindingEvent.SourceClass,
+                bindingEvent.SourceCardId);
+            return new CurrentMainHostId(false, null);
+        }
+        catch (Exception ex) when (ex is CmdbuildRequestException or HttpRequestException or TaskCanceledException or JsonException)
         {
             logger.LogWarning(
                 ex,
@@ -231,7 +250,12 @@ public sealed class CmdbuildBindingClient(
         }
 
         using var response = await httpClient.SendAsync(request, timeout.Token);
-        response.EnsureSuccessStatusCode();
+        var text = await response.Content.ReadAsStringAsync(timeout.Token);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new CmdbuildRequestException(response.StatusCode, text);
+        }
+
         logger.LogVerbose(
             debugLoggingOptions,
             "CMDBuild {HttpMethod} {Path} returned HTTP {StatusCode}",
@@ -243,7 +267,6 @@ public sealed class CmdbuildBindingClient(
             return null;
         }
 
-        var text = await response.Content.ReadAsStringAsync(timeout.Token);
         if (string.IsNullOrWhiteSpace(text))
         {
             return null;
@@ -319,13 +342,24 @@ public sealed class CmdbuildBindingClient(
             || Same(left, right);
     }
 
+    private static bool IsUnavailableCardStatus(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound;
+    }
+
     private static bool IsDeleted(ZabbixBindingEvent bindingEvent)
     {
         return string.Equals(bindingEvent.BindingStatus, "deleted", StringComparison.OrdinalIgnoreCase)
             || string.Equals(bindingEvent.Operation, "host.delete", StringComparison.OrdinalIgnoreCase);
     }
 
-    private readonly record struct CurrentMainHostId(string? HostId);
+    private sealed class CmdbuildRequestException(HttpStatusCode statusCode, string? responseBody)
+        : HttpRequestException($"CMDBuild request failed with HTTP {(int)statusCode}: {responseBody}")
+    {
+        public HttpStatusCode ResponseStatusCode { get; } = statusCode;
+    }
+
+    private readonly record struct CurrentMainHostId(bool SourceCardAvailable, string? HostId);
 
     private readonly record struct ExistingBindingCard(string CardId, JsonElement Card);
 }

@@ -274,6 +274,12 @@ public sealed class KafkaZabbixRequestWorker(
                 validation.MissingTemplateGroups.ToArray());
         }
 
+        var protectedPayloadResult = ValidateProtectedHostPayload(request);
+        if (protectedPayloadResult is not null)
+        {
+            return protectedPayloadResult;
+        }
+
         if (IsDirectUpdateRequest(request) && HasMergeableHostUpdateFields(request.Params))
         {
             logger.LogBasic(
@@ -282,6 +288,12 @@ public sealed class KafkaZabbixRequestWorker(
                 request.EntityId ?? "<unknown>",
                 request.Host ?? "<unknown>");
             return await ProcessDirectUpdateAsync(request, cancellationToken);
+        }
+
+        var protectedMutationResult = await ValidateProtectedHostMutationAsync(request, cancellationToken);
+        if (protectedMutationResult is not null)
+        {
+            return protectedMutationResult;
         }
 
         logger.LogBasic(
@@ -314,8 +326,8 @@ public sealed class KafkaZabbixRequestWorker(
             return ZabbixProcessingResult.FromApiResult(lookupRequest, lookupResult);
         }
 
-        var hostId = ReadFirstHostId(lookupResult.ResponseJson);
-        if (string.IsNullOrWhiteSpace(hostId))
+        var hostInfo = ReadFirstHostLookupInfo(lookupResult.ResponseJson);
+        if (hostInfo is null)
         {
             return ZabbixProcessingResult.FromValidationError(
                 lookupRequest,
@@ -326,7 +338,7 @@ public sealed class KafkaZabbixRequestWorker(
                 []);
         }
 
-        var deleteRequestJson = BuildHostDeleteRequestJson(lookupRequest, hostId);
+        var deleteRequestJson = BuildHostDeleteRequestJson(lookupRequest, hostInfo.HostId);
         var deleteRequest = requestReader.Read(lookupRequest.EntityId, deleteRequestJson, lookupRequest.Host);
         var deleteValidation = await requestValidator.ValidateAsync(deleteRequest, cancellationToken);
         if (!deleteValidation.IsValid)
@@ -338,6 +350,12 @@ public sealed class KafkaZabbixRequestWorker(
                 deleteValidation.MissingHostGroups.ToArray(),
                 deleteValidation.MissingTemplates.ToArray(),
                 deleteValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var protectedHostResult = RejectProtectedAggregateHost(deleteRequest, hostInfo);
+        if (protectedHostResult is not null)
+        {
+            return protectedHostResult;
         }
 
         var deleteResult = await zabbixClient.ExecuteAsync(deleteRequest, cancellationToken);
@@ -386,6 +404,12 @@ public sealed class KafkaZabbixRequestWorker(
                 []);
         }
 
+        var existingProtectedHostResult = RejectProtectedAggregateHost(lookupRequest, hostInfo);
+        if (existingProtectedHostResult is not null)
+        {
+            return existingProtectedHostResult;
+        }
+
         var updateRequestJson = BuildHostUpdateRequestJson(
             lookupRequest,
             hostInfo);
@@ -406,6 +430,12 @@ public sealed class KafkaZabbixRequestWorker(
                 updateValidation.MissingHostGroups.ToArray(),
                 updateValidation.MissingTemplates.ToArray(),
                 updateValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var protectedPayloadResult = ValidateProtectedHostPayload(updateRequest);
+        if (protectedPayloadResult is not null)
+        {
+            return protectedPayloadResult;
         }
 
         var updateResult = await zabbixClient.ExecuteAsync(updateRequest, cancellationToken);
@@ -460,6 +490,12 @@ public sealed class KafkaZabbixRequestWorker(
                 []);
         }
 
+        var existingProtectedHostResult = RejectProtectedAggregateHost(updateRequest, hostInfo);
+        if (existingProtectedHostResult is not null)
+        {
+            return existingProtectedHostResult;
+        }
+
         var mergedUpdateRequestJson = BuildHostUpdateRequestJson(
             updateRequest,
             updateRequest.Params,
@@ -481,6 +517,12 @@ public sealed class KafkaZabbixRequestWorker(
                 mergedValidation.MissingHostGroups.ToArray(),
                 mergedValidation.MissingTemplates.ToArray(),
                 mergedValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var protectedPayloadResult = ValidateProtectedHostPayload(mergedUpdateRequest);
+        if (protectedPayloadResult is not null)
+        {
+            return protectedPayloadResult;
         }
 
         var mergedUpdateResult = await zabbixClient.ExecuteAsync(mergedUpdateRequest, cancellationToken);
@@ -522,8 +564,209 @@ public sealed class KafkaZabbixRequestWorker(
                 createValidation.MissingTemplateGroups.ToArray());
         }
 
+        var protectedPayloadResult = ValidateProtectedHostPayload(createRequest);
+        if (protectedPayloadResult is not null)
+        {
+            return protectedPayloadResult;
+        }
+
         var createResult = await zabbixClient.ExecuteAsync(createRequest, cancellationToken);
         return ZabbixProcessingResult.FromApiResult(createRequest, createResult);
+    }
+
+    private ZabbixProcessingResult? ValidateProtectedHostPayload(ZabbixRequestDocument request)
+    {
+        if (!processingOptions.Value.ProtectManagedAggregateHosts
+            || !IsHostCreateOrUpdateRequest(request)
+            || request.Params.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var violation = FindProtectedHostViolation(
+            ReadString(request.Params, "hostid"),
+            ReadString(request.Params, "host"),
+            ReadString(request.Params, "name"),
+            ReadObjectArray(request.Params, "tags"));
+
+        return violation is null ? null : RejectProtectedHost(request, violation);
+    }
+
+    private async Task<ZabbixProcessingResult?> ValidateProtectedHostMutationAsync(
+        ZabbixRequestDocument request,
+        CancellationToken cancellationToken)
+    {
+        if (!processingOptions.Value.ProtectManagedAggregateHosts
+            || !IsHostUpdateOrDeleteRequest(request))
+        {
+            return null;
+        }
+
+        var hostIds = ReadMutationHostIds(request)
+            .Where(hostId => !string.IsNullOrWhiteSpace(hostId))
+            .Select(hostId => hostId!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (hostIds.Length == 0)
+        {
+            return null;
+        }
+
+        var lookupRequestJson = BuildHostGetByIdsRequestJson(request, hostIds);
+        var lookupRequest = requestReader.Read(request.EntityId, lookupRequestJson, request.Host);
+        var lookupValidation = await requestValidator.ValidateAsync(lookupRequest, cancellationToken);
+        if (!lookupValidation.IsValid)
+        {
+            return ZabbixProcessingResult.FromValidationError(
+                lookupRequest,
+                lookupValidation.PrimaryErrorCode(),
+                lookupValidation.PrimaryErrorMessage(),
+                lookupValidation.MissingHostGroups.ToArray(),
+                lookupValidation.MissingTemplates.ToArray(),
+                lookupValidation.MissingTemplateGroups.ToArray());
+        }
+
+        var lookupResult = await zabbixClient.ExecuteAsync(lookupRequest, cancellationToken);
+        if (!lookupResult.Success)
+        {
+            return ZabbixProcessingResult.FromApiResult(lookupRequest, lookupResult);
+        }
+
+        foreach (var hostInfo in ReadHostLookupInfos(lookupResult.ResponseJson))
+        {
+            var protectedHostResult = RejectProtectedAggregateHost(request, hostInfo);
+            if (protectedHostResult is not null)
+            {
+                return protectedHostResult;
+            }
+        }
+
+        return null;
+    }
+
+    private ZabbixProcessingResult? RejectProtectedAggregateHost(
+        ZabbixRequestDocument request,
+        ZabbixHostLookupInfo hostInfo)
+    {
+        var violation = FindProtectedHostViolation(
+            hostInfo.HostId,
+            hostInfo.Host,
+            hostInfo.Name,
+            hostInfo.Tags);
+
+        return violation is null ? null : RejectProtectedHost(request, violation);
+    }
+
+    private ZabbixProcessingResult RejectProtectedHost(
+        ZabbixRequestDocument request,
+        ProtectedHostViolation violation)
+    {
+        var method = string.Equals(request.Method, "host.get", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(request.FallbackForMethod)
+                ? request.FallbackForMethod
+                : request.Method;
+        logger.LogWarning(
+            "Blocked Zabbix {Method} for protected aggregate host {HostId} ({Host}/{Name}): {Reason}",
+            method,
+            violation.HostId ?? "<new>",
+            violation.Host ?? "<unknown>",
+            violation.Name ?? "<unknown>",
+            violation.Reason);
+
+        return ZabbixProcessingResult.FromValidationError(
+            request,
+            "protected_aggregate_host",
+            $"Refusing {method} for protected aggregate Zabbix host {FormatProtectedHost(violation)}: {violation.Reason}.",
+            [],
+            [],
+            []);
+    }
+
+    private ProtectedHostViolation? FindProtectedHostViolation(
+        string? hostId,
+        string? host,
+        string? name,
+        IReadOnlyCollection<JsonElement> tags)
+    {
+        var options = processingOptions.Value;
+        if (!options.ProtectManagedAggregateHosts)
+        {
+            return null;
+        }
+
+        foreach (var protectedHostName in options.ProtectedHostNames ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(protectedHostName))
+            {
+                continue;
+            }
+
+            if (SameScalar(host, protectedHostName) || SameScalar(name, protectedHostName))
+            {
+                return new ProtectedHostViolation(
+                    $"protected host name '{protectedHostName}'",
+                    hostId,
+                    host,
+                    name);
+            }
+        }
+
+        foreach (var tag in tags)
+        {
+            if (tag.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var tagName = ReadString(tag, "tag");
+            if (string.IsNullOrWhiteSpace(tagName))
+            {
+                continue;
+            }
+
+            foreach (var protectedTag in options.ProtectedHostTags ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(protectedTag.Tag)
+                    || !SameScalar(tagName, protectedTag.Tag))
+                {
+                    continue;
+                }
+
+                var expectedValue = protectedTag.Value;
+                var actualValue = ReadString(tag, "value");
+                if (!string.IsNullOrWhiteSpace(expectedValue)
+                    && !SameScalar(actualValue, expectedValue))
+                {
+                    continue;
+                }
+
+                var marker = string.IsNullOrWhiteSpace(expectedValue)
+                    ? protectedTag.Tag
+                    : $"{protectedTag.Tag}={expectedValue}";
+                return new ProtectedHostViolation(
+                    $"protected host tag '{marker}'",
+                    hostId,
+                    host,
+                    name);
+            }
+        }
+
+        return null;
+    }
+
+    private static string FormatProtectedHost(ProtectedHostViolation violation)
+    {
+        if (!string.IsNullOrWhiteSpace(violation.Host))
+        {
+            return $"'{violation.Host}'";
+        }
+
+        if (!string.IsNullOrWhiteSpace(violation.Name))
+        {
+            return $"'{violation.Name}'";
+        }
+
+        return violation.HostId is null ? "<new>" : $"hostid {violation.HostId}";
     }
 
     private static bool IsDeleteFallbackRequest(ZabbixRequestDocument request)
@@ -544,6 +787,37 @@ public sealed class KafkaZabbixRequestWorker(
             && request.Params.ValueKind == JsonValueKind.Object;
     }
 
+    private static bool IsHostCreateOrUpdateRequest(ZabbixRequestDocument request)
+    {
+        return string.Equals(request.Method, "host.create", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(request.Method, "host.update", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsHostUpdateOrDeleteRequest(ZabbixRequestDocument request)
+    {
+        return string.Equals(request.Method, "host.update", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(request.Method, "host.delete", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string?> ReadMutationHostIds(ZabbixRequestDocument request)
+    {
+        if (string.Equals(request.Method, "host.update", StringComparison.OrdinalIgnoreCase)
+            && request.Params.ValueKind == JsonValueKind.Object)
+        {
+            yield return ReadString(request.Params, "hostid");
+            yield break;
+        }
+
+        if (string.Equals(request.Method, "host.delete", StringComparison.OrdinalIgnoreCase)
+            && request.Params.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var hostId in request.Params.EnumerateArray())
+            {
+                yield return ReadScalar(hostId);
+            }
+        }
+    }
+
     private static bool HasMergeableHostUpdateFields(JsonElement parameters)
     {
         if (parameters.ValueKind != JsonValueKind.Object)
@@ -559,24 +833,25 @@ public sealed class KafkaZabbixRequestWorker(
             || parameters.TryGetProperty("inventory", out var inventory) && inventory.ValueKind == JsonValueKind.Object;
     }
 
-    private static string? ReadFirstHostId(string? responseJson)
+    private static ZabbixHostLookupInfo? ReadFirstHostLookupInfo(string? responseJson)
     {
-        return ReadFirstHostLookupInfo(responseJson)?.HostId;
+        return ReadHostLookupInfos(responseJson).FirstOrDefault();
     }
 
-    private static ZabbixHostLookupInfo? ReadFirstHostLookupInfo(string? responseJson)
+    private static ZabbixHostLookupInfo[] ReadHostLookupInfos(string? responseJson)
     {
         if (string.IsNullOrWhiteSpace(responseJson))
         {
-            return null;
+            return [];
         }
 
         using var document = JsonDocument.Parse(responseJson);
         if (!document.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return [];
         }
 
+        var hostInfos = new List<ZabbixHostLookupInfo>();
         foreach (var host in result.EnumerateArray())
         {
             if (host.ValueKind == JsonValueKind.Object
@@ -588,18 +863,20 @@ public sealed class KafkaZabbixRequestWorker(
                     continue;
                 }
 
-                return new ZabbixHostLookupInfo(
+                hostInfos.Add(new ZabbixHostLookupInfo(
                     parsedHostId,
+                    ReadString(host, "host"),
+                    ReadString(host, "name"),
                     ReadInterfaces(host),
                     ReadTemplateIds(host),
                     ReadObjectArray(host, "groups"),
                     ReadObjectArray(host, "tags"),
                     ReadObjectArray(host, "macros"),
-                    ReadObject(host, "inventory"));
+                    ReadObject(host, "inventory")));
             }
         }
 
-        return null;
+        return hostInfos.ToArray();
     }
 
     private static JsonElement[] ReadObjectArray(JsonElement value, string propertyName)
@@ -773,6 +1050,13 @@ public sealed class KafkaZabbixRequestWorker(
         ZabbixRequestDocument updateRequest,
         string hostId)
     {
+        return BuildHostGetByIdsRequestJson(updateRequest, [hostId]);
+    }
+
+    private static string BuildHostGetByIdsRequestJson(
+        ZabbixRequestDocument updateRequest,
+        IReadOnlyCollection<string> hostIds)
+    {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -785,7 +1069,7 @@ public sealed class KafkaZabbixRequestWorker(
             writer.WritePropertyName("output");
             WriteStringArray(writer, new[] { "hostid", "host", "name" });
             writer.WritePropertyName("hostids");
-            WriteStringArray(writer, new[] { hostId });
+            WriteStringArray(writer, hostIds);
             writer.WritePropertyName("selectInterfaces");
             WriteStringArray(writer, new[] { "interfaceid", "type", "main", "useip", "ip", "dns", "port" });
             writer.WritePropertyName("selectGroups");
@@ -1284,12 +1568,20 @@ public sealed class KafkaZabbixRequestWorker(
 
     private sealed record ZabbixHostLookupInfo(
         string HostId,
+        string? Host,
+        string? Name,
         ZabbixInterfaceLookupInfo[] Interfaces,
         string[] TemplateIds,
         JsonElement[] Groups,
         JsonElement[] Tags,
         JsonElement[] Macros,
         JsonElement Inventory);
+
+    private sealed record ProtectedHostViolation(
+        string Reason,
+        string? HostId,
+        string? Host,
+        string? Name);
 
     private sealed record ZabbixInterfaceLookupInfo(
         string? InterfaceId,

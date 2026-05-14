@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1",
-  "rulesVersion": "2026.05.12-091152-test15-profile-ip-leaf-fix",
+  "rulesVersion": "2026.05.13-145441-test15-profile-ip-leaf-fix",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
   "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
@@ -19,6 +19,9 @@
       "ARM",
       "C2MTestCI",
       "DBGKM",
+      "iiipad",
+      "iiiphone",
+      "iiirouter",
       "Netman",
       "NGFW",
       "NTbook",
@@ -645,6 +648,16 @@
           "mode": "cmdbPath",
           "valueMode": "leaf",
           "maxDepth": 2
+        }
+      },
+      "ipaddressip": {
+        "source": "ipaddressip",
+        "cmdbAttribute": "ipaddressip",
+        "cmdbPath": "iiirouter.ipaddressip",
+        "required": false,
+        "type": "ipAddress",
+        "resolve": {
+          "mode": "none"
         }
       }
     }
@@ -1533,6 +1546,90 @@
           }
         }
       ]
+    },
+    {
+      "name": "iiirouter-main",
+      "priority": 210,
+      "isMainProfile": true,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^iiirouter$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "iiirouter-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "ipaddressip",
+          "when": {
+            "fieldExists": "ipaddressip"
+          }
+        }
+      ]
+    },
+    {
+      "name": "iiiphone-main",
+      "priority": 220,
+      "isMainProfile": true,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^iiiphone$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "iiiphone-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "ipAddress",
+          "when": {
+            "fieldExists": "ipAddress"
+          }
+        }
+      ]
+    },
+    {
+      "name": "iiipad-main",
+      "priority": 230,
+      "isMainProfile": true,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^iiipad$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "iiipad-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "ipAddress",
+          "when": {
+            "fieldExists": "ipAddress"
+          }
+        }
+      ]
     }
   ],
   "selectionPolicy": {
@@ -1836,32 +1933,6 @@
       ]
     },
     {
-      "name": "templates-routerg-ostype-windows-by-zabbix-agent",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^routerG$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^routerg-main$"
-          },
-          {
-            "field": "OStype",
-            "pattern": "(?i).*indows.*"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "Windows by Zabbix agent",
-          "templateid": "10081"
-        }
-      ]
-    },
-    {
       "name": "templates-sfr-sfrostype-windows-by-zabbix-agent",
       "priority": 100,
       "when": {
@@ -2006,6 +2077,128 @@
           },
           {
             "field": "entityId",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        }
+      ]
+    },
+    {
+      "name": "templates-iiirouter-description-icmp-ping",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^iiirouter$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^iiirouter-main$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        }
+      ]
+    },
+    {
+      "name": "templates-iiiphone-description-icmp-ping",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^iiiphone$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^iiiphone-main$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        }
+      ]
+    },
+    {
+      "name": "templates-iiipad-description-icmp-ping",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^iiipad$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^iiipad-main$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        }
+      ]
+    },
+    {
+      "name": "templates-routerg-ostype-windows-by-zabbix-agent",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^routerG$"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        }
+      ]
+    },
+    {
+      "name": "templates-routercore-description-icmp-ping",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^routerCore$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^routercore-main$"
+          },
+          {
+            "field": "description",
             "pattern": "(?i).*"
           }
         ]
