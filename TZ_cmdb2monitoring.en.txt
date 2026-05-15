@@ -340,7 +340,7 @@ If a catalog reference is missing or template compatibility fails, the service m
 
 14.6. Gentle Processing
 
-`Processing:DelayBetweenObjectsMs` defaults to `2000` ms to avoid overloading Zabbix.
+`Processing:DelayBetweenObjectsMs` defaults to `100` ms so the Zabbix writer does not add an excessive pause between objects.
 
 14.7. Response Topic Contract
 

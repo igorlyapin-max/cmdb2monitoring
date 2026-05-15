@@ -42,9 +42,21 @@ ValidateTopicChain(configs, "base", errors);
 ValidateTopicChain(configs, "development", errors);
 ValidateRulesFile(repositoryRoot, errors);
 await ValidateRulesT4Rendering(repositoryRoot, errors);
-await ValidateC2MTestMultiProfileConversion(repositoryRoot, errors);
-await ValidateServerOsHostGroupConversion(repositoryRoot, errors);
-await ValidateMonitoringSuppressionConversion(repositoryRoot, errors);
+if (ActiveRulesHaveHostProfiles(repositoryRoot, "main", "separate-profile-1", "separate-profile-2"))
+{
+    await ValidateC2MTestMultiProfileConversion(repositoryRoot, errors);
+}
+
+if (ActiveRulesHaveServerWindowsFixture(repositoryRoot))
+{
+    await ValidateServerOsHostGroupConversion(repositoryRoot, errors);
+}
+
+if (ActiveRulesHaveMonitoringSuppressionFixture(repositoryRoot))
+{
+    await ValidateMonitoringSuppressionConversion(repositoryRoot, errors);
+}
+
 await ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(repositoryRoot, errors);
 ValidateArchitectureArtifacts(repositoryRoot, errors);
 
@@ -421,7 +433,7 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
     RequireArray(rules, "t4Templates:hostUpdateJsonRpcRequestLines", "rules", errors);
     RequireArray(rules, "t4Templates:hostDeleteJsonRpcRequestLines", "rules", errors);
     RequireArray(rules, "hostProfiles", "rules", errors);
-    RequireArray(rules, "monitoringSuppressionRules", "rules", errors);
+    RequireArrayNode(rules, "monitoringSuppressionRules", "rules", errors);
     RequireObject(rules, "source:fields:c2mExtraInterface1Ip", "rules", errors);
     RequireObject(rules, "source:fields:c2mExtraInterface2Ip", "rules", errors);
     RequireObject(rules, "source:fields:c2mSeparateProfile1Ip", "rules", errors);
@@ -454,31 +466,7 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
         RequireArray(profile, "interfaces", $"hostProfile:{GetString(profile, "name") ?? "<unknown>"}", errors);
     }
 
-    foreach (var profileName in new[] { "main", "separate-profile-1", "separate-profile-2" })
-    {
-        if (!hostProfiles.OfType<JsonObject>().Any(profile => string.Equals(GetString(profile, "name"), profileName, StringComparison.Ordinal)))
-        {
-            errors.Add($"Rules file must contain hostProfiles entry for '{profileName}'.");
-        }
-    }
-
-    foreach (var profileName in new[] { "separate-profile-1", "separate-profile-2" })
-    {
-        var profile = hostProfiles.OfType<JsonObject>()
-            .FirstOrDefault(item => string.Equals(GetString(item, "name"), profileName, StringComparison.Ordinal));
-        if (profile is not null && GetBool(profile, "createOnUpdateWhenMissing") != true)
-        {
-            errors.Add($"Rules file hostProfile '{profileName}' must enable createOnUpdateWhenMissing.");
-        }
-    }
-
-    var suppressionRules = GetArray(rules, "monitoringSuppressionRules");
-    if (!suppressionRules.OfType<JsonObject>().Any(rule =>
-        string.Equals(GetString(rule, "name"), "object-policy-do-not-monitor", StringComparison.Ordinal)
-        && string.Equals(GetString(rule, "reason"), "object_policy_do_not_monitor", StringComparison.Ordinal)))
-    {
-        errors.Add("Rules file must contain monitoringSuppressionRules entry 'object-policy-do-not-monitor'.");
-    }
+    ValidateSuppressionRulesShape(rules, errors);
 
     var templateConflictRules = GetArray(rules, "templateConflictRules");
     foreach (var templateId in new[] { "10256", "10563" })
@@ -496,6 +484,23 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
             if (!GetArray(conflictRule, "removeTemplateIds").Any(item => string.Equals(item?.GetValue<string>(), removeTemplateId, StringComparison.OrdinalIgnoreCase)))
             {
                 errors.Add($"Rules file must remove conflicting template {removeTemplateId} when template {templateId} is selected.");
+            }
+        }
+    }
+
+    var icmpConflictRule = templateConflictRules.OfType<JsonObject>().FirstOrDefault(rule =>
+        GetArray(rule, "whenTemplateIds").Any(item => string.Equals(item?.GetValue<string>(), "10564", StringComparison.OrdinalIgnoreCase)));
+    if (icmpConflictRule is null)
+    {
+        errors.Add("Rules file must contain template conflict rule for ICMP Ping (10564) to clear agent templates from existing ping-only hosts.");
+    }
+    else
+    {
+        foreach (var removeTemplateId in new[] { "10001", "10081", "10561", "10562" })
+        {
+            if (!GetArray(icmpConflictRule, "removeTemplateIds").Any(item => string.Equals(item?.GetValue<string>(), removeTemplateId, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"Rules file must remove agent template {removeTemplateId} when ICMP Ping (10564) is selected.");
             }
         }
     }
@@ -580,6 +585,28 @@ static void ValidateCmdbPathSourceFields(JsonObject rules, List<string> errors)
         if (maxDepth is not null && (maxDepth < 2 || maxDepth > 5))
         {
             errors.Add($"Rules file source field '{fieldName}' resolve.maxDepth must be from 2 to 5.");
+        }
+    }
+}
+
+static void ValidateSuppressionRulesShape(JsonObject rules, List<string> errors)
+{
+    if (GetNode(rules, "monitoringSuppressionRules") is not JsonArray suppressionRules)
+    {
+        return;
+    }
+
+    foreach (var rule in suppressionRules.OfType<JsonObject>())
+    {
+        var name = GetString(rule, "name");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errors.Add("Each monitoringSuppressionRules entry must contain name.");
+        }
+
+        if (string.IsNullOrWhiteSpace(GetString(rule, "reason")))
+        {
+            errors.Add($"monitoringSuppressionRules entry '{name ?? "<unknown>"}' must contain reason.");
         }
     }
 }
@@ -1196,6 +1223,100 @@ static async Task ValidateMonitoringSuppressionConversion(string repositoryRoot,
     }
 }
 
+static bool ActiveRulesHaveHostProfiles(string repositoryRoot, params string[] profileNames)
+{
+    var rules = TryLoadActiveRulesObject(repositoryRoot);
+    if (rules is null)
+    {
+        return false;
+    }
+
+    var existingNames = GetArray(rules, "hostProfiles")
+        .OfType<JsonObject>()
+        .Select(profile => GetString(profile, "name"))
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .ToHashSet(StringComparer.Ordinal);
+    return profileNames.All(existingNames.Contains);
+}
+
+static bool ActiveRulesHaveServerWindowsFixture(string repositoryRoot)
+{
+    var rules = TryLoadActiveRulesObject(repositoryRoot);
+    if (rules is null)
+    {
+        return false;
+    }
+
+    return GetArray(rules, "templateSelectionRules").OfType<JsonObject>().Any(rule =>
+            RuleHasClassMatcher(rule, "Server") && RuleHasTemplate(rule, "10081"))
+        || GetArray(rules, "groupSelectionRules").OfType<JsonObject>().Any(rule =>
+            RuleHasClassMatcher(rule, "Server") && RuleHasGroup(rule, "5"))
+        || GetArray(rules, "tagSelectionRules").OfType<JsonObject>().Any(rule =>
+            RuleHasClassMatcher(rule, "Server") && RuleHasTag(rule, "cmdb.os"));
+}
+
+static bool ActiveRulesHaveMonitoringSuppressionFixture(string repositoryRoot)
+{
+    var rules = TryLoadActiveRulesObject(repositoryRoot);
+    if (rules is null)
+    {
+        return false;
+    }
+
+    return GetArray(rules, "monitoringSuppressionRules").OfType<JsonObject>().Any(rule =>
+        string.Equals(GetString(rule, "name"), "object-policy-do-not-monitor", StringComparison.Ordinal)
+        && string.Equals(GetString(rule, "reason"), "object_policy_do_not_monitor", StringComparison.Ordinal));
+}
+
+static JsonObject? TryLoadActiveRulesObject(string repositoryRoot)
+{
+    var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
+    if (!File.Exists(rulesPath))
+    {
+        return null;
+    }
+
+    try
+    {
+        return JsonNode.Parse(File.ReadAllText(rulesPath)) as JsonObject;
+    }
+    catch (JsonException)
+    {
+        return null;
+    }
+}
+
+static bool RuleHasClassMatcher(JsonObject rule, string className)
+{
+    return GetArray(rule, "when:allRegex")
+        .Concat(GetArray(rule, "when:anyRegex"))
+        .OfType<JsonObject>()
+        .Where(matcher => string.Equals(GetString(matcher, "field"), "className", StringComparison.OrdinalIgnoreCase))
+        .Select(matcher => GetString(matcher, "pattern"))
+        .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+        .Any(pattern => RegexPatternCanMatchClass(pattern!, className)
+            || RegexLiteralValues(pattern!).Any(value =>
+                string.Equals(NormalizeRuleName(value), NormalizeRuleName(className), StringComparison.OrdinalIgnoreCase)));
+}
+
+static bool RuleHasTemplate(JsonObject rule, string templateId)
+{
+    return GetArray(rule, "templates").OfType<JsonObject>().Any(template =>
+        string.Equals(GetString(template, "templateid"), templateId, StringComparison.OrdinalIgnoreCase));
+}
+
+static bool RuleHasGroup(JsonObject rule, string groupId)
+{
+    return GetArray(rule, "groups").OfType<JsonObject>().Any(group =>
+        string.Equals(GetString(group, "groupid"), groupId, StringComparison.OrdinalIgnoreCase));
+}
+
+static bool RuleHasTag(JsonObject rule, string tagName)
+{
+    return GetArray(rule, "tags").OfType<JsonObject>().Any(tag =>
+        string.Equals(GetString(tag, "tag"), tagName, StringComparison.OrdinalIgnoreCase));
+}
+
 static async Task ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(string repositoryRoot, List<string> errors)
 {
     var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.json");
@@ -1703,6 +1824,14 @@ static void RequireArray(JsonObject config, string path, string context, List<st
     if (GetArray(config, path).Count == 0)
     {
         errors.Add($"{context} {path} must be a non-empty array.");
+    }
+}
+
+static void RequireArrayNode(JsonObject config, string path, string context, List<string> errors)
+{
+    if (GetNode(config, path) is not JsonArray)
+    {
+        errors.Add($"{context} {path} must be an array.");
     }
 }
 

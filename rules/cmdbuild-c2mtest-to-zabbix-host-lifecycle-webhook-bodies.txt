@@ -10,11 +10,439 @@
 #
 # Save validation: критичных предупреждений по IP/DNS -> Zabbix interface binding нет.
 
-## ADD rule / Template rules / templates-routercore-description-icmp-ping
-# Rule collection: templateSelectionRules
-# Affected class rules: routerCore
+## ADD class attribute field aRMIpaddressIpAddr / ApplicG / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "ApplicG",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
 
-## ADD rule templates-routercore-description-icmp-ping / routerCore / create
+## ADD class attribute field aRMIpaddressIpAddr / ApplicG / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "ApplicG",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / ApplicG / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "ApplicG",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / ApplicGE / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "ApplicGE",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / ApplicGE / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "ApplicGE",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / ApplicGE / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "ApplicGE",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / ARM / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "ARM",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / ARM / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "ARM",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / ARM / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "ARM",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / DBGKM / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "DBGKM",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / DBGKM / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "DBGKM",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / DBGKM / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "DBGKM",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / iiipad / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "iiipad",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / iiipad / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "iiipad",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / iiipad / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "iiipad",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / iiiphone / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "iiiphone",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / iiiphone / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "iiiphone",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / iiiphone / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "iiiphone",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / Netman / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "Netman",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / Netman / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "Netman",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / Netman / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "Netman",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / NGFW / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "NGFW",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / NGFW / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "NGFW",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / NGFW / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "NGFW",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / NTbook / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "NTbook",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / NTbook / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "NTbook",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / NTbook / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "NTbook",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / routerCore / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
 # URL: http://192.168.202.100:5080/webhooks/cmdbuild
@@ -29,7 +457,8 @@
   "code": "{{Code}}",
   "ip_address": "{{ipaddress}}"
 }
-## ADD rule templates-routercore-description-icmp-ping / routerCore / update
+
+## ADD class attribute field aRMIpaddressIpAddr / routerCore / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
 # URL: http://192.168.202.100:5080/webhooks/cmdbuild
@@ -45,7 +474,7 @@
   "ip_address": "{{ipaddress}}"
 }
 
-## ADD rule templates-routercore-description-icmp-ping / routerCore / delete
+## ADD class attribute field aRMIpaddressIpAddr / routerCore / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
 # URL: http://192.168.202.100:5080/webhooks/cmdbuild
@@ -60,3 +489,486 @@
   "code": "{{Code}}",
   "ip_address": "{{ipaddress}}"
 }
+
+## ADD class attribute field aRMIpaddressIpAddr / routerG / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "routerG",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / routerG / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "routerG",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / routerG / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "routerG",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / Server / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "Server",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{IPAddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / Server / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "Server",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{IPAddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / Server / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "Server",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{IPAddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / serveri / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "serveri",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}",
+  "hostname": "{{hostname}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / serveri / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "serveri",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}",
+  "hostname": "{{hostname}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / serveri / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "serveri",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}",
+  "hostname": "{{hostname}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / SFR / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "SFR",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / SFR / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "SFR",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / SFR / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "SFR",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / STORAGEP / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "STORAGEP",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / STORAGEP / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "STORAGEP",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / STORAGEP / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "STORAGEP",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / tdwifi / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "tdwifi",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / tdwifi / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "tdwifi",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / tdwifi / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "tdwifi",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / TKGK / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "TKGK",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / TKGK / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "TKGK",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / TKGK / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "TKGK",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / VMware / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "VMware",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / VMware / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "VMware",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / VMware / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "VMware",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / VPN_HUB / create
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "create",
+  "cmdbuildEvent": "card_create_after",
+  "className": "VPN_HUB",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / VPN_HUB / update
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "update",
+  "cmdbuildEvent": "card_update_after",
+  "className": "VPN_HUB",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD class attribute field aRMIpaddressIpAddr / VPN_HUB / delete
+# Action: ADD or UPDATE CMDBuild webhook Body
+# Method: POST
+# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# Headers: Authorization: Bearer XXXXX
+# Path metadata: no CMDB path fields for this class.
+{
+  "source": "cmdbuild",
+  "eventType": "delete",
+  "cmdbuildEvent": "card_delete_after",
+  "className": "VPN_HUB",
+  "id": "{{Id}}",
+  "code": "{{Code}}",
+  "ip_address": "{{ipaddress}}"
+}
+
+## ADD rule / Host profiles / arm-main
+# Rule collection: hostProfiles
+# Affected class rules: ARM
+
+## ADD rule / Host profiles / ntbook-main
+# Rule collection: hostProfiles
+# Affected class rules: NTbook
+
+## ADD rule / Template rules / templates-ntbook-description-icmp-ping
+# Rule collection: templateSelectionRules
+# Affected class rules: NTbook
+
+## DELETE rule / Host profiles / arm-main
+# Action: DELETE/disable related rule handling
+# Rule collection: hostProfiles
+# Affected class rules: ARM
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule arm-main / ARM
+# Action: DELETE or disable CMDBuild webhook records.
+# Body для удаления не нужен. Удалите/отключите webhook-записи со следующими событиями:
+# - create: card_create_after
+# - update: card_update_after
+# - delete: card_delete_after
+# Method у удаляемых записей: POST
+# URL у удаляемых записей: http://192.168.202.100:5080/webhooks/cmdbuild
+
+## DELETE rule / Host profiles / ntbook-main
+# Action: DELETE/disable related rule handling
+# Rule collection: hostProfiles
+# Affected class rules: NTbook
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.
+
+## DELETE rule ntbook-main / NTbook
+# Action: DELETE or disable CMDBuild webhook records.
+# Body для удаления не нужен. Удалите/отключите webhook-записи со следующими событиями:
+# - create: card_create_after
+# - update: card_update_after
+# - delete: card_delete_after
+# Method у удаляемых записей: POST
+# URL у удаляемых записей: http://192.168.202.100:5080/webhooks/cmdbuild
+
+## DELETE rule / Template rules / templates-ntbook-ntbookipaddressostype-linux-by-zabbix-agent
+# Action: DELETE/disable related rule handling
+# Rule collection: templateSelectionRules
+# Affected class rules: NTbook
+# Если это правило было единственной причиной webhook-записи, удалите/отключите соответствующую запись CMDBuild.

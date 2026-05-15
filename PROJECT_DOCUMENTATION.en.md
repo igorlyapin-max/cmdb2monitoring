@@ -259,7 +259,7 @@ Main settings:
 | `ProcessingState` | State file for the last processed object |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to Zabbix/Kafka/ELK secrets |
 
-`Processing:DelayBetweenObjectsMs` defaults to `2000` to avoid sending objects to Zabbix too aggressively.
+`Processing:DelayBetweenObjectsMs` defaults to `100` ms so the Zabbix writer does not add an excessive pause between objects.
 
 The state file stores the last successfully processed input offset; startup resumes from `lastInputOffset + 1`.
 

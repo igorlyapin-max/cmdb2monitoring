@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1",
-  "rulesVersion": "2026.05.13-145441-test15-profile-ip-leaf-fix",
+  "rulesVersion": "2026.05.14-113433-test15-profile-ip-leaf-fix",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
   "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
   "source": {
@@ -659,6 +659,30 @@
         "resolve": {
           "mode": "none"
         }
+      },
+      "aRMIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "ARM.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
+      },
+      "nTbookIpaddressIpAddr": {
+        "source": "ipaddress",
+        "cmdbAttribute": "ipaddress",
+        "cmdbPath": "NTbook.ipaddress.ipAddr",
+        "type": "ipAddress",
+        "required": false,
+        "resolve": {
+          "mode": "cmdbPath",
+          "valueMode": "leaf",
+          "maxDepth": 2
+        }
       }
     }
   },
@@ -816,10 +840,6 @@
       {
         "name": "ICMP Ping",
         "templateid": "10564"
-      },
-      {
-        "name": "Linux by Zabbix agent",
-        "templateid": "10001"
       }
     ],
     "agentInterface": {
@@ -1148,16 +1168,17 @@
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
       "interfaces": [
         {
-          "name": "arm-main-agent-dns",
+          "name": "arm-main-agent-ip",
           "priority": 10,
           "interfaceProfileRef": "agent",
-          "mode": "dns",
-          "valueField": "aRMHostname",
+          "mode": "ip",
+          "valueField": "aRMIpaddressIpAddr",
           "when": {
-            "fieldExists": "aRMHostname"
+            "fieldExists": "aRMIpaddressIpAddr"
           }
         }
-      ]
+      ],
+      "isMainProfile": true
     },
     {
       "name": "dbgkm-main",
@@ -1236,33 +1257,6 @@
           "valueField": "nGFWIpaddressIpAddr",
           "when": {
             "fieldExists": "nGFWIpaddressIpAddr"
-          }
-        }
-      ]
-    },
-    {
-      "name": "ntbook-main",
-      "priority": 100,
-      "createOnUpdateWhenMissing": true,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^NTbook$"
-          }
-        ]
-      },
-      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
-      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
-      "interfaces": [
-        {
-          "name": "ntbook-main-agent-dns",
-          "priority": 10,
-          "interfaceProfileRef": "agent",
-          "mode": "dns",
-          "valueField": "nTbookHostname",
-          "when": {
-            "fieldExists": "nTbookHostname"
           }
         }
       ]
@@ -1630,6 +1624,34 @@
           }
         }
       ]
+    },
+    {
+      "name": "ntbook-main",
+      "priority": 240,
+      "isMainProfile": true,
+      "createOnUpdateWhenMissing": true,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^NTbook$"
+          }
+        ]
+      },
+      "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
+      "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
+      "interfaces": [
+        {
+          "name": "ntbook-main-agent-ip",
+          "priority": 10,
+          "interfaceProfileRef": "agent",
+          "mode": "ip",
+          "valueField": "nTbookIpaddressIpAddr",
+          "when": {
+            "fieldExists": "nTbookIpaddressIpAddr"
+          }
+        }
+      ]
     }
   ],
   "selectionPolicy": {
@@ -1872,39 +1894,13 @@
       ]
     },
     {
-      "name": "default-linux-agent",
+      "name": "default-icmp-ping",
       "priority": 1000,
       "fallback": true,
       "when": {
         "always": true
       },
       "templatesRef": "defaults.templates"
-    },
-    {
-      "name": "templates-ntbook-ntbookipaddressostype-linux-by-zabbix-agent",
-      "priority": 100,
-      "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^NTbook$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^ntbook-main$"
-          },
-          {
-            "field": "nTbookIpaddressOStype",
-            "pattern": "(?i).*linux.*"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "Linux by Zabbix agent",
-          "templateid": "10001"
-        }
-      ]
     },
     {
       "name": "templates-printerdwh-type-zabbix-server-health-by-zabbix-agent",
@@ -2209,9 +2205,48 @@
           "templateid": "10564"
         }
       ]
+    },
+    {
+      "name": "templates-ntbook-description-icmp-ping",
+      "priority": 100,
+      "when": {
+        "allRegex": [
+          {
+            "field": "className",
+            "pattern": "(?i)^NTbook$"
+          },
+          {
+            "field": "hostProfile",
+            "pattern": "(?i)^ntbook-main$"
+          },
+          {
+            "field": "description",
+            "pattern": "(?i).*"
+          }
+        ]
+      },
+      "templates": [
+        {
+          "name": "ICMP Ping",
+          "templateid": "10564"
+        }
+      ]
     }
   ],
   "templateConflictRules": [
+    {
+      "name": "icmp-ping-removes-agent-templates",
+      "whenTemplateIds": [
+        "10564"
+      ],
+      "removeTemplateIds": [
+        "10001",
+        "10081",
+        "10561",
+        "10562"
+      ],
+      "reason": "ICMP-only monitoring must clear agent templates from existing hosts so ping profiles do not keep Zabbix agent availability triggers."
+    },
     {
       "name": "hp-interface-removes-conflicting-agent-templates",
       "whenTemplateIds": [

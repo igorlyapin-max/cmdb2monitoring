@@ -4,7 +4,7 @@ public sealed class ProcessingOptions
 {
     public const string SectionName = "Processing";
 
-    public int DelayBetweenObjectsMs { get; init; } = 2000;
+    public int DelayBetweenObjectsMs { get; init; } = 100;
 
     public int MaxRetryAttempts { get; init; } = 3;
 
