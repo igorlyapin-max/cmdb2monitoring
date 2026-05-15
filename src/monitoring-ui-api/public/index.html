@@ -110,20 +110,6 @@
         </form>
       </section>
 
-      <section id="validationRuleDialog" class="modal-shell hidden" role="dialog" aria-modal="true" aria-labelledby="validationRuleDialogTitle">
-        <div class="modal-panel">
-          <h2 id="validationRuleDialogTitle" data-i18n="validation.review.title">Проверка удаления правила</h2>
-          <p id="validationRuleDialogText" class="modal-text"></p>
-          <textarea id="validationRuleJson" class="validation-rule-json" spellcheck="false"></textarea>
-          <p id="validationRuleDialogError" class="error-line"></p>
-          <div class="actions">
-            <button id="validationRuleApplyEdit" type="button" data-i18n="validation.review.applyEdit">Сохранить правку</button>
-            <button id="validationRuleDeleteAnyway" class="danger" type="button" data-i18n="validation.review.deleteAnyway">Удалить все равно</button>
-            <button id="validationRuleCancel" class="secondary" type="button" data-i18n="validation.review.cancel">Отказаться</button>
-          </div>
-        </div>
-      </section>
-
       <section id="webhookEditDialog" class="modal-shell hidden" role="dialog" aria-modal="true" aria-labelledby="webhookEditDialogTitle">
         <div class="modal-panel">
           <h2 id="webhookEditDialogTitle" data-i18n="webhooks.editTitle">Редактирование webhook</h2>
@@ -319,39 +305,6 @@
             </div>
           </section>
 
-          <section class="view" id="rules">
-            <div class="view-header">
-              <h1 data-i18n="nav.rules">Rules</h1>
-              <div class="actions">
-                <button id="loadRules" type="button" data-i18n="common.load">Load</button>
-                <button id="validateRules" type="button" data-i18n="common.validate">Validate</button>
-                <button id="createEmptyRules" class="secondary" type="button" data-i18n="rules.createEmpty">Создать пустой</button>
-              </div>
-            </div>
-            <p id="rulesActionStatus" class="mapping-editor-status action-status" aria-live="polite"></p>
-            <p id="rulesSourceStatus" class="mapping-editor-status rules-source-status" aria-live="polite"></p>
-            <div class="split-layout">
-              <div class="surface">
-                <h2>Current</h2>
-                <dl class="kv" id="rulesSummary"></dl>
-                <pre id="rulesPreview" class="code-block"></pre>
-              </div>
-              <div class="surface">
-                <h2>Local file / Dry-run</h2>
-                <label class="file-picker">
-                  <span>Rules JSON</span>
-                  <input id="rulesFile" type="file" accept="application/json,.json">
-                </label>
-                <textarea id="dryRunPayload" spellcheck="false"></textarea>
-                <div class="actions">
-                  <button id="dryRunRules" type="button" data-i18n="common.dryRun">Dry-run</button>
-                  <button id="saveRulesAs" type="button" data-i18n="common.saveFileAs">Save file as</button>
-                </div>
-                <pre id="rulesResult" class="code-block"></pre>
-              </div>
-            </div>
-          </section>
-
           <section class="view" id="mapping">
             <div class="view-header">
               <div class="view-title-block">
@@ -525,56 +478,6 @@
             </details>
           </section>
 
-          <section class="view" id="validateMapping">
-            <div class="view-header">
-              <h1 data-i18n="nav.validateMapping">Логический контроль правил конвертации</h1>
-              <div class="actions">
-                <button id="validateMappingUndo" class="secondary" type="button" disabled data-i18n="common.undo">Отменить</button>
-                <button id="validateMappingRedo" class="secondary" type="button" disabled data-i18n="common.redo">Вернуть</button>
-                <button id="validateMappingSaveAs" class="secondary" type="button" disabled data-i18n="common.saveFileAs">Сохранить файл как</button>
-                <button id="loadValidateMapping" type="button" data-i18n="common.load">Load</button>
-              </div>
-            </div>
-            <p id="validateMappingActionStatus" class="mapping-editor-status action-status" aria-live="polite"></p>
-            <p id="validateMappingRulesSourceStatus" class="mapping-editor-status rules-source-status" aria-live="polite"></p>
-            <div id="validateMappingSummary" class="surface validation-summary"></div>
-            <div class="validation-post-actions">
-              <button id="deleteValidateMappingSelected" class="danger" type="button" disabled data-i18n="validation.applySelected">Применить выбранное</button>
-            </div>
-            <div class="mapping-grid validation-grid">
-              <div class="mapping-column surface" data-validation-column="cmdbuild">
-                <div class="validation-column-header">
-                  <h2>CMDBuild</h2>
-                  <div class="validation-column-actions">
-                    <button class="secondary" type="button" data-validation-select="cmdbuild" data-i18n="common.selectAll">Select all</button>
-                    <button class="secondary" type="button" data-validation-clear="cmdbuild" data-i18n="common.clear">Clear</button>
-                  </div>
-                </div>
-                <div id="validateMappingCmdbuild" class="mapping-tree"></div>
-              </div>
-              <div class="mapping-column surface" data-validation-column="rules">
-                <div class="validation-column-header">
-                  <h2>Conversion Rules</h2>
-                  <div class="validation-column-actions">
-                    <button class="secondary" type="button" data-validation-select="rules" data-i18n="common.selectAll">Select all</button>
-                    <button class="secondary" type="button" data-validation-clear="rules" data-i18n="common.clear">Clear</button>
-                  </div>
-                </div>
-                <div id="validateMappingRules" class="mapping-tree"></div>
-              </div>
-              <div class="mapping-column surface" data-validation-column="zabbix">
-                <div class="validation-column-header">
-                  <h2>Zabbix</h2>
-                  <div class="validation-column-actions">
-                    <button class="secondary" type="button" data-validation-select="zabbix" data-i18n="common.selectAll">Select all</button>
-                    <button class="secondary" type="button" data-validation-clear="zabbix" data-i18n="common.clear">Clear</button>
-                  </div>
-                </div>
-                <div id="validateMappingZabbix" class="mapping-tree"></div>
-              </div>
-            </div>
-          </section>
-
           <section class="view" id="webhooks">
             <div class="view-header">
               <h1 data-i18n="nav.webhooks">Настройка webhooks</h1>
@@ -622,80 +525,6 @@
               </div>
             </div>
             <p id="webhooksStatus" class="mapping-editor-status" aria-live="polite"></p>
-          </section>
-
-          <section class="view" id="zabbix">
-            <div class="view-header">
-              <h1 data-i18n="nav.zabbix">Zabbix Catalog</h1>
-              <div class="actions">
-                <button id="syncZabbix" type="button" data-i18n="common.sync">Sync</button>
-                <button id="loadZabbix" type="button" data-i18n="common.load">Load</button>
-              </div>
-            </div>
-            <p id="zabbixActionStatus" class="mapping-editor-status action-status" aria-live="polite"></p>
-            <div id="zabbixCatalogSummary" class="surface validation-summary"></div>
-            <div class="zabbix-catalog-layout">
-              <aside class="surface zabbix-catalog-menu">
-                <h2>Catalog groups</h2>
-                <div id="zabbixCatalogMenu" class="catalog-submenu"></div>
-              </aside>
-              <div id="zabbixCatalogContent" class="zabbix-catalog-content"></div>
-            </div>
-          </section>
-
-          <section class="view" id="zabbixMetadata">
-            <div class="view-header">
-              <h1 data-i18n="nav.zabbixMetadata">Метаданные Zabbix</h1>
-              <div class="actions">
-                <button id="syncZabbixMetadata" type="button" data-i18n="common.sync">Sync</button>
-                <button id="loadZabbixMetadata" type="button" data-i18n="common.load">Load</button>
-              </div>
-            </div>
-            <p id="zabbixMetadataStatus" class="mapping-editor-status action-status" aria-live="polite"></p>
-            <div id="zabbixMetadataSummary" class="surface validation-summary"></div>
-            <div class="split-layout">
-              <div class="surface">
-                <h2 data-i18n="zabbixMetadata.conflicts">Конфликты templates</h2>
-                <table>
-                  <thead>
-                    <tr>
-                      <th data-i18n="zabbixMetadata.type">Тип</th>
-                      <th data-i18n="zabbixMetadata.key">Key</th>
-                      <th data-i18n="zabbixMetadata.templates">Templates</th>
-                    </tr>
-                  </thead>
-                  <tbody id="zabbixMetadataConflicts"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2 data-i18n="zabbixMetadata.templates">Templates</h2>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th data-i18n="zabbixMetadata.name">Name</th>
-                      <th data-i18n="zabbixMetadata.items">Items</th>
-                      <th data-i18n="zabbixMetadata.discoveryRules">LLD</th>
-                      <th data-i18n="zabbixMetadata.inventoryLinks">Inventory</th>
-                    </tr>
-                  </thead>
-                  <tbody id="zabbixMetadataTemplates"></tbody>
-                </table>
-              </div>
-              <div class="surface">
-                <h2 data-i18n="zabbixMetadata.hosts">Hosts</h2>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th data-i18n="zabbixMetadata.host">Host</th>
-                      <th data-i18n="zabbixMetadata.linkedTemplates">Linked templates</th>
-                    </tr>
-                  </thead>
-                  <tbody id="zabbixMetadataHosts"></tbody>
-                </table>
-              </div>
-            </div>
           </section>
 
           <section class="view" id="cmdbuild">
@@ -1063,16 +892,6 @@
                 </ul>
               </div>
               <div class="surface">
-                <h2 data-i18n="help.rules.title">Правила</h2>
-                <ul>
-                  <li data-i18n="help.rules.1">Load загружает текущий JSON правил конвертации.</li>
-                  <li data-i18n="help.rules.2">Validate проверяет структуру правил на backend.</li>
-                  <li data-i18n="help.rules.3">Dry-run применяет правила к тестовому CMDBuild payload без сохранения.</li>
-                  <li data-i18n="help.rules.4">Save file as сохраняет JSON правил через браузер и обновляет rulesVersion в выгружаемом файле; backend rules-файл и git не изменяются.</li>
-                  <li data-i18n="help.rules.5">Создать пустой формирует production starter из текущего окружения: endpoints/topics и справочники CMDBuild/Zabbix берутся из runtime config и catalog cache, routes остаются publish=false до осознанного включения. Если CMDBuild или Zabbix cache пустой, backend возвращает ошибку и предлагает сначала синхронизировать каталог.</li>
-                </ul>
-              </div>
-              <div class="surface">
                 <h2 data-i18n="help.mapping.title">Управление правилами конвертации</h2>
                 <ul>
                   <li data-i18n="help.mapping.1">Страница показывает цепочку CMDBuild -> Conversion Rules -> Zabbix.</li>
@@ -1095,16 +914,6 @@
                   <li data-i18n="help.mapping.18">Правило template проверяется по Метаданные Zabbix: конфликт item key, LLD rule key или inventory link подсвечивается красным и блокирует сохранение до исправления templateConflictRules или выбора совместимого template set.</li>
                   <li data-i18n="help.mapping.19">В редакторе правил доступны виртуальные поля hostProfile и outputProfile. Их заполняет converter для каждого hostProfiles[]; через них можно ограничить template/group/tag rule конкретным fan-out profile.</li>
                   <li data-i18n="help.mapping.20">Профили мониторинга создаются, изменяются и удаляются в отдельном блоке редактора. После создания дополнительного profile назначайте templates/groups/tags отдельными правилами через виртуальное поле hostProfile или через чекбокс ограничения выбранным hostProfile, если основное условие должно остаться по description/lookup/domain leaf.</li>
-                </ul>
-              </div>
-              <div class="surface">
-                <h2 data-i18n="help.validate.title">Логический контроль правил конвертации</h2>
-                <ul>
-                  <li data-i18n="help.validate.1">Страница не строит интерактивную цепочку, а подсвечивает только отсутствующие сущности.</li>
-                  <li data-i18n="help.validate.2">Красным отмечаются классы и атрибуты, отсутствующие в CMDBuild catalog, а также Zabbix-ссылки, которых нет в Zabbix catalog.</li>
-                  <li data-i18n="help.validate.3">Checkbox над отсутствующим элементом включает его в удаление из rules JSON.</li>
-                  <li data-i18n="help.validate.4">Delete спрашивает подтверждение, сохраняет предыдущую версию и исправляет выбранные ссылки в правилах.</li>
-                  <li data-i18n="help.validate.5">Несовместимые Zabbix templates из Метаданные Zabbix считаются критичной ошибкой rules: исправьте templateConflictRules, выберите совместимые templates или удалите ошибочное rule из draft.</li>
                 </ul>
               </div>
               <div class="surface">
