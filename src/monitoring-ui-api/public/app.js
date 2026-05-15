@@ -36,7 +36,7 @@ const state = {
   currentRules: null,
   uploadedRulesText: null,
   runtimeSettings: null,
-  mappingMode: 'view',
+  mappingMode: 'edit',
   mappingEditAction: 'add',
   mappingDeleteView: 'cmdbuild',
   mappingDraftRules: null,
@@ -49,6 +49,7 @@ const state = {
   mappingEditorFieldOptionStates: new Map(),
   mappingEditorTargetOptionStates: new Map(),
   mappingProfileFieldOptions: new Map(),
+  mappingProfileClassName: '',
   mappingProfileSelectedName: '',
   mappingLoaded: false,
   validateMappingLoaded: false,
@@ -111,10 +112,10 @@ const defaultConversionRulesFilePath = 'rules/cmdbuild-to-zabbix-host-create.jso
 const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
 const roleViews = {
-  viewer: ['dashboard', 'events'],
-  editor: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'about', 'help'],
-  admin: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help'],
-  administrator: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
+  viewer: ['dashboard', 'events', 'about', 'help'],
+  editor: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'about', 'help'],
+  admin: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help'],
+  administrator: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
 const defaultCmdbuildWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
@@ -302,7 +303,7 @@ const zabbixExtensionDefinitions = [
     catalogKey: 'inventoryFields',
     idField: 'name',
     lazyCatalogPath: 'inventory-fields',
-    label: item => item.name,
+    label: item => item.name || item.field || item.inventoryField,
     meta: () => 'host inventory',
     help: 'Inventory field - стандартное поле Zabbix host inventory. Хорошая зона для CMDB данных: owner, location, serial, asset tag, OS.'
   },
@@ -479,6 +480,7 @@ const translations = {
     'webhooks.detailsHint': 'Нажмите значение в столбце "Действие", чтобы открыть детали под строкой; общий блок деталей находится под таблицей.',
     'webhooks.currentDetailsHint': 'Загруженные из CMDB webhooks показаны ниже. Нажмите "Проанализировать rules", чтобы построить план операций.',
     'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
+    'webhooks.ownershipNote': 'Операции create/update/delete применяются только к owned managed webhooks cmdb2monitoring; чужие webhooks остаются вне плана.',
     'audit.storageIntro': 'Аудит будет использовать хранилище, выбранное в Runtime-настройках. PostgreSQL предназначен для средних и крупных инсталляций, SQLite - для разработки и небольших инсталляций.',
     'audit.quickTitle': 'Быстрый аудит',
     'audit.quickIntro': 'Быстрый аудит читает CMDBuild и Zabbix, сравнивает основные параметры постановки на мониторинг и не меняет управляемые системы.',
@@ -547,16 +549,21 @@ const translations = {
     'audit.summarySchemaVersion': 'Schema version',
     'audit.summaryParent': 'Родительский класс',
     'audit.summaryCatalogSynced': 'CMDBuild catalog',
+    'nav.group.overview': 'Обзор',
+    'nav.group.rules': 'Правила мониторинга',
+    'nav.group.admin': 'Администрирование',
+    'nav.group.system': 'Система',
     'nav.dashboard': 'Панель',
     'nav.events': 'События',
     'nav.systemAudit': 'Аудит',
-    'nav.rules': 'Правила',
+    'nav.rules': 'JSON-инструменты',
     'nav.mapping': 'Управление правилами конвертации',
     'nav.validateMapping': 'Логический контроль правил конвертации',
     'nav.webhooks': 'Настройка webhooks',
     'nav.zabbix': 'Каталог Zabbix',
     'nav.zabbixMetadata': 'Метаданные Zabbix',
     'nav.cmdbuild': 'Каталог CMDBuild',
+    'nav.cmdbuildAdmin': 'Операции CMDBuild',
     'nav.settings': 'Настройки',
     'nav.authSettings': 'Авторизация',
     'nav.runtimeSettings': 'Runtime-настройки',
@@ -648,6 +655,7 @@ const translations = {
     'catalog.lookupBulkFilterEmpty': 'только пустой',
     'catalog.lookupBulkFilterAll': 'все карточки',
     'catalog.lookupBulkDone': 'Готово: в CMDBuild {cmdbuildTotal}, обработано уникальных {total}, отфильтровано {filtered}, изменено {changed}, пропущено {skipped}, ошибок {failed}.',
+    'catalog.diagnosticsDetails': 'Диагностика cache CMDBuild',
     'catalog.notLoaded': 'Каталог еще не загружен.',
     'settings.kafkaEvents': 'Kafka Events',
     'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
@@ -726,7 +734,7 @@ const translations = {
     'mapping.action': 'Действие',
     'mapping.actionAdd': 'Добавление правила',
     'mapping.actionModify': 'Модификация правила',
-    'mapping.actionDelete': 'Удаление правил и классов',
+    'mapping.actionDelete': 'Удаление правил',
     'mapping.modifyRule': 'Правило для изменения',
     'mapping.cmdbClass': 'Класс CMDBuild',
     'mapping.classField': 'Атрибут класса',
@@ -780,6 +788,10 @@ const translations = {
     'mapping.deleteTreeZabbix': 'Дерево Zabbix',
     'mapping.deleteTreeRules': 'Дерево правил',
     'mapping.deleteSelectedRules': 'Удалить выбранные правила',
+    'mapping.deleteIntro': 'Удаление меняет только draft JSON: классы, source fields и объекты CMDBuild/Zabbix не удаляются.',
+    'mapping.deleteSelectionNone': 'Правила для удаления не выбраны.',
+    'mapping.deleteSelectionSummary': 'Выбрано правил: {count}.',
+    'mapping.deleteSelectionMore': 'Еще правил: {count}.',
     'mapping.delete.noRulesInDraft': 'В draft JSON нет правил, которые можно удалить через этот режим.',
     'mapping.confirm.deleteRulesTitle': 'Удалить выбранные правила из draft JSON ({count})?',
     'mapping.confirm.deleteRulesKeepSources': 'Классы и class attribute fields останутся в rules, чтобы не удалить источник, который может использоваться другими правилами.',
@@ -896,6 +908,7 @@ const translations = {
     'mapping.option.chooseClassFirst': 'Сначала выберите класс',
     'mapping.option.chooseRule': 'Выберите правило для модификации',
     'mapping.option.noRulesToModify': 'Нет правил, доступных для модификации',
+    'mapping.option.noRulesForModifyScope': 'Для выбранного класса/профиля нет правил для изменения',
     'mapping.option.chooseClassFilter': 'Выберите класс CMDBuild или оставьте фильтр пустым',
     'mapping.option.chooseFieldFilter': 'Выберите атрибут класса или оставьте фильтр пустым',
     'mapping.option.chooseStructureFilter': 'Выберите структуру конвертации или оставьте фильтр пустым',
@@ -942,6 +955,17 @@ const translations = {
     'mapping.target.interface': 'Fallback-правило интерфейса',
     'mapping.rules.interfaceAddress': 'Правила выбора адреса интерфейса',
     'mapping.rules.interface': 'Fallback-правила интерфейса',
+    'mapping.pipelineCmdbuild': 'Классы, атрибуты, lookup/reference/domain',
+    'mapping.pipelineRules': 'Профили, regexp, условия, преобразования',
+    'mapping.pipelineZabbix': 'Payload host.create/update/delete',
+    'mapping.validationTitle': 'Контроль правил',
+    'mapping.validationNotRun': 'Проверка еще не запускалась.',
+    'mapping.validationRun': 'Проверить правила',
+    'mapping.validationRunning': 'Проверка правил выполняется...',
+    'mapping.validationOk': 'Критичных расхождений нет. Предупреждений: {warning}.',
+    'mapping.validationErrors': 'Ошибок: {error}. Предупреждений: {warning}.',
+    'mapping.validationMore': 'Еще замечаний: {count}.',
+    'mapping.diagnosticsDetails': 'Детальная схема связей',
     'zabbix.interfaceProfiles.title': 'Профили Zabbix interfaces[]',
     'zabbix.interfaceProfiles.ruleTitle': 'Правило выбора профиля интерфейса',
     'zabbix.interfaceProfiles.rulesTitle': 'Правила выбора профиля интерфейса',
@@ -960,6 +984,10 @@ const translations = {
     'sessionTraffic.readGit': 'Прочитано из git',
     'sessionTraffic.savedGit': 'Записано в git-копию',
     'sessionTraffic.error': 'Ошибка',
+    'sessionTraffic.webhookCount': 'Webhook в CMDB: {count}',
+    'sessionTraffic.clickLoad': 'Нажмите, чтобы загрузить данные через BFF.',
+    'sessionTraffic.clickSync': 'Нажмите, чтобы синхронизировать кэш через BFF.',
+    'sessionTraffic.autoLoadFailed': 'Часть кэшей не загрузилась автоматически; проверьте светофоры.',
     'session.notAuthenticated': 'не авторизован',
     'help.general.title': 'Общий принцип',
     'help.general.1': 'Браузер работает только с monitoring-ui-api; прямых подключений из браузера к CMDBuild, Zabbix или Kafka нет.',
@@ -1033,6 +1061,7 @@ const translations = {
     'help.catalogs.8': 'Настройка git отделена от Runtime-настроек: UI показывает путь файла правил, локальную repository path, режим чтения, repository URL, schemaVersion и rulesVersion. UI может записать rules с новым rulesVersion и соседний webhook artifact в локальную working copy, но не выполняет commit/push; секреты в webhook artifact заменяются на XXXXX.',
     'tooltip.brand': 'Название приложения cmdb2monitoring.',
     'tooltip.sessionSummary': 'Текущий пользователь и способ авторизации.',
+    'tooltip.sessionTrafficHelp': 'Открывает страницу справки. Светофоры рядом остаются кликабельными: наведите на них, чтобы увидеть версию или дату синхронизации, нажмите для загрузки или синхронизации.',
     'tooltip.idpLoginButton': 'Запускает вход через выбранный внешний IdP.',
     'tooltip.logoutButton': 'Завершает текущую пользовательскую сессию.',
     'tooltip.changePasswordOpen': 'Открывает смену пароля текущего локального пользователя.',
@@ -1051,7 +1080,8 @@ const translations = {
     'tooltip.dryRunRules': 'Выполняет пробную конвертацию без сохранения правил.',
     'tooltip.saveRulesAs': 'Сохраняет текущий JSON правил через браузер и обновляет rulesVersion в выгружаемом файле. Backend rules-файл, git commit и git push не выполняются.',
     'tooltip.loadMapping': 'Загружает визуальную карту связей Zabbix, правил и CMDBuild.',
-    'tooltip.mappingMode': 'Переключает управление правилами конвертации между просмотром и редактированием draft-правил текущей сессии.',
+    'tooltip.mappingMode': 'Технический переключатель режима управления правилами.',
+    'tooltip.mappingRunValidation': 'Запускает логический контроль текущих правил против кэшей CMDBuild и Zabbix и показывает компактную сводку.',
     'tooltip.mappingEditAction': 'Переключает действие редактора: добавление, модификация или удаление rules из draft JSON.',
     'tooltip.mappingClearSelection': 'Снимает выделение цепочки и возвращает обычный обзор.',
     'tooltip.mappingUndo': 'Отменяет последнее изменение draft-правил текущей сессии.',
@@ -1235,6 +1265,7 @@ const translations = {
     'webhooks.detailsHint': 'Click the Action value to open details under that row; the shared details panel is below the table.',
     'webhooks.currentDetailsHint': 'Loaded CMDB webhooks are shown below. Click "Analyze rules" to build the operation plan.',
     'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
+    'webhooks.ownershipNote': 'Create/update/delete operations apply only to owned managed cmdb2monitoring webhooks; foreign webhooks stay outside the plan.',
     'audit.storageIntro': 'Audit will use the storage selected in Runtime settings. PostgreSQL targets medium and large installations; SQLite is for development and small installations.',
     'audit.quickTitle': 'Quick audit',
     'audit.quickIntro': 'Quick audit reads CMDBuild and Zabbix, compares the main monitoring placement parameters, and does not modify managed systems.',
@@ -1303,16 +1334,21 @@ const translations = {
     'audit.summarySchemaVersion': 'Schema version',
     'audit.summaryParent': 'Parent class',
     'audit.summaryCatalogSynced': 'CMDBuild catalog',
+    'nav.group.overview': 'Overview',
+    'nav.group.rules': 'Monitoring Rules',
+    'nav.group.admin': 'Administration',
+    'nav.group.system': 'System',
     'nav.dashboard': 'Dashboard',
     'nav.events': 'Events',
     'nav.systemAudit': 'Audit',
-    'nav.rules': 'Rules',
+    'nav.rules': 'JSON Tools',
     'nav.mapping': 'Conversion Rules Management',
     'nav.validateMapping': 'Conversion Rules Logical Control',
     'nav.webhooks': 'Webhook Setup',
     'nav.zabbix': 'Zabbix Catalog',
     'nav.zabbixMetadata': 'Zabbix Metadata',
     'nav.cmdbuild': 'CMDBuild Catalog',
+    'nav.cmdbuildAdmin': 'CMDBuild Operations',
     'nav.settings': 'Settings',
     'nav.authSettings': 'Authorization',
     'nav.runtimeSettings': 'Runtime settings',
@@ -1403,6 +1439,7 @@ const translations = {
     'catalog.lookupBulkFilterEmpty': 'empty only',
     'catalog.lookupBulkFilterAll': 'all cards',
     'catalog.lookupBulkDone': 'Done: CMDBuild total {cmdbuildTotal}, unique processed {total}, filtered {filtered}, changed {changed}, skipped {skipped}, failed {failed}.',
+    'catalog.diagnosticsDetails': 'CMDBuild cache diagnostics',
     'catalog.notLoaded': 'Catalog is not loaded yet.',
     'settings.kafkaEvents': 'Kafka Events',
     'settings.idp': 'IdP/SAML2/OAuth2/LDAP',
@@ -1481,7 +1518,7 @@ const translations = {
     'mapping.action': 'Action',
     'mapping.actionAdd': 'Add rule',
     'mapping.actionModify': 'Modify rule',
-    'mapping.actionDelete': 'Delete rule & classes',
+    'mapping.actionDelete': 'Delete rules',
     'mapping.modifyRule': 'Rule to modify',
     'mapping.cmdbClass': 'CMDBuild class',
     'mapping.classField': 'Class attribute field',
@@ -1535,6 +1572,10 @@ const translations = {
     'mapping.deleteTreeZabbix': 'Zabbix tree',
     'mapping.deleteTreeRules': 'Rules tree',
     'mapping.deleteSelectedRules': 'Delete selected rules',
+    'mapping.deleteIntro': 'Deletion changes only the draft JSON: classes, source fields, and CMDBuild/Zabbix objects are not deleted.',
+    'mapping.deleteSelectionNone': 'No rules selected for deletion.',
+    'mapping.deleteSelectionSummary': 'Selected rules: {count}.',
+    'mapping.deleteSelectionMore': 'More rules: {count}.',
     'mapping.delete.noRulesInDraft': 'The draft JSON has no rules that can be deleted in this mode.',
     'mapping.confirm.deleteRulesTitle': 'Delete selected rules from draft JSON ({count})?',
     'mapping.confirm.deleteRulesKeepSources': 'Classes and class attribute fields will remain in rules so a source used by other rules is not removed.',
@@ -1651,6 +1692,7 @@ const translations = {
     'mapping.option.chooseClassFirst': 'Choose a class first',
     'mapping.option.chooseRule': 'Choose a rule to modify',
     'mapping.option.noRulesToModify': 'No rules available for modification',
+    'mapping.option.noRulesForModifyScope': 'No rules to modify for the selected class/profile',
     'mapping.option.chooseClassFilter': 'Choose CMDBuild class or leave the filter empty',
     'mapping.option.chooseFieldFilter': 'Choose class attribute field or leave the filter empty',
     'mapping.option.chooseStructureFilter': 'Choose conversion structure or leave the filter empty',
@@ -1697,6 +1739,17 @@ const translations = {
     'mapping.target.interface': 'Legacy interface fallback rule',
     'mapping.rules.interfaceAddress': 'Interface address selection rules',
     'mapping.rules.interface': 'Legacy interface fallback rules',
+    'mapping.pipelineCmdbuild': 'Classes, attributes, lookup/reference/domain',
+    'mapping.pipelineRules': 'Profiles, regexps, conditions, transformations',
+    'mapping.pipelineZabbix': 'host.create/update/delete payload',
+    'mapping.validationTitle': 'Rule Control',
+    'mapping.validationNotRun': 'Validation has not run yet.',
+    'mapping.validationRun': 'Validate rules',
+    'mapping.validationRunning': 'Rule validation is running...',
+    'mapping.validationOk': 'No critical mismatches. Warnings: {warning}.',
+    'mapping.validationErrors': 'Errors: {error}. Warnings: {warning}.',
+    'mapping.validationMore': 'More issues: {count}.',
+    'mapping.diagnosticsDetails': 'Detailed relationship diagram',
     'zabbix.interfaceProfiles.title': 'Zabbix interfaces[] profiles',
     'zabbix.interfaceProfiles.ruleTitle': 'Interface profile selection rule',
     'zabbix.interfaceProfiles.rulesTitle': 'Interface profile selection rules',
@@ -1715,6 +1768,10 @@ const translations = {
     'sessionTraffic.readGit': 'Read from git',
     'sessionTraffic.savedGit': 'Saved to git copy',
     'sessionTraffic.error': 'Error',
+    'sessionTraffic.webhookCount': 'CMDB webhooks: {count}',
+    'sessionTraffic.clickLoad': 'Click to load data through the BFF.',
+    'sessionTraffic.clickSync': 'Click to sync the cache through the BFF.',
+    'sessionTraffic.autoLoadFailed': 'Some caches were not loaded automatically; check the traffic lights.',
     'session.notAuthenticated': 'not authenticated',
     'help.general.title': 'General Principle',
     'help.general.1': 'The browser works only with monitoring-ui-api; it does not connect directly to CMDBuild, Zabbix, or Kafka.',
@@ -1788,6 +1845,7 @@ const translations = {
     'help.catalogs.8': 'Git Settings is separate from Runtime Settings: the UI shows the rules file path, local repository path, read mode, repository URL, schemaVersion, and rulesVersion. It can write rules with a new rulesVersion and a neighboring webhook artifact to a local working copy, but it does not commit or push; secrets in the webhook artifact are replaced with XXXXX.',
     'tooltip.brand': 'Application name: cmdb2monitoring.',
     'tooltip.sessionSummary': 'Current user and authentication method.',
+    'tooltip.sessionTrafficHelp': 'Opens the Help page. The nearby traffic lights remain clickable: hover them to see version or sync date, click to load or sync data.',
     'tooltip.idpLoginButton': 'Starts login through the selected external IdP.',
     'tooltip.logoutButton': 'Ends the current user session.',
     'tooltip.changePasswordOpen': 'Opens password change for the current local user.',
@@ -1806,7 +1864,8 @@ const translations = {
     'tooltip.dryRunRules': 'Runs a trial conversion without saving rules.',
     'tooltip.saveRulesAs': 'Saves the current rules JSON through the browser and updates rulesVersion in the exported file. The backend rules file, git commit, and git push are not changed.',
     'tooltip.loadMapping': 'Loads the visual map of Zabbix, rules, and CMDBuild links.',
-    'tooltip.mappingMode': 'Switches conversion rules management between view and current-session draft editing.',
+    'tooltip.mappingMode': 'Technical conversion rule mode switch.',
+    'tooltip.mappingRunValidation': 'Runs logical control for current rules against CMDBuild and Zabbix caches and shows a compact summary.',
     'tooltip.mappingEditAction': 'Switches the editor action: add, modify, or delete rules from draft JSON.',
     'tooltip.mappingClearSelection': 'Clears the highlighted chain and returns the normal overview.',
     'tooltip.mappingUndo': 'Undoes the latest draft-rules change in the current session.',
@@ -1891,7 +1950,7 @@ const viewDescriptions = {
     webhooks: 'Пользоваться этим пунктом не обязательно: можно самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации. Здесь можно загрузить текущие CMDBuild webhooks, построить план create/update/delete по rules и явно загрузить выбранные операции в CMDBuild. Отсутствующие payload-поля, необходимые rules, показываются до применения плана. Undo/Redo не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
     zabbix: 'Показывает templates, host groups, template groups, tags и расширенные Zabbix-справочники: proxies, macros, inventory fields, профили Zabbix interfaces[], statuses, maintenance, TLS/PSK и value maps.',
     zabbixMetadata: 'Показывает метаданные Zabbix templates, конфликтующие item keys, LLD rule keys и inventory fields. Эти данные используются редактором и логическим контролем правил.',
-    cmdbuild: 'Показывает классы, атрибуты, domains и lookup-справочники, загруженные из CMDBuild.',
+    cmdbuild: 'Административные операции CMDBuild: массовое изменение lookup-атрибута карточек и просмотр загруженного cache при диагностике.',
     authSettings: 'Управляет режимом авторизации: локальная, MS AD или IdP. В IdP режиме MS AD используется для сопоставления групп с ролями.',
     runtimeSettings: 'Содержит runtime-настройки подключений, хранилище аудита, Zabbix API key и Kafka Events.',
     gitSettings: 'Настройка микросервиса по конвертации, который использует файл конвертации, не зависит от настроек ниже, здесь управляется только копиями, размещение которых в продуктивных местах хранение лежит в области ответственности администратора системы.',
@@ -1908,7 +1967,7 @@ const viewDescriptions = {
     webhooks: 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved with the conversion rules file. This page loads current CMDBuild webhooks, builds a create/update/delete plan from rules, and explicitly loads selected operations into CMDBuild. Missing payload fields required by rules are shown before applying the plan. Undo/Redo does not roll back configuration already loaded into CMDBuild.',
     zabbix: 'Shows templates, host groups, template groups, tags, and extended Zabbix catalogs, including Zabbix interfaces[] profiles.',
     zabbixMetadata: 'Shows Zabbix template metadata, conflicting item keys, LLD rule keys, and inventory fields. The rule editor and logical control use this data.',
-    cmdbuild: 'Shows classes, attributes, domains, and lookup catalogs loaded from CMDBuild.',
+    cmdbuild: 'CMDBuild administration operations: bulk lookup changes for cards and loaded cache inspection for diagnostics.',
     authSettings: 'Manages authorization mode: local, MS AD, or IdP. In IdP mode, MS AD is used for group-to-role mapping.',
     runtimeSettings: 'Contains runtime connection settings, audit storage, Zabbix API key, and Kafka Events.',
     gitSettings: 'Converter microservice settings, which use the conversion file, do not depend on the settings below; this page only manages copies, and production placement of those copies is the system administrator responsibility.',
@@ -1954,6 +2013,7 @@ async function initialize() {
     if (canUseRules()) {
       await loadRuntimeCapabilities();
       await loadRules();
+      await loadSessionCaches();
     }
     if (currentRole() === 'admin') {
       await loadRuntimeSettings();
@@ -1995,6 +2055,12 @@ function bindNavigation() {
         await loadAuthSettings();
       }
     });
+  });
+  $('#sessionTrafficHelp')?.addEventListener('click', () => {
+    if (!state.authenticated || !canView('help') || !canLeaveCurrentView('help')) {
+      return;
+    }
+    showView('help');
   });
 
   window.addEventListener('beforeunload', event => {
@@ -2162,6 +2228,13 @@ function canLeaveCurrentView(nextView) {
 function applyRoleAccess() {
   $$('.nav-item[data-view]').forEach(button => {
     button.classList.toggle('hidden', state.authenticated && !canView(button.dataset.view));
+  });
+  $$('.nav-section').forEach(section => {
+    const items = $$('.nav-item[data-view]', section);
+    if (items.length === 0) {
+      return;
+    }
+    section.classList.toggle('hidden', state.authenticated && items.every(item => item.classList.contains('hidden')));
   });
 
   const activeView = $('.view.active')?.id ?? 'dashboard';
@@ -2402,13 +2475,75 @@ function renderSessionTraffic() {
     const indicator = state.sessionIndicators[definition.key] ?? {};
     const label = t(definition.labelKey);
     const text = t(indicator.textKey ?? 'sessionTraffic.notLoaded');
-    const node = document.createElement('span');
+    const detail = indicator.detail || sessionIndicatorDetail(definition.key);
+    const actionText = sessionIndicatorActionType(definition.key) === 'sync'
+      ? t('sessionTraffic.clickSync')
+      : t('sessionTraffic.clickLoad');
+    const helpText = [label, text, detail, actionText].filter(Boolean).join('. ');
+    const node = document.createElement('button');
+    node.type = 'button';
     node.className = `session-light session-light-${indicator.status ?? 'idle'}`;
+    node.dataset.sessionIndicator = definition.key;
     node.textContent = `${label}: ${text}`;
-    node.title = indicator.detail ? `${label}: ${text}. ${indicator.detail}` : `${label}: ${text}`;
+    node.setAttribute('aria-label', helpText);
+    setHelp(node, helpText);
     return node;
   });
   container.replaceChildren(...items);
+}
+
+function sessionIndicatorDetail(key) {
+  if (key === 'zabbixCatalog') {
+    return state.zabbixCatalog?.syncedAt ?? '';
+  }
+  if (key === 'cmdbuildCatalog') {
+    return state.cmdbuildCatalog?.syncedAt ?? '';
+  }
+  if (key === 'zabbixMetadata') {
+    return state.zabbixMetadata?.syncedAt ?? '';
+  }
+  if (key === 'gitRules') {
+    return state.currentRules ? rulesVersionLabel(state.currentRules) : '';
+  }
+  if (key === 'webhooks' && state.webhooksLoaded) {
+    return tf('sessionTraffic.webhookCount', { count: state.webhooksCurrent.length });
+  }
+  return '';
+}
+
+function sessionIndicatorActionType(key) {
+  return ['zabbixCatalog', 'cmdbuildCatalog', 'zabbixMetadata'].includes(key) ? 'sync' : 'load';
+}
+
+function sessionIndicatorAction(key) {
+  const actions = {
+    webhooks: loadCmdbuildWebhooks,
+    zabbixCatalog: syncZabbix,
+    cmdbuildCatalog: syncCmdbuild,
+    gitRules: loadRules,
+    zabbixMetadata: syncZabbixMetadata
+  };
+  return actions[key] ?? null;
+}
+
+async function runSessionIndicatorAction(button) {
+  const key = button.dataset.sessionIndicator;
+  const action = sessionIndicatorAction(key);
+  if (!action || button.disabled) {
+    return;
+  }
+
+  button.disabled = true;
+  button.classList.add('is-busy');
+  try {
+    await action();
+  } catch (error) {
+    setSessionIndicator(key, 'error', 'sessionTraffic.error', error.message ?? String(error));
+    toast(error.message ?? String(error));
+  } finally {
+    button.disabled = false;
+    button.classList.remove('is-busy');
+  }
 }
 
 function bindForms() {
@@ -2438,6 +2573,7 @@ function bindForms() {
       if (canUseRules()) {
         await loadRuntimeCapabilities();
         await loadRules();
+        await loadSessionCaches();
       }
     } catch (error) {
       $('#loginError').textContent = error.message;
@@ -2451,6 +2587,12 @@ function bindForms() {
   $('#logoutButton').addEventListener('click', async () => {
     await api('/api/auth/logout', { method: 'POST', body: {} });
     location.reload();
+  });
+  $('#sessionTraffic')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-session-indicator]');
+    if (button) {
+      runSessionIndicatorAction(button);
+    }
   });
 
   bindAction('#refreshDashboard', loadDashboard);
@@ -2527,6 +2669,7 @@ function bindForms() {
     }
   });
   bindAction('#loadValidateMapping', loadValidateMapping);
+  bindAction('#mappingRunValidation', runMappingValidation, { statusSelector: '#mappingValidationStatus', success: false });
   $('#validateMappingUndo')?.addEventListener('click', undoValidateMappingEdit);
   $('#validateMappingRedo')?.addEventListener('click', redoValidateMappingEdit);
   bindAction('#validateMappingSaveAs', saveValidateMappingDraftAsFile);
@@ -2920,6 +3063,25 @@ async function loadRules(options = {}) {
     syncLoadedRuleEditorsFromRulesDocument(rulesDocument);
   }
   return state.currentRules;
+}
+
+async function loadSessionCaches() {
+  const tasks = [
+    ['zabbixCatalog', loadZabbix],
+    ['zabbixMetadata', loadZabbixMetadata],
+    ['cmdbuildCatalog', loadCmdbuild]
+  ];
+  const results = await Promise.allSettled(tasks.map(async ([key, action]) => {
+    try {
+      await action();
+    } catch (error) {
+      setSessionIndicator(key, 'error', 'sessionTraffic.error', error.message ?? String(error));
+      throw error;
+    }
+  }));
+  if (results.some(result => result.status === 'rejected')) {
+    toast(t('sessionTraffic.autoLoadFailed'));
+  }
 }
 
 function renderCurrentRulesSummary(rulesDocument) {
@@ -4184,7 +4346,26 @@ function initializeMappingDraft(rules) {
   state.mappingDraftRules = cloneJson(rules);
   state.mappingHistory = [cloneJson(state.mappingDraftRules)];
   state.mappingHistoryIndex = 0;
+  resetMappingEditorTransientState();
   updateMappingEditorControls();
+}
+
+function resetMappingEditorTransientState() {
+  state.mappingEditAction = 'add';
+  state.mappingProfileClassName = '';
+  state.mappingProfileSelectedName = '';
+  if ($('#mappingEditAction')) {
+    $('#mappingEditAction').value = 'add';
+  }
+  if ($('#mappingModifyRule')) {
+    $('#mappingModifyRule').value = '';
+  }
+  if ($('#mappingEditClass')) {
+    $('#mappingEditClass').dataset.userTouched = '';
+  }
+  clearMappingEditorRuleForm();
+  resetMappingProfileForm({ silent: true, clearClass: true, clearStatus: true });
+  scheduleMappingProfileClassEnforcement();
 }
 
 function currentMappingRules() {
@@ -5646,6 +5827,9 @@ function updateMappingEditorAction() {
 }
 
 function handleMappingEditorClassChange() {
+  if ($('#mappingEditClass')) {
+    $('#mappingEditClass').dataset.userTouched = '1';
+  }
   if (isMappingModifyFilterMode()) {
     populateMappingModifyFilterControls({ autoSelect: true, changed: 'className' });
     return;
@@ -5729,6 +5913,7 @@ function refreshMappingEditorDependentControls(options = {}) {
 
 function clearMappingEditorRuleForm() {
   $('#mappingEditClass').value = '';
+  $('#mappingEditClass').dataset.userTouched = '';
   $('#mappingEditField').value = '';
   $('#mappingEditTargetType').value = '';
   $('#mappingEditZabbixObject').value = '';
@@ -6237,9 +6422,51 @@ function updateMappingDeleteControls() {
   const enabled = state.mappingMode === 'edit' && state.mappingEditAction === 'delete' && Boolean(state.mappingDraftRules);
   $('#mappingDeleteSelectAll').disabled = !enabled || !hasRules;
   $('#mappingDeleteClear').disabled = !enabled || !hasRules || selectedCount === 0;
-  $('#mappingDeleteSelected').disabled = !enabled || selectedCount === 0;
+  const deleteButton = $('#mappingDeleteSelected');
+  deleteButton.disabled = !enabled || selectedCount === 0;
+  deleteButton.textContent = selectedCount > 0
+    ? `${t('mapping.deleteSelectedRules')} (${selectedCount})`
+    : t('mapping.deleteSelectedRules');
   deletePanel?.classList.toggle('has-selection', selectedCount > 0);
+  renderMappingDeleteSelectionSummary();
   updateMappingDeleteGroupCheckboxes();
+}
+
+function renderMappingDeleteSelectionSummary() {
+  const container = $('#mappingDeleteSummary');
+  if (!container) {
+    return;
+  }
+
+  clear(container);
+  const selected = selectedMappingRuleDeletionItems();
+  if (selected.length === 0) {
+    container.append(el('p', 'mapping-delete-summary-empty', t('mapping.deleteSelectionNone')));
+    return;
+  }
+
+  container.append(el('p', 'mapping-delete-summary-title', tf('mapping.deleteSelectionSummary', { count: selected.length })));
+  const list = el('ul', 'mapping-delete-summary-list', '');
+  for (const item of selected.slice(0, 6)) {
+    const entry = el('li', '', '');
+    entry.append(
+      el('span', 'mapping-delete-summary-name', ruleDisplayName(item.rule)),
+      el('span', 'mapping-delete-summary-meta', mappingDeleteRuleMeta(item.rule, item.collection.type, currentMappingRules()))
+    );
+    list.append(entry);
+  }
+  container.append(list);
+  if (selected.length > 6) {
+    container.append(el('p', 'mapping-delete-summary-more', tf('mapping.deleteSelectionMore', { count: selected.length - 6 })));
+  }
+}
+
+function selectedMappingRuleDeletionItems() {
+  const selectedKeys = new Set(selectedMappingRuleDeletions().map(operation => operation.operationKey));
+  if (selectedKeys.size === 0) {
+    return [];
+  }
+  return mappingDeleteRuleItems(currentMappingRules()).filter(item => selectedKeys.has(item.operationKey));
 }
 
 function setMappingDeleteSelection(checked) {
@@ -6292,6 +6519,7 @@ function deleteSelectedMappingRules() {
 
   const confirmed = window.confirm([
     tf('mapping.confirm.deleteRulesTitle', { count: operations.length }),
+    ...selectedMappingRuleDeletionItems().slice(0, 6).map(item => `- ${ruleDisplayName(item.rule)} / ${item.collection.label}`),
     t('mapping.confirm.deleteRulesKeepSources'),
     t('mapping.confirm.deleteRulesUndo')
   ].join('\n'));
@@ -6328,8 +6556,8 @@ function deleteSelectedMappingRules() {
 
 function populateMappingEditorClasses() {
   const select = $('#mappingEditClass');
-  const profileClass = mappingEditorSelectedProfileClassForAdd();
-  const previous = profileClass || select.value;
+  const profileClass = mappingEditorProfileClassForCurrentContext();
+  const previous = profileClass || (select.dataset.userTouched ? select.value : '');
   const rules = currentMappingRules();
   const classes = mappingEditorClassOptions(rules, state.mappingCmdbuildCatalog ?? {});
 
@@ -6339,18 +6567,63 @@ function populateMappingEditorClasses() {
   ], previous, state.mappingCmdbuildCatalog ?? {});
 }
 
-function mappingEditorSelectedProfileClassForAdd() {
-  if (state.mappingEditAction !== 'add') {
+function mappingEditorProfileClassForCurrentContext() {
+  if (!mappingEditorShouldFollowProfileClass()) {
     return '';
   }
 
   const profile = selectedMappingHostProfile();
   const classes = profile ? ruleClassConditions(profile) : [];
   if (classes.length !== 1) {
-    return '';
+    return selectedMappingProfileClassName();
   }
 
   return catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, classes[0]);
+}
+
+function mappingEditorShouldFollowProfileClass() {
+  if (state.mappingEditAction === 'delete') {
+    return false;
+  }
+  if (state.mappingEditAction === 'modify' && $('#mappingModifyRule')?.value) {
+    return false;
+  }
+  return true;
+}
+
+function syncMappingEditorClassToProfileClass(className) {
+  const normalizedClass = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, className ?? '');
+  const select = $('#mappingEditClass');
+  if (!normalizedClass || !select || !mappingEditorShouldFollowProfileClass()) {
+    return false;
+  }
+
+  const options = [...select.options].map(option => ({
+    value: option.value,
+    disabled: option.disabled
+  }));
+  const exact = options.find(option => !option.disabled && normalizeClassName(option.value) === normalizeClassName(normalizedClass));
+  const nearest = exact ?? nearestConcreteClassOption(options, state.mappingCmdbuildCatalog ?? {}, normalizedClass);
+  const nextValue = nearest?.value ?? normalizedClass;
+  if (normalizeClassName(select.value) === normalizeClassName(nextValue)) {
+    select.dataset.userTouched = '';
+    if (isMappingModifyFilterMode()) {
+      populateMappingModifyFilterControls({ autoSelect: false });
+    }
+    return false;
+  }
+
+  select.value = nextValue;
+  select.dataset.userTouched = '';
+  if (isMappingModifyFilterMode()) {
+    populateMappingModifyFilterControls({ autoSelect: false });
+  } else {
+    refreshMappingEditorDependentControls({
+      selectedField: '',
+      selectedTarget: ''
+    });
+  }
+  return true;
 }
 
 function setClassSelectOptions(select, options, selectedValue = '', catalog = {}) {
@@ -7294,11 +7567,48 @@ function populateMappingProfileClasses() {
   }
 
   const rules = currentMappingRules();
-  const previous = select.value;
+  const previous = selectedMappingProfileClassName();
   setClassSelectOptions(select, [
     { value: '', label: t('mapping.option.chooseClass') },
     ...mappingEditorClassOptions(rules, state.mappingCmdbuildCatalog ?? {})
   ], previous, state.mappingCmdbuildCatalog ?? {});
+  enforceMappingProfileClassSelection();
+}
+
+function selectedMappingProfileClassName() {
+  return catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, state.mappingProfileClassName || '');
+}
+
+function setMappingProfileClassName(className) {
+  state.mappingProfileClassName = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, className || '');
+  enforceMappingProfileClassSelection();
+}
+
+function enforceMappingProfileClassSelection() {
+  const select = $('#mappingProfileClass');
+  if (!select) {
+    return;
+  }
+
+  const className = selectedMappingProfileClassName();
+  const exactOption = [...select.options]
+    .find(option => normalizeClassName(option.value) === normalizeClassName(className));
+  select.value = exactOption?.value ?? '';
+}
+
+function scheduleMappingProfileClassEnforcement() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  for (const delay of [0, 50, 250]) {
+    window.setTimeout(() => {
+      if (!state.mappingProfileClassName) {
+        enforceMappingProfileClassSelection();
+        updateMappingProfilesPanel();
+      }
+    }, delay);
+  }
 }
 
 function populateMappingProfileFields(options = {}) {
@@ -7307,7 +7617,7 @@ function populateMappingProfileFields(options = {}) {
     return;
   }
 
-  const className = $('#mappingProfileClass')?.value ?? '';
+  const className = selectedMappingProfileClassName();
   const selected = options.selectedValue !== undefined ? options.selectedValue : select.value;
   const optionsList = mappingProfileAddressFieldOptions(className);
   const fieldOptions = optionsList.length > 0
@@ -7365,7 +7675,7 @@ function populateMappingProfileInterfaceProfiles(options = {}) {
 }
 
 function syncMappingProfileSuggestedValues() {
-  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingProfileClass')?.value ?? '');
+  const className = selectedMappingProfileClassName();
   const field = $('#mappingProfileField')?.value ?? '';
   const fieldRule = mappingProfileFieldRule(field);
   const kind = $('#mappingProfileKind')?.value ?? 'main';
@@ -7396,7 +7706,7 @@ function mappingProfileFieldRule(field) {
     return {};
   }
   const rules = currentMappingRules();
-  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingProfileClass')?.value ?? '');
+  const className = selectedMappingProfileClassName();
   const configured = rules.source?.fields?.[field];
   if (configured && isMappingSourceFieldCompatibleWithClass(className, field, configured, rules)) {
     return configured;
@@ -7408,7 +7718,7 @@ function mappingProfileFieldRule(field) {
 }
 
 function mappingProfileFormValues() {
-  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingProfileClass')?.value ?? '');
+  const className = selectedMappingProfileClassName();
   const field = $('#mappingProfileField')?.value ?? '';
   const fieldRule = mappingProfileFieldRule(field);
   const kind = $('#mappingProfileKind')?.value === 'additional' ? 'additional' : 'main';
@@ -7488,17 +7798,19 @@ function renderMappingProfilesList() {
   }
 
   clear(container);
-  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingProfileClass')?.value ?? '');
+  const className = selectedMappingProfileClassName();
   if (!state.mappingDraftRules) {
     container.append(el('div', 'mapping-delete-empty', t('mapping.status.profileLoadRulesFirst')));
     return;
   }
+  if (!className) {
+    container.append(el('div', 'mapping-delete-empty', t('mapping.status.profileChooseClass')));
+    return;
+  }
 
-  const profiles = className
-    ? mappingHostProfilesForClass(currentMappingRules(), className)
-    : currentMappingRules().hostProfiles ?? [];
+  const profiles = mappingHostProfilesForClass(currentMappingRules(), className);
   if (profiles.length === 0) {
-    container.append(el('div', 'mapping-delete-empty', className ? t('mapping.status.profileNoProfilesForClass') : t('mapping.status.profileChooseClass')));
+    container.append(el('div', 'mapping-delete-empty', t('mapping.status.profileNoProfilesForClass')));
     return;
   }
 
@@ -7587,12 +7899,15 @@ function updateMappingProfileControls() {
 }
 
 function handleMappingProfileClassChange() {
+  setMappingProfileClassName($('#mappingProfileClass')?.value ?? '');
   state.mappingProfileSelectedName = '';
   $('#mappingProfileName').value = '';
   $('#mappingProfileMode').dataset.userTouched = '';
   populateMappingProfileFields({ selectedValue: '' });
   syncMappingProfileKindDefault();
   updateMappingProfilesPanel();
+  populateMappingEditorClasses();
+  syncMappingEditorClassToProfileClass(selectedMappingProfileClassName());
 }
 
 function handleMappingProfileKindChange() {
@@ -7613,7 +7928,7 @@ function handleMappingProfileRecognizedOnlyChange() {
 }
 
 function syncMappingProfileKindDefault() {
-  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingProfileClass')?.value ?? '');
+  const className = selectedMappingProfileClassName();
   const kind = $('#mappingProfileKind');
   if (kind && className) {
     kind.value = classHasHostProfile(currentMappingRules(), className) ? 'additional' : 'main';
@@ -7645,9 +7960,10 @@ function loadMappingHostProfileIntoForm(profileName) {
     return;
   }
 
-  const className = ruleClassConditions(profile)[0] ?? $('#mappingProfileClass')?.value ?? '';
+  const className = ruleClassConditions(profile)[0] ?? selectedMappingProfileClassName();
   const item = mappingProfilePrimaryInterface(profile);
   const field = item.valueField || profile.valueField || '';
+  setMappingProfileClassName(className);
   if ($('#mappingProfileClass')) {
     $('#mappingProfileClass').value = className;
   }
@@ -7682,13 +7998,7 @@ function loadMappingHostProfileIntoForm(profileName) {
     $('#mappingProfileScope').dataset.userTouched = '';
   }
   renderMappingProfilesList();
-  if (state.mappingEditAction === 'add' && className) {
-    $('#mappingEditClass').value = className;
-    refreshMappingEditorDependentControls({
-      selectedField: '',
-      selectedTarget: ''
-    });
-  }
+  syncMappingEditorClassToProfileClass(className);
   updateMappingProfileControls();
   updateMappingEditorFormState();
   setMappingProfileStatus(tf('mapping.status.profileLoaded', { profile: profile.name || 'default' }), 'success');
@@ -7785,6 +8095,12 @@ function deleteMappingHostProfile() {
 
 function resetMappingProfileForm(options = {}) {
   state.mappingProfileSelectedName = '';
+  if (options.clearClass) {
+    state.mappingProfileClassName = '';
+    if ($('#mappingProfileClass')) {
+      $('#mappingProfileClass').value = '';
+    }
+  }
   if ($('#mappingProfileName')) {
     $('#mappingProfileName').value = '';
   }
@@ -7808,6 +8124,9 @@ function resetMappingProfileForm(options = {}) {
   syncMappingProfileKindDefault();
   updateMappingProfilesPanel();
   updateMappingEditorFormState();
+  if (options.clearStatus) {
+    setMappingProfileStatus('', '');
+  }
   if (!options.silent) {
     setMappingProfileStatus(t('mapping.status.profileReset'), 'success');
   }
@@ -8327,13 +8646,18 @@ function populateMappingModifyRules(options = {}) {
     return;
   }
 
+  const rules = currentMappingRules();
   const previous = options.selectedValue !== undefined ? options.selectedValue : select.value;
-  const items = options.items ?? mappingModifyRuleItems(currentMappingRules());
+  const scope = mappingModifyRuleScopeFilters();
+  const items = options.items ?? mappingModifyScopedRuleItems(mappingModifyRuleItems(rules), scope, rules);
   const ruleOptions = items.map(item => ({
     value: item.operationKey,
     label: `${item.collection.label}: ${ruleDisplayName(item.rule)}`,
-    meta: mappingDeleteRuleMeta(item.rule, item.collection.type, currentMappingRules())
+    meta: mappingDeleteRuleMeta(item.rule, item.collection.type, rules)
   }));
+  const noRulesLabel = mappingModifyScopeIsActive(scope)
+    ? t('mapping.option.noRulesForModifyScope')
+    : t('mapping.option.noRulesToModify');
 
   setSelectOptions(select, ruleOptions.length > 0
     ? [
@@ -8345,13 +8669,17 @@ function populateMappingModifyRules(options = {}) {
       },
       ...ruleOptions
     ]
-    : [{ value: '', label: t('mapping.option.noRulesToModify'), disabled: true }], previous);
+    : [{ value: '', label: noRulesLabel, disabled: true }], previous);
 }
 
 function populateMappingModifyFilterControls(options = {}) {
   const rules = currentMappingRules();
-  const allItems = mappingModifyRuleItems(rules);
+  const scope = mappingModifyRuleScopeFilters();
+  const allItems = mappingModifyScopedRuleItems(mappingModifyRuleItems(rules), scope, rules);
   const filters = normalizedMappingModifyFilters(mappingModifyFilterValues());
+  if (!filters.className && scope.className) {
+    filters.className = scope.className;
+  }
   if (options.autoSelect) {
     autoFillMappingModifyFilters(filters, allItems, options.changed);
   }
@@ -8428,6 +8756,50 @@ function mappingModifyRuleItemsMatching(items, filters, rules) {
   return items.filter(item => mappingModifyRuleItemMatches(item, filters, rules));
 }
 
+function mappingModifyScopedRuleItems(items, scope, rules) {
+  return items.filter(item => mappingModifyRuleItemMatchesScope(item, scope, rules));
+}
+
+function mappingModifyRuleScopeFilters() {
+  const profile = selectedMappingHostProfile();
+  return {
+    className: mappingModifyScopeClassName(profile),
+    profileName: profile?.name ?? ''
+  };
+}
+
+function mappingModifyScopeClassName(profile = selectedMappingHostProfile()) {
+  const selectedClass = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass')?.value ?? '');
+  if (selectedClass) {
+    return selectedClass;
+  }
+
+  const profileClasses = profile ? ruleClassConditions(profile) : [];
+  return profileClasses.length === 1
+    ? catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, profileClasses[0])
+    : '';
+}
+
+function mappingModifyScopeIsActive(scope = {}) {
+  return Boolean(scope.className || scope.profileName);
+}
+
+function mappingModifyRuleItemMatchesScope(item, scope = {}, rules) {
+  if (scope.profileName) {
+    const profileScoped = hostProfileMatchers(item.rule).length > 0;
+    if (profileScoped && !ruleMatchesHostProfile(item.rule, scope.profileName)) {
+      return false;
+    }
+  }
+
+  if (scope.className && !mappingModifyItemClasses(item, rules)
+    .some(className => normalizeClassName(className) === normalizeClassName(scope.className))) {
+    return false;
+  }
+
+  return true;
+}
+
 function mappingModifyRuleItemMatches(item, filters, rules) {
   if (filters.className && !mappingModifyItemClasses(item, rules)
     .some(className => normalizeClassName(className) === normalizeClassName(filters.className))) {
@@ -8461,7 +8833,10 @@ function mappingModifyItemTargetValue(item) {
 }
 
 function populateMappingModifyClassFilter(items, selectedValue) {
-  const classes = uniqueTokens(items.flatMap(item => mappingModifyItemClasses(item)))
+  const classes = uniqueTokens([
+    selectedValue,
+    ...items.flatMap(item => mappingModifyItemClasses(item))
+  ].filter(Boolean))
     .sort(compareText);
   const options = mappingModifyClassOptions(classes, currentMappingRules());
   setClassSelectOptions($('#mappingEditClass'), [
@@ -8668,6 +9043,7 @@ function loadSelectedMappingRuleIntoEditor(options = {}) {
     );
     classSelect.value = selectedClass?.value || form.className;
   }
+  classSelect.dataset.userTouched = '1';
   $('#mappingEditPriority').value = String(form.priority);
   $('#mappingEditRegex').value = form.regex;
   if ($('#mappingEditStringTemplate')) {
@@ -8679,6 +9055,10 @@ function loadSelectedMappingRuleIntoEditor(options = {}) {
     state.mappingModifyFieldValue = form.field;
   }
   state.mappingProfileSelectedName = form.profileName || state.mappingProfileSelectedName;
+  if (form.profileName) {
+    const scopedProfile = selectedMappingHostProfile();
+    setMappingProfileClassName(ruleClassConditions(scopedProfile ?? {})[0] ?? form.className);
+  }
   if ($('#mappingProfileScope')) {
     $('#mappingProfileScope').checked = Boolean(form.profileName);
     $('#mappingProfileScope').dataset.userTouched = form.profileName ? '1' : '';
@@ -10572,6 +10952,66 @@ async function loadValidateMapping() {
   return { rulesDocument, zabbixCatalog, cmdbuildCatalog };
 }
 
+async function runMappingValidation() {
+  setActionStatus($('#mappingValidationStatus'), t('mapping.validationRunning'), 'running');
+  const result = await loadValidateMapping();
+  const validation = buildRulesMappingValidation(
+    state.validateMappingRules,
+    result.zabbixCatalog,
+    result.cmdbuildCatalog
+  );
+  renderMappingValidationSummary(validation);
+  return result;
+}
+
+function renderMappingValidationSummary(validation = { issues: [] }) {
+  const container = $('#mappingValidationSummary');
+  if (!container) {
+    return;
+  }
+
+  clear(container);
+  const issues = validation.issues ?? [];
+  const errors = issues.filter(issue => issue.severity === 'error');
+  const warnings = issues.filter(issue => issue.severity === 'warning');
+  const statusKey = errors.length === 0 ? 'mapping.validationOk' : 'mapping.validationErrors';
+  const statusLevel = errors.length === 0 ? 'success' : 'error';
+  setActionStatus($('#mappingValidationStatus'), tf(statusKey, {
+    error: errors.length,
+    warning: warnings.length
+  }), statusLevel);
+
+  const counters = el('div', 'mapping-validation-counters', '');
+  counters.append(
+    mappingValidationCounter('error', errors.length),
+    mappingValidationCounter('warning', warnings.length)
+  );
+  container.append(counters);
+
+  if (issues.length === 0) {
+    return;
+  }
+
+  const list = el('ul', 'mapping-validation-issues', '');
+  for (const issue of issues.slice(0, 12)) {
+    list.append(validationIssueNode(issue));
+  }
+  container.append(list);
+
+  if (issues.length > 12) {
+    container.append(el('p', 'mapping-validation-more', tf('mapping.validationMore', {
+      count: issues.length - 12
+    })));
+  }
+}
+
+function mappingValidationCounter(severity, count) {
+  const label = severity === 'error' ? t('audit.quickSummaryError') : t('audit.quickSummaryWarning');
+  const node = el('span', `mapping-validation-counter mapping-validation-counter-${severity}`, `${label}: ${count}`);
+  node.dataset.severity = severity;
+  return node;
+}
+
 function renderValidateMapping(rules, zabbixCatalog, cmdbuildCatalog) {
   const validation = buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog);
   renderValidationSummary($('#validateMappingSummary'), validation);
@@ -10600,11 +11040,22 @@ function renderValidationSummary(container, validation) {
 
   const list = el('ul', 'validation-issues', '');
   for (const issue of validation.issues) {
-    const item = el('li', `validation-issue validation-issue-${issue.severity}`, issue.message);
-    setHelp(item, issue.help ?? issue.message);
-    list.append(item);
+    list.append(validationIssueNode(issue));
   }
   container.append(list);
+}
+
+function validationIssueNode(issue) {
+  const item = el('li', `validation-issue validation-issue-${issue.severity}`, '');
+  item.append(el('div', 'validation-issue-message', issue.message));
+  if (issue.context) {
+    item.append(el('div', 'validation-issue-context', issue.context));
+  }
+  if (issue.help) {
+    item.append(el('div', 'validation-issue-help', issue.help));
+  }
+  setHelp(item, [issue.message, issue.context, issue.help].filter(Boolean).join(' '));
+  return item;
 }
 
 function renderValidateMappingZabbix(container, rules, catalog, validation) {
@@ -11538,6 +11989,7 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
     source: issue.source,
     message: issue.message,
     tokens: uniqueTokens(issue.tokens ?? []),
+    context: issue.context,
     help: issue.help,
     fix: issue.fix
   });
@@ -11596,11 +12048,14 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
 
     for (const item of referencedZabbixExtensionItems(rules, definition)) {
       if (!zabbixExtensionItemExists(zabbixCatalog[definition.catalogKey] ?? [], definition, item)) {
+        const references = zabbixExtensionItemRuleReferences(rules, definition, item);
+        const itemLabel = zabbixExtensionItemLabel(definition, item);
         addIssue({
           source: 'zabbix',
-          message: `Zabbix ${zabbixExtensionTitle(definition)} отсутствует: ${definition.label(item)}`,
+          message: `Zabbix ${zabbixExtensionTitle(definition)} отсутствует: ${itemLabel}`,
           tokens: zabbixExtensionItemMappingTokens(definition, item, rules),
-          help: `${zabbixExtensionHelp(definition)} Объект указан в JSON правил, но отсутствует в Zabbix catalog.`
+          context: validationRuleReferencesContext(references),
+          help: zabbixExtensionMissingHelp(definition, itemLabel, references)
         });
       }
     }
@@ -11726,6 +12181,7 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
   }
 
   const unknownSourceFieldTokens = new Map();
+  const unknownSourceFieldRefs = new Map();
   for (const item of mappingDeleteRuleItems(rules)) {
     for (const field of mappingDeleteSourceFieldsForItem(item.rule)) {
       const fieldKey = canonicalSourceField(field);
@@ -11735,14 +12191,19 @@ function buildRulesMappingValidation(rules, zabbixCatalog, cmdbuildCatalog) {
       const tokens = unknownSourceFieldTokens.get(fieldKey) ?? [];
       tokens.push(ruleValidationToken(item.rule, item.collection.type), ...sourceFieldTokens(fieldKey));
       unknownSourceFieldTokens.set(fieldKey, tokens);
+      const refs = unknownSourceFieldRefs.get(fieldKey) ?? [];
+      refs.push(validationRuleReference(item.rule, item.collection.label));
+      unknownSourceFieldRefs.set(fieldKey, refs);
     }
   }
 
   for (const [fieldKey, tokens] of unknownSourceFieldTokens) {
+    const references = uniqueValidationRuleReferences(unknownSourceFieldRefs.get(fieldKey) ?? []);
     addIssue({
       source: 'cmdbuild',
       message: `Class attribute field в rule не объявлен: ${fieldKey}`,
       tokens: [...sourceFieldTokens(fieldKey), ...tokens],
+      context: validationRuleReferencesContext(references),
       help: 'Rule ссылается на class attribute field, которого нет в source.fields. Добавьте field в правила или исправьте condition/valueField.'
     });
   }
@@ -13164,11 +13625,12 @@ function singularRuleKey(value) {
 }
 
 function zabbixExtensionTokens(definition, item) {
-  const id = item?.[definition.idField] ?? definition.label(item);
+  const label = zabbixExtensionItemLabel(definition, item);
+  const id = item?.[definition.idField] ?? label;
   const tokens = [
     `target:${definition.rulesKey}`,
     `zbx-${definition.rulesKey}:${normalizeToken(id)}`,
-    `zbx-${definition.rulesKey}:${normalizeToken(definition.label(item))}`
+    `zbx-${definition.rulesKey}:${normalizeToken(label)}`
   ];
   if (definition.rulesKey === 'hostMacros') {
     tokens.push('target:macros', ...tagValueTokens(item));
@@ -13181,6 +13643,26 @@ function zabbixExtensionTokens(definition, item) {
     );
   }
   return tokens;
+}
+
+function zabbixExtensionItemLabel(definition, item) {
+  const label = definition.label(item);
+  if (label) {
+    return label;
+  }
+
+  return firstNonBlankValue(
+    item?.[definition.idField],
+    item?.name,
+    item?.field,
+    item?.macro,
+    item?.proxyId,
+    item?.proxy_groupid,
+    item?.maintenanceId,
+    item?.valueMapId,
+    item?.valueField,
+    stableJson(item)
+  ) || 'не задано';
 }
 
 function zabbixExtensionItemMappingTokens(definition, item, rules = null) {
@@ -13205,6 +13687,40 @@ function zabbixExtensionItemMappingTokens(definition, item, rules = null) {
   return uniqueTokens(tokens);
 }
 
+function zabbixExtensionItemRuleReferences(rules, definition, item) {
+  const selectionRules = rules[definition.selectionRulesKey] ?? rules[`${definition.rulesKey}SelectionRules`] ?? [];
+  return uniqueValidationRuleReferences(selectionRules
+    .filter(rule => selectionItemsForRule(rules, rule, definition.rulesKey)
+      .some(candidate => sameZabbixExtensionItem(definition, candidate, item)))
+    .map(rule => validationRuleReference(rule, zabbixExtensionRulesTitle(definition))));
+}
+
+function validationRuleReference(rule, collectionLabel) {
+  return `${collectionLabel}: "${ruleDisplayName(rule)}"`;
+}
+
+function uniqueValidationRuleReferences(references = []) {
+  return uniqueTokens(references).sort(compareText);
+}
+
+function validationRuleReferencesContext(references = []) {
+  if (references.length === 0) {
+    return '';
+  }
+  return `Некорректное правило: ${references.slice(0, 4).join('; ')}${references.length > 4 ? `; еще ${references.length - 4}` : ''}.`;
+}
+
+function zabbixExtensionMissingHelp(definition, itemLabel, references = []) {
+  const base = `${zabbixExtensionHelp(definition)} Объект указан в JSON правил, но отсутствует в Zabbix catalog.`;
+  if (definition.rulesKey === 'inventoryFields') {
+    return `${base} Для inventory target "${itemLabel}" выберите существующее поле Zabbix inventory или измените target field в указанном rule; CMDB attribute должен быть source/valueField, а не названием inventory target.`;
+  }
+  if (references.length > 0) {
+    return `${base} Откройте указанное rule в режиме "Модификация правила" и замените объект/payload Zabbix на существующий.`;
+  }
+  return base;
+}
+
 function sameZabbixExtensionItem(definition, left, right) {
   const leftValues = zabbixExtensionIdentityValues(definition, left);
   const rightValues = zabbixExtensionIdentityValues(definition, right);
@@ -13218,7 +13734,7 @@ function zabbixExtensionIdentityValues(definition, item) {
 
   return uniqueTokens([
     item?.[definition.idField],
-    definition.label(item),
+    zabbixExtensionItemLabel(definition, item),
     item?.name,
     item?.macro,
     item?.field,
@@ -13248,9 +13764,10 @@ function zabbixLazySectionTokens(definition, items, rules) {
 function zabbixExtensionItemExists(items, definition, item) {
   const wanted = [
     item?.[definition.idField],
-    definition.label(item),
+    zabbixExtensionItemLabel(definition, item),
     item?.name,
-    item?.macro
+    item?.macro,
+    item?.field
   ].map(normalizeToken).filter(Boolean);
   if (wanted.length === 0) {
     return false;
@@ -13258,9 +13775,10 @@ function zabbixExtensionItemExists(items, definition, item) {
 
   return items.some(candidate => [
     candidate?.[definition.idField],
-    definition.label(candidate),
+    zabbixExtensionItemLabel(definition, candidate),
     candidate?.name,
-    candidate?.macro
+    candidate?.macro,
+    candidate?.field
   ].map(normalizeToken).some(value => wanted.includes(value)));
 }
 
@@ -13607,8 +14125,20 @@ function templateStringTokens(template = '') {
 }
 
 function isKnownMappingSourceField(rules, field) {
+  const canonical = canonicalSourceField(field);
   return Boolean(rules?.source?.fields?.[field])
-    || ['eventType', 'zabbixHostId', 'ipAddress', 'dnsName', 'hostProfile', 'outputProfile'].includes(canonicalSourceField(field));
+    || [
+      'className',
+      'eventType',
+      'zabbixHostId',
+      'ipAddress',
+      'dnsName',
+      'hostProfile',
+      'hostProfileName',
+      'outputProfile',
+      'code',
+      'entityId'
+    ].includes(canonical);
 }
 
 function selectionItemsForRule(rules, rule, type) {
@@ -15058,6 +15588,7 @@ function applyHelpText() {
     '#mappingStringRegexReplacement': 'tooltip.mappingStringRegexReplacement',
     '#mappingInsertStringField': 'tooltip.mappingInsertStringField',
     '#mappingInsertRegex': 'tooltip.mappingInsertRegex',
+    '#mappingRunValidation': 'tooltip.mappingRunValidation',
     '#mappingProfileClass': 'tooltip.mappingProfileClass',
     '#mappingProfileKind': 'tooltip.mappingProfileKind',
     '#mappingProfileName': 'tooltip.mappingProfileName',

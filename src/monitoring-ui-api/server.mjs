@@ -23,19 +23,19 @@ const roles = {
     key: 'viewer',
     label: 'Просмотр',
     legacy: ['readonly'],
-    views: ['dashboard', 'events']
+    views: ['dashboard', 'events', 'about', 'help']
   },
   editor: {
     key: 'editor',
     label: 'Редактирование правил',
     legacy: ['operator'],
-    views: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'about', 'help']
+    views: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'about', 'help']
   },
   admin: {
     key: 'admin',
     label: 'Администрирование',
     legacy: ['administrator'],
-    views: ['dashboard', 'events', 'systemAudit', 'rules', 'mapping', 'validateMapping', 'webhooks', 'zabbix', 'zabbixMetadata', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
+    views: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
   }
 };
 

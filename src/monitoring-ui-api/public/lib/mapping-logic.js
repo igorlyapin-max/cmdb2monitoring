@@ -523,6 +523,7 @@ export function canonicalSourceField(field) {
     zabbix_hostid: 'zabbixHostId',
     eventtype: 'eventType',
     hostprofile: 'hostProfile',
+    hostprofilename: 'hostProfileName',
     outputprofile: 'outputProfile'
   }[normalized] ?? field;
 }

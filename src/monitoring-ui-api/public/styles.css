@@ -148,6 +148,14 @@ label span {
   text-align: right;
 }
 
+.session-traffic-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
 .session-traffic {
   display: flex;
   align-items: center;
@@ -170,12 +178,40 @@ label span {
   white-space: nowrap;
 }
 
+button.session-light {
+  min-height: 22px;
+  border-color: var(--line);
+  background: #f8fafc;
+  color: #334155;
+  padding: 2px 7px;
+}
+
+button.session-light:hover,
+button.session-light:focus-visible {
+  border-color: #9fb8b5;
+  background: #eef7f5;
+}
+
 .session-light::before {
   content: "";
   width: 7px;
   height: 7px;
   border-radius: 999px;
   background: #94a3b8;
+}
+
+.session-help-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-color: var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent-strong);
+  padding: 0;
+  font-weight: 700;
 }
 
 .session-light-loaded::before,
@@ -303,7 +339,7 @@ h2 {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-columns: 270px minmax(0, 1fr);
   height: calc(100vh - 56px);
   min-height: calc(100vh - 56px);
 }
@@ -319,13 +355,39 @@ h2 {
   padding: 12px;
 }
 
+.nav-section {
+  margin-bottom: 10px;
+}
+
+.nav-section-title {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.nav-section-items {
+  display: grid;
+  gap: 4px;
+}
+
+.nav-section-bottom {
+  margin-top: 14px;
+}
+
 .nav-item {
   width: 100%;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   border-color: transparent;
   background: transparent;
   color: var(--text);
   text-align: left;
+  white-space: normal;
 }
 
 .nav-item.active {
@@ -423,6 +485,10 @@ h2 {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
+}
+
+.webhooks-ownership-note {
+  margin: 10px 0 14px;
 }
 
 .webhooks-table th:first-child,
@@ -706,6 +772,132 @@ h2 {
 
 .mapping-mode-field select {
   width: 220px;
+}
+
+.mapping-workflow {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.mapping-pipeline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.mapping-pipeline-step {
+  display: grid;
+  gap: 4px;
+  min-height: 74px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.mapping-pipeline-title {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.mapping-pipeline-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.mapping-pipeline-arrow {
+  align-self: center;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.mapping-validation-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.mapping-validation-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.mapping-validation-summary {
+  grid-column: 1 / -1;
+}
+
+.mapping-validation-counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mapping-validation-counter {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 2px 8px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mapping-validation-counter-error {
+  border-color: #f3b2aa;
+  color: var(--danger);
+}
+
+.mapping-validation-counter-warning {
+  border-color: #f6d28b;
+  color: var(--warn);
+}
+
+.mapping-validation-issues {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.mapping-validation-more {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mapping-diagnostics-details {
+  margin-top: 14px;
+}
+
+.mapping-diagnostics-details > summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.mapping-diagnostics-details[open] > summary {
+  margin-bottom: 10px;
+}
+
+.catalog-diagnostics-details {
+  margin-top: 14px;
+}
+
+.catalog-diagnostics-details > summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.catalog-diagnostics-details[open] > summary {
+  margin-bottom: 10px;
 }
 
 .mapping-editor {
@@ -1048,6 +1240,66 @@ h2 {
 
 .mapping-delete-view-field {
   min-width: 180px;
+}
+
+.mapping-delete-note {
+  margin: -2px 0 10px;
+  border-left: 3px solid #d97706;
+  background: #fff7ed;
+  color: #7c2d12;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mapping-delete-summary {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.mapping-delete-summary p {
+  margin: 0;
+}
+
+.mapping-delete-summary-title {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.mapping-delete-summary-empty,
+.mapping-delete-summary-more {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mapping-delete-summary-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.mapping-delete-summary-list li {
+  margin: 3px 0;
+}
+
+.mapping-delete-summary-name,
+.mapping-delete-summary-meta {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.mapping-delete-summary-name {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.mapping-delete-summary-meta {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .mapping-delete-list {
@@ -1513,6 +1765,22 @@ fieldset.settings-stack {
   color: var(--warn);
 }
 
+.validation-issue-message {
+  font-weight: 700;
+}
+
+.validation-issue-context,
+.validation-issue-help {
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.validation-issue-help {
+  color: var(--muted);
+}
+
 .help-popover {
   position: fixed;
   z-index: 60;
@@ -1737,8 +2005,18 @@ th {
   .mapping-editor-grid,
   .mapping-profile-grid,
   .mapping-profile-row,
-  .mapping-string-builder-grid {
+  .mapping-string-builder-grid,
+  .mapping-validation-panel {
     grid-template-columns: 1fr;
+  }
+
+  .mapping-pipeline {
+    grid-template-columns: 1fr;
+  }
+
+  .mapping-pipeline-arrow {
+    justify-self: center;
+    transform: rotate(90deg);
   }
 
   .mapping-editor-grid .wide-field,
@@ -1779,6 +2057,7 @@ th {
     position: static;
     height: auto;
     display: flex;
+    align-items: flex-start;
     overflow-x: auto;
     overflow-y: visible;
     gap: 6px;
@@ -1786,8 +2065,18 @@ th {
     border-bottom: 1px solid var(--line);
   }
 
+  .nav-section {
+    flex: 0 0 220px;
+    margin-bottom: 0;
+  }
+
+  .nav-section-bottom {
+    flex-basis: 150px;
+    margin-top: 0;
+  }
+
   .nav-item {
-    min-width: 150px;
+    min-width: 0;
     margin: 0;
   }
 
