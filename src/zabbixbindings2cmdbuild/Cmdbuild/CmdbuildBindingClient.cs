@@ -176,7 +176,7 @@ public sealed class CmdbuildBindingClient(
     {
         using var document = await SendAsync(
             HttpMethod.Get,
-            $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards?limit={Math.Max(1, options.Value.BindingLookupLimit)}",
+            BuildBindingLookupPath(bindingEvent),
             null,
             cancellationToken);
         if (document is null)
@@ -198,6 +198,39 @@ public sealed class CmdbuildBindingClient(
         }
 
         return null;
+    }
+
+    private string BuildBindingLookupPath(ZabbixBindingEvent bindingEvent)
+    {
+        var filter = JsonSerializer.Serialize(new
+        {
+            attribute = new
+            {
+                and = new[]
+                {
+                    BindingFilter("OwnerClass", bindingEvent.SourceClass),
+                    BindingFilter("OwnerCardId", bindingEvent.SourceCardId),
+                    BindingFilter("HostProfile", bindingEvent.HostProfile)
+                }
+            }
+        }, JsonOptions);
+
+        return $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards"
+            + $"?limit={Math.Max(1, options.Value.BindingLookupLimit)}"
+            + $"&filter={Uri.EscapeDataString(filter)}";
+    }
+
+    private static object BindingFilter(string attribute, string value)
+    {
+        return new
+        {
+            simple = new
+            {
+                attribute,
+                @operator = "equal",
+                value = new[] { value }
+            }
+        };
     }
 
     private static JsonObject BuildBindingBody(ZabbixBindingEvent bindingEvent)

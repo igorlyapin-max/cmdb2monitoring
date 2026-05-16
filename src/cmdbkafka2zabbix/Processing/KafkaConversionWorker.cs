@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Cmdb2Monitoring.Logging;
 using CmdbKafka2Zabbix.Conversion;
@@ -140,13 +141,24 @@ public sealed class KafkaConversionWorker(
         IConsumer<string, string> consumer,
         CancellationToken cancellationToken)
     {
+        var totalStopwatch = Stopwatch.StartNew();
+        var stageStopwatch = Stopwatch.StartNew();
+        long rulesMs = 0;
+        long readResolveMs = 0;
+        long convertMs = 0;
+        long publishMs = 0;
+        long stateCommitMs = 0;
+
         var rules = await rulesProvider.GetRulesAsync(cancellationToken);
+        rulesMs = stageStopwatch.ElapsedMilliseconds;
         CmdbSourceEvent source;
 
         try
         {
+            stageStopwatch.Restart();
             source = eventReader.Read(consumed.Message.Value, rules);
             source = await fieldResolver.ResolveAsync(source, rules, cancellationToken);
+            readResolveMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogBasic(
                 debugLoggingOptions,
                 "Resolved CMDBuild event {EventType} for {ClassName}/{EntityId} with {FieldCount} source field(s)",
@@ -163,6 +175,7 @@ public sealed class KafkaConversionWorker(
         }
         catch (JsonException ex)
         {
+            readResolveMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogWarning(
                 ex,
                 "Skipping invalid JSON message from {Topic}[{Partition}]@{Offset}",
@@ -170,6 +183,7 @@ public sealed class KafkaConversionWorker(
                 consumed.Partition.Value,
                 consumed.Offset.Value);
 
+            stageStopwatch.Restart();
             await WriteStateAndCommitAsync(
                 consumed,
                 consumer,
@@ -178,11 +192,24 @@ public sealed class KafkaConversionWorker(
                 outputPublished: false,
                 skipReason: "invalid_json",
                 cancellationToken);
+            stateCommitMs = stageStopwatch.ElapsedMilliseconds;
+            LogStageDurations(
+                consumed,
+                source: null,
+                outcome: "invalid_json",
+                totalStopwatch.ElapsedMilliseconds,
+                rulesMs,
+                readResolveMs,
+                convertMs,
+                publishMs,
+                stateCommitMs);
 
             return;
         }
 
+        stageStopwatch.Restart();
         var results = await converter.ConvertAsync(source, rules, cancellationToken);
+        convertMs = stageStopwatch.ElapsedMilliseconds;
         var publishableResults = results.Where(result => result.ShouldPublish).ToArray();
         logger.LogBasic(
             debugLoggingOptions,
@@ -203,6 +230,7 @@ public sealed class KafkaConversionWorker(
 
         if (publishableResults.Length == 0)
         {
+            stageStopwatch.Restart();
             await WriteStateAndCommitAsync(
                 consumed,
                 consumer,
@@ -211,11 +239,23 @@ public sealed class KafkaConversionWorker(
                 outputPublished: false,
                 skipReason: string.Join(';', results.Select(result => result.SkipReason).Where(reason => !string.IsNullOrWhiteSpace(reason))),
                 cancellationToken);
+            stateCommitMs = stageStopwatch.ElapsedMilliseconds;
+            LogStageDurations(
+                consumed,
+                source,
+                outcome: "skipped",
+                totalStopwatch.ElapsedMilliseconds,
+                rulesMs,
+                readResolveMs,
+                convertMs,
+                publishMs,
+                stateCommitMs);
 
             return;
         }
 
         DeliveryResult<string, string>? lastDeliveryResult = null;
+        stageStopwatch.Restart();
         foreach (var result in publishableResults)
         {
             lastDeliveryResult = await publisher.PublishAsync(result, cancellationToken);
@@ -226,7 +266,9 @@ public sealed class KafkaConversionWorker(
                 result.Method,
                 result.Value);
         }
+        publishMs = stageStopwatch.ElapsedMilliseconds;
 
+        stageStopwatch.Restart();
         await WriteStateAndCommitAsync(
             consumed,
             consumer,
@@ -236,12 +278,50 @@ public sealed class KafkaConversionWorker(
             skipReason: null,
             cancellationToken,
             outputTopic: lastDeliveryResult?.Topic);
+        stateCommitMs = stageStopwatch.ElapsedMilliseconds;
+        LogStageDurations(
+            consumed,
+            source,
+            outcome: "published",
+            totalStopwatch.ElapsedMilliseconds,
+            rulesMs,
+            readResolveMs,
+            convertMs,
+            publishMs,
+            stateCommitMs);
 
         logger.LogInformation(
             "Processed CMDBuild event {EventType} for entity {EntityId} into {PublishedCount} Zabbix request(s)",
             source.EventType,
             source.EntityId ?? "<unknown>",
             publishableResults.Length);
+    }
+
+    private void LogStageDurations(
+        ConsumeResult<string, string> consumed,
+        CmdbSourceEvent? source,
+        string outcome,
+        long totalMs,
+        long rulesMs,
+        long readResolveMs,
+        long convertMs,
+        long publishMs,
+        long stateCommitMs)
+    {
+        logger.LogBasic(
+            debugLoggingOptions,
+            "CMDBuild conversion stage durations for {Topic}[{Partition}]@{Offset}, entity {EntityId}, outcome {Outcome}: total {TotalMs} ms, rules {RulesMs} ms, readResolve {ReadResolveMs} ms, convert {ConvertMs} ms, publish {PublishMs} ms, stateCommit {StateCommitMs} ms",
+            consumed.Topic,
+            consumed.Partition.Value,
+            consumed.Offset.Value,
+            source?.EntityId ?? consumed.Message.Key ?? "<unknown>",
+            outcome,
+            totalMs,
+            rulesMs,
+            readResolveMs,
+            convertMs,
+            publishMs,
+            stateCommitMs);
     }
 
     private async Task WriteStateAndCommitAsync(

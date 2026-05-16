@@ -79,7 +79,7 @@ public sealed class CmdbZabbixHostBindingResolver(
         CancellationToken cancellationToken)
     {
         using var document = await GetJsonAsync(
-            $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards?limit={Math.Max(1, options.Value.BindingLookupLimit)}",
+            BuildBindingLookupPath(sourceClass, sourceCardId, hostProfile),
             cancellationToken);
 
         foreach (var card in ReadDataArray(document.RootElement))
@@ -109,6 +109,39 @@ public sealed class CmdbZabbixHostBindingResolver(
         }
 
         return null;
+    }
+
+    private string BuildBindingLookupPath(string sourceClass, string sourceCardId, string hostProfile)
+    {
+        var filter = JsonSerializer.Serialize(new
+        {
+            attribute = new
+            {
+                and = new[]
+                {
+                    BindingFilter("OwnerClass", sourceClass),
+                    BindingFilter("OwnerCardId", sourceCardId),
+                    BindingFilter("HostProfile", hostProfile)
+                }
+            }
+        });
+
+        return $"/classes/{Uri.EscapeDataString(options.Value.BindingClassName)}/cards"
+            + $"?limit={Math.Max(1, options.Value.BindingLookupLimit)}"
+            + $"&filter={Uri.EscapeDataString(filter)}";
+    }
+
+    private static object BindingFilter(string attribute, string value)
+    {
+        return new
+        {
+            simple = new
+            {
+                attribute,
+                @operator = "equal",
+                value = new[] { value }
+            }
+        };
     }
 
     private async Task<JsonDocument> GetJsonAsync(string path, CancellationToken cancellationToken)

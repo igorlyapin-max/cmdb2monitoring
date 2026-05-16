@@ -29,6 +29,7 @@ state/
 src/monitoring-ui-api/data/
 rules/.backup/
 rules-git-working-copy/
+reports/perf-baseline-*.json
 node_modules/
 
 # Local runtime secrets and Codex workspace metadata

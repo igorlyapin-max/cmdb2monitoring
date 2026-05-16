@@ -14,6 +14,10 @@ public sealed class ZabbixClient(
     ILogger<ZabbixClient> logger) : IZabbixClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly object cacheLock = new();
+    private readonly Dictionary<string, CacheEntry<bool>> hostGroupIdCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CacheEntry<string>> hostGroupNameCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CacheEntry<ZabbixTemplateInfo>> templateInfoCache = new(StringComparer.OrdinalIgnoreCase);
     private string? loginToken;
 
     public async Task<ZabbixApiCallResult> ExecuteAsync(
@@ -27,9 +31,31 @@ public sealed class ZabbixClient(
         IReadOnlyCollection<string> groupIds,
         CancellationToken cancellationToken)
     {
-        if (groupIds.Count == 0)
+        var requestedIds = groupIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (requestedIds.Length == 0)
         {
             return [];
+        }
+
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var missingIds = new List<string>();
+        foreach (var groupId in requestedIds)
+        {
+            if (TryReadCache(hostGroupIdCache, groupId, options.Value.HostGroupCacheTtlSeconds, out _))
+            {
+                result.Add(groupId);
+                continue;
+            }
+
+            missingIds.Add(groupId);
+        }
+
+        if (missingIds.Count == 0)
+        {
+            return result;
         }
 
         var request = JsonSerializer.Serialize(new
@@ -39,7 +65,7 @@ public sealed class ZabbixClient(
             @params = new
             {
                 output = new[] { "groupid", "name" },
-                groupids = groupIds
+                groupids = missingIds
             },
             id = 1
         }, JsonOptions);
@@ -51,12 +77,18 @@ public sealed class ZabbixClient(
         }
 
         using var document = JsonDocument.Parse(response.ResponseJson);
-        return document.RootElement
+        foreach (var id in document.RootElement
             .GetProperty("result")
             .EnumerateArray()
             .Select(item => ReadString(item, "groupid"))
             .Where(id => !string.IsNullOrWhiteSpace(id))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+            .Select(id => id!))
+        {
+            result.Add(id);
+            WriteCache(hostGroupIdCache, id, true, options.Value.HostGroupCacheTtlSeconds);
+        }
+
+        return result;
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetHostGroupIdsByNameAsync(
@@ -72,6 +104,24 @@ public sealed class ZabbixClient(
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var missingNames = new List<string>();
+        foreach (var name in names)
+        {
+            if (TryReadCache(hostGroupNameCache, name, options.Value.HostGroupCacheTtlSeconds, out var groupId))
+            {
+                result[name] = groupId;
+                continue;
+            }
+
+            missingNames.Add(name);
+        }
+
+        if (missingNames.Count == 0)
+        {
+            return result;
+        }
+
         var request = JsonSerializer.Serialize(new
         {
             jsonrpc = "2.0",
@@ -81,7 +131,7 @@ public sealed class ZabbixClient(
                 output = new[] { "groupid", "name" },
                 filter = new
                 {
-                    name = names
+                    name = missingNames
                 }
             },
             id = 3
@@ -94,7 +144,6 @@ public sealed class ZabbixClient(
         }
 
         using var document = JsonDocument.Parse(response.ResponseJson);
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in document.RootElement.GetProperty("result").EnumerateArray())
         {
             var name = ReadString(item, "name");
@@ -102,6 +151,8 @@ public sealed class ZabbixClient(
             if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(groupId))
             {
                 result[name] = groupId;
+                WriteCache(hostGroupNameCache, name, groupId, options.Value.HostGroupCacheTtlSeconds);
+                WriteCache(hostGroupIdCache, groupId, true, options.Value.HostGroupCacheTtlSeconds);
             }
         }
 
@@ -143,6 +194,8 @@ public sealed class ZabbixClient(
             var groupId = ReadScalar(groupIds[0]);
             if (!string.IsNullOrWhiteSpace(groupId))
             {
+                WriteCache(hostGroupNameCache, groupName, groupId, options.Value.HostGroupCacheTtlSeconds);
+                WriteCache(hostGroupIdCache, groupId, true, options.Value.HostGroupCacheTtlSeconds);
                 return groupId;
             }
         }
@@ -154,9 +207,31 @@ public sealed class ZabbixClient(
         IReadOnlyCollection<string> templateIds,
         CancellationToken cancellationToken)
     {
-        if (templateIds.Count == 0)
+        var requestedIds = templateIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (requestedIds.Length == 0)
         {
             return new Dictionary<string, ZabbixTemplateInfo>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var result = new Dictionary<string, ZabbixTemplateInfo>(StringComparer.OrdinalIgnoreCase);
+        var missingIds = new List<string>();
+        foreach (var templateId in requestedIds)
+        {
+            if (TryReadCache(templateInfoCache, templateId, options.Value.TemplateCacheTtlSeconds, out var templateInfo))
+            {
+                result[templateId] = templateInfo;
+                continue;
+            }
+
+            missingIds.Add(templateId);
+        }
+
+        if (missingIds.Count == 0)
+        {
+            return result;
         }
 
         var request = JsonSerializer.Serialize(new
@@ -166,7 +241,7 @@ public sealed class ZabbixClient(
             @params = new
             {
                 output = new[] { "templateid", "host", "name" },
-                templateids = templateIds,
+                templateids = missingIds,
                 selectTemplateGroups = new[] { "groupid", "name" },
                 selectItems = new[] { "itemid", "key_", "name", "inventory_link" },
                 selectDiscoveryRules = new[] { "itemid", "key_", "name" }
@@ -181,7 +256,6 @@ public sealed class ZabbixClient(
         }
 
         using var document = JsonDocument.Parse(response.ResponseJson);
-        var result = new Dictionary<string, ZabbixTemplateInfo>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in document.RootElement.GetProperty("result").EnumerateArray())
         {
             var templateId = ReadString(item, "templateid");
@@ -193,7 +267,7 @@ public sealed class ZabbixClient(
             var host = ReadString(item, "host") ?? string.Empty;
             var name = ReadString(item, "name") ?? host;
             var itemInfos = ReadItemInfos(item, "items");
-            result[templateId] = new ZabbixTemplateInfo(
+            var templateInfo = new ZabbixTemplateInfo(
                 templateId,
                 name,
                 host,
@@ -207,10 +281,61 @@ public sealed class ZabbixClient(
                     .Where(info => !string.IsNullOrWhiteSpace(info.InventoryLink)
                         && !string.Equals(info.InventoryLink, "0", StringComparison.OrdinalIgnoreCase))
                     .ToArray());
+            result[templateId] = templateInfo;
+            WriteCache(templateInfoCache, templateId, templateInfo, options.Value.TemplateCacheTtlSeconds);
         }
 
         return result;
     }
+
+    private bool TryReadCache<T>(
+        Dictionary<string, CacheEntry<T>> cache,
+        string key,
+        int ttlSeconds,
+        out T value)
+    {
+        value = default!;
+        if (ttlSeconds <= 0 || string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        lock (cacheLock)
+        {
+            if (cache.TryGetValue(key, out var cached))
+            {
+                if (cached.ExpiresAt > now)
+                {
+                    value = cached.Value;
+                    return true;
+                }
+
+                cache.Remove(key);
+            }
+        }
+
+        return false;
+    }
+
+    private void WriteCache<T>(
+        Dictionary<string, CacheEntry<T>> cache,
+        string key,
+        T value,
+        int ttlSeconds)
+    {
+        if (ttlSeconds <= 0 || string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        lock (cacheLock)
+        {
+            cache[key] = new CacheEntry<T>(value, DateTimeOffset.UtcNow.AddSeconds(ttlSeconds));
+        }
+    }
+
+    private sealed record CacheEntry<T>(T Value, DateTimeOffset ExpiresAt);
 
     private async Task<ZabbixApiCallResult> SendJsonRpcAsync(
         string requestJson,

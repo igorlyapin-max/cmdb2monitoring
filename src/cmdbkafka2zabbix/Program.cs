@@ -61,6 +61,7 @@ builder.Services.AddOptions<CmdbuildOptions>()
     .Validate(options => !options.HostBindingLookupEnabled || !string.IsNullOrWhiteSpace(options.MainHostIdAttributeName), "CMDBuild main host id attribute name is required when host binding lookup is enabled.")
     .Validate(options => !options.HostBindingLookupEnabled || !string.IsNullOrWhiteSpace(options.BindingClassName), "CMDBuild binding class name is required when host binding lookup is enabled.")
     .Validate(options => !options.HostBindingLookupEnabled || options.BindingLookupLimit > 0, "CMDBuild binding lookup limit must be greater than zero when host binding lookup is enabled.")
+    .Validate(options => options.LookupCacheTtlSeconds >= 0, "CMDBuild lookup cache TTL cannot be negative.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ProcessingStateOptions>()

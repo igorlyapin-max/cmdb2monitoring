@@ -5,6 +5,13 @@
 ### Added
 
 - CMDBuild Catalog now has an editor/admin bulk lookup-change action: select a class and writable lookup attribute, confirm, and the UI sends per-card PUT updates that rotate each card to the next active lookup value.
+- Added `scripts/perf-baseline.mjs`, a read-only CMDBuild/Zabbix latency baseline report for comparing stands and validating optimization work.
+
+### Changed
+
+- `zabbixrequests2api` now reuses one singleton Zabbix client, caches positive host group/template validation lookups with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.
+- `cmdbkafka2zabbix` now uses a precise CMDBuild filter for additional-profile `ZabbixHostBinding` lookup, caches CMDBuild lookup values with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.
+- `zabbixbindings2cmdbuild` now uses a precise CMDBuild filter for binding-card lookup and logs parse/apply/writeback stage durations in `DebugLogging:Basic`.
 
 ### Fixed
 

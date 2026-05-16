@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
@@ -125,10 +126,17 @@ public sealed class KafkaBindingWorker(
         IConsumer<string, string> consumer,
         CancellationToken cancellationToken)
     {
+        var totalStopwatch = Stopwatch.StartNew();
+        var stageStopwatch = Stopwatch.StartNew();
+        long parseMs = 0;
+        long applyMs = 0;
+        long stateCommitMs = 0;
+
         ZabbixBindingEvent? bindingEvent = null;
         try
         {
             bindingEvent = eventReader.Read(consumed.Message.Value);
+            parseMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogBasic(
                 debugLoggingOptions,
                 "Applying Zabbix binding event {EventType} for {SourceClass}/{SourceCardId}, profile {HostProfile}, hostid {ZabbixHostId}",
@@ -137,8 +145,20 @@ public sealed class KafkaBindingWorker(
                 bindingEvent.SourceCardId,
                 bindingEvent.HostProfile,
                 bindingEvent.ZabbixHostId);
+            stageStopwatch.Restart();
             await cmdbuildClient.ApplyAsync(bindingEvent, cancellationToken);
+            applyMs = stageStopwatch.ElapsedMilliseconds;
+            stageStopwatch.Restart();
             await WriteStateAndCommitAsync(consumed, consumer, bindingEvent, true, null, cancellationToken);
+            stateCommitMs = stageStopwatch.ElapsedMilliseconds;
+            LogStageDurations(
+                consumed,
+                bindingEvent,
+                outcome: "applied",
+                totalStopwatch.ElapsedMilliseconds,
+                parseMs,
+                applyMs,
+                stateCommitMs);
 
             logger.LogInformation(
                 "Applied Zabbix binding event {EventType} for {SourceClass}/{SourceCardId}, profile {HostProfile}",
@@ -149,14 +169,50 @@ public sealed class KafkaBindingWorker(
         }
         catch (JsonException ex)
         {
+            parseMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogWarning(
                 ex,
                 "Skipping invalid binding JSON from {Topic}[{Partition}]@{Offset}",
                 consumed.Topic,
                 consumed.Partition.Value,
                 consumed.Offset.Value);
+            stageStopwatch.Restart();
             await WriteStateAndCommitAsync(consumed, consumer, bindingEvent, false, "invalid_json", cancellationToken);
+            stateCommitMs = stageStopwatch.ElapsedMilliseconds;
+            LogStageDurations(
+                consumed,
+                bindingEvent,
+                outcome: "invalid_json",
+                totalStopwatch.ElapsedMilliseconds,
+                parseMs,
+                applyMs,
+                stateCommitMs);
         }
+    }
+
+    private void LogStageDurations(
+        ConsumeResult<string, string> consumed,
+        ZabbixBindingEvent? bindingEvent,
+        string outcome,
+        long totalMs,
+        long parseMs,
+        long applyMs,
+        long stateCommitMs)
+    {
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Zabbix binding stage durations for {Topic}[{Partition}]@{Offset}, source {SourceClass}/{SourceCardId}, profile {HostProfile}, outcome {Outcome}: total {TotalMs} ms, parse {ParseMs} ms, apply {ApplyMs} ms, stateCommit {StateCommitMs} ms",
+            consumed.Topic,
+            consumed.Partition.Value,
+            consumed.Offset.Value,
+            bindingEvent?.SourceClass ?? "<unknown>",
+            bindingEvent?.SourceCardId ?? consumed.Message.Key ?? "<unknown>",
+            bindingEvent?.HostProfile ?? "<unknown>",
+            outcome,
+            totalMs,
+            parseMs,
+            applyMs,
+            stateCommitMs);
     }
 
     private async Task WriteStateAndCommitAsync(

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
@@ -143,12 +144,19 @@ public sealed class KafkaZabbixRequestWorker(
         IConsumer<string, string> consumer,
         CancellationToken cancellationToken)
     {
+        var totalStopwatch = Stopwatch.StartNew();
+        var stageStopwatch = Stopwatch.StartNew();
+        long parseMs = 0;
+        long processMs = 0;
+        long publishCommitMs = 0;
+
         ZabbixRequestDocument? request = null;
         ZabbixProcessingResult result;
 
         try
         {
             request = requestReader.Read(consumed.Message.Key, consumed.Message.Value);
+            parseMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogBasic(
                 debugLoggingOptions,
                 "Parsed Zabbix request {Method} for entity {EntityId}, profile {HostProfileName}, host {Host}",
@@ -159,6 +167,7 @@ public sealed class KafkaZabbixRequestWorker(
         }
         catch (JsonException ex)
         {
+            parseMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogWarning(
                 ex,
                 "Skipping invalid JSON message from {Topic}[{Partition}]@{Offset}",
@@ -174,11 +183,22 @@ public sealed class KafkaZabbixRequestWorker(
                 missingTemplates: [],
                 missingTemplateGroups: []);
 
+            stageStopwatch.Restart();
             await PublishStateAndCommitAsync(consumed, consumer, result, cancellationToken);
+            publishCommitMs = stageStopwatch.ElapsedMilliseconds;
+            LogStageDurations(
+                consumed,
+                result,
+                totalStopwatch.ElapsedMilliseconds,
+                parseMs,
+                processMs,
+                publishCommitMs);
             return;
         }
 
+        stageStopwatch.Restart();
         result = await ProcessRequestWithRetryAsync(request, cancellationToken);
+        processMs = stageStopwatch.ElapsedMilliseconds;
         logger.LogBasic(
             debugLoggingOptions,
             "Zabbix processing result for {Method}, entity {EntityId}: success {Success}, sent {ZabbixRequestSent}, error {ErrorCode}",
@@ -193,7 +213,16 @@ public sealed class KafkaZabbixRequestWorker(
             result.Method,
             result.EntityId ?? "<unknown>",
             result.ZabbixResponseJson ?? "<empty>");
+        stageStopwatch.Restart();
         await PublishStateAndCommitAsync(consumed, consumer, result, cancellationToken);
+        publishCommitMs = stageStopwatch.ElapsedMilliseconds;
+        LogStageDurations(
+            consumed,
+            result,
+            totalStopwatch.ElapsedMilliseconds,
+            parseMs,
+            processMs,
+            publishCommitMs);
 
         logger.LogInformation(
             "Processed Zabbix request {Method} for entity {EntityId}, profile {HostProfileName}, success {Success}, error {ErrorCode}",
@@ -202,6 +231,28 @@ public sealed class KafkaZabbixRequestWorker(
             result.HostProfileName ?? "<default>",
             result.Success,
             result.ErrorCode ?? "<none>");
+    }
+
+    private void LogStageDurations(
+        ConsumeResult<string, string> consumed,
+        ZabbixProcessingResult result,
+        long totalMs,
+        long parseMs,
+        long processMs,
+        long publishCommitMs)
+    {
+        logger.LogBasic(
+            debugLoggingOptions,
+            "Zabbix request stage durations for {Topic}[{Partition}]@{Offset}, entity {EntityId}, method {Method}: total {TotalMs} ms, parse {ParseMs} ms, process {ProcessMs} ms, publishCommit {PublishCommitMs} ms",
+            consumed.Topic,
+            consumed.Partition.Value,
+            consumed.Offset.Value,
+            result.EntityId ?? consumed.Message.Key ?? "<unknown>",
+            result.Method,
+            totalMs,
+            parseMs,
+            processMs,
+            publishCommitMs);
     }
 
     private async Task<ZabbixProcessingResult> ProcessRequestWithRetryAsync(

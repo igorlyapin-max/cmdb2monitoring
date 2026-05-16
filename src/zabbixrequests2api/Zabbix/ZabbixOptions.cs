@@ -26,6 +26,10 @@ public sealed class ZabbixOptions
 
     public bool AllowDynamicHostGroupCreate { get; init; } = true;
 
+    public int HostGroupCacheTtlSeconds { get; init; } = 300;
+
+    public int TemplateCacheTtlSeconds { get; init; } = 300;
+
     public bool HasValidAuthMode()
     {
         return string.Equals(AuthMode, "None", StringComparison.OrdinalIgnoreCase)

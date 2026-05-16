@@ -307,6 +307,7 @@ static void ValidateCmdbuildResolver(JsonObject config, string context, List<str
     RequireNonEmpty(config, "Cmdbuild:MainHostIdAttributeName", context, errors);
     RequireNonEmpty(config, "Cmdbuild:BindingClassName", context, errors);
     RequirePositiveInt(config, "Cmdbuild:BindingLookupLimit", context, errors);
+    RequireNonNegativeInt(config, "Cmdbuild:LookupCacheTtlSeconds", context, errors);
 }
 
 static void ValidateZabbix(JsonObject config, string context, List<string> errors, List<string> warnings)
@@ -320,6 +321,8 @@ static void ValidateZabbix(JsonObject config, string context, List<string> error
     }
 
     RequirePositiveInt(config, "Zabbix:RequestTimeoutMs", context, errors);
+    RequireNonNegativeInt(config, "Zabbix:HostGroupCacheTtlSeconds", context, errors);
+    RequireNonNegativeInt(config, "Zabbix:TemplateCacheTtlSeconds", context, errors);
     foreach (var switchPath in new[]
     {
         "Zabbix:ValidateHostGroups",

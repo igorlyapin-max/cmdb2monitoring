@@ -15,6 +15,8 @@ public sealed class CmdbSourceFieldResolver(
     ILogger<CmdbSourceFieldResolver> logger)
 {
     private readonly Dictionary<string, IReadOnlyDictionary<string, CmdbAttributeInfo>> attributeCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object lookupValueCacheLock = new();
+    private readonly Dictionary<string, TimedCacheEntry<IReadOnlyList<CmdbLookupValue>>> lookupValueCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly AsyncLocal<RuntimeResolveCache?> runtimeCache = new();
     private bool missingConfigurationWarningLogged;
 
@@ -643,6 +645,16 @@ public sealed class CmdbSourceFieldResolver(
             return cached;
         }
 
+        if (TryReadLookupValueCache(lookupType, out var serviceCached))
+        {
+            if (cache is not null)
+            {
+                cache.LookupCache[lookupType] = serviceCached;
+            }
+
+            return serviceCached;
+        }
+
         using var document = await GetJsonAsync($"/lookup_types/{Uri.EscapeDataString(lookupType)}/values", cancellationToken);
         var values = ReadDataArray(document.RootElement)
             .Select(item => new CmdbLookupValue(
@@ -658,7 +670,55 @@ public sealed class CmdbSourceFieldResolver(
         {
             cache.LookupCache[lookupType] = values;
         }
+        WriteLookupValueCache(lookupType, values);
         return values;
+    }
+
+    private bool TryReadLookupValueCache(
+        string lookupType,
+        out IReadOnlyList<CmdbLookupValue> values)
+    {
+        values = [];
+        var ttlSeconds = options.Value.LookupCacheTtlSeconds;
+        if (ttlSeconds <= 0 || string.IsNullOrWhiteSpace(lookupType))
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        lock (lookupValueCacheLock)
+        {
+            if (lookupValueCache.TryGetValue(lookupType, out var cached))
+            {
+                if (cached.ExpiresAt > now)
+                {
+                    values = cached.Value;
+                    return true;
+                }
+
+                lookupValueCache.Remove(lookupType);
+            }
+        }
+
+        return false;
+    }
+
+    private void WriteLookupValueCache(
+        string lookupType,
+        IReadOnlyList<CmdbLookupValue> values)
+    {
+        var ttlSeconds = options.Value.LookupCacheTtlSeconds;
+        if (ttlSeconds <= 0 || string.IsNullOrWhiteSpace(lookupType))
+        {
+            return;
+        }
+
+        lock (lookupValueCacheLock)
+        {
+            lookupValueCache[lookupType] = new TimedCacheEntry<IReadOnlyList<CmdbLookupValue>>(
+                values,
+                DateTimeOffset.UtcNow.AddSeconds(ttlSeconds));
+        }
     }
 
     private async Task<IReadOnlyList<CmdbRelationEndpoint>> GetRelatedCardsAsync(
@@ -667,16 +727,29 @@ public sealed class CmdbSourceFieldResolver(
         string targetClass,
         CancellationToken cancellationToken)
     {
+        var cacheKey = $"{sourceClass}:{sourceCardId}:{targetClass}";
+        var cache = runtimeCache.Value;
+        if (cache?.RelationCache.TryGetValue(cacheKey, out var cached) == true)
+        {
+            return cached;
+        }
+
         using var document = await GetJsonAsync(
             $"/classes/{Uri.EscapeDataString(sourceClass)}/cards/{Uri.EscapeDataString(sourceCardId)}/relations",
             cancellationToken);
-        return ReadDataArray(document.RootElement)
+        var relatedCards = ReadDataArray(document.RootElement)
             .Select(item => ReadRelatedEndpoint(item, sourceClass, sourceCardId, targetClass))
             .Where(item => item is not null)
             .Select(item => item!)
             .GroupBy(item => $"{item.ClassName}:{item.CardId}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();
+        if (cache is not null)
+        {
+            cache.RelationCache[cacheKey] = relatedCards;
+        }
+
+        return relatedCards;
     }
 
     private static CmdbRelationEndpoint? ReadRelatedEndpoint(
@@ -1056,8 +1129,12 @@ public sealed class CmdbSourceFieldResolver(
     {
         public Dictionary<string, IReadOnlyDictionary<string, string>> CardCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        public Dictionary<string, IReadOnlyList<CmdbRelationEndpoint>> RelationCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public Dictionary<string, IReadOnlyList<CmdbLookupValue>> LookupCache { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
+
+    private sealed record TimedCacheEntry<T>(T Value, DateTimeOffset ExpiresAt);
 
     private sealed record CmdbLookupValue(
         string Id,

@@ -37,7 +37,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("zabbix processing result keeps update hostid from request", ZabbixProcessingResultKeepsUpdateHostId),
     ("binding publisher contract renders delete payload", BindingPublisherContractRendersDeletePayload),
     ("binding publisher contract renders configured headers", BindingPublisherContractRendersConfiguredHeaders),
-    ("binding publisher contract only publishes successful host writes", BindingPublisherContractOnlyPublishesSuccessfulHostWrites)
+    ("binding publisher contract only publishes successful host writes", BindingPublisherContractOnlyPublishesSuccessfulHostWrites),
+    ("zabbix client caches host group ids", ZabbixClientCachesHostGroupIds),
+    ("zabbix client caches host group names", ZabbixClientCachesHostGroupNames),
+    ("zabbix client caches template infos", ZabbixClientCachesTemplateInfos)
 };
 
 var failures = new List<string>();
@@ -257,7 +260,7 @@ static async Task BindingClientSkipsMainHostIdWhenSourceCardIsUnavailable()
 static async Task BindingClientCreatesAdditionalProfileCard()
 {
     var handler = new FakeHttpMessageHandler();
-    handler.ExpectJson(HttpMethod.Get, "/classes/ZabbixHostBinding/cards?limit=1000", _ => { }, """{"data":[]}""");
+    handler.ExpectJson(HttpMethod.Get, BindingLookupPath(), _ => { }, """{"data":[]}""");
     handler.ExpectJson(
         HttpMethod.Post,
         "/classes/ZabbixHostBinding/cards",
@@ -286,7 +289,7 @@ static async Task BindingClientUpdatesExistingAdditionalProfileCard()
     var handler = new FakeHttpMessageHandler();
     handler.ExpectJson(
         HttpMethod.Get,
-        "/classes/ZabbixHostBinding/cards?limit=1000",
+        BindingLookupPath(),
         _ => { },
         """
         {
@@ -319,7 +322,7 @@ static async Task BindingClientSkipsUnchangedAdditionalProfileCard()
     var handler = new FakeHttpMessageHandler();
     handler.ExpectJson(
         HttpMethod.Get,
-        "/classes/ZabbixHostBinding/cards?limit=1000",
+        BindingLookupPath(),
         _ => { },
         """
         {
@@ -368,7 +371,7 @@ static async Task HostBindingResolverReadsAdditionalBinding()
     var handler = new FakeHttpMessageHandler();
     handler.ExpectJson(
         HttpMethod.Get,
-        "/classes/ZabbixHostBinding/cards?limit=1000",
+        BindingLookupPath(),
         _ => { },
         """
         {
@@ -391,7 +394,7 @@ static async Task HostBindingResolverIgnoresDeletedAdditionalBinding()
     var handler = new FakeHttpMessageHandler();
     handler.ExpectJson(
         HttpMethod.Get,
-        "/classes/ZabbixHostBinding/cards?limit=1000",
+        BindingLookupPath(),
         _ => { },
         """
         {
@@ -544,6 +547,100 @@ static Task BindingPublisherContractOnlyPublishesSuccessfulHostWrites()
     return Task.CompletedTask;
 }
 
+static async Task ZabbixClientCachesHostGroupIds()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Post,
+        "/api_jsonrpc.php",
+        request => AssertJsonBody(request, body =>
+        {
+            AssertEqual("hostgroup.get", ReadString(body, "method"), "method");
+            var groupIds = body["params"]?["groupids"]?.AsArray()
+                ?? throw new InvalidOperationException("Expected params.groupids.");
+            AssertEqual(1, groupIds.Count, "groupids count");
+            AssertEqual("2", groupIds[0]?.GetValue<string>(), "groupid");
+        }),
+        """{"jsonrpc":"2.0","result":[{"groupid":"2","name":"Linux servers"}],"id":1}""");
+
+    var client = CreateZabbixClient(handler);
+    var first = await client.GetExistingHostGroupIdsAsync(["2"], CancellationToken.None);
+    var second = await client.GetExistingHostGroupIdsAsync(["2"], CancellationToken.None);
+
+    AssertTrue(first.Contains("2"), "first host group lookup should return groupid 2");
+    AssertTrue(second.Contains("2"), "cached host group lookup should return groupid 2");
+    handler.AssertAllRequestsConsumed();
+    AssertEqual(1, handler.Requests.Count, "Zabbix hostgroup.get call count");
+}
+
+static async Task ZabbixClientCachesHostGroupNames()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Post,
+        "/api_jsonrpc.php",
+        request => AssertJsonBody(request, body =>
+        {
+            AssertEqual("hostgroup.get", ReadString(body, "method"), "method");
+            var names = body["params"]?["filter"]?["name"]?.AsArray()
+                ?? throw new InvalidOperationException("Expected params.filter.name.");
+            AssertEqual(1, names.Count, "host group name count");
+            AssertEqual("Linux servers", names[0]?.GetValue<string>(), "host group name");
+        }),
+        """{"jsonrpc":"2.0","result":[{"groupid":"2","name":"Linux servers"}],"id":3}""");
+
+    var client = CreateZabbixClient(handler);
+    var first = await client.GetHostGroupIdsByNameAsync(["Linux servers"], CancellationToken.None);
+    var second = await client.GetHostGroupIdsByNameAsync(["Linux servers"], CancellationToken.None);
+
+    AssertEqual("2", first["Linux servers"], "first host group name lookup");
+    AssertEqual("2", second["Linux servers"], "cached host group name lookup");
+    handler.AssertAllRequestsConsumed();
+    AssertEqual(1, handler.Requests.Count, "Zabbix hostgroup.get by name call count");
+}
+
+static async Task ZabbixClientCachesTemplateInfos()
+{
+    var handler = new FakeHttpMessageHandler();
+    handler.ExpectJson(
+        HttpMethod.Post,
+        "/api_jsonrpc.php",
+        request => AssertJsonBody(request, body =>
+        {
+            AssertEqual("template.get", ReadString(body, "method"), "method");
+            var templateIds = body["params"]?["templateids"]?.AsArray()
+                ?? throw new InvalidOperationException("Expected params.templateids.");
+            AssertEqual(1, templateIds.Count, "templateids count");
+            AssertEqual("10564", templateIds[0]?.GetValue<string>(), "templateid");
+        }),
+        """
+        {
+          "jsonrpc": "2.0",
+          "result": [
+            {
+              "templateid": "10564",
+              "host": "Template ICMP Ping",
+              "name": "ICMP Ping",
+              "templategroups": [{ "groupid": "1", "name": "Templates" }],
+              "items": [{ "itemid": "10", "key_": "icmpping", "name": "Ping", "inventory_link": "0" }],
+              "discoveryRules": [{ "itemid": "11", "key_": "net.if.discovery", "name": "Interfaces" }]
+            }
+          ],
+          "id": 2
+        }
+        """);
+
+    var client = CreateZabbixClient(handler);
+    var first = await client.GetTemplateInfosAsync(["10564"], CancellationToken.None);
+    var second = await client.GetTemplateInfosAsync(["10564"], CancellationToken.None);
+
+    AssertEqual("ICMP Ping", first["10564"].Name, "first template name");
+    AssertEqual("ICMP Ping", second["10564"].Name, "cached template name");
+    AssertTrue(second["10564"].ItemKeys.Contains("icmpping"), "cached template should keep item keys");
+    handler.AssertAllRequestsConsumed();
+    AssertEqual(1, handler.Requests.Count, "Zabbix template.get call count");
+}
+
 static CmdbuildBindingClient CreateBindingClient(FakeHttpMessageHandler handler)
 {
     var constructor = typeof(CmdbuildBindingClient).GetConstructors().Single();
@@ -561,6 +658,58 @@ static CmdbuildBindingClient CreateBindingClient(FakeHttpMessageHandler handler)
         CreateDefaultOptions(constructor.GetParameters()[2].ParameterType),
         NullLogger<CmdbuildBindingClient>.Instance
     ])!;
+}
+
+static ZabbixClient CreateZabbixClient(FakeHttpMessageHandler handler)
+{
+    var constructor = typeof(ZabbixClient).GetConstructors().Single();
+    return (ZabbixClient)constructor.Invoke([
+        new HttpClient(handler),
+        Options.Create(new ZabbixOptions
+        {
+            ApiEndpoint = "http://zabbix.example/api_jsonrpc.php",
+            AuthMode = "None",
+            HostGroupCacheTtlSeconds = 300,
+            TemplateCacheTtlSeconds = 300
+        }),
+        CreateDefaultOptions(constructor.GetParameters()[2].ParameterType),
+        NullLogger<ZabbixClient>.Instance
+    ])!;
+}
+
+static string BindingLookupPath(
+    string ownerClass = "CIClass",
+    string ownerCardId = "101",
+    string hostProfile = "management",
+    int limit = 1000)
+{
+    var filter = JsonSerializer.Serialize(new
+    {
+        attribute = new
+        {
+            and = new[]
+            {
+                BindingFilter("OwnerClass", ownerClass),
+                BindingFilter("OwnerCardId", ownerCardId),
+                BindingFilter("HostProfile", hostProfile)
+            }
+        }
+    }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+    return $"/classes/ZabbixHostBinding/cards?limit={limit}&filter={Uri.EscapeDataString(filter)}";
+}
+
+static object BindingFilter(string attribute, string value)
+{
+    return new
+    {
+        simple = new
+        {
+            attribute,
+            @operator = "equal",
+            value = new[] { value }
+        }
+    };
 }
 
 static object CreateDefaultOptions(Type optionsInterfaceType)

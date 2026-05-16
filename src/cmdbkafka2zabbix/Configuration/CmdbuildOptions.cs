@@ -24,6 +24,8 @@ public sealed class CmdbuildOptions
 
     public int BindingLookupLimit { get; init; } = 1000;
 
+    public int LookupCacheTtlSeconds { get; init; } = 300;
+
     public bool HasCredentials =>
         !string.IsNullOrWhiteSpace(Username)
         && !string.IsNullOrWhiteSpace(Password);

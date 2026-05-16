@@ -10,7 +10,8 @@ using Microsoft.Extensions.Options;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
-    ("update rereads lookup values", UpdateRereadsLookupValues),
+    ("update rereads lookup values when ttl disabled", UpdateRereadsLookupValuesWhenTtlDisabled),
+    ("lookup values cache honors ttl", LookupValuesCacheHonorsTtl),
     ("update rereads reference leaf cards", UpdateRereadsReferenceLeafCards),
     ("update skips foreign class-prefixed cmdb paths", UpdateSkipsForeignClassPrefixedCmdbPaths),
     ("update resolves unrooted reference leaf cards", UpdateResolvesUnrootedReferenceLeafCards),
@@ -48,10 +49,10 @@ if (failures.Count > 0)
 Console.WriteLine("CMDB resolver tests passed.");
 return 0;
 
-static async Task UpdateRereadsLookupValues()
+static async Task UpdateRereadsLookupValuesWhenTtlDisabled()
 {
     var cmdb = new FakeCmdbuild();
-    var resolver = CreateResolver(cmdb);
+    var resolver = CreateResolver(cmdb, lookupCacheTtlSeconds: 0);
     var rules = RulesWithFields(new Dictionary<string, SourceFieldRule>(StringComparer.OrdinalIgnoreCase)
     {
         ["lifecycle"] = new()
@@ -84,6 +85,48 @@ static async Task UpdateRereadsLookupValues()
         ["lifecycle"] = "2"
     }), rules, CancellationToken.None);
     AssertField(second, "lifecycle", "business-hours");
+}
+
+static async Task LookupValuesCacheHonorsTtl()
+{
+    var cmdb = new FakeCmdbuild();
+    var resolver = CreateResolver(cmdb, lookupCacheTtlSeconds: 300);
+    var rules = RulesWithFields(new Dictionary<string, SourceFieldRule>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["lifecycle"] = new()
+        {
+            Source = "lifecycle",
+            Type = "lookup",
+            LookupType = "LifecycleState",
+            Resolve = new SourceFieldResolveRule
+            {
+                Mode = "lookup",
+                ValueMode = "code"
+            }
+        }
+    });
+
+    cmdb.Revision = 1;
+    var first = await resolver.ResolveAsync(UpdateEvent(new()
+    {
+        ["id"] = "server-1",
+        ["className"] = "Server",
+        ["lifecycle"] = "2"
+    }), rules, CancellationToken.None);
+    AssertField(first, "lifecycle", "standby-old");
+
+    cmdb.Revision = 2;
+    var second = await resolver.ResolveAsync(UpdateEvent(new()
+    {
+        ["id"] = "server-1",
+        ["className"] = "Server",
+        ["lifecycle"] = "2"
+    }), rules, CancellationToken.None);
+    AssertField(second, "lifecycle", "standby-old");
+    AssertEqual(
+        1,
+        cmdb.RequestPaths.Count(path => path == "/lookup_types/LifecycleState/values"),
+        "lookup values request count");
 }
 
 static async Task UpdateRereadsReferenceLeafCards()
@@ -496,7 +539,7 @@ static async Task UpdateMapsRereadDomainLeafIntoDynamicHostGroups()
     AssertDynamicGroup(second, "Payments new");
 }
 
-static CmdbSourceFieldResolver CreateResolver(FakeCmdbuild cmdb)
+static CmdbSourceFieldResolver CreateResolver(FakeCmdbuild cmdb, int lookupCacheTtlSeconds = 0)
 {
     var httpClient = new HttpClient(cmdb)
     {
@@ -511,7 +554,8 @@ static CmdbSourceFieldResolver CreateResolver(FakeCmdbuild cmdb)
             Password = "admin",
             RequestTimeoutMs = 5000,
             MaxPathDepth = 2,
-            Enabled = true
+            Enabled = true,
+            LookupCacheTtlSeconds = lookupCacheTtlSeconds
         }),
         Options.Create(new ExtendedDebugLoggingOptions()),
         NullLogger<CmdbSourceFieldResolver>.Instance);
@@ -590,6 +634,14 @@ static void AssertNoRequests(FakeCmdbuild cmdb)
     if (cmdb.RequestPaths.Count != 0)
     {
         throw new InvalidOperationException($"Expected no CMDBuild requests, got [{string.Join(", ", cmdb.RequestPaths)}].");
+    }
+}
+
+static void AssertEqual<T>(T expected, T actual, string label)
+{
+    if (!EqualityComparer<T>.Default.Equals(expected, actual))
+    {
+        throw new InvalidOperationException($"{label}: expected '{expected}', got '{actual}'.");
     }
 }
 

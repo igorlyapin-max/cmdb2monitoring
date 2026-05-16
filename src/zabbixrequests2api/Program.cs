@@ -55,6 +55,8 @@ builder.Services.AddOptions<ZabbixOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.ApiEndpoint), "Zabbix API endpoint is required.")
     .Validate(options => options.HasValidAuthMode(), "Zabbix auth mode is invalid.")
     .Validate(options => options.RequestTimeoutMs > 0, "Zabbix request timeout must be greater than zero.")
+    .Validate(options => options.HostGroupCacheTtlSeconds >= 0, "Zabbix host group cache TTL cannot be negative.")
+    .Validate(options => options.TemplateCacheTtlSeconds >= 0, "Zabbix template cache TTL cannot be negative.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ProcessingOptions>()
@@ -101,11 +103,12 @@ builder.Services.AddSingleton<IProducer<string, string>>(services =>
 
 builder.Logging.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerProvider, KafkaElkLoggerProvider>());
 
-builder.Services.AddHttpClient<IZabbixClient, ZabbixClient>((services, client) =>
+builder.Services.AddHttpClient<ZabbixClient>((services, client) =>
 {
     var options = services.GetRequiredService<IOptions<ZabbixOptions>>().Value;
     client.Timeout = TimeSpan.FromMilliseconds(options.RequestTimeoutMs);
 });
+builder.Services.AddSingleton<IZabbixClient>(services => services.GetRequiredService<ZabbixClient>());
 builder.Services.AddSingleton<ZabbixRequestReader>();
 builder.Services.AddSingleton<ZabbixRequestValidator>();
 builder.Services.AddSingleton<ZabbixDynamicHostGroupResolver>();
