@@ -86,6 +86,8 @@ const state = {
   auditModelPlan: null,
   auditCmdbuildCatalog: null,
   auditQuickReport: null,
+  queueMonitor: null,
+  queueMonitorLoading: false,
   sessionIndicators: {
     webhooks: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
     zabbixCatalog: { status: 'idle', textKey: 'sessionTraffic.notLoaded' },
@@ -99,6 +101,7 @@ const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const languageCookieName = 'c2m_lang';
 const defaultEventMaxMessages = 5;
+const defaultQueueMonitorRefreshMs = 5000;
 const defaultConversionRulesFilePath = 'rules/cmdbuild-to-zabbix-host-create.json';
 const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
@@ -119,6 +122,7 @@ const sessionIndicatorDefinitions = [
 ];
 let helpShowTimer = null;
 let pendingHelpTarget = null;
+let queueMonitorTimer = null;
 const mappingEditorFormControlSelectors = [
   '#mappingModifyRule',
   '#mappingEditClass',
@@ -293,6 +297,23 @@ const translations = {
     'dashboard.rulesSourcePath': 'Источник: {source}, {path}',
     'dashboard.rulesVersionMismatch': 'Версии отличаются. Проверьте источник rules в настройках git и путь, который использует микросервис.',
     'dashboard.serviceHelp': 'Проверка сервиса "{name}". Показывает HTTP-статус, задержку, проверяемый URL и версии rules, если сервис их отдает.',
+    'dashboard.queueTitle': 'Очереди обработки',
+    'dashboard.queueDisabled': 'Мониторинг очереди выключен',
+    'dashboard.queueEmpty': 'Очереди не настроены',
+    'dashboard.queueLag': 'в очереди',
+    'dashboard.queueStatusOk': 'норма',
+    'dashboard.queueStatusWarn': 'рост',
+    'dashboard.queueStatusCritical': 'критично',
+    'dashboard.queueStatusUnknown': 'нет данных',
+    'dashboard.queueTopic': 'topic',
+    'dashboard.queueOffsets': 'offset {processed} / {high}',
+    'dashboard.queueUpdated': 'обновлено {time}',
+    'dashboard.queueLastProcessed': 'последняя обработка {time}',
+    'dashboard.queueLastOperation': 'последняя операция {operation}',
+    'dashboard.queueTrendDown': 'снижается на {rate}/с, ETA {eta}',
+    'dashboard.queueTrendUp': 'рост +{delta}',
+    'dashboard.queueTrendFlat': 'без изменения',
+    'dashboard.queueHelp': 'Онлайн-размер очереди: Kafka high watermark минус последний offset, зафиксированный обрабатывающим сервисом в state-файле.',
     'account.changePassword': 'Сменить пароль',
     'account.currentPassword': 'Текущий пароль',
     'account.newPassword': 'Новый пароль',
@@ -1025,6 +1046,23 @@ const translations = {
     'dashboard.rulesSourcePath': 'Source: {source}, {path}',
     'dashboard.rulesVersionMismatch': 'Versions differ. Check the rules source in Git settings and the path used by the microservice.',
     'dashboard.serviceHelp': 'Service "{name}" probe. Shows HTTP status, latency, checked URL, and rules versions when the service exposes them.',
+    'dashboard.queueTitle': 'Processing Queues',
+    'dashboard.queueDisabled': 'Queue monitoring is disabled',
+    'dashboard.queueEmpty': 'No queues configured',
+    'dashboard.queueLag': 'queued',
+    'dashboard.queueStatusOk': 'normal',
+    'dashboard.queueStatusWarn': 'growing',
+    'dashboard.queueStatusCritical': 'critical',
+    'dashboard.queueStatusUnknown': 'no data',
+    'dashboard.queueTopic': 'topic',
+    'dashboard.queueOffsets': 'offset {processed} / {high}',
+    'dashboard.queueUpdated': 'updated {time}',
+    'dashboard.queueLastProcessed': 'last processed {time}',
+    'dashboard.queueLastOperation': 'last operation {operation}',
+    'dashboard.queueTrendDown': 'draining at {rate}/s, ETA {eta}',
+    'dashboard.queueTrendUp': 'growth +{delta}',
+    'dashboard.queueTrendFlat': 'no change',
+    'dashboard.queueHelp': 'Live queue size: Kafka high watermark minus the last offset recorded by the processing service in its state file.',
     'account.changePassword': 'Change password',
     'account.currentPassword': 'Current password',
     'account.newPassword': 'New password',
@@ -1954,6 +1992,7 @@ function showView(viewId) {
   $$('.nav-item[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === targetView));
   $$('.view').forEach(view => view.classList.toggle('active', view.id === targetView));
   updateViewDescription(targetView);
+  syncQueueMonitorPolling();
 }
 
 function canLeaveCurrentView(nextView) {
@@ -2164,6 +2203,9 @@ function updateLocalizedDynamicUi() {
   }
   if (state.webhooksLoaded) {
     renderWebhooks();
+  }
+  if (state.queueMonitor) {
+    renderQueueMonitor(state.queueMonitor);
   }
   renderAuditModel();
 }
@@ -2542,10 +2584,14 @@ function renderAuth(status) {
   if (status.authenticated && status.user?.passwordChangeRequired) {
     openPasswordDialog();
   }
+  syncQueueMonitorPolling();
 }
 
 async function loadDashboard() {
-  const health = await api('/api/services/health');
+  const [health] = await Promise.all([
+    api('/api/services/health'),
+    loadQueueMonitor({ allowStaleOnError: true })
+  ]);
   const grid = $('#healthGrid');
   clear(grid);
   for (const item of health.items) {
@@ -2568,6 +2614,230 @@ async function loadDashboard() {
     grid.append(node);
   }
   return health;
+}
+
+async function loadQueueMonitor(options = {}) {
+  if (state.queueMonitorLoading) {
+    return state.queueMonitor;
+  }
+
+  state.queueMonitorLoading = true;
+  try {
+    const result = await api('/api/queue/status');
+    state.queueMonitor = result;
+    renderQueueMonitor(result);
+    syncQueueMonitorPolling(result.refreshIntervalMs);
+    return result;
+  } catch (error) {
+    if (!options.allowStaleOnError || !state.queueMonitor) {
+      renderQueueMonitorError(error);
+    }
+    return state.queueMonitor;
+  } finally {
+    state.queueMonitorLoading = false;
+  }
+}
+
+function renderQueueMonitor(status) {
+  const container = $('#queueMonitor');
+  if (!container) {
+    return;
+  }
+
+  if (!status?.enabled) {
+    container.className = 'queue-monitor queue-monitor-muted';
+    container.replaceChildren(
+      el('div', 'queue-monitor-title', t('dashboard.queueTitle')),
+      el('div', 'queue-monitor-empty', t('dashboard.queueDisabled'))
+    );
+    return;
+  }
+
+  const items = status.items ?? [];
+  if (items.length === 0) {
+    container.className = 'queue-monitor queue-monitor-muted';
+    container.replaceChildren(
+      el('div', 'queue-monitor-title', t('dashboard.queueTitle')),
+      el('div', 'queue-monitor-empty', t('dashboard.queueEmpty'))
+    );
+    return;
+  }
+
+  container.className = 'queue-monitor';
+  const title = el('div', 'queue-monitor-title', t('dashboard.queueTitle'));
+  const updated = el('div', 'queue-monitor-updated', tf('dashboard.queueUpdated', {
+    time: formatShortDateTime(status.collectedAt)
+  }));
+  const header = el('div', 'queue-monitor-header', '');
+  header.append(title, updated);
+
+  const cards = el('div', 'queue-monitor-grid', '');
+  cards.append(...items.map(renderQueueMonitorItem));
+  container.replaceChildren(header, cards);
+}
+
+function renderQueueMonitorItem(item) {
+  const status = item.status ?? 'unknown';
+  const lag = Number.isFinite(item.lag) ? item.lag : null;
+  const critical = Math.max(1, Number(item.criticalThreshold) || 1);
+  const fillPercent = lag === null ? 0 : Math.max(2, Math.min(100, (lag / critical) * 100));
+  const card = el('div', `queue-card queue-card-${status}`, '');
+  const fill = el('div', 'queue-thermometer-fill', '');
+  fill.style.width = `${fillPercent}%`;
+
+  const gauge = el('div', 'queue-thermometer', '');
+  gauge.append(fill);
+  const value = el('div', 'queue-card-value', lag === null ? '-' : formatInteger(lag));
+  const unit = el('div', 'queue-card-unit', t('dashboard.queueLag'));
+  const statusLabel = el('div', `queue-card-status status-${queueStatusClass(status)}`, queueStatusText(status));
+  const main = el('div', 'queue-card-main', '');
+  main.append(value, unit, statusLabel);
+
+  const meta = el('div', 'queue-card-meta', '');
+  meta.append(
+    el('div', '', `${item.name ?? '-'}`),
+    el('div', '', `${t('dashboard.queueTopic')}: ${item.topic ?? '-'}`),
+    el('div', '', tf('dashboard.queueOffsets', {
+      processed: formatNullableInteger(item.processedNextOffset),
+      high: formatNullableInteger(item.highOffset)
+    }))
+  );
+  if (item.lastProcessedAt) {
+    meta.append(el('div', '', tf('dashboard.queueLastProcessed', { time: formatShortDateTime(item.lastProcessedAt) })));
+  }
+  if (item.lastOperation) {
+    meta.append(el('div', '', tf('dashboard.queueLastOperation', { operation: item.lastOperation })));
+  }
+  const trend = queueTrendText(item);
+  if (trend) {
+    meta.append(el('div', 'queue-card-trend', trend));
+  }
+  if (item.stateError) {
+    meta.append(el('div', 'queue-card-error', item.stateError));
+  }
+
+  card.append(main, gauge, meta);
+  setHelp(card, t('dashboard.queueHelp'));
+  return card;
+}
+
+function renderQueueMonitorError(error) {
+  const container = $('#queueMonitor');
+  if (!container) {
+    return;
+  }
+
+  container.className = 'queue-monitor queue-monitor-muted';
+  container.replaceChildren(
+    el('div', 'queue-monitor-title', t('dashboard.queueTitle')),
+    el('div', 'queue-monitor-empty status-bad', error.message ?? String(error))
+  );
+}
+
+function queueStatusText(status) {
+  return {
+    ok: t('dashboard.queueStatusOk'),
+    warn: t('dashboard.queueStatusWarn'),
+    critical: t('dashboard.queueStatusCritical'),
+    unknown: t('dashboard.queueStatusUnknown')
+  }[status] ?? t('dashboard.queueStatusUnknown');
+}
+
+function queueStatusClass(status) {
+  return {
+    ok: 'ok',
+    warn: 'warn',
+    critical: 'bad',
+    unknown: 'warn'
+  }[status] ?? 'warn';
+}
+
+function queueTrendText(item) {
+  if (!Number.isFinite(item.lagDelta)) {
+    return '';
+  }
+  if (item.lagDelta < 0 && Number.isFinite(item.drainRatePerSecond) && item.drainRatePerSecond > 0) {
+    return tf('dashboard.queueTrendDown', {
+      rate: formatRate(item.drainRatePerSecond),
+      eta: formatDuration(item.etaSeconds)
+    });
+  }
+  if (item.lagDelta > 0) {
+    return tf('dashboard.queueTrendUp', { delta: formatInteger(item.lagDelta) });
+  }
+  return t('dashboard.queueTrendFlat');
+}
+
+function syncQueueMonitorPolling(refreshIntervalMs = state.queueMonitor?.refreshIntervalMs) {
+  const shouldPoll = state.authenticated && $('.view.active')?.id === 'dashboard';
+  if (!shouldPoll) {
+    if (queueMonitorTimer) {
+      clearInterval(queueMonitorTimer);
+      queueMonitorTimer = null;
+    }
+    return;
+  }
+
+  if (queueMonitorTimer) {
+    return;
+  }
+
+  const interval = clampNumber(refreshIntervalMs, defaultQueueMonitorRefreshMs, 5000, 10000);
+  queueMonitorTimer = setInterval(() => {
+    if ($('.view.active')?.id !== 'dashboard') {
+      syncQueueMonitorPolling();
+      return;
+    }
+
+    loadQueueMonitor({ allowStaleOnError: true });
+  }, interval);
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat(state.language).format(Number(value) || 0);
+}
+
+function formatNullableInteger(value) {
+  return Number.isFinite(value) ? formatInteger(value) : '-';
+}
+
+function formatRate(value) {
+  return Number(value).toLocaleString(state.language, {
+    maximumFractionDigits: value >= 10 ? 0 : 1
+  });
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '-';
+  }
+
+  const rounded = Math.round(seconds);
+  if (rounded < 60) {
+    return `${rounded}s`;
+  }
+  const minutes = Math.floor(rounded / 60);
+  const restSeconds = rounded % 60;
+  if (minutes < 60) {
+    return restSeconds ? `${minutes}m ${restSeconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `${hours}h ${restMinutes}m` : `${hours}h`;
+}
+
+function formatShortDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return date.toLocaleTimeString(state.language, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
 }
 
 async function reloadConversionRules(serviceName, button) {

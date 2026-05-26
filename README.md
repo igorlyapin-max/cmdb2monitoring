@@ -20,7 +20,7 @@ Run .NET commands through the repository wrapper:
 - `cmdbkafka2zabbix`: reads CMDB events from Kafka, applies JSON/T4 conversion rules including `hostProfiles[]`, and publishes one or more Zabbix JSON-RPC requests.
 - `zabbixrequests2api`: reads Zabbix JSON-RPC requests from Kafka, validates them, calls Zabbix API, and publishes responses.
 - `zabbixbindings2cmdbuild`: reads Zabbix binding events and writes `zabbix_main_hostid` / `ZabbixHostBinding` back to CMDBuild.
-- `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, Events Kafka browser, rules validate/dry-run/browser save-as, Conversion Rules Management edit/delete, SAML2/OAuth2/MS AD authorization settings, and CMDBuild/Zabbix catalog sync.
+- `monitoring-ui-api`: Node.js frontend/backend-for-frontend for dashboard, live processing-queue thermometers, Events Kafka browser, rules validate/dry-run/browser save-as, Conversion Rules Management edit/delete, SAML2/OAuth2/MS AD authorization settings, and CMDBuild/Zabbix catalog sync.
 
 Dev HTTP ports:
 

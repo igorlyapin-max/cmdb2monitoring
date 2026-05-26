@@ -44,6 +44,7 @@ const ownedCmdbuildWebhookIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 const cmdbuildWebhookAuthorizationHeaderName = 'Authorization';
 const auditMainHostIdAttributeName = 'zabbix_main_hostid';
 const auditBindingClassName = 'ZabbixHostBinding';
+const queueMonitorSnapshots = new Map();
 const auditBindingAttributes = [
   { name: 'OwnerClass', description: 'CMDBuild owner class', maxLength: 100 },
   { name: 'OwnerCardId', description: 'CMDBuild owner card id', maxLength: 64 },
@@ -229,6 +230,16 @@ async function routeApi(request, response, url, path) {
     }
 
     sendJson(response, 200, await readServicesHealth());
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/api/queue/status') {
+    requireRole(session, response, ['viewer', 'editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, await readQueueMonitorStatus());
     return;
   }
 
@@ -1071,7 +1082,9 @@ function applyEnvOverrides(target) {
     MONITORING_UI_KAFKA_USERNAME: ['EventBrowser', 'Username'],
     MONITORING_UI_KAFKA_PASSWORD: ['EventBrowser', 'Password'],
     MONITORING_UI_EVENTS_MAX_MESSAGES: ['EventBrowser', 'MaxMessages'],
-    MONITORING_UI_EVENTS_READ_TIMEOUT_MS: ['EventBrowser', 'ReadTimeoutMs']
+    MONITORING_UI_EVENTS_READ_TIMEOUT_MS: ['EventBrowser', 'ReadTimeoutMs'],
+    MONITORING_UI_QUEUE_MONITOR_ENABLED: ['QueueMonitor', 'Enabled'],
+    MONITORING_UI_QUEUE_MONITOR_REFRESH_INTERVAL_MS: ['QueueMonitor', 'RefreshIntervalMs']
   };
 
   for (const [envName, path] of Object.entries(mapping)) {
@@ -1544,6 +1557,298 @@ async function readServicesHealth() {
     items,
     managementRules: await managementRulesPromise
   };
+}
+
+async function readQueueMonitorStatus() {
+  const monitor = config.QueueMonitor ?? {};
+  const refreshIntervalMs = clampInt(monitor.RefreshIntervalMs ?? monitor.refreshIntervalMs, 5000, 5000, 10000);
+  const enabled = (monitor.Enabled ?? monitor.enabled ?? false) === true;
+  const pipelines = normalizeQueueMonitorPipelines(monitor);
+  const collectedAt = new Date().toISOString();
+
+  if (!enabled || pipelines.length === 0) {
+    return {
+      enabled,
+      refreshIntervalMs,
+      collectedAt,
+      items: []
+    };
+  }
+
+  const items = await Promise.all(pipelines.map(async pipeline => {
+    try {
+      return await readQueuePipelineStatus(pipeline);
+    } catch (error) {
+      return queuePipelineErrorStatus(pipeline, error);
+    }
+  }));
+
+  return {
+    enabled: true,
+    refreshIntervalMs,
+    collectedAt,
+    items
+  };
+}
+
+function normalizeQueueMonitorPipelines(monitor) {
+  const warningThreshold = clampInt(monitor.WarningThreshold ?? monitor.warningThreshold, 1000, 0, 1_000_000_000);
+  const criticalThreshold = clampInt(monitor.CriticalThreshold ?? monitor.criticalThreshold, 10000, 1, 1_000_000_000);
+  return (Array.isArray(monitor.Pipelines ?? monitor.pipelines) ? (monitor.Pipelines ?? monitor.pipelines) : [])
+    .map((pipeline, index) => ({
+      name: String(pipeline.Name ?? pipeline.name ?? `Queue ${index + 1}`).trim(),
+      topic: String(pipeline.Topic ?? pipeline.topic ?? '').trim(),
+      stateFilePath: String(pipeline.StateFilePath ?? pipeline.stateFilePath ?? '').trim(),
+      warningThreshold: clampInt(
+        pipeline.WarningThreshold ?? pipeline.warningThreshold,
+        warningThreshold,
+        0,
+        1_000_000_000),
+      criticalThreshold: clampInt(
+        pipeline.CriticalThreshold ?? pipeline.criticalThreshold,
+        criticalThreshold,
+        1,
+        1_000_000_000)
+    }))
+    .filter(pipeline => !isBlank(pipeline.topic));
+}
+
+async function readQueuePipelineStatus(pipeline) {
+  const offsets = await readKafkaTopicOffsets(pipeline.topic);
+  const stateInfo = await readQueueStateDocument(pipeline.stateFilePath);
+  const stateDocument = stateInfo.document;
+  const stateTopic = queueStateValue(stateDocument, 'lastInputTopic', 'LastInputTopic');
+  const statePartition = queueNumberOrNull(queueStateValue(stateDocument, 'lastInputPartition', 'LastInputPartition'));
+  const lastInputOffset = queueNumberOrNull(queueStateValue(stateDocument, 'lastInputOffset', 'LastInputOffset'));
+  const lastMethod = queueStateValue(stateDocument, 'lastMethod', 'LastMethod') ?? null;
+  const lastEventType = queueStateValue(stateDocument, 'lastEventType', 'LastEventType') ?? null;
+  const highOffset = queueOffsetsSum(offsets, 'high');
+  const lowOffset = queueOffsetsSum(offsets, 'low');
+  const stateTopicMatches = isBlank(stateTopic) || stateTopic === pipeline.topic;
+  const canCalculateLag = stateDocument && stateTopicMatches && Number.isFinite(lastInputOffset) && Number.isFinite(statePartition);
+  const partitions = offsets.map(offset => queuePartitionStatus(offset, statePartition, lastInputOffset, canCalculateLag));
+  const lag = canCalculateLag
+    ? queueNumberFromBigInt(partitions.reduce((sum, item) => sum + parseQueueOffset(item.lag), 0n))
+    : null;
+  const snapshot = updateQueueMonitorSnapshot(pipeline, lag);
+  const status = queueLagStatus(lag, pipeline, stateInfo.error || (!stateTopicMatches ? 'state_topic_mismatch' : ''));
+
+  return {
+    name: pipeline.name,
+    topic: pipeline.topic,
+    status,
+    lag,
+    warningThreshold: pipeline.warningThreshold,
+    criticalThreshold: pipeline.criticalThreshold,
+    highOffset: queueNumberFromBigInt(highOffset),
+    lowOffset: queueNumberFromBigInt(lowOffset),
+    processedNextOffset: queueProcessedNextOffset(partitions),
+    lastInputOffset,
+    lastInputPartition: statePartition,
+    lastEntityId: queueStateValue(stateDocument, 'lastEntityId', 'LastEntityId') ?? null,
+    lastMethod,
+    lastEventType,
+    lastOperation: lastMethod ?? lastEventType,
+    lastProcessedAt: queueStateValue(stateDocument, 'processedAt', 'ProcessedAt') ?? null,
+    stateFilePath: pipeline.stateFilePath,
+    resolvedStateFilePath: stateInfo.resolvedPath,
+    stateError: stateInfo.error || (!stateTopicMatches ? `State topic '${stateTopic}' does not match '${pipeline.topic}'.` : null),
+    lagDelta: snapshot.lagDelta,
+    drainRatePerSecond: snapshot.drainRatePerSecond,
+    etaSeconds: snapshot.etaSeconds,
+    partitions
+  };
+}
+
+function queuePipelineErrorStatus(pipeline, error) {
+  return {
+    name: pipeline.name,
+    topic: pipeline.topic,
+    status: 'unknown',
+    lag: null,
+    warningThreshold: pipeline.warningThreshold,
+    criticalThreshold: pipeline.criticalThreshold,
+    highOffset: null,
+    lowOffset: null,
+    processedNextOffset: null,
+    lastInputOffset: null,
+    lastInputPartition: null,
+    lastEntityId: null,
+    lastMethod: null,
+    lastEventType: null,
+    lastOperation: null,
+    lastProcessedAt: null,
+    stateFilePath: pipeline.stateFilePath,
+    resolvedStateFilePath: '',
+    stateError: error instanceof Error ? error.message : 'queue_status_failed',
+    lagDelta: null,
+    drainRatePerSecond: null,
+    etaSeconds: null,
+    partitions: []
+  };
+}
+
+async function readKafkaTopicOffsets(topic) {
+  const kafka = createKafkaClient();
+  const admin = kafka.admin();
+  try {
+    await admin.connect();
+    return await admin.fetchTopicOffsets(topic);
+  } finally {
+    await disconnectKafka(admin);
+  }
+}
+
+async function readQueueStateDocument(configuredPath) {
+  if (isBlank(configuredPath)) {
+    return {
+      resolvedPath: '',
+      document: null,
+      error: 'state_file_not_configured'
+    };
+  }
+
+  const resolvedPath = resolveQueueStatePath(configuredPath);
+  if (!existsSync(resolvedPath)) {
+    return {
+      resolvedPath,
+      document: null,
+      error: 'state_file_missing'
+    };
+  }
+
+  try {
+    return {
+      resolvedPath,
+      document: JSON.parse(await readFile(resolvedPath, 'utf8')),
+      error: null
+    };
+  } catch (error) {
+    return {
+      resolvedPath,
+      document: null,
+      error: error instanceof Error ? error.message : 'state_file_read_failed'
+    };
+  }
+}
+
+function resolveQueueStatePath(configuredPath) {
+  const fullPath = isAbsolute(configuredPath)
+    ? normalize(configuredPath)
+    : resolve(serviceRoot, configuredPath);
+  if (!isPathInside(repositoryRoot, fullPath)) {
+    throw httpError(400, 'invalid_queue_state_path', 'Queue monitor state file path escapes repository root.');
+  }
+
+  return fullPath;
+}
+
+function queuePartitionStatus(offset, statePartition, lastInputOffset, canCalculateLag) {
+  const partition = Number(offset.partition);
+  const low = parseQueueOffset(offset.low);
+  const high = parseQueueOffset(offset.high ?? offset.offset);
+  const processedNext = canCalculateLag && partition === statePartition
+    ? parseQueueOffset(lastInputOffset) + 1n
+    : low;
+  const lag = high > processedNext ? high - processedNext : 0n;
+  return {
+    partition,
+    low: queueNumberFromBigInt(low),
+    high: queueNumberFromBigInt(high),
+    processedNext: queueNumberFromBigInt(processedNext),
+    lag: queueNumberFromBigInt(lag)
+  };
+}
+
+function queueOffsetsSum(offsets, key) {
+  return offsets.reduce((sum, offset) => sum + parseQueueOffset(offset[key] ?? offset.offset), 0n);
+}
+
+function queueProcessedNextOffset(partitions) {
+  if (partitions.length === 0) {
+    return null;
+  }
+
+  return partitions.reduce((sum, item) => sum + (Number.isFinite(item.processedNext) ? item.processedNext : 0), 0);
+}
+
+function queueLagStatus(lag, pipeline, stateError) {
+  if (stateError || lag === null || lag === undefined || !Number.isFinite(lag)) {
+    return 'unknown';
+  }
+  if (lag >= pipeline.criticalThreshold) {
+    return 'critical';
+  }
+  if (lag >= pipeline.warningThreshold) {
+    return 'warn';
+  }
+  return 'ok';
+}
+
+function updateQueueMonitorSnapshot(pipeline, lag) {
+  const key = `${pipeline.topic}|${pipeline.stateFilePath}`;
+  const now = Date.now();
+  const previous = queueMonitorSnapshots.get(key);
+  const result = {
+    lagDelta: null,
+    drainRatePerSecond: null,
+    etaSeconds: null
+  };
+
+  if (previous && Number.isFinite(lag) && Number.isFinite(previous.lag)) {
+    const elapsedSeconds = Math.max(0.001, (now - previous.observedAtMs) / 1000);
+    result.lagDelta = lag - previous.lag;
+    if (result.lagDelta < 0) {
+      result.drainRatePerSecond = Math.abs(result.lagDelta) / elapsedSeconds;
+      result.etaSeconds = result.drainRatePerSecond > 0 ? lag / result.drainRatePerSecond : null;
+    }
+  }
+
+  queueMonitorSnapshots.set(key, {
+    lag,
+    observedAtMs: now
+  });
+  return result;
+}
+
+function queueStateValue(document, ...keys) {
+  for (const key of keys) {
+    if (document && Object.prototype.hasOwnProperty.call(document, key)) {
+      return document[key];
+    }
+  }
+
+  return undefined;
+}
+
+function queueNumberOrNull(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function parseQueueOffset(value) {
+  if (value === undefined || value === null || value === '') {
+    return 0n;
+  }
+
+  try {
+    return BigInt(String(value));
+  } catch {
+    return 0n;
+  }
+}
+
+function queueNumberFromBigInt(value) {
+  const max = BigInt(Number.MAX_SAFE_INTEGER);
+  if (value > max) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return Number(value);
 }
 
 async function readServiceRulesStatus(endpoint) {

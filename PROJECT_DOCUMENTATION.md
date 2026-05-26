@@ -11,6 +11,7 @@
 
 Дополнительный компонент `monitoring-ui-api` предоставляет frontend/BFF для оператора:
 - health dashboard микросервисов;
+- онлайн-градусники очередей конвертации и применения в Zabbix по Kafka high watermark и state-файлам сервисов;
 - загрузка, валидация и dry-run rules JSON;
 - визуальное управление правилами конвертации и логический контроль правил конвертации с подсветкой связей CMDBuild -> rules -> Zabbix;
 - режим `Управление правилами конвертации`: добавление, модификация и удаление rules в draft JSON, undo/redo, save-as без записи на backend;
@@ -322,6 +323,7 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `Rules` | Rules path, local JSON validate/dry-run policy |
 | `AuditStorage` | Provider `postgresql`/`sqlite`, connection string, schema, auto-migrate и timeout для будущего раздела аудита |
 | `EventBrowser` | Kafka read-only browser для вкладки Events: bootstrap, auth, topics, limits |
+| `QueueMonitor` | Read-only мониторинг backlog: topic, state file path, интервал опроса `5000..10000` ms и пороги warning/critical |
 | `Services:HealthEndpoints` | Health endpoints микросервисов для dashboard; optional rules reload URL/token для converter |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB секреты и rules reload tokens |
 
@@ -366,6 +368,7 @@ Runtime settings:
 - runtime-файл и файл пользователей не коммитятся и могут содержать dev secrets;
 - dev config не заполняет CMDBuild/Zabbix пароли по умолчанию;
 - текущий dev `EventBrowser` смотрит Kafka `localhost:9092` и topics `*.dev`.
+- текущий dev `QueueMonitor` включен для очередей `cmdbuild.webhooks.dev` и `zabbix.host.requests.dev`; он читает state-файлы `../cmdbkafka2zabbix/state/cmdbkafka2zabbix-state.dev.json` и `../zabbixrequests2api/state/zabbixrequests2api-state.dev.json`, а dashboard пересчитывает backlog каждые 5 секунд.
 
 Audit model:
 - раздел `Аудит` готовит CMDBuild model для обратной связи с Zabbix. Проверка строит план без изменений, а применение от имени администратора создает недостающие элементы в управляемой CMDBuild;

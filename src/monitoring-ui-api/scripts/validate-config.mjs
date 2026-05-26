@@ -50,6 +50,9 @@ required(config, 'EventBrowser.BootstrapServers');
 required(config, 'EventBrowser.ClientId');
 required(config, 'EventBrowser.SecurityProtocol');
 required(config, 'EventBrowser.Topics');
+required(config, 'QueueMonitor.Enabled');
+required(config, 'QueueMonitor.RefreshIntervalMs');
+required(config, 'QueueMonitor.Pipelines');
 required(config, 'Services.HealthEndpoints');
 
 if (!existsSync(join(repoRoot, config.Rules.RulesFilePath))) {
@@ -83,6 +86,23 @@ if (!intInRange(config.AuditStorage?.CommandTimeoutSeconds, 1, 300)) {
 
 if (!Array.isArray(config.EventBrowser.Topics) || config.EventBrowser.Topics.length === 0) {
   errors.push('EventBrowser.Topics must contain at least one topic.');
+}
+
+if (!intInRange(config.QueueMonitor?.RefreshIntervalMs, 5000, 10000)) {
+  errors.push('QueueMonitor.RefreshIntervalMs must be an integer from 5000 to 10000.');
+}
+
+if (!Array.isArray(config.QueueMonitor?.Pipelines) || config.QueueMonitor.Pipelines.length === 0) {
+  errors.push('QueueMonitor.Pipelines must contain at least one pipeline.');
+}
+
+for (const pipeline of config.QueueMonitor?.Pipelines ?? []) {
+  if (!pipeline?.Topic) {
+    errors.push('QueueMonitor.Pipelines items must include Topic.');
+  }
+  if (!pipeline?.StateFilePath) {
+    errors.push('QueueMonitor.Pipelines items must include StateFilePath.');
+  }
 }
 
 for (const expectedTopic of ['zabbix.host.bindings', 'zabbixbindings2cmdbuild.logs']) {

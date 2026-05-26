@@ -17,6 +17,7 @@ After a successful `host.create/update/delete`, a separate flow writes the rever
 The additional `monitoring-ui-api` component provides an operator frontend/BFF for:
 
 - microservice health dashboard;
+- live conversion and Zabbix apply queue thermometers based on Kafka high watermarks and service state files;
 - rules JSON load, validation, and dry-run;
 - Conversion Rules Management and Logical Control of Conversion Rules with CMDBuild -> rules -> Zabbix highlighting;
 - draft rule add/modify/delete, undo/redo, and browser save-as without writing the active backend rules file;
@@ -322,6 +323,7 @@ Main settings:
 | `Rules` | Rules path and local JSON validate/dry-run policy |
 | `AuditStorage` | Provider `postgresql`/`sqlite`, connection string, schema, auto-migrate, and timeout for the future audit section |
 | `EventBrowser` | Read-only Kafka browser for Events: bootstrap, auth, topics, limits |
+| `QueueMonitor` | Read-only backlog monitoring: topic, state file path, polling interval `5000..10000` ms, and warning/critical thresholds |
 | `Services:HealthEndpoints` | Microservice health endpoints and optional rules reload URL/token |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to the Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB secrets, and rules reload tokens |
 

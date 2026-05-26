@@ -5,6 +5,7 @@
 ### Added
 
 - CMDBuild Catalog now has an editor/admin bulk lookup-change action: select a class and writable lookup attribute, confirm, and the UI sends per-card PUT updates that rotate each card to the next active lookup value.
+- Dashboard now shows live conversion and Zabbix apply queue thermometers, refreshed every 5-10 seconds from Kafka topic high watermarks and processing state files.
 - Added `scripts/perf-baseline.mjs`, a read-only CMDBuild/Zabbix latency baseline report for comparing stands and validating optimization work.
 
 ### Changed
