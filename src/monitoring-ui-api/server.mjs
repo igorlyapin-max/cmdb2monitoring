@@ -44,6 +44,8 @@ const ownedCmdbuildWebhookIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 const cmdbuildWebhookAuthorizationHeaderName = 'Authorization';
 const auditMainHostIdAttributeName = 'zabbix_main_hostid';
 const auditBindingClassName = 'ZabbixHostBinding';
+const cmdbuildLookupBulkBatchTtlMs = 30 * 60 * 1000;
+const cmdbuildLookupBulkBatches = new Map();
 const queueMonitorSnapshots = new Map();
 const auditBindingAttributes = [
   { name: 'OwnerClass', description: 'CMDBuild owner class', maxLength: 100 },
@@ -2953,6 +2955,39 @@ async function syncCmdbuildCatalog(session) {
 }
 
 async function applyCmdbuildLookupBulkChange(session, payload = {}) {
+  const batchKey = cmdbuildLookupBulkBatchCacheKey(payload);
+  if (batchKey) {
+    pruneCmdbuildLookupBulkBatches();
+    const cached = cmdbuildLookupBulkBatches.get(batchKey);
+    if (cached?.result) {
+      return cached.result;
+    }
+
+    if (cached?.promise) {
+      return await cached.promise;
+    }
+
+    const startedAt = Date.now();
+    const promise = runCmdbuildLookupBulkChange(session, payload);
+    cmdbuildLookupBulkBatches.set(batchKey, { startedAt, promise });
+    try {
+      const result = await promise;
+      cmdbuildLookupBulkBatches.set(batchKey, {
+        startedAt,
+        completedAt: Date.now(),
+        result
+      });
+      return result;
+    } catch (error) {
+      cmdbuildLookupBulkBatches.delete(batchKey);
+      throw error;
+    }
+  }
+
+  return await runCmdbuildLookupBulkChange(session, payload);
+}
+
+async function runCmdbuildLookupBulkChange(session, payload = {}) {
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
   const className = String(payload.className ?? '').trim();
@@ -2998,7 +3033,8 @@ async function applyCmdbuildLookupBulkChange(session, payload = {}) {
 
   const batchSize = 100;
   const maxCards = normalizePositiveInteger(payload.maxCards, 10000, 10000);
-  let offset = 0;
+  const startOffset = normalizeNonNegativeInteger(payload.offset, 0, 10000000);
+  let offset = startOffset;
   const cardsById = new Map();
   let duplicateCardsSkipped = 0;
   let paginationStopped = false;
@@ -3100,6 +3136,9 @@ async function applyCmdbuildLookupBulkChange(session, payload = {}) {
     className,
     attributeName,
     lookupType,
+    offset: startOffset,
+    nextOffset: offset,
+    maxCards,
     total,
     changed,
     skipped,
@@ -3113,6 +3152,32 @@ async function applyCmdbuildLookupBulkChange(session, payload = {}) {
     failures: failures.slice(0, 50),
     samples
   };
+}
+
+function cmdbuildLookupBulkBatchCacheKey(payload = {}) {
+  const batchId = String(payload.batchId ?? '').trim();
+  if (isBlank(batchId)) {
+    return '';
+  }
+
+  return JSON.stringify([
+    batchId,
+    String(payload.className ?? '').trim(),
+    String(payload.attributeName ?? '').trim(),
+    payload.onlyEmptyMainHostId === true,
+    normalizePositiveInteger(payload.maxCards, 10000, 10000),
+    normalizeNonNegativeInteger(payload.offset, 0, 10000000)
+  ]);
+}
+
+function pruneCmdbuildLookupBulkBatches() {
+  const threshold = Date.now() - cmdbuildLookupBulkBatchTtlMs;
+  for (const [key, item] of cmdbuildLookupBulkBatches.entries()) {
+    const timestamp = item.completedAt ?? item.startedAt ?? 0;
+    if (timestamp < threshold) {
+      cmdbuildLookupBulkBatches.delete(key);
+    }
+  }
 }
 
 async function ensureCmdbuildAttributeExists(baseUrl, credentials, className, attributeName) {
@@ -3189,6 +3254,13 @@ function readCmdbuildCardIdentifier(card) {
 function normalizePositiveInteger(value, fallback, maximum = fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(Math.floor(parsed), maximum)
+    : fallback;
+}
+
+function normalizeNonNegativeInteger(value, fallback, maximum = fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0
     ? Math.min(Math.floor(parsed), maximum)
     : fallback;
 }

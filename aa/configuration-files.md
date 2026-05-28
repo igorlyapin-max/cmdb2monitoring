@@ -108,7 +108,7 @@ SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles
 
 Dev запуск:
 - `launchSettings.json` должен использовать `http://0.0.0.0:5080`;
-- CMDBuild-контейнер вызывает webhook по `http://192.168.202.100:5080/webhooks/cmdbuild`;
+- CMDBuild-контейнер вызывает webhook по `http://192.168.202.35:5080/webhooks/cmdbuild`;
 - `http://localhost:5080` доступен только с dev host и не подходит как URL внутри CMDBuild-контейнера.
 
 Пример env override:

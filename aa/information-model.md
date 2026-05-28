@@ -4,7 +4,7 @@
 
 | ID | Источник | Приемник | Канал | Данные |
 | --- | --- | --- | --- | --- |
-| IF-001 | CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild`, dev URL `http://192.168.202.100:5080/webhooks/cmdbuild` | CMDBuild webhook payload |
+| IF-001 | CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild`, dev URL `http://192.168.202.35:5080/webhooks/cmdbuild` | CMDBuild webhook payload |
 | IF-002 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | topic `cmdbuild.webhooks.*` | Нормализованный CMDB event envelope |
 | IF-003 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
 | IF-004 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |

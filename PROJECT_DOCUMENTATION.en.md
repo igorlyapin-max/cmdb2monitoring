@@ -70,7 +70,7 @@ The additional `monitoring-ui-api` component provides an operator frontend/BFF f
 CMDBuild runs in Docker, so the CMDBuild webhook URL must point to a host address reachable from the Docker network:
 
 ```text
-http://192.168.202.100:5080/webhooks/cmdbuild
+http://192.168.202.35:5080/webhooks/cmdbuild
 ```
 
 For local development, `cmdbwebhooks2kafka` listens on `0.0.0.0:5080`. If it listens only on `localhost:5080`, the CMDBuild container cannot call it.
@@ -260,7 +260,7 @@ Main settings:
 | `ProcessingState` | State file for the last processed object |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to Zabbix/Kafka/ELK secrets |
 
-`Processing:DelayBetweenObjectsMs` defaults to `100` ms so the Zabbix writer does not add an excessive pause between objects.
+`Processing:DelayBetweenObjectsMs` defaults to `50` ms so the Zabbix writer does not add an excessive pause between objects.
 
 The state file stores the last successfully processed input offset; startup resumes from `lastInputOffset + 1`.
 

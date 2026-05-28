@@ -29,7 +29,7 @@ This file records mandatory project development rules. If a rule conflicts with 
 - Kafka offsets are committed only after successful processing, successful result publication, or an intentional skip/error response.
 - Services that can fail during processing must persist the last processed object and Kafka input offset in a state file.
 - On startup, a consumer must read the state file and resume from `lastInputOffset + 1` for the relevant topic/partition. The state file must not be only diagnostic output.
-- If a service runs on the dev host and the source system runs in Docker, the HTTP endpoint must listen on more than loopback. The current webhook dev bind is `0.0.0.0:5080`, and CMDBuild calls `http://192.168.202.100:5080/webhooks/cmdbuild`.
+- If a service runs on the dev host and the source system runs in Docker, the HTTP endpoint must listen on more than loopback. The current webhook dev bind is `0.0.0.0:5080`, and CMDBuild calls `http://192.168.202.35:5080/webhooks/cmdbuild`.
 
 ## Kafka And Contracts
 

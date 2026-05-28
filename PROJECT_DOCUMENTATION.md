@@ -65,7 +65,7 @@
 CMDBuild работает в Docker, поэтому webhook URL в CMDBuild должен указывать на адрес host-сервиса, доступный из Docker-сети:
 
 ```text
-http://192.168.202.100:5080/webhooks/cmdbuild
+http://192.168.202.35:5080/webhooks/cmdbuild
 ```
 
 Для локального запуска `cmdbwebhooks2kafka` слушает `0.0.0.0:5080`; если запустить его только на `localhost:5080`, CMDBuild-контейнер не сможет вызвать webhook.
@@ -259,7 +259,7 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `ProcessingState` | State-файл последнего обработанного объекта |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Zabbix/Kafka/ELK секреты |
 
-`Processing:DelayBetweenObjectsMs` по умолчанию 100 мс, чтобы Zabbix writer не делал лишнюю паузу между объектами.
+`Processing:DelayBetweenObjectsMs` по умолчанию 50 мс, чтобы Zabbix writer не делал лишнюю паузу между объектами.
 
 `ProcessingState` работает по тому же правилу, что и во втором сервисе: state-файл хранит последний успешно обработанный input offset, а consumer при старте начинает с `lastInputOffset + 1`.
 

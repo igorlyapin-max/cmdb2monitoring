@@ -71,7 +71,7 @@ The service exposes:
 - `GET /health`;
 - `POST /webhooks/cmdbuild`.
 
-Development binding is `0.0.0.0:5080`, because CMDBuild runs in Docker and must reach the host service through `http://192.168.202.100:5080/webhooks/cmdbuild`.
+Development binding is `0.0.0.0:5080`, because CMDBuild runs in Docker and must reach the host service through `http://192.168.202.35:5080/webhooks/cmdbuild`.
 
 4.2. Webhook Input Format
 
@@ -340,7 +340,7 @@ If a catalog reference is missing or template compatibility fails, the service m
 
 14.6. Gentle Processing
 
-`Processing:DelayBetweenObjectsMs` defaults to `100` ms so the Zabbix writer does not add an excessive pause between objects.
+`Processing:DelayBetweenObjectsMs` defaults to `50` ms so the Zabbix writer does not add an excessive pause between objects.
 
 14.7. Response Topic Contract
 

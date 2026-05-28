@@ -9,7 +9,7 @@ info:
 servers:
   - url: http://localhost:5080
     description: Dev server from host
-  - url: http://192.168.202.100:5080
+  - url: http://192.168.202.35:5080
     description: Dev server from CMDBuild Docker container
 paths:
   /health:

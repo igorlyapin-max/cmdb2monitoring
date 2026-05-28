@@ -5,7 +5,7 @@ info:
 servers:
   - url: http://localhost:5080
     description: cmdbwebhooks2kafka dev
-  - url: http://192.168.202.100:5080
+  - url: http://192.168.202.35:5080
     description: cmdbwebhooks2kafka dev from CMDBuild Docker container
   - url: http://localhost:5081
     description: cmdbkafka2zabbix dev

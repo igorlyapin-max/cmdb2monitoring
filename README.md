@@ -24,7 +24,7 @@ Run .NET commands through the repository wrapper:
 
 Dev HTTP ports:
 
-- `cmdbwebhooks2kafka`: `http://localhost:5080`, bind `0.0.0.0:5080` so CMDBuild in Docker can call `http://192.168.202.100:5080/webhooks/cmdbuild`.
+- `cmdbwebhooks2kafka`: `http://localhost:5080`, bind `0.0.0.0:5080` so CMDBuild in Docker can call `http://192.168.202.35:5080/webhooks/cmdbuild`.
 - `cmdbkafka2zabbix`: `http://localhost:5081`.
 - `zabbixrequests2api`: `http://localhost:5082`.
 - `zabbixbindings2cmdbuild`: `http://localhost:5083`.

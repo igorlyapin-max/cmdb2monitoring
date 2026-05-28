@@ -95,7 +95,7 @@ public sealed class CmdbToZabbixConverter(
                 throw new InvalidOperationException($"Conversion rules do not contain '{templateName}' T4 template.");
             }
 
-            var request = await templateRenderer.RenderAsync(templateLines, model, cancellationToken);
+            var request = await templateRenderer.RenderAsync(templateLines, model, cancellationToken, templateName);
             request = EnrichCmdb2MonitoringMetadata(request, model, rules, isMainProfile);
 
             using (JsonDocument.Parse(request))

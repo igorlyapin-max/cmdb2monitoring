@@ -6,7 +6,7 @@
 
 | Узел | Артефакты | Сетевые адреса |
 | --- | --- | --- |
-| Workstation/Dev host | `cmdbwebhooks2kafka` | bind `0.0.0.0:5080`, local `http://localhost:5080`, Docker-visible `http://192.168.202.100:5080` |
+| Workstation/Dev host | `cmdbwebhooks2kafka` | bind `0.0.0.0:5080`, local `http://localhost:5080`, Docker-visible `http://192.168.202.35:5080` |
 | Workstation/Dev host | `cmdbkafka2zabbix` | `http://localhost:5081` |
 | Workstation/Dev host | `zabbixrequests2api` | `http://localhost:5082` |
 | Workstation/Dev host | `zabbixbindings2cmdbuild` | `http://localhost:5083` |
@@ -91,7 +91,7 @@
 
 | Откуда | Куда | Протокол |
 | --- | --- | --- |
-| CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild` через `http://192.168.202.100:5080` в dev |
+| CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild` через `http://192.168.202.35:5080` в dev |
 | Browser | monitoring-ui-api `:5090` | HTTP |
 | monitoring-ui-api `:5090` | IdP/MS AD `:443/:80/:636/:389` | SAML2 Redirect/POST, OAuth2 Authorization Code, LDAP bind/search |
 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP |

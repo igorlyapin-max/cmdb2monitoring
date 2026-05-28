@@ -103,6 +103,10 @@ const languageCookieName = 'c2m_lang';
 const defaultEventMaxMessages = 5;
 const defaultQueueMonitorRefreshMs = 5000;
 const defaultConversionRulesFilePath = 'rules/cmdbuild-to-zabbix-host-create.json';
+const cmdbuildLookupBulkBatchSize = 10;
+const cmdbuildLookupBulkNetworkRetryAttempts = 6;
+const cmdbuildCatalogSyncRecoveryAttempts = 18;
+const cmdbuildCatalogSyncRecoveryDelayMs = 5000;
 const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
 const roleViews = {
@@ -112,7 +116,7 @@ const roleViews = {
   administrator: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
-const defaultCmdbuildWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
+const defaultCmdbuildWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
 const sessionIndicatorDefinitions = [
   { key: 'webhooks', labelKey: 'sessionTraffic.webhooks' },
   { key: 'zabbixCatalog', labelKey: 'sessionTraffic.zabbixCatalog' },
@@ -3219,11 +3223,72 @@ function hostMacroHost(item) {
 }
 
 async function syncCmdbuild() {
-  const result = await api('/api/cmdbuild/catalog/sync', { method: 'POST', body: {} });
+  const beforeStatus = await readCmdbuildCatalogStatusOrNull();
+  let result;
+  try {
+    result = await api('/api/cmdbuild/catalog/sync', { method: 'POST', body: {} });
+  } catch (error) {
+    if (!isFetchNetworkError(error)) {
+      throw error;
+    }
+
+    result = await recoverCmdbuildCatalogSync(beforeStatus);
+    if (!result) {
+      throw error;
+    }
+  }
   renderCmdbuild(result);
   setSessionIndicator('cmdbuildCatalog', 'synced', 'sessionTraffic.synced');
   toast('CMDBuild catalog synced');
   return result;
+}
+
+async function readCmdbuildCatalogStatusOrNull() {
+  try {
+    return await api('/api/cmdbuild/catalog/status', { retryCredentials: false });
+  } catch {
+    return null;
+  }
+}
+
+async function recoverCmdbuildCatalogSync(beforeStatus) {
+  for (let attempt = 0; attempt < cmdbuildCatalogSyncRecoveryAttempts; attempt += 1) {
+    await delay(attempt === 0 ? 1000 : cmdbuildCatalogSyncRecoveryDelayMs);
+    const status = await readCmdbuildCatalogStatusOrNull();
+    if (!isCmdbuildCatalogStatusNewer(status, beforeStatus)) {
+      continue;
+    }
+
+    return await api('/api/cmdbuild/catalog');
+  }
+
+  return null;
+}
+
+function isCmdbuildCatalogStatusNewer(status, beforeStatus) {
+  if (!status?.exists) {
+    return false;
+  }
+
+  const syncedAt = Date.parse(status.syncedAt ?? status.modifiedAt ?? '');
+  const beforeSyncedAt = Date.parse(beforeStatus?.syncedAt ?? beforeStatus?.modifiedAt ?? '');
+  if (Number.isFinite(syncedAt) && Number.isFinite(beforeSyncedAt)) {
+    return syncedAt > beforeSyncedAt;
+  }
+
+  return Boolean(status.syncedAt || status.modifiedAt) && !beforeStatus?.exists;
+}
+
+function isFetchNetworkError(error) {
+  const message = String(error?.message ?? error ?? '').toLowerCase();
+  return error instanceof TypeError
+    || message.includes('networkerror')
+    || message.includes('failed to fetch')
+    || message.includes('load failed');
+}
+
+function delay(ms) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
 async function loadCmdbuild() {
@@ -3345,12 +3410,63 @@ async function applyCmdbuildLookupBulkChange() {
     return { cancelled: true };
   }
 
-  const result = await api('/api/cmdbuild/catalog/lookup-bulk-change', {
-    method: 'POST',
-    body: { className, attributeName, onlyEmptyMainHostId }
-  });
+  const result = {
+    className,
+    attributeName,
+    total: 0,
+    changed: 0,
+    skipped: 0,
+    failed: 0,
+    filteredOutByMainHostId: 0,
+    duplicateCardsSkipped: 0,
+    paginationStopped: false,
+    failures: [],
+    samples: []
+  };
+  let offset = 0;
+  let cmdbuildReportedTotal = null;
+  let batchIndex = 0;
+  const operationId = `lookup-bulk-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  while (true) {
+    const batchBody = {
+      className,
+      attributeName,
+      onlyEmptyMainHostId,
+      maxCards: cmdbuildLookupBulkBatchSize,
+      offset,
+      batchId: `${operationId}-${batchIndex}`
+    };
+    const batch = await applyCmdbuildLookupBulkBatch(batchBody);
+    batchIndex += 1;
+    cmdbuildReportedTotal = batch.cmdbuildReportedTotal ?? cmdbuildReportedTotal;
+    result.lookupType = batch.lookupType ?? result.lookupType;
+    result.total += batch.total ?? 0;
+    result.changed += batch.changed ?? 0;
+    result.skipped += batch.skipped ?? 0;
+    result.failed += batch.failed ?? 0;
+    result.filteredOutByMainHostId += batch.filteredOutByMainHostId ?? 0;
+    result.duplicateCardsSkipped += batch.duplicateCardsSkipped ?? 0;
+    result.paginationStopped ||= Boolean(batch.paginationStopped);
+    result.failures.push(...(batch.failures ?? []).slice(0, Math.max(0, 50 - result.failures.length)));
+    result.samples.push(...(batch.samples ?? []).slice(0, Math.max(0, 20 - result.samples.length)));
+
+    offset = batch.nextOffset ?? (offset + (batch.total ?? 0));
+    result.cmdbuildReportedTotal = cmdbuildReportedTotal;
+    const progressTotal = cmdbuildReportedTotal ?? '?';
+    setActionStatus(
+      $('#cmdbuildLookupBulkStatus'),
+      `${t('common.running')} ${Math.min(offset, cmdbuildReportedTotal ?? offset)} / ${progressTotal}`,
+      'running'
+    );
+
+    if ((batch.total ?? 0) === 0
+      || result.paginationStopped
+      || (cmdbuildReportedTotal !== null && offset >= cmdbuildReportedTotal)) {
+      break;
+    }
+  }
   const message = tf('catalog.lookupBulkDone', {
-    cmdbuildTotal: result.cmdbuildReportedTotal ?? '-',
+    cmdbuildTotal: cmdbuildReportedTotal ?? '-',
     total: result.total ?? 0,
     filtered: result.filteredOutByMainHostId ?? 0,
     changed: result.changed ?? 0,
@@ -3360,6 +3476,30 @@ async function applyCmdbuildLookupBulkChange() {
   setActionStatus($('#cmdbuildLookupBulkStatus'), message, result.failed || result.paginationStopped ? 'warning' : 'success');
   toast(message);
   return result;
+}
+
+async function applyCmdbuildLookupBulkBatch(body) {
+  for (let attempt = 0; attempt < cmdbuildLookupBulkNetworkRetryAttempts; attempt += 1) {
+    try {
+      return await api('/api/cmdbuild/catalog/lookup-bulk-change', {
+        method: 'POST',
+        body
+      });
+    } catch (error) {
+      if (!isFetchNetworkError(error) || attempt + 1 >= cmdbuildLookupBulkNetworkRetryAttempts) {
+        throw error;
+      }
+
+      setActionStatus(
+        $('#cmdbuildLookupBulkStatus'),
+        `${t('common.running')} ${body.offset ?? 0} / ?`,
+        'running'
+      );
+      await delay(1000 + attempt * 2000);
+    }
+  }
+
+  throw new Error('CMDBuild lookup bulk batch failed.');
 }
 
 function renderCmdbuildCatalogSummary(catalog = {}) {
@@ -10020,7 +10160,7 @@ function buildWebhookBodiesFile(rules, cmdbuildCatalog, validation, changes) {
     '# Authorization: Bearer XXXXX нужно заменить согласованным токеном микросервиса при ручной настройке.',
     '# Если рядом уже есть рабочие webhook-записи, можно взять из них блок Authorization и использовать тот же подход.',
     '# Method в CMDBuild выбирайте POST. Он должен совпадать с HTTP-интерфейсом микросервиса: POST /webhooks/cmdbuild.',
-    '# Dev URL сейчас обычно: http://192.168.202.100:5080/webhooks/cmdbuild. Для другого окружения замените URL.',
+    '# Dev URL сейчас обычно: http://192.168.202.35:5080/webhooks/cmdbuild. Для другого окружения замените URL.',
     '# Content-Type вручную лучше не добавлять в headers CMDBuild: CMDBuild сам выставляет его для JSON body.',
     '#',
     validation.issues.length > 0
@@ -10150,7 +10290,7 @@ function appendWebhookBodiesForClass(lines, rules, cmdbuildCatalog, className, e
       `## ${actionLabel} / ${classItem.name} / ${event.eventType}`,
       '# Action: ADD or UPDATE CMDBuild webhook Body',
       '# Method: POST',
-      '# URL: http://192.168.202.100:5080/webhooks/cmdbuild',
+      '# URL: http://192.168.202.35:5080/webhooks/cmdbuild',
       '# Headers: Authorization: Bearer XXXXX',
       ...pathComments,
       JSON.stringify(body, null, 2),
@@ -10180,7 +10320,7 @@ function appendWebhookDeleteInstructions(lines, className, events, actionLabel, 
     '# Body для удаления не нужен. Удалите/отключите webhook-записи со следующими событиями:',
     ...visibleEvents.map(event => `# - ${event.eventType}: ${event.cmdbuildEvent}`),
     '# Method у удаляемых записей: POST',
-    '# URL у удаляемых записей: http://192.168.202.100:5080/webhooks/cmdbuild',
+    '# URL у удаляемых записей: http://192.168.202.35:5080/webhooks/cmdbuild',
     ''
   );
 }

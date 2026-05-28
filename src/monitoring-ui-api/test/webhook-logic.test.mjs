@@ -30,7 +30,7 @@ const catalog = {
     }
   ]
 };
-const defaultWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
+const defaultWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
 const managedIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 
 function baseRules(overrides = {}) {
@@ -414,7 +414,7 @@ test('unmanaged current webhooks are not matched, deleted, or used as defaults',
   assert.equal(operations.length, 1);
   assert.equal(operations[0].action, 'create');
   assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
-  assert.equal(operations[0].desired.url, 'http://192.168.202.100:5080/webhooks/cmdbuild');
+  assert.equal(operations[0].desired.url, 'http://192.168.202.35:5080/webhooks/cmdbuild');
   assert.equal(operations.some(item => item.code === 'other-system-class-update'), false);
 });
 
@@ -425,6 +425,61 @@ test('new managed webhooks use zabbix host code segment', () => {
   assert.equal(operations.length, 1);
   assert.equal(operations[0].action, 'create');
   assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
+});
+
+test('managed webhooks do not reuse a foreign class placeholder prefix', () => {
+  const rules = baseRules({
+    fields: {
+      addressIp: { source: 'addressIp', cmdbAttribute: 'Address', required: true }
+    }
+  });
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [
+    {
+      code: 'cmdbwebhooks2kafka-zabbix-host-other-update',
+      event: 'card_update_after',
+      target: 'Other',
+      method: 'post',
+      url: defaultWebhookUrl,
+      body: {
+        source: 'cmdbuild',
+        managedIdentifier,
+        className: 'Other',
+        eventType: 'update',
+        cmdbuildEvent: 'card_update_after',
+        id: '{server:Id}'
+      },
+      active: true
+    }
+  ]);
+  const create = operations.find(item => item.action === 'create');
+
+  assert.ok(create);
+  assert.equal(create.code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
+  assert.equal(create.desired.body.id, '{card:Id}');
+  assert.equal(create.desired.body.addressIp, '{card:Address}');
+});
+
+test('managed webhooks replace mismatched placeholder prefix for the target class', () => {
+  const rules = baseRules({
+    fields: {
+      addressIp: { source: 'addressIp', cmdbAttribute: 'Address', required: true }
+    }
+  });
+  const operations = buildCmdbuildWebhookOperations(rules, catalog, [
+    currentNamespacedUpdateWebhook({
+      id: '{server:Id}',
+      code: '{server:Code}',
+      hostname: '{server:hostname}',
+      addressIp: '{server:Address}'
+    })
+  ]);
+  const update = operations.find(item => item.action === 'update');
+
+  assert.ok(update);
+  assert.equal(update.desired.body.id, '{card:Id}');
+  assert.equal(update.desired.body.code, '{card:Code}');
+  assert.equal(update.desired.body.hostname, '{card:hostname}');
+  assert.equal(update.desired.body.addressIp, '{card:Address}');
 });
 
 test('authorization header drift is outside normal webhook configuration diff', () => {

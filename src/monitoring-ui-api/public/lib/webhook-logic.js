@@ -6,7 +6,7 @@ import {
 } from './mapping-logic.js';
 
 const defaultManagedPrefix = 'cmdbwebhooks2kafka-';
-const defaultWebhookUrl = 'http://192.168.202.100:5080/webhooks/cmdbuild';
+const defaultWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
 const defaultManagedIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 const defaultManagedCodeSegment = 'zabbix-host';
 
@@ -58,10 +58,10 @@ export function buildDesiredCmdbuildWebhooks(rules = {}, cmdbuildCatalog = {}, c
     for (const event of events) {
       const code = desiredWebhookCode(classRequirements.className, event.eventType, allCurrentByCode, currentByCode, options);
       const current = currentByCode.get(normalizeWebhookCode(code));
-      const currentPrefix = currentWebhookPlaceholderPrefix(current);
-      const prefix = webhookPlaceholderPrefixMatchesClass(currentPrefix, classRequirements.className)
-        ? currentPrefix
-        : defaults.placeholderPrefix;
+      const prefix = webhookPlaceholderPrefixForClass(
+        currentWebhookPlaceholderPrefix(current),
+        defaults.placeholderPrefix,
+        classRequirements.className);
       desired.push(normalizeWebhookItem({
         code,
         description: current?.description || `cmdb2monitoring ${classRequirements.className} ${event.eventType}`,
@@ -333,7 +333,7 @@ function sourceFieldUsageForClass(rules, className) {
 
 function webhookBodyForRequirements(event, prefix, baseBody = {}, requirements = [], className = '', options = {}) {
   const body = {
-    ...plainObjectOrEmpty(baseBody),
+    ...normalizeWebhookBodyPlaceholderPrefixes(plainObjectOrEmpty(baseBody), prefix, className),
     source: 'cmdbuild',
     className,
     eventType: event.eventType,
@@ -349,13 +349,30 @@ function webhookBodyForRequirements(event, prefix, baseBody = {}, requirements =
       continue;
     }
     removeWebhookBodyAliasFields(body, requirement);
-    if (bodyHasKey(body, requirement.payloadKey)) {
-      continue;
-    }
     body[requirement.payloadKey] = cmdbuildPlaceholder(prefix, requirement.placeholderAttribute);
   }
 
   return body;
+}
+
+function normalizeWebhookBodyPlaceholderPrefixes(value, prefix, className) {
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeWebhookBodyPlaceholderPrefixes(item, prefix, className));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value)
+      .map(([key, item]) => [key, normalizeWebhookBodyPlaceholderPrefixes(item, prefix, className)]));
+  }
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const match = value.match(/^\{([^}:]+):([^}]+)\}$/);
+  if (!match || webhookPlaceholderPrefixMatchesClass(match[1], className)) {
+    return value;
+  }
+
+  return cmdbuildPlaceholder(prefix, match[2]);
 }
 
 function missingPayloadRequirements(currentHook, desiredHook) {
@@ -638,6 +655,17 @@ function currentWebhookDefaults(currentHooks, options) {
 function webhookPlaceholderPrefixMatchesClass(prefix, className) {
   return String(prefix ?? '').trim() !== ''
     && (normalizeToken(prefix) === 'card' || normalizeToken(prefix) === normalizeToken(className));
+}
+
+function webhookPlaceholderPrefixForClass(currentPrefix, defaultPrefix, className) {
+  if (webhookPlaceholderPrefixMatchesClass(currentPrefix, className)) {
+    return currentPrefix;
+  }
+  if (webhookPlaceholderPrefixMatchesClass(defaultPrefix, className)) {
+    return defaultPrefix;
+  }
+
+  return 'card';
 }
 
 function desiredWebhookCode(className, eventType, allCurrentByCode, ownedCurrentByCode, options) {

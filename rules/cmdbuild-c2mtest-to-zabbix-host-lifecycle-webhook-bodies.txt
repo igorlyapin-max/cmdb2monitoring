@@ -5,7 +5,7 @@
 # Authorization: Bearer XXXXX нужно заменить согласованным токеном микросервиса при ручной настройке.
 # Если рядом уже есть рабочие webhook-записи, можно взять из них блок Authorization и использовать тот же подход.
 # Method в CMDBuild выбирайте POST. Он должен совпадать с HTTP-интерфейсом микросервиса: POST /webhooks/cmdbuild.
-# Dev URL сейчас обычно: http://192.168.202.100:5080/webhooks/cmdbuild. Для другого окружения замените URL.
+# Dev URL сейчас обычно: http://192.168.202.35:5080/webhooks/cmdbuild. Для другого окружения замените URL.
 # Content-Type вручную лучше не добавлять в headers CMDBuild: CMDBuild сам выставляет его для JSON body.
 #
 # Save validation: критичных предупреждений по IP/DNS -> Zabbix interface binding нет.
@@ -13,7 +13,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ApplicG / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -29,7 +29,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ApplicG / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -45,7 +45,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ApplicG / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -61,7 +61,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ApplicGE / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -77,7 +77,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ApplicGE / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -93,7 +93,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ApplicGE / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -109,7 +109,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ARM / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -125,7 +125,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ARM / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -141,7 +141,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / ARM / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -157,7 +157,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / DBGKM / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -173,7 +173,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / DBGKM / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -189,7 +189,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / DBGKM / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -205,7 +205,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / iiipad / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -221,7 +221,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / iiipad / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -237,7 +237,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / iiipad / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -253,7 +253,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / iiiphone / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -269,7 +269,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / iiiphone / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -285,7 +285,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / iiiphone / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -301,7 +301,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / Netman / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -317,7 +317,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / Netman / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -333,7 +333,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / Netman / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -349,7 +349,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / NGFW / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -365,7 +365,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / NGFW / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -381,7 +381,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / NGFW / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -397,7 +397,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / NTbook / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -413,7 +413,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / NTbook / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -429,7 +429,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / NTbook / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -445,7 +445,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / routerCore / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -461,7 +461,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / routerCore / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -477,7 +477,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / routerCore / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -493,7 +493,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / routerG / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -509,7 +509,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / routerG / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -525,7 +525,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / routerG / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -541,7 +541,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / Server / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -557,7 +557,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / Server / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -573,7 +573,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / Server / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -589,7 +589,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / serveri / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
 {
@@ -606,7 +606,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / serveri / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
 {
@@ -623,7 +623,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / serveri / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: hostname -> serveri.hostname. Payload stays flat; CMDBuild sends the numeric id/value in "hostname".
 {
@@ -640,7 +640,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / SFR / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -656,7 +656,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / SFR / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -672,7 +672,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / SFR / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -688,7 +688,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / STORAGEP / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -704,7 +704,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / STORAGEP / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -720,7 +720,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / STORAGEP / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -736,7 +736,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / tdwifi / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -752,7 +752,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / tdwifi / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -768,7 +768,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / tdwifi / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -784,7 +784,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / TKGK / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -800,7 +800,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / TKGK / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -816,7 +816,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / TKGK / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -832,7 +832,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / VMware / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -848,7 +848,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / VMware / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -864,7 +864,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / VMware / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -880,7 +880,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / VPN_HUB / create
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -896,7 +896,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / VPN_HUB / update
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -912,7 +912,7 @@
 ## ADD class attribute field tKGKIpaddressIpAddr / VPN_HUB / delete
 # Action: ADD or UPDATE CMDBuild webhook Body
 # Method: POST
-# URL: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL: http://192.168.202.35:5080/webhooks/cmdbuild
 # Headers: Authorization: Bearer XXXXX
 # Path metadata: no CMDB path fields for this class.
 {
@@ -942,4 +942,4 @@
 # - update: card_update_after
 # - delete: card_delete_after
 # Method у удаляемых записей: POST
-# URL у удаляемых записей: http://192.168.202.100:5080/webhooks/cmdbuild
+# URL у удаляемых записей: http://192.168.202.35:5080/webhooks/cmdbuild
