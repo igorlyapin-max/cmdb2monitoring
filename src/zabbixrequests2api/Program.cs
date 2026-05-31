@@ -1,6 +1,12 @@
 using Confluent.Kafka;
+using Cmdb2Monitoring.Http;
+using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
+using Cmdb2Monitoring.Metrics;
+using Cmdb2Monitoring.Security;
 using Cmdb2Monitoring.Secrets;
+using Cmdb2Monitoring.Transport;
+using Cmdb2Monitoring.Workers;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Configuration;
@@ -10,7 +16,26 @@ using ZabbixRequests2Api.Processing;
 using ZabbixRequests2Api.Zabbix;
 
 var builder = WebApplication.CreateBuilder(args);
+TransportConfigurator.UseConfiguredUrls(builder.WebHost, builder.Configuration, "http://localhost:5082");
 await builder.Configuration.ResolveSecretReferencesAsync("zabbixrequests2api");
+
+builder.Services.AddOptions<TransportOptions>()
+    .Bind(builder.Configuration.GetSection(TransportOptions.SectionName))
+    .Validate(options => options.HasValidMode(), "Transport mode must be Http or Https.")
+    .Validate(options => ProductionSecurityGuards.AllowsPlainHttp(builder.Environment, options), "Production transport requires Https unless Transport:AllowPlainHttp is true.")
+    .ValidateOnStart();
+
+builder.Services.AddOptions<HostSecurityOptions>()
+    .Bind(builder.Configuration.GetSection(HostSecurityOptions.SectionName))
+    .Validate(options => ProductionSecurityGuards.AllowsWildcardAllowedHosts(builder.Environment, builder.Configuration["AllowedHosts"], options.AllowWildcardAllowedHosts), "Production AllowedHosts='*' requires HostSecurity:AllowWildcardAllowedHosts=true.")
+    .ValidateOnStart();
+
+builder.Services.AddOptions<WorkerRuntimeOptions>()
+    .Bind(builder.Configuration.GetSection(WorkerRuntimeOptions.SectionName))
+    .Validate(options => options.HasValidReplicaMode(), "Worker replica mode must be SingleActive or ExternalState.")
+    .Validate(options => options.ExpectedReplicas > 0, "Worker expected replicas must be greater than zero.")
+    .Validate(options => options.AllowsConfiguredReplicaCount(), "Worker ReplicaMode=SingleActive allows only one expected replica unless Worker:AllowMultipleActiveReplicas=true.")
+    .ValidateOnStart();
 
 builder.Services.AddOptions<ServiceOptions>()
     .Bind(builder.Configuration.GetSection(ServiceOptions.SectionName))
@@ -26,6 +51,8 @@ builder.Services.AddOptions<KafkaOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.Input.ClientId), "Kafka input client id is required.")
     .Validate(options => options.Input.HasValidSecurityProtocol(), "Kafka input security protocol is invalid.")
     .Validate(options => options.Input.HasValidSaslMechanism(), "Kafka input SASL mechanism is invalid.")
+    .Validate(options => options.Input.HasValidSslEndpointIdentificationAlgorithm(), "Kafka input SSL endpoint identification algorithm is invalid.")
+    .Validate(options => ProductionSecurityGuards.AllowsKafkaProtocol(builder.Environment, options.Input.SecurityProtocol, options.Input.AllowPlaintextKafka), "Production Kafka input requires Ssl/SaslSsl unless AllowPlaintextKafka is true.")
     .Validate(options => options.Input.HasValidAutoOffsetReset(), "Kafka input auto offset reset is invalid.")
     .Validate(options => options.Input.PollTimeoutMs > 0, "Kafka input poll timeout must be greater than zero.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.BootstrapServers), "Kafka output bootstrap servers are required.")
@@ -33,6 +60,8 @@ builder.Services.AddOptions<KafkaOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.ClientId), "Kafka output client id is required.")
     .Validate(options => options.Output.HasValidSecurityProtocol(), "Kafka output security protocol is invalid.")
     .Validate(options => options.Output.HasValidSaslMechanism(), "Kafka output SASL mechanism is invalid.")
+    .Validate(options => options.Output.HasValidSslEndpointIdentificationAlgorithm(), "Kafka output SSL endpoint identification algorithm is invalid.")
+    .Validate(options => ProductionSecurityGuards.AllowsKafkaProtocol(builder.Environment, options.Output.SecurityProtocol, options.Output.AllowPlaintextKafka), "Production Kafka output requires Ssl/SaslSsl unless AllowPlaintextKafka is true.")
     .Validate(options => options.Output.HasValidAcks(), "Kafka output acks value is invalid.")
     .Validate(options => options.Output.MessageTimeoutMs > 0, "Kafka output message timeout must be greater than zero.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.SuccessHeaderName), "Kafka output success header name is required.")
@@ -43,6 +72,8 @@ builder.Services.AddOptions<KafkaOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.ClientId), "Kafka binding output client id is required.")
     .Validate(options => options.BindingOutput.HasValidSecurityProtocol(), "Kafka binding output security protocol is invalid.")
     .Validate(options => options.BindingOutput.HasValidSaslMechanism(), "Kafka binding output SASL mechanism is invalid.")
+    .Validate(options => options.BindingOutput.HasValidSslEndpointIdentificationAlgorithm(), "Kafka binding output SSL endpoint identification algorithm is invalid.")
+    .Validate(options => ProductionSecurityGuards.AllowsKafkaProtocol(builder.Environment, options.BindingOutput.SecurityProtocol, options.BindingOutput.AllowPlaintextKafka), "Production Kafka binding output requires Ssl/SaslSsl unless AllowPlaintextKafka is true.")
     .Validate(options => options.BindingOutput.HasValidAcks(), "Kafka binding output acks value is invalid.")
     .Validate(options => options.BindingOutput.MessageTimeoutMs > 0, "Kafka binding output message timeout must be greater than zero.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.BindingOutput.EventTypeHeaderName), "Kafka binding output event type header name is required.")
@@ -53,6 +84,8 @@ builder.Services.AddOptions<KafkaOptions>()
 builder.Services.AddOptions<ZabbixOptions>()
     .Bind(builder.Configuration.GetSection(ZabbixOptions.SectionName))
     .Validate(options => !string.IsNullOrWhiteSpace(options.ApiEndpoint), "Zabbix API endpoint is required.")
+    .Validate(options => ProductionSecurityGuards.AllowsHttpEndpoint(builder.Environment, options.ApiEndpoint, options.Tls.AllowInsecureHttp), "Production Zabbix ApiEndpoint requires https unless Zabbix:Tls:AllowInsecureHttp is true.")
+    .Validate(options => !builder.Environment.IsProduction() || options.Tls.RejectUnauthorized, "Production Zabbix TLS must reject unauthorized certificates.")
     .Validate(options => options.HasValidAuthMode(), "Zabbix auth mode is invalid.")
     .Validate(options => options.RequestTimeoutMs > 0, "Zabbix request timeout must be greater than zero.")
     .Validate(options => options.HostGroupCacheTtlSeconds >= 0, "Zabbix host group cache TTL cannot be negative.")
@@ -70,6 +103,11 @@ builder.Services.AddOptions<ProcessingOptions>()
 builder.Services.AddOptions<ProcessingStateOptions>()
     .Bind(builder.Configuration.GetSection(ProcessingStateOptions.SectionName))
     .Validate(options => !string.IsNullOrWhiteSpace(options.FilePath), "Processing state file path is required.")
+    .ValidateOnStart();
+
+builder.Services.AddOptions<KafkaDeadLetterOptions>()
+    .Bind(builder.Configuration.GetSection(KafkaDeadLetterOptions.SectionName))
+    .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.Topic), "DeadLetter topic is required when DeadLetter is enabled.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ElkLoggingOptions>()
@@ -107,14 +145,21 @@ builder.Services.AddHttpClient<ZabbixClient>((services, client) =>
 {
     var options = services.GetRequiredService<IOptions<ZabbixOptions>>().Value;
     client.Timeout = TimeSpan.FromMilliseconds(options.RequestTimeoutMs);
-});
+})
+    .ConfigurePrimaryHttpMessageHandler(services =>
+    {
+        var options = services.GetRequiredService<IOptions<ZabbixOptions>>().Value;
+        return HttpClientTlsConfigurator.CreateHandler(options.Tls);
+    });
 builder.Services.AddSingleton<IZabbixClient>(services => services.GetRequiredService<ZabbixClient>());
 builder.Services.AddSingleton<ZabbixRequestReader>();
 builder.Services.AddSingleton<ZabbixRequestValidator>();
 builder.Services.AddSingleton<ZabbixDynamicHostGroupResolver>();
 builder.Services.AddSingleton<IZabbixResponsePublisher, ZabbixResponsePublisher>();
 builder.Services.AddSingleton<IZabbixBindingEventPublisher, ZabbixBindingEventPublisher>();
+builder.Services.AddSingleton<IKafkaDeadLetterPublisher, KafkaDeadLetterPublisher>();
 builder.Services.AddSingleton<IProcessingStateStore, FileProcessingStateStore>();
+builder.Services.AddSingleton<IServiceMetrics, ServiceMetrics>();
 builder.Services.AddHostedService<KafkaZabbixRequestWorker>();
 
 var app = builder.Build();
@@ -126,10 +171,6 @@ app.Logger.LogBasic(
     serviceOptions.Name,
     debugLoggingOptions.Value.Level);
 
-app.MapGet(serviceOptions.HealthRoute, () => Results.Ok(new
-{
-    service = serviceOptions.Name,
-    status = "ok"
-}));
+app.MapServiceRuntimeEndpoints(serviceOptions.Name, serviceOptions.HealthRoute);
 
 app.Run();

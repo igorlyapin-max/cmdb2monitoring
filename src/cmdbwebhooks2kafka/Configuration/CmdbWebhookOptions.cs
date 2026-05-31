@@ -12,6 +12,8 @@ public sealed class CmdbWebhookOptions
 
     public string BearerToken { get; init; } = string.Empty;
 
+    public bool AllowDisabledAuthorizationInProduction { get; init; }
+
     public string Source { get; init; } = string.Empty;
 
     public string UnknownEventType { get; init; } = string.Empty;
@@ -24,6 +26,8 @@ public sealed class CmdbWebhookOptions
 
     public string[] SearchContainers { get; init; } = [];
 
+    public WebhookRateLimitOptions RateLimit { get; init; } = new();
+
     public bool RequiresBearerToken()
     {
         return string.Equals(AuthorizationMode, "Static", StringComparison.OrdinalIgnoreCase);
@@ -33,5 +37,19 @@ public sealed class CmdbWebhookOptions
     {
         return string.Equals(AuthorizationMode, "Static", StringComparison.OrdinalIgnoreCase)
             || string.Equals(AuthorizationMode, "Disabled", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public sealed class WebhookRateLimitOptions
+{
+    public bool Enabled { get; init; } = true;
+
+    public int PermitLimit { get; init; } = 600;
+
+    public int WindowSeconds { get; init; } = 60;
+
+    public bool HasValidValues()
+    {
+        return PermitLimit > 0 && WindowSeconds > 0;
     }
 }

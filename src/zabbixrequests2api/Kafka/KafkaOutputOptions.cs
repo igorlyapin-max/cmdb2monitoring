@@ -31,6 +31,7 @@ public sealed class KafkaOutputOptions : KafkaClientOptions
         };
 
         ApplySaslConfig(config);
+        ApplySslConfig(config);
 
         return config;
     }

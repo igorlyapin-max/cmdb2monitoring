@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/monitoring-ui-api/package-lock.json
+
+      - name: Install .NET SDK
+        run: |
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --jsonfile global.json --install-dir .dotnet
+
+      - name: Install UI dependencies
+        run: npm ci --prefix src/monitoring-ui-api
+
+      - name: Validate Node syntax and config
+        run: |
+          node --check src/monitoring-ui-api/server.mjs
+          node --check src/monitoring-ui-api/public/app.js
+          node src/monitoring-ui-api/scripts/validate-config.mjs
+
+      - name: Build .NET services
+        run: |
+          ./scripts/dotnet build src/cmdbwebhooks2kafka/cmdbwebhooks2kafka.csproj -v minimal
+          ./scripts/dotnet build src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj -v minimal
+          ./scripts/dotnet build src/zabbixrequests2api/zabbixrequests2api.csproj -v minimal
+          ./scripts/dotnet build src/zabbixbindings2cmdbuild/zabbixbindings2cmdbuild.csproj -v minimal
+          ./scripts/dotnet build tests/configvalidation/configvalidation.csproj -v minimal
+
+      - name: Run repository validation
+        run: ./scripts/test-configs.sh
+
+      - name: Check whitespace
+        run: git diff --check
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

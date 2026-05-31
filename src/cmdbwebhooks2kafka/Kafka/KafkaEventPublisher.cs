@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
 using CmdbWebhooks2Kafka.Models;
 using Confluent.Kafka;
@@ -34,7 +35,8 @@ public sealed class KafkaEventPublisher(
             Headers = new Headers
             {
                 { options.Value.SourceHeaderName, Encoding.UTF8.GetBytes(envelope.Source) },
-                { options.Value.EventTypeHeaderName, Encoding.UTF8.GetBytes(envelope.EventType) }
+                { options.Value.EventTypeHeaderName, Encoding.UTF8.GetBytes(envelope.EventType) },
+                { KafkaCorrelation.HeaderName, Encoding.UTF8.GetBytes(envelope.CorrelationId) }
             }
         }, cancellationToken);
 

@@ -18,6 +18,8 @@ public sealed class ZabbixRequestDocument
 
     public string? RequestId { get; init; }
 
+    public string? CorrelationId { get; set; }
+
     public string? EntityId { get; init; }
 
     public string? Host { get; init; }

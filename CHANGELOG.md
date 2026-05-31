@@ -4,12 +4,16 @@
 
 ### Added
 
+- Added configurable HTTP/HTTPS transport settings for all services, Kafka SSL fields, UI Redis session storage option, CSRF protection, webhook rate limiting, and non-root container runtime defaults.
+- Added Kafka `correlationId` propagation, DLQ topics for webhook conversion and Zabbix request application, `/ready` and `/metrics` runtime endpoints, single-active worker config guards, Docker `HEALTHCHECK`, and a CI workflow with build/config/secret-scan gates.
 - CMDBuild Catalog now has an editor/admin bulk lookup-change action: select a class and writable lookup attribute, confirm, and the UI sends per-card PUT updates that rotate each card to the next active lookup value.
 - Dashboard now shows live conversion and Zabbix apply queue thermometers, refreshed every 5-10 seconds from Kafka topic high watermarks and processing state files.
 - Added `scripts/perf-baseline.mjs`, a read-only CMDBuild/Zabbix latency baseline report for comparing stands and validating optimization work.
 
 ### Changed
 
+- Production startup validation now rejects plain HTTP, plaintext Kafka, weak webhook tokens, and insecure TLS settings unless an explicit insecure override is configured.
+- UI local bootstrap no longer creates known `viewer`/`editor`/`admin` passwords; a one-time admin password is generated when the users file is created.
 - `zabbixrequests2api` now reuses one singleton Zabbix client, caches positive host group/template validation lookups with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.
 - `cmdbkafka2zabbix` now uses a precise CMDBuild filter for additional-profile `ZabbixHostBinding` lookup, caches CMDBuild lookup values with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.
 - `zabbixbindings2cmdbuild` now uses a precise CMDBuild filter for binding-card lookup and logs parse/apply/writeback stage durations in `DebugLogging:Basic`.

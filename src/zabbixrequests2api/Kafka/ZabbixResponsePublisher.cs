@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
@@ -24,7 +25,7 @@ public sealed class ZabbixResponsePublisher(
         {
             Key = result.EntityId ?? result.Host ?? result.Method,
             Value = payload,
-            Headers = BuildHeaders(result, outputOptions)
+            Headers = BuildHeaders(result, outputOptions, input)
         };
         logger.LogVerbose(
             debugLoggingOptions,
@@ -60,6 +61,7 @@ public sealed class ZabbixResponsePublisher(
         var payload = new JsonObject
         {
             ["source"] = "zabbixrequests2api",
+            ["correlationId"] = result.CorrelationId ?? KafkaCorrelation.Read(input.Message.Headers),
             ["success"] = result.Success,
             ["method"] = result.Method,
             ["entityId"] = result.EntityId,
@@ -100,12 +102,16 @@ public sealed class ZabbixResponsePublisher(
         return payload.ToJsonString();
     }
 
-    private static Headers BuildHeaders(ZabbixProcessingResult result, KafkaOutputOptions options)
+    private static Headers BuildHeaders(
+        ZabbixProcessingResult result,
+        KafkaOutputOptions options,
+        ConsumeResult<string, string> input)
     {
         var headers = new Headers();
         AddHeader(headers, options.SuccessHeaderName, result.Success ? "true" : "false");
         AddHeader(headers, options.MethodHeaderName, result.Method);
         AddHeader(headers, options.ErrorCodeHeaderName, result.ErrorCode ?? string.Empty);
+        KafkaCorrelation.Add(headers, result.CorrelationId ?? KafkaCorrelation.Read(input.Message.Headers));
         return headers;
     }
 

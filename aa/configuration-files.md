@@ -97,13 +97,15 @@ SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles
 | --- | --- | --- |
 | `Service:Name` | Имя сервиса в health/logs | При смене окружения или имени deployment |
 | `Service:HealthRoute` | Health endpoint | Если меняется route healthcheck |
+| `Transport:Mode`, `Transport:Certificate:*` | HTTP/HTTPS listener и certificate paths | При включении TLS на actor-е |
+| `HostSecurity:AllowWildcardAllowedHosts` | Явный override для `AllowedHosts="*"` в production | Только если wildcard host filter осознанно принят |
 | `CmdbWebhook:Route` | Endpoint приема webhook | Если CMDBuild должен вызывать другой путь |
 | `CmdbWebhook:AuthorizationMode`, `CmdbWebhook:BearerToken` | Проверка `Authorization: Bearer ...` от CMDBuild | В production задавать token через env/secret storage |
 | `CmdbWebhook:EventTypeFields` | Поля поиска event type | Если CMDBuild меняет body webhook |
 | `CmdbWebhook:EntityTypeFields` | Поля поиска класса/типа объекта | Если меняется payload |
 | `CmdbWebhook:EntityIdFields` | Приоритет выбора id | Если меняется источник идентификатора |
 | `Kafka:Topic` | Output topic нормализованных событий | При смене Kafka namespace/окружения |
-| `Kafka:SecurityProtocol` | Plaintext/SASL/TLS режим | При включении авторизации Kafka |
+| `Kafka:SecurityProtocol`, `Kafka:Ssl*` | Plaintext/SASL/TLS режим и Kafka certificates | При включении авторизации/TLS Kafka |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK или смене log topic |
 
 Dev запуск:
@@ -115,9 +117,14 @@ Dev запуск:
 
 ```bash
 ASPNETCORE_URLS=http://0.0.0.0:5080
+Transport__Mode=Https
+Transport__Certificate__Path=/certs/cmdbwebhooks2kafka.pfx
+Transport__Certificate__Password=<secret>
 CmdbWebhook__BearerToken=<secret>
 Kafka__BootstrapServers=kafka:29092
 Kafka__Topic=cmdbuild.webhooks
+Kafka__SecurityProtocol=SaslSsl
+Kafka__SslCaLocation=/certs/kafka-ca.pem
 ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 ```
 
@@ -139,6 +146,7 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 | `Kafka:Input:GroupId` | Consumer group | Менять при отдельном независимом потребителе |
 | `Kafka:Output:Topic` | Output topic Zabbix JSON-RPC | Должен совпадать с input третьего сервиса |
 | `Kafka:Output:ProfileHeaderName` | Kafka header с именем host profile | Менять только если downstream consumer ожидает другой header |
+| `DeadLetter:Topic` | DLQ для rejected `cmdbuild.webhooks.*` messages | При смене Kafka namespace/окружения |
 | `ConversionRules:RepositoryPath` | Git working copy rules | Если rules вынесены в отдельный repo |
 | `ConversionRules:ReadFromGit` | Разрешает git-команды для rules working copy | Включать только если rules действительно читаются из локальной git working copy |
 | `ConversionRules:RepositoryUrl` | URL git repository, например `https://git.example.org/cmdb2monitoring/conversion-rules.git` | Для фиксации источника rules в настройках/логах; внутри repository ожидается файл по `ConversionRules:RulesFilePath` |
@@ -155,6 +163,7 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 | `Cmdbuild:BindingClassName` | Служебный класс связей дополнительных профилей, default `ZabbixHostBinding` | Если audit model использует другое имя |
 | `Cmdbuild:BindingLookupLimit` | Лимит чтения карточек binding-класса при поиске дополнительного профиля | При большом количестве дополнительных профилей |
 | `ProcessingState:FilePath` | State-файл offset/объекта | Для отдельного окружения или volume |
+| `Worker:ReplicaMode`, `Worker:ExpectedReplicas` | Single-active policy для consumer/state worker-а | При переходе на внешний state/lock дизайн |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK |
 
 Rules-файл `rules/cmdbuild-to-zabbix-host-create.json` управляет:
@@ -207,6 +216,7 @@ Cmdbuild__BindingClassName=ZabbixHostBinding
 | `Kafka:Input:Topic` | Входной topic JSON-RPC requests | Должен совпадать с output второго сервиса |
 | `Kafka:Output:Topic` | Response topic | При смене схемы топиков |
 | `Kafka:BindingOutput:Topic` | Topic событий `CMDBuild card/profile -> Zabbix hostid` | Должен совпадать с input `zabbixbindings2cmdbuild` |
+| `DeadLetter:Topic` | DLQ для malformed/failed `zabbix.host.requests.*` messages | При смене Kafka namespace/окружения |
 | `Zabbix:ApiEndpoint` | Zabbix JSON-RPC URL | Для каждого окружения |
 | `Zabbix:AuthMode` | `None`, `Token`, `Login`, `LoginOrToken` | По способу авторизации Zabbix |
 | `Zabbix:ApiToken` | API token | Для token auth, задавать через secret/env |
@@ -217,6 +227,7 @@ Cmdbuild__BindingClassName=ZabbixHostBinding
 | `Processing:DelayBetweenObjectsMs` | Gentle delay между объектами | Увеличивать при нагрузке на Zabbix |
 | `Processing:MaxRetryAttempts` | Retry попытки | При нестабильном Zabbix/API |
 | `ProcessingState:FilePath` | State-файл | Для отдельного окружения или volume |
+| `Worker:ReplicaMode`, `Worker:ExpectedReplicas` | Single-active policy для consumer/state worker-а | При переходе на внешний state/lock дизайн |
 
 Пример prod overrides:
 
@@ -251,6 +262,7 @@ State-файл `zabbixrequests2api` также используется для �
 | `Cmdbuild:BindingClassName` | Класс связей дополнительных профилей, default `ZabbixHostBinding` | Если audit model создан с другим именем |
 | `Cmdbuild:BindingLookupLimit` | Лимит поиска существующих binding-карточек | При большом количестве дополнительных профилей |
 | `ProcessingState:FilePath` | State-файл offset/binding event | Для отдельного окружения или volume |
+| `Worker:ReplicaMode`, `Worker:ExpectedReplicas` | Single-active policy для consumer/state worker-а | При переходе на внешний state/lock дизайн |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK |
 
 Пример prod overrides:

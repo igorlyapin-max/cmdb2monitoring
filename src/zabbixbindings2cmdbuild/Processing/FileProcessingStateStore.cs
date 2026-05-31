@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cmdb2Monitoring.State;
 using Microsoft.Extensions.Options;
 
 namespace ZabbixBindings2Cmdbuild.Processing;
@@ -15,17 +16,20 @@ public sealed class FileProcessingStateStore(
     public async Task<ProcessingStateDocument?> ReadAsync(CancellationToken cancellationToken)
     {
         var path = options.Value.FilePath;
-        if (!File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path))
         {
             return null;
         }
 
         try
         {
-            await using var stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<ProcessingStateDocument>(stream, JsonOptions, cancellationToken);
+            return await SafeStateFileStore.ReadAsync<ProcessingStateDocument>(
+                path,
+                options.Value.BaseDirectory,
+                JsonOptions,
+                cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
         {
             logger.LogWarning(ex, "Could not read processing state from {StatePath}", path);
             return null;
@@ -34,14 +38,6 @@ public sealed class FileProcessingStateStore(
 
     public async Task WriteAsync(ProcessingStateDocument state, CancellationToken cancellationToken)
     {
-        var path = options.Value.FilePath;
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        await using var stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+        await SafeStateFileStore.WriteAsync(options.Value.FilePath, options.Value.BaseDirectory, state, JsonOptions, cancellationToken);
     }
 }

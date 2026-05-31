@@ -17,10 +17,14 @@ for (const relativePath of ['config/appsettings.json', 'config/appsettings.Devel
 const config = JSON.parse(readFileSync(join(serviceRoot, 'config/appsettings.json'), 'utf8'));
 required(config, 'Service.Name');
 required(config, 'Service.HealthRoute');
+required(config, 'Transport.Mode');
 required(config, 'Secrets.Provider');
 required(config, 'UiSettings.FilePath');
 required(config, 'Auth.UsersFilePath');
 required(config, 'Auth.SessionCookieName');
+required(config, 'Auth.SessionTimeoutMinutes');
+required(config, 'Auth.SessionAbsoluteLifetimeMinutes');
+required(config, 'Auth.SessionStore.Mode');
 required(config, 'Auth.MaxSamlPostBytes');
 required(config, 'Idp.Provider');
 required(config, 'Idp.SpEntityId');
@@ -61,6 +65,32 @@ if (!existsSync(join(repoRoot, config.Rules.RulesFilePath))) {
 
 if (typeof config.Rules.ReadFromGit !== 'boolean') {
   errors.push('Rules.ReadFromGit must be boolean.');
+}
+
+if (!['Http', 'Https'].includes(config.Transport?.Mode)) {
+  errors.push(`Transport.Mode has unsupported value: ${config.Transport?.Mode}`);
+}
+
+if (config.Transport?.Mode === 'Https') {
+  required(config, 'Transport.Certificate.Path');
+  required(config, 'Transport.Certificate.KeyPath');
+}
+
+if (!intInRange(config.Auth?.SessionTimeoutMinutes, 1, 480)) {
+  errors.push('Auth.SessionTimeoutMinutes must be an integer from 1 to 480.');
+}
+
+if (!intInRange(config.Auth?.SessionAbsoluteLifetimeMinutes, 1, 1440)) {
+  errors.push('Auth.SessionAbsoluteLifetimeMinutes must be an integer from 1 to 1440.');
+}
+
+if (!['Memory', 'Redis'].includes(config.Auth?.SessionStore?.Mode)) {
+  errors.push(`Auth.SessionStore.Mode has unsupported value: ${config.Auth?.SessionStore?.Mode}`);
+}
+
+if (config.Auth?.SessionStore?.Mode === 'Redis') {
+  required(config, 'Auth.SessionStore.Redis.Url');
+  required(config, 'Auth.SessionEncryptionKey');
 }
 
 const secretsProvider = String(config.Secrets?.Provider ?? '').toLowerCase();
@@ -105,7 +135,7 @@ for (const pipeline of config.QueueMonitor?.Pipelines ?? []) {
   }
 }
 
-for (const expectedTopic of ['zabbix.host.bindings', 'zabbixbindings2cmdbuild.logs']) {
+for (const expectedTopic of ['zabbix.host.bindings', 'cmdbuild.webhooks.dlq', 'zabbix.host.requests.dlq', 'zabbixbindings2cmdbuild.logs']) {
   if (!config.EventBrowser.Topics.some(topic => topic?.Name === expectedTopic)) {
     errors.push(`EventBrowser.Topics must include ${expectedTopic}.`);
   }

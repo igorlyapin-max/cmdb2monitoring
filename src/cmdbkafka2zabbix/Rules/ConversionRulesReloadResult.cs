@@ -6,5 +6,7 @@ public sealed record ConversionRulesReloadResult(
     string RulesVersion,
     string Location,
     string? Version,
+    string RepositoryPath,
+    string RepositoryUrl,
     bool StorageRefreshed,
     DateTimeOffset ReloadedAt);

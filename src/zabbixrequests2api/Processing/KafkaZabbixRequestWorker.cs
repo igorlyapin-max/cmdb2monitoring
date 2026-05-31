@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
+using Cmdb2Monitoring.Metrics;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Kafka;
@@ -17,7 +19,9 @@ public sealed class KafkaZabbixRequestWorker(
     IZabbixClient zabbixClient,
     IZabbixResponsePublisher responsePublisher,
     IZabbixBindingEventPublisher bindingEventPublisher,
+    IKafkaDeadLetterPublisher deadLetterPublisher,
     IProcessingStateStore stateStore,
+    IServiceMetrics metrics,
     IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaZabbixRequestWorker> logger) : BackgroundService
 {
@@ -61,55 +65,60 @@ public sealed class KafkaZabbixRequestWorker(
             inputOptions.Topic,
             inputOptions.GroupId);
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            ConsumeResult<string, string>? consumed = null;
-
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                consumed = consumer.Consume(TimeSpan.FromMilliseconds(inputOptions.PollTimeoutMs));
-                if (consumed is null)
+                ConsumeResult<string, string>? consumed = null;
+
+                try
                 {
-                    continue;
+                    consumed = consumer.Consume(TimeSpan.FromMilliseconds(inputOptions.PollTimeoutMs));
+                    if (consumed is null)
+                    {
+                        continue;
+                    }
+
+                    logger.LogBasic(
+                        debugLoggingOptions,
+                        "Consumed Zabbix request from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
+                        consumed.Topic,
+                        consumed.Partition.Value,
+                        consumed.Offset.Value,
+                        consumed.Message.Key ?? "<empty>");
+                    logger.LogVerbose(
+                        debugLoggingOptions,
+                        "Consumed Zabbix request payload {KafkaPayload}",
+                        consumed.Message.Value);
+
+                    await ProcessMessageAsync(consumed, consumer, stoppingToken);
+                    await DelayBeforeNextObjectAsync(stoppingToken);
                 }
+                catch (ConsumeException ex)
+                {
+                    logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(
+                        ex,
+                        "Failed to process Kafka message from {Topic}[{Partition}]@{Offset}; message will be retried after restart or next poll",
+                        consumed?.Topic ?? "<unknown>",
+                        consumed?.Partition.Value,
+                        consumed?.Offset.Value);
 
-                logger.LogBasic(
-                    debugLoggingOptions,
-                    "Consumed Zabbix request from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
-                    consumed.Topic,
-                    consumed.Partition.Value,
-                    consumed.Offset.Value,
-                    consumed.Message.Key ?? "<empty>");
-                logger.LogVerbose(
-                    debugLoggingOptions,
-                    "Consumed Zabbix request payload {KafkaPayload}",
-                    consumed.Message.Value);
-
-                await ProcessMessageAsync(consumed, consumer, stoppingToken);
-                await DelayBeforeNextObjectAsync(stoppingToken);
-            }
-            catch (ConsumeException ex)
-            {
-                logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(
-                    ex,
-                    "Failed to process Kafka message from {Topic}[{Partition}]@{Offset}; message will be retried after restart or next poll",
-                    consumed?.Topic ?? "<unknown>",
-                    consumed?.Partition.Value,
-                    consumed?.Offset.Value);
-
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                }
             }
         }
-
-        consumer.Close();
+        finally
+        {
+            consumer.Close();
+        }
     }
 
     private static List<TopicPartitionOffset> BuildPartitionAssignments(
@@ -152,18 +161,21 @@ public sealed class KafkaZabbixRequestWorker(
 
         ZabbixRequestDocument? request = null;
         ZabbixProcessingResult result;
+        var correlationId = KafkaCorrelation.Ensure(consumed.Message.Headers);
 
         try
         {
             request = requestReader.Read(consumed.Message.Key, consumed.Message.Value);
+            request.CorrelationId ??= correlationId;
             parseMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogBasic(
                 debugLoggingOptions,
-                "Parsed Zabbix request {Method} for entity {EntityId}, profile {HostProfileName}, host {Host}",
+                "Parsed Zabbix request {Method} for entity {EntityId}, profile {HostProfileName}, host {Host}, correlation {CorrelationId}",
                 request.Method,
                 request.EntityId ?? "<unknown>",
                 request.HostProfileName ?? "<default>",
-                request.Host ?? "<unknown>");
+                request.Host ?? "<unknown>",
+                correlationId);
         }
         catch (JsonException ex)
         {
@@ -181,7 +193,19 @@ public sealed class KafkaZabbixRequestWorker(
                 errorMessage: ex.Message,
                 missingHostGroups: [],
                 missingTemplates: [],
-                missingTemplateGroups: []);
+                missingTemplateGroups: []) with
+            {
+                CorrelationId = correlationId
+            };
+            await PublishDeadLetterAsync(
+                consumed,
+                "invalid_json",
+                ex.Message,
+                correlationId,
+                rulesVersion: null,
+                ex,
+                cancellationToken);
+            metrics.Increment("dead_letter_published");
 
             stageStopwatch.Restart();
             await PublishStateAndCommitAsync(consumed, consumer, result, cancellationToken);
@@ -198,6 +222,10 @@ public sealed class KafkaZabbixRequestWorker(
 
         stageStopwatch.Restart();
         result = await ProcessRequestWithRetryAsync(request, cancellationToken);
+        if (string.IsNullOrWhiteSpace(result.CorrelationId))
+        {
+            result = result with { CorrelationId = request.CorrelationId ?? correlationId };
+        }
         processMs = stageStopwatch.ElapsedMilliseconds;
         logger.LogBasic(
             debugLoggingOptions,
@@ -214,6 +242,18 @@ public sealed class KafkaZabbixRequestWorker(
             result.EntityId ?? "<unknown>",
             result.ZabbixResponseJson ?? "<empty>");
         stageStopwatch.Restart();
+        if (!result.Success && string.Equals(result.ErrorCode, "zabbix_api_error", StringComparison.OrdinalIgnoreCase))
+        {
+            await PublishDeadLetterAsync(
+                consumed,
+                "zabbix_api_error",
+                result.ErrorMessage ?? "Zabbix API request failed after retry attempts.",
+                result.CorrelationId ?? correlationId,
+                result.RulesVersion,
+                exception: null,
+                cancellationToken);
+            metrics.Increment("dead_letter_published");
+        }
         await PublishStateAndCommitAsync(consumed, consumer, result, cancellationToken);
         publishCommitMs = stageStopwatch.ElapsedMilliseconds;
         LogStageDurations(
@@ -253,6 +293,42 @@ public sealed class KafkaZabbixRequestWorker(
             parseMs,
             processMs,
             publishCommitMs);
+    }
+
+    private async Task PublishDeadLetterAsync(
+        ConsumeResult<string, string> consumed,
+        string errorCode,
+        string errorMessage,
+        string correlationId,
+        string? rulesVersion,
+        Exception? exception,
+        CancellationToken cancellationToken)
+    {
+        var delivery = await deadLetterPublisher.PublishAsync(new KafkaDeadLetterMessage(
+            Service: "zabbixrequests2api",
+            ErrorCode: errorCode,
+            ErrorMessage: errorMessage,
+            CorrelationId: correlationId,
+            InputTopic: consumed.Topic,
+            InputPartition: consumed.Partition.Value,
+            InputOffset: consumed.Offset.Value,
+            InputKey: consumed.Message.Key,
+            OriginalPayload: consumed.Message.Value,
+            RulesVersion: rulesVersion,
+            ExceptionType: exception?.GetType().FullName,
+            OccurredAt: DateTimeOffset.UtcNow), cancellationToken);
+
+        if (delivery is not null)
+        {
+            logger.LogWarning(
+                "Published dead-letter message for {InputTopic}[{Partition}]@{Offset} to {DeadLetterTopic}[{DeadLetterPartition}]@{DeadLetterOffset}",
+                consumed.Topic,
+                consumed.Partition.Value,
+                consumed.Offset.Value,
+                delivery.Topic,
+                delivery.Partition.Value,
+                delivery.Offset.Value);
+        }
     }
 
     private async Task<ZabbixProcessingResult> ProcessRequestWithRetryAsync(
@@ -1677,6 +1753,7 @@ public sealed class KafkaZabbixRequestWorker(
             ProcessedAt: result.ProcessedAt), cancellationToken);
 
         consumer.Commit(consumed);
+        metrics.Increment(result.Success ? "zabbix_request_success" : "zabbix_request_failed");
     }
 
     private async Task DelayBeforeNextObjectAsync(CancellationToken cancellationToken)

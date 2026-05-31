@@ -8,16 +8,21 @@ public sealed record CmdbWebhookEnvelope(
     string EventType,
     string? EntityType,
     string? EntityId,
+    string CorrelationId,
     DateTimeOffset ReceivedAt,
     JsonElement Payload)
 {
-    public static CmdbWebhookEnvelope FromPayload(JsonElement payload, CmdbWebhookOptions options)
+    public static CmdbWebhookEnvelope FromPayload(
+        JsonElement payload,
+        CmdbWebhookOptions options,
+        string correlationId)
     {
         return new CmdbWebhookEnvelope(
             Source: options.Source,
             EventType: ReadString(payload, options.EventTypeFields, options.SearchContainers) ?? options.UnknownEventType,
             EntityType: ReadString(payload, options.EntityTypeFields, options.SearchContainers),
             EntityId: ReadString(payload, options.EntityIdFields, options.SearchContainers),
+            CorrelationId: correlationId,
             ReceivedAt: DateTimeOffset.UtcNow,
             Payload: payload.Clone());
     }

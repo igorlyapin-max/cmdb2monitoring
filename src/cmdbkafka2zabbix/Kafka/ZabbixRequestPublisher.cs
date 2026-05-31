@@ -1,4 +1,7 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
 using CmdbKafka2Zabbix.Conversion;
 using Confluent.Kafka;
@@ -14,6 +17,7 @@ public sealed class ZabbixRequestPublisher(
 {
     public async Task<DeliveryResult<string, string>> PublishAsync(
         ZabbixConversionResult result,
+        string correlationId,
         CancellationToken cancellationToken)
     {
         if (!result.ShouldPublish || string.IsNullOrWhiteSpace(result.Value))
@@ -31,11 +35,12 @@ public sealed class ZabbixRequestPublisher(
             result.Method,
             result.ProfileName ?? "<default>",
             result.Value);
+        var payload = EnrichCorrelationMetadata(result.Value, correlationId);
         var deliveryResult = await producer.ProduceAsync(outputOptions.Topic, new Message<string, string>
         {
             Key = key,
-            Value = result.Value,
-            Headers = BuildHeaders(result, outputOptions)
+            Value = payload,
+            Headers = BuildHeaders(result, outputOptions, correlationId)
         }, cancellationToken);
 
         logger.LogInformation(
@@ -58,7 +63,7 @@ public sealed class ZabbixRequestPublisher(
         return deliveryResult;
     }
 
-    private static Headers BuildHeaders(ZabbixConversionResult result, KafkaOutputOptions options)
+    private static Headers BuildHeaders(ZabbixConversionResult result, KafkaOutputOptions options, string correlationId)
     {
         var headers = new Headers
         {
@@ -66,6 +71,7 @@ public sealed class ZabbixRequestPublisher(
             { options.EventTypeHeaderName, Encoding.UTF8.GetBytes(result.EventType) },
             { options.EntityIdHeaderName, Encoding.UTF8.GetBytes(result.EntityId ?? string.Empty) }
         };
+        KafkaCorrelation.Add(headers, correlationId);
 
         if (!string.IsNullOrWhiteSpace(options.ProfileHeaderName))
         {
@@ -73,5 +79,19 @@ public sealed class ZabbixRequestPublisher(
         }
 
         return headers;
+    }
+
+    private static string EnrichCorrelationMetadata(string requestJson, string correlationId)
+    {
+        var root = JsonNode.Parse(requestJson) as JsonObject
+            ?? throw new JsonException("Rendered Zabbix request must be a JSON object.");
+        if (root["cmdb2monitoring"] is not JsonObject metadata)
+        {
+            metadata = new JsonObject();
+            root["cmdb2monitoring"] = metadata;
+        }
+
+        metadata["correlationId"] = KafkaCorrelation.Ensure(correlationId);
+        return root.ToJsonString();
     }
 }

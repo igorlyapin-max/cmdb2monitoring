@@ -151,6 +151,7 @@ static void ValidateServiceConfig(
     RequireNonEmpty(config, "Service:Name", context, errors);
     RequireRoute(config, "Service:HealthRoute", context, errors);
     ValidateSecrets(config, context, errors);
+    ValidateHostSecurity(config, context, errors);
     ValidateElkLogging(config, context, errors);
 
     switch (service.Kind)
@@ -170,9 +171,11 @@ static void ValidateServiceConfig(
             ValidateKafkaClient(config, "Kafka:Output", context, errors, requireGroup: false);
             ValidateTopicSuffix(config, "Kafka:Input:Topic", environment, context, errors);
             ValidateTopicSuffix(config, "Kafka:Output:Topic", environment, context, errors);
+            ValidateDeadLetter(config, "DeadLetter", environment, context, errors);
             ValidateConversionRules(config, service, repositoryRoot, context, errors);
             ValidateCmdbuildResolver(config, context, errors);
             ValidateProcessingState(config, context, errors);
+            ValidateWorker(config, context, errors);
             break;
         case ServiceKind.ZabbixApi:
             ValidateKafkaClient(config, "Kafka:Input", context, errors, requireGroup: true);
@@ -181,15 +184,18 @@ static void ValidateServiceConfig(
             ValidateTopicSuffix(config, "Kafka:Input:Topic", environment, context, errors);
             ValidateTopicSuffix(config, "Kafka:Output:Topic", environment, context, errors);
             ValidateTopicSuffix(config, "Kafka:BindingOutput:Topic", environment, context, errors);
+            ValidateDeadLetter(config, "DeadLetter", environment, context, errors);
             ValidateZabbix(config, context, errors, warnings);
             ValidateProcessing(config, context, errors);
             ValidateProcessingState(config, context, errors);
+            ValidateWorker(config, context, errors);
             break;
         case ServiceKind.BindingWriter:
             ValidateKafkaClient(config, "Kafka:Input", context, errors, requireGroup: true);
             ValidateTopicSuffix(config, "Kafka:Input:Topic", environment, context, errors);
             ValidateCmdbuildBinding(config, context, errors);
             ValidateProcessingState(config, context, errors);
+            ValidateWorker(config, context, errors);
             break;
     }
 }
@@ -274,6 +280,14 @@ static void ValidateSecrets(JsonObject config, string context, List<string> erro
     }
 }
 
+static void ValidateHostSecurity(JsonObject config, string context, List<string> errors)
+{
+    if (GetBool(config, "HostSecurity:AllowWildcardAllowedHosts") is null)
+    {
+        errors.Add($"{context} HostSecurity:AllowWildcardAllowedHosts must be configured as a boolean switch.");
+    }
+}
+
 static void ValidateConversionRules(
     JsonObject config,
     ServiceDefinition service,
@@ -288,6 +302,11 @@ static void ValidateConversionRules(
     if (GetBool(config, "ConversionRules:ReadFromGit") is null)
     {
         errors.Add($"{context} ConversionRules:ReadFromGit must be configured as a boolean switch.");
+    }
+
+    if (GetBool(config, "ConversionRules:RequireTrustedArtifactInProduction") is null)
+    {
+        errors.Add($"{context} ConversionRules:RequireTrustedArtifactInProduction must be configured as a boolean switch.");
     }
 
     var serviceDirectory = Path.Combine(repositoryRoot, service.RelativePath);
@@ -365,6 +384,51 @@ static void ValidateProcessingState(JsonObject config, string context, List<stri
     if (!filePath.StartsWith("state/", StringComparison.OrdinalIgnoreCase))
     {
         errors.Add($"{context} ProcessingState:FilePath should be under state/: {filePath}");
+    }
+}
+
+static void ValidateDeadLetter(
+    JsonObject config,
+    string sectionPath,
+    string environment,
+    string context,
+    List<string> errors)
+{
+    var enabled = GetBool(config, $"{sectionPath}:Enabled");
+    if (enabled is null)
+    {
+        errors.Add($"{context} {sectionPath}:Enabled must be configured as a boolean switch.");
+    }
+
+    if (enabled == true)
+    {
+        RequireNonEmpty(config, $"{sectionPath}:Topic", context, errors);
+        ValidateTopicSuffix(config, $"{sectionPath}:Topic", environment, context, errors);
+    }
+}
+
+static void ValidateWorker(JsonObject config, string context, List<string> errors)
+{
+    var replicaMode = GetString(config, "Worker:ReplicaMode");
+    if (string.IsNullOrWhiteSpace(replicaMode)
+        || !IsOneOf(replicaMode, "SingleActive", "ExternalState"))
+    {
+        errors.Add($"{context} Worker:ReplicaMode must be SingleActive or ExternalState.");
+    }
+
+    RequirePositiveInt(config, "Worker:ExpectedReplicas", context, errors);
+    var expectedReplicas = GetInt(config, "Worker:ExpectedReplicas");
+    var allowMultiple = GetBool(config, "Worker:AllowMultipleActiveReplicas");
+    if (allowMultiple is null)
+    {
+        errors.Add($"{context} Worker:AllowMultipleActiveReplicas must be configured as a boolean switch.");
+    }
+
+    if (string.Equals(replicaMode, "SingleActive", StringComparison.OrdinalIgnoreCase)
+        && expectedReplicas > 1
+        && allowMultiple != true)
+    {
+        errors.Add($"{context} Worker ReplicaMode=SingleActive allows only one expected replica unless Worker:AllowMultipleActiveReplicas=true.");
     }
 }
 
@@ -1761,7 +1825,8 @@ static void ValidateCmdbWebhookAuthorization(
         return;
     }
 
-    if (environment.Equals("base", StringComparison.OrdinalIgnoreCase))
+    if (environment.Equals("base", StringComparison.OrdinalIgnoreCase)
+        || environment.Equals("Development", StringComparison.OrdinalIgnoreCase))
     {
         warnings.Add($"{context} uses Static webhook authorization with an empty CmdbWebhook:BearerToken; provide it through env/secret storage for deployment.");
         return;

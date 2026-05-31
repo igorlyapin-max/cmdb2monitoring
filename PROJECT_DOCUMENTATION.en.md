@@ -75,6 +75,24 @@ http://192.168.202.35:5080/webhooks/cmdbuild
 
 For local development, `cmdbwebhooks2kafka` listens on `0.0.0.0:5080`. If it listens only on `localhost:5080`, the CMDBuild container cannot call it.
 
+## Transport Security
+
+All HTTP actors support configurable transport mode:
+
+- `Transport:Mode=Http|Https`;
+- `Transport:Certificate:Path`, `Transport:Certificate:KeyPath`, `Transport:Certificate:Password` for HTTPS;
+- production startup with `Http` requires explicit `Transport:AllowPlainHttp=true`.
+
+Kafka clients support `Plaintext`, `Ssl`, `SaslPlaintext`, and `SaslSsl`. TLS/SASL fields `SslCaLocation`, `SslCertificateLocation`, `SslKeyLocation`, `SslKeyPassword`, and `SslEndpointIdentificationAlgorithm` are available in service Kafka sections; production startup with `Plaintext`/`SaslPlaintext` requires explicit `AllowPlaintextKafka=true`.
+
+CMDBuild, Zabbix, and PAM/AAPM HTTP clients can use `https://` endpoints. In production, `http://` and `RejectUnauthorized=false` are insecure and require an explicit override in the matching `Tls` block.
+
+For ASP.NET actors, `AllowedHosts="*"` is rejected in production unless `HostSecurity:AllowWildcardAllowedHosts=true` is set explicitly.
+
+All HTTP actors expose `/health` for liveness, `/ready` for readiness after runtime configuration, and `/metrics` in Prometheus text format with basic processing counters.
+
+`monitoring-ui-api` stores only the session id in the browser cookie with `SameSite=Strict`; HTTPS/Production also adds `Secure`. For HA, enable `Auth:SessionStore:Mode=Redis`; sensitive session payload is encrypted with `Auth:SessionEncryptionKey`/`MONITORING_UI_SESSION_ENCRYPTION_KEY`.
+
 ## Compatibility
 
 Verified development environment on 2026-05-02:
@@ -171,9 +189,11 @@ Main settings:
 | `Service` | Service name, health route, rules reload route, and Bearer token |
 | `Kafka:Input` | `cmdbuild.webhooks.*` topic, group id, consumer auth/security |
 | `Kafka:Output` | `zabbix.host.requests.*` topic, producer auth/security, `ProfileHeaderName` |
+| `DeadLetter` | `cmdbuild.webhooks.dlq.*` topic for malformed/unprocessable input messages |
 | `ConversionRules` | `ReadFromGit`, repository URL/path, rules file path, git pull behavior, reload behavior, template engine |
 | `Cmdbuild` | CMDBuild REST base URL, lookup/reference/domain resolver limits, `HostBindingLookupEnabled`, `MainHostIdAttributeName`, `BindingClassName`, `BindingLookupLimit` |
 | `ProcessingState` | State file for the last processed object |
+| `Worker` | `ReplicaMode=SingleActive`, expected replicas, and explicit multi-active override |
 | `ElkLogging` | Kafka log topic or future ELK |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to CMDBuild/Kafka/reload-token service secrets |
 
@@ -250,6 +270,7 @@ Main settings:
 | `Kafka:Input` | `zabbix.host.requests.*` topic, group id, consumer auth/security |
 | `Kafka:Output` | `zabbix.host.responses.*` topic, producer auth/security |
 | `Kafka:BindingOutput` | `zabbix.host.bindings.*` topic, producer auth/security, headers `binding-event-type`, `binding-host-profile`, `binding-status` |
+| `DeadLetter` | `zabbix.host.requests.dlq.*` topic for malformed requests and exhausted Zabbix API retry failures |
 | `Zabbix:ApiEndpoint` | Zabbix JSON-RPC API URL |
 | `Zabbix:AuthMode` | `Token`, `Login`, `LoginOrToken`, or `None` |
 | `Zabbix:ApiToken` | Production token through secret/env |
@@ -258,11 +279,14 @@ Main settings:
 | `Zabbix:Validate*` | Host group/template/template group checks before API call |
 | `Processing` | Gentle delay, retries, retry delay |
 | `ProcessingState` | State file for the last processed object |
+| `Worker` | `ReplicaMode=SingleActive`, expected replicas, and explicit multi-active override |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to Zabbix/Kafka/ELK secrets |
 
 `Processing:DelayBetweenObjectsMs` defaults to `50` ms so the Zabbix writer does not add an excessive pause between objects.
 
 The state file stores the last successfully processed input offset; startup resumes from `lastInputOffset + 1`.
+
+`correlationId` is propagated through Kafka headers and `cmdb2monitoring.correlationId` metadata. Malformed JSON goes to DLQ; transient Zabbix API exceptions are retried by `Processing:MaxRetryAttempts`/`RetryDelayMs`, then published to DLQ and committed as an error response.
 
 `zabbixrequests2api` validates base `host.create/update/delete` payloads and extended host fields used by rules: `status`, `macros`, `inventory`, TLS/PSK parameters. Future/dedicated operations are reserved for `maintenance.*`, `usermacro.*`, `proxy.*`, and `valuemap.*`.
 

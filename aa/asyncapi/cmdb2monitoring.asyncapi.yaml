@@ -1,7 +1,7 @@
 asyncapi: '2.6.0'
 info:
   title: cmdb2monitoring Kafka API
-  version: '0.4.0'
+  version: '0.5.0'
   description: >
     AsyncAPI для Kafka-потоков проекта cmdb2monitoring. CMDBuild webhook payload
     остается плоским; reference/lookup/domain leaf-значения поднимаются downstream по
@@ -56,6 +56,20 @@ channels:
       summary: zabbixbindings2cmdbuild читает binding event
       message:
         $ref: '#/components/messages/ZabbixBindingEvent'
+  cmdbuild.webhooks.dlq.dev:
+    description: Dead-letter messages for malformed or unprocessable CMDBuild webhook events.
+    publish:
+      operationId: publishCmdbWebhookDeadLetter
+      summary: cmdbkafka2zabbix publishes rejected input events
+      message:
+        $ref: '#/components/messages/DeadLetterMessage'
+  zabbix.host.requests.dlq.dev:
+    description: Dead-letter messages for malformed Zabbix requests or exhausted Zabbix API retry failures.
+    publish:
+      operationId: publishZabbixRequestDeadLetter
+      summary: zabbixrequests2api publishes rejected request events
+      message:
+        $ref: '#/components/messages/DeadLetterMessage'
   cmdbwebhooks2kafka.logs.dev:
     description: Structured JSON logs первого сервиса.
     publish:
@@ -90,18 +104,30 @@ components:
           eventType:
             type: string
             enum: [create, update, delete]
+          correlationId:
+            type: string
       payload:
         $ref: '#/components/schemas/CmdbWebhookEnvelope'
     ZabbixJsonRpcRequest:
       name: ZabbixJsonRpcRequest
       title: Zabbix JSON-RPC request
       contentType: application/json
+      headers:
+        type: object
+        properties:
+          correlationId:
+            type: string
       payload:
         $ref: '#/components/schemas/ZabbixJsonRpcRequest'
     ZabbixProcessingResponse:
       name: ZabbixProcessingResponse
       title: Zabbix processing response
       contentType: application/json
+      headers:
+        type: object
+        properties:
+          correlationId:
+            type: string
       payload:
         $ref: '#/components/schemas/ZabbixProcessingResponse'
     ZabbixBindingEvent:
@@ -117,8 +143,25 @@ components:
             type: string
           binding-status:
             type: string
+          correlationId:
+            type: string
       payload:
         $ref: '#/components/schemas/ZabbixBindingEvent'
+    DeadLetterMessage:
+      name: DeadLetterMessage
+      title: Kafka dead-letter message
+      contentType: application/json
+      headers:
+        type: object
+        properties:
+          service:
+            type: string
+          errorCode:
+            type: string
+          correlationId:
+            type: string
+      payload:
+        $ref: '#/components/schemas/DeadLetterMessage'
     StructuredLog:
       name: StructuredLog
       title: Structured service log
@@ -128,7 +171,7 @@ components:
   schemas:
     CmdbWebhookEnvelope:
       type: object
-      required: [source, eventType, entityType, entityId, receivedAt, payload]
+      required: [source, eventType, correlationId, receivedAt, payload]
       properties:
         source:
           type: string
@@ -141,6 +184,8 @@ components:
           type: string
           description: CMDBuild class name from the concrete model; current dev examples include Notebook, PC, Server, and tk.
         entityId:
+          type: string
+        correlationId:
           type: string
         receivedAt:
           type: string
@@ -207,6 +252,8 @@ components:
           description: Внутренняя metadata для lifecycle/fallback, перед вызовом Zabbix API удаляется.
           properties:
             eventType:
+              type: string
+            correlationId:
               type: string
             entityId:
               type: string
@@ -321,6 +368,9 @@ components:
         source:
           type: string
           const: zabbixrequests2api
+        correlationId:
+          type: string
+          nullable: true
         success:
           type: boolean
         method:
@@ -368,6 +418,9 @@ components:
         source:
           type: string
           const: zabbixrequests2api
+        correlationId:
+          type: string
+          nullable: true
         eventType:
           type: string
           enum:
@@ -421,6 +474,47 @@ components:
             key:
               type: string
               nullable: true
+    DeadLetterMessage:
+      type: object
+      required:
+        - service
+        - errorCode
+        - errorMessage
+        - inputTopic
+        - inputPartition
+        - inputOffset
+        - originalPayload
+        - occurredAt
+      properties:
+        service:
+          type: string
+        errorCode:
+          type: string
+        errorMessage:
+          type: string
+        correlationId:
+          type: string
+          nullable: true
+        inputTopic:
+          type: string
+        inputPartition:
+          type: integer
+        inputOffset:
+          type: integer
+        inputKey:
+          type: string
+          nullable: true
+        originalPayload:
+          type: string
+        rulesVersion:
+          type: string
+          nullable: true
+        exceptionType:
+          type: string
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
     StructuredLog:
       type: object
       required: [timestamp, level, category, message, service, environment]

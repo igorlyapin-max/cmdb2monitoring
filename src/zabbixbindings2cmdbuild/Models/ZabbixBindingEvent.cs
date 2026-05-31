@@ -15,4 +15,7 @@ public sealed record ZabbixBindingEvent(
     string? RulesVersion,
     string? SchemaVersion,
     string? RequestId,
-    DateTimeOffset? OccurredAt);
+    DateTimeOffset? OccurredAt)
+{
+    public string? CorrelationId { get; init; }
+}

@@ -25,6 +25,8 @@ public sealed record ZabbixProcessingResult(
     string? ZabbixResponseJson,
     DateTimeOffset ProcessedAt)
 {
+    public string? CorrelationId { get; init; }
+
     public static ZabbixProcessingResult FromValidationError(
         ZabbixRequestDocument? request,
         string errorCode,
@@ -54,7 +56,10 @@ public sealed record ZabbixProcessingResult(
             MissingTemplateGroups: missingTemplateGroups,
             ZabbixRequestSent: false,
             ZabbixResponseJson: null,
-            ProcessedAt: DateTimeOffset.UtcNow);
+            ProcessedAt: DateTimeOffset.UtcNow)
+        {
+            CorrelationId = request?.CorrelationId
+        };
     }
 
     public static ZabbixProcessingResult FromApiResult(ZabbixRequestDocument request, ZabbixApiCallResult apiResult)
@@ -80,7 +85,10 @@ public sealed record ZabbixProcessingResult(
             MissingTemplateGroups: [],
             ZabbixRequestSent: true,
             ZabbixResponseJson: apiResult.ResponseJson,
-            ProcessedAt: DateTimeOffset.UtcNow);
+            ProcessedAt: DateTimeOffset.UtcNow)
+        {
+            CorrelationId = request.CorrelationId
+        };
     }
 
     public static ZabbixProcessingResult FromException(ZabbixRequestDocument? request, Exception exception)
@@ -106,7 +114,10 @@ public sealed record ZabbixProcessingResult(
             MissingTemplateGroups: [],
             ZabbixRequestSent: false,
             ZabbixResponseJson: null,
-            ProcessedAt: DateTimeOffset.UtcNow);
+            ProcessedAt: DateTimeOffset.UtcNow)
+        {
+            CorrelationId = request?.CorrelationId
+        };
     }
 
     private static string? ReadZabbixHostId(string? responseJson)

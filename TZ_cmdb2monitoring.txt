@@ -148,6 +148,11 @@ Health endpoint:
 
 GET /health
 
+Readiness и metrics endpoints:
+
+GET /ready
+GET /metrics
+
 4.2. Входной формат webhook
 
 CMDBuild должен отправлять JSON body с плоской структурой:
@@ -341,9 +346,12 @@ cmdbuild.webhooks
   "eventType": "create|update|delete",
   "entityType": "<CMDBuild class name>",
   "entityId": "<id или code>",
+  "correlationId": "<uuid/string>",
   "receivedAt": "<UTC timestamp>",
   "payload": { ... исходный webhook payload ... }
 }
+
+Kafka header `correlationId` должен совпадать с payload `correlationId`.
 
 Правило entityId:
 - сначала читать поле id;
@@ -362,6 +370,8 @@ Kafka key:
 Обязательные topics:
 - cmdbuild.webhooks.dev для dev-окружения;
 - cmdbuild.webhooks для production/base config;
+- cmdbuild.webhooks.dlq.dev для dev DLQ;
+- cmdbuild.webhooks.dlq для production/base DLQ;
 - cmdbwebhooks2kafka.logs.dev для dev-логов;
 - cmdbwebhooks2kafka.logs для production/base config логов.
 
@@ -542,6 +552,7 @@ cmdbuild.webhooks
 
 Consumer group должен задаваться через конфиг.
 Kafka offsets должны коммититься только после успешной обработки сообщения или после осознанного skip некорректного/неподдерживаемого события.
+Некорректный JSON и необрабатываемые входные сообщения должны публиковаться в DLQ с исходным payload, input topic/partition/offset, error code/message и `correlationId`, после чего offset может быть закоммичен.
 
 13.3. Kafka output
 
@@ -932,6 +943,13 @@ Production/base binding output topic:
 
 zabbix.host.bindings
 
+DLQ topics:
+
+zabbix.host.requests.dlq.dev
+zabbix.host.requests.dlq
+
+`correlationId` должен передаваться из Kafka header/input metadata в response, binding event и DLQ payload. Некорректный JSON публикуется в DLQ сразу; transient Zabbix API exceptions повторяются по настройкам Processing retry, после исчерпания попыток публикуются в DLQ и фиксируются как error response.
+
 Микросервис не создает Kafka topics при старте.
 Input/output/binding-output/log topics должны быть созданы заранее средствами инфраструктуры.
 
@@ -1039,6 +1057,7 @@ Retry-настройки также задаются через конфиг:
 
 {
   "source": "zabbixrequests2api",
+  "correlationId": "<uuid/string>",
   "success": true|false,
   "method": "host.create|host.update|host.delete|host.get",
   "entityId": "<Kafka key>",
@@ -1068,6 +1087,7 @@ Retry-настройки также задаются через конфиг:
 
 {
   "source": "zabbixrequests2api",
+  "correlationId": "<uuid/string>",
   "eventType": "zabbix.host.binding.created|zabbix.host.binding.updated|zabbix.host.binding.deleted",
   "operation": "host.create|host.update|host.delete",
   "sourceClass": "<CMDBuild class>",

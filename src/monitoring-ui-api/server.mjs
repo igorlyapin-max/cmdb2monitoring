@@ -1,6 +1,9 @@
-import { createServer } from 'node:http';
-import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { connect as connectNet } from 'node:net';
+import { connect as connectTls } from 'node:tls';
+import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +17,11 @@ const repositoryRoot = resolve(serviceRoot, '../..');
 const environment = process.env.NODE_ENV || 'Development';
 const resolvedSecretReferences = new Map();
 const config = await loadConfig();
-const sessions = new Map();
-const oauthStates = new Map();
+validateRuntimeSecurityConfig(config);
+const startedAt = new Date();
+const serviceCounters = new Map();
+const sessionStore = await createSessionStore('session');
+const oauthStateStore = await createSessionStore('oauth');
 let samlMetadataCache = null;
 
 const roles = {
@@ -60,9 +66,7 @@ const auditBindingAttributes = [
 ];
 
 const defaultLocalUsers = [
-  { username: 'viewer', password: 'viewer', role: 'viewer', displayName: 'Просмотр' },
-  { username: 'editor', password: 'editor', role: 'editor', displayName: 'Редактирование правил' },
-  { username: 'admin', password: 'admin', role: 'admin', displayName: 'Администрирование' }
+  { username: 'admin', role: 'admin', displayName: 'Администрирование' }
 ];
 
 const passwordHashSettings = {
@@ -83,7 +87,7 @@ if (config.Cmdbuild?.Catalog?.SyncOnStartup) {
   console.warn('CMDBuild catalog SyncOnStartup is configured but requires user credentials; skipping startup sync.');
 }
 
-const server = createServer(async (request, response) => {
+const server = await createApplicationServer(async (request, response) => {
   try {
     await route(request, response);
   } catch (error) {
@@ -101,18 +105,33 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(config.Service.Port, config.Service.Host, () => {
-  console.log(`${config.Service.Name} listening on http://${config.Service.Host}:${config.Service.Port}`);
+  console.log(`${config.Service.Name} listening on ${serviceBaseUrl()}`);
 });
 
 async function route(request, response) {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const path = trimTrailingSlash(url.pathname);
+  incrementCounter('http_requests_total');
 
   if (request.method === 'GET' && path === config.Service.HealthRoute) {
     sendJson(response, 200, {
       service: config.Service.Name,
-      status: 'ok'
+      status: 'ok',
+      startedAt: startedAt.toISOString()
     });
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/ready') {
+    sendJson(response, 200, {
+      service: config.Service.Name,
+      status: 'ready'
+    });
+    return;
+  }
+
+  if (request.method === 'GET' && path === '/metrics') {
+    sendText(response, 200, buildPrometheusMetrics(), 'text/plain; version=0.0.4; charset=utf-8');
     return;
   }
 
@@ -136,10 +155,11 @@ async function route(request, response) {
 
 async function routeApi(request, response, url, path) {
   if (request.method === 'GET' && path === '/api/auth/status') {
-    const session = getSession(request);
+    const session = await getSession(request);
     sendJson(response, 200, {
       authenticated: Boolean(session),
       user: session ? publicUser(session) : null,
+      csrfToken: session?.csrfToken ?? null,
       idp: publicIdpSettings(),
       auth: {
         useIdp: isIdpEnabled(),
@@ -158,7 +178,8 @@ async function routeApi(request, response, url, path) {
     const cookie = buildSessionCookie(session.id);
     sendJson(response, 200, {
       authenticated: true,
-      user: publicUser(session)
+      user: publicUser(session),
+      csrfToken: session.csrfToken
     }, {
       'Set-Cookie': cookie
     });
@@ -168,18 +189,21 @@ async function routeApi(request, response, url, path) {
   if (request.method === 'POST' && path === '/api/auth/logout') {
     const sessionId = readCookie(request, config.Auth.SessionCookieName);
     if (sessionId) {
-      sessions.delete(sessionId);
+      await sessionStore.delete(sessionId);
     }
 
     sendJson(response, 200, { success: true }, {
-      'Set-Cookie': `${config.Auth.SessionCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`
+      'Set-Cookie': buildExpiredSessionCookie()
     });
     return;
   }
 
   if (request.method === 'POST' && path === '/api/auth/change-password') {
-    const session = requireSession(request, response);
+    const session = await requireSession(request, response);
     if (!session) {
+      return;
+    }
+    if (!validateCsrfRequest(request, response, session)) {
       return;
     }
 
@@ -189,8 +213,11 @@ async function routeApi(request, response, url, path) {
   }
 
   if (request.method === 'POST' && path === '/api/auth/session-credentials') {
-    const session = requireSession(request, response);
+    const session = await requireSession(request, response);
     if (!session) {
+      return;
+    }
+    if (!validateCsrfRequest(request, response, session)) {
       return;
     }
 
@@ -199,8 +226,11 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
-  const session = requireSession(request, response);
+  const session = await requireSession(request, response);
   if (!session) {
+    return;
+  }
+  if (isMutatingRequest(request) && !validateCsrfRequest(request, response, session)) {
     return;
   }
 
@@ -651,6 +681,7 @@ async function routeSaml(request, response, url, path) {
     assertIdpProvider('saml2');
     const metadata = await buildSamlMetadata();
     response.writeHead(200, {
+      ...securityHeaders(),
       'content-type': 'application/samlmetadata+xml; charset=utf-8',
       'cache-control': 'no-store'
     });
@@ -684,7 +715,7 @@ async function routeSaml(request, response, url, path) {
     }
 
     const session = await createSamlSession(validation.profile);
-    sessions.set(session.id, session);
+    await saveSession(session);
     sendRedirect(response, safeRelayState(form.RelayState ?? '/'), {
       'Set-Cookie': buildSessionCookie(session.id)
     });
@@ -693,12 +724,12 @@ async function routeSaml(request, response, url, path) {
 
   if (request.method === 'GET' && path === '/auth/saml2/logout') {
     const sessionId = readCookie(request, config.Auth.SessionCookieName);
-    const session = sessionId ? sessions.get(sessionId) : null;
+    const session = sessionId ? await sessionStore.get(sessionId) : null;
     if (sessionId) {
-      sessions.delete(sessionId);
+      await sessionStore.delete(sessionId);
     }
 
-    const expiredCookie = `${config.Auth.SessionCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+    const expiredCookie = buildExpiredSessionCookie();
     if (session?.saml?.profile && !isBlank(config.Idp.SloUrl || config.Idp.sloUrl)) {
       const saml = await createSamlClient();
       const redirectUrl = await saml.getLogoutUrlAsync(session.saml.profile, '/', {});
@@ -721,12 +752,12 @@ async function routeOauth2(request, response, url, path) {
     assertOauth2Enabled();
     const settings = resolveOauth2Settings();
     const state = randomBytes(24).toString('hex');
-    oauthStates.set(state, {
+    await oauthStateStore.set(state, {
       returnUrl: safeRelayState(url.searchParams.get('returnUrl') ?? '/'),
       createdAt: Date.now()
-    });
+    }, oauthStateTtlMs());
 
-    pruneOauthStates();
+    await pruneOauthStates();
     const redirectUrl = new URL(settings.authorizationUrl);
     redirectUrl.searchParams.set('response_type', 'code');
     redirectUrl.searchParams.set('client_id', settings.clientId);
@@ -742,8 +773,8 @@ async function routeOauth2(request, response, url, path) {
     const state = url.searchParams.get('state') ?? '';
     const code = url.searchParams.get('code') ?? '';
     const error = url.searchParams.get('error') ?? '';
-    const stateRecord = oauthStates.get(state);
-    oauthStates.delete(state);
+    const stateRecord = await oauthStateStore.get(state);
+    await oauthStateStore.delete(state);
 
     if (!isBlank(error)) {
       throw httpError(401, 'oauth2_error', url.searchParams.get('error_description') || error);
@@ -756,7 +787,7 @@ async function routeOauth2(request, response, url, path) {
     const tokenSet = await exchangeOauth2Code(code);
     const claims = await readOauth2UserInfo(tokenSet);
     const session = await createOauth2Session(claims, tokenSet);
-    sessions.set(session.id, session);
+    await saveSession(session);
     sendRedirect(response, stateRecord.returnUrl, {
       'Set-Cookie': buildSessionCookie(session.id)
     });
@@ -884,6 +915,7 @@ async function readIndeedPamAapmSecret(target, serviceName, secretId) {
     headers.Authorization = `Basic ${Buffer.from(`${applicationCredentials.username}:${applicationCredentials.password}`).toString('base64')}`;
 
     if (aapm.SendApplicationCredentialsInQuery === true || aapm.sendApplicationCredentialsInQuery === true) {
+      console.warn('Secrets.IndeedPamAapm.SendApplicationCredentialsInQuery is deprecated and can leak credentials through URLs.');
       url.searchParams.set('username', applicationCredentials.username);
       url.searchParams.set('password', applicationCredentials.password);
     }
@@ -1021,7 +1053,17 @@ function applyEnvOverrides(target) {
   const mapping = {
     PORT: ['Service', 'Port'],
     MONITORING_UI_HOST: ['Service', 'Host'],
+    MONITORING_UI_TRANSPORT_MODE: ['Transport', 'Mode'],
+    MONITORING_UI_TRANSPORT_CERT_PATH: ['Transport', 'Certificate', 'Path'],
+    MONITORING_UI_TRANSPORT_KEY_PATH: ['Transport', 'Certificate', 'KeyPath'],
+    MONITORING_UI_TRANSPORT_CERT_PASSWORD: ['Transport', 'Certificate', 'Password'],
     MONITORING_UI_USE_IDP: ['Auth', 'UseIdp'],
+    MONITORING_UI_SECURE_COOKIES: ['Auth', 'SecureCookies'],
+    MONITORING_UI_SESSION_ENCRYPTION_KEY: ['Auth', 'SessionEncryptionKey'],
+    MONITORING_UI_SESSION_STORE_MODE: ['Auth', 'SessionStore', 'Mode'],
+    MONITORING_UI_REDIS_URL: ['Auth', 'SessionStore', 'Redis', 'Url'],
+    MONITORING_UI_REDIS_USERNAME: ['Auth', 'SessionStore', 'Redis', 'Username'],
+    MONITORING_UI_REDIS_PASSWORD: ['Auth', 'SessionStore', 'Redis', 'Password'],
     IDP_PROVIDER: ['Idp', 'Provider'],
     SAML2_METADATA_URL: ['Idp', 'MetadataUrl'],
     SAML2_ENTITY_ID: ['Idp', 'EntityId'],
@@ -1062,9 +1104,13 @@ function applyEnvOverrides(target) {
     LDAP_GROUPS_ATTRIBUTE: ['Idp', 'Ldap', 'GroupsAttribute'],
     LDAP_TLS_REJECT_UNAUTHORIZED: ['Idp', 'Ldap', 'TlsRejectUnauthorized'],
     CMDBUILD_BASE_URL: ['Cmdbuild', 'BaseUrl'],
+    CMDBUILD_ALLOW_INSECURE_HTTP: ['Cmdbuild', 'Tls', 'AllowInsecureHttp'],
+    CMDBUILD_TLS_REJECT_UNAUTHORIZED: ['Cmdbuild', 'Tls', 'RejectUnauthorized'],
     CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER: ['Cmdbuild', 'Webhooks', 'AuthorizationHeader'],
     CMDBUILD_WEBHOOK_BEARER_TOKEN: ['Cmdbuild', 'Webhooks', 'BearerToken'],
     ZABBIX_API_ENDPOINT: ['Zabbix', 'ApiEndpoint'],
+    ZABBIX_ALLOW_INSECURE_HTTP: ['Zabbix', 'Tls', 'AllowInsecureHttp'],
+    ZABBIX_TLS_REJECT_UNAUTHORIZED: ['Zabbix', 'Tls', 'RejectUnauthorized'],
     ZABBIX_API_TOKEN: ['Zabbix', 'ApiToken'],
     RULES_READ_FROM_GIT: ['Rules', 'ReadFromGit'],
     RULES_REPOSITORY_URL: ['Rules', 'RepositoryUrl'],
@@ -1083,6 +1129,10 @@ function applyEnvOverrides(target) {
     MONITORING_UI_KAFKA_SASL_MECHANISM: ['EventBrowser', 'SaslMechanism'],
     MONITORING_UI_KAFKA_USERNAME: ['EventBrowser', 'Username'],
     MONITORING_UI_KAFKA_PASSWORD: ['EventBrowser', 'Password'],
+    MONITORING_UI_KAFKA_SSL_CA_LOCATION: ['EventBrowser', 'SslCaLocation'],
+    MONITORING_UI_KAFKA_SSL_CERTIFICATE_LOCATION: ['EventBrowser', 'SslCertificateLocation'],
+    MONITORING_UI_KAFKA_SSL_KEY_LOCATION: ['EventBrowser', 'SslKeyLocation'],
+    MONITORING_UI_KAFKA_SSL_REJECT_UNAUTHORIZED: ['EventBrowser', 'SslRejectUnauthorized'],
     MONITORING_UI_EVENTS_MAX_MESSAGES: ['EventBrowser', 'MaxMessages'],
     MONITORING_UI_EVENTS_READ_TIMEOUT_MS: ['EventBrowser', 'ReadTimeoutMs'],
     MONITORING_UI_QUEUE_MONITOR_ENABLED: ['QueueMonitor', 'Enabled'],
@@ -1159,6 +1209,39 @@ function applyCommonSaslCompatibility(target) {
   }
 }
 
+function validateRuntimeSecurityConfig(target) {
+  if (environment !== 'Production') {
+    return;
+  }
+
+  const transport = target.Transport ?? {};
+  if (String(transport.Mode ?? 'Http').toLowerCase() !== 'https' && transport.AllowPlainHttp !== true) {
+    throw new Error('Production monitoring-ui-api requires Transport.Mode=Https unless Transport.AllowPlainHttp=true.');
+  }
+
+  for (const [name, url, tls] of [
+    ['CMDBuild', target.Cmdbuild?.BaseUrl, target.Cmdbuild?.Tls],
+    ['Zabbix', target.Zabbix?.ApiEndpoint, target.Zabbix?.Tls],
+    ['PAM', target.Secrets?.IndeedPamAapm?.BaseUrl, target.Secrets?.IndeedPamAapm?.Tls]
+  ]) {
+    if (isBlank(url) || tls?.AllowInsecureHttp === true) {
+      continue;
+    }
+    if (URL.canParse(url) && new URL(url).protocol === 'http:') {
+      throw new Error(`Production ${name} endpoint requires https unless ${name}.Tls.AllowInsecureHttp=true.`);
+    }
+    if (tls?.RejectUnauthorized === false) {
+      throw new Error(`Production ${name} TLS must reject unauthorized certificates.`);
+    }
+  }
+
+  const eventBrowser = target.EventBrowser ?? {};
+  const protocol = String(eventBrowser.SecurityProtocol ?? 'Plaintext').toLowerCase();
+  if ((protocol === 'plaintext' || protocol === 'saslplaintext') && eventBrowser.AllowPlaintextKafka !== true) {
+    throw new Error('Production EventBrowser Kafka requires Ssl/SaslSsl unless EventBrowser.AllowPlaintextKafka=true.');
+  }
+}
+
 function applySecretCompanionReferences(target) {
   applySecretCompanionReferencesInner(target, []);
 }
@@ -1217,6 +1300,338 @@ function readPath(target, path) {
   return current;
 }
 
+async function createApplicationServer(handler) {
+  const transport = config.Transport ?? {};
+  const mode = String(transport.Mode ?? transport.mode ?? 'Http').toLowerCase();
+  if (mode !== 'https') {
+    return createHttpServer(handler);
+  }
+
+  const certificate = transport.Certificate ?? transport.certificate ?? {};
+  const certPath = certificate.Path ?? certificate.path;
+  const keyPath = certificate.KeyPath ?? certificate.keyPath;
+  if (isBlank(certPath) || isBlank(keyPath)) {
+    throw new Error('Transport HTTPS mode requires Transport.Certificate.Path and Transport.Certificate.KeyPath.');
+  }
+
+  return createHttpsServer({
+    cert: await readFile(resolveServicePath(certPath, false)),
+    key: await readFile(resolveServicePath(keyPath, false)),
+    passphrase: (certificate.Password ?? certificate.password) || undefined
+  }, handler);
+}
+
+function serviceBaseUrl() {
+  const transport = config.Transport ?? {};
+  const scheme = String(transport.Mode ?? transport.mode ?? 'Http').toLowerCase() === 'https'
+    ? 'https'
+    : 'http';
+  return `${scheme}://${config.Service.Host}:${config.Service.Port}`;
+}
+
+async function createSessionStore(kind) {
+  const storeOptions = config.Auth?.SessionStore ?? {};
+  const mode = String(storeOptions.Mode ?? storeOptions.mode ?? 'Memory').toLowerCase();
+  const prefix = `${storeOptions.KeyPrefix ?? storeOptions.keyPrefix ?? 'cmdb2m'}:${kind}:`;
+  if (mode === 'redis') {
+    const redis = normalizeRedisOptions(storeOptions.Redis ?? storeOptions.redis ?? {});
+    const encryptionKey = sessionEncryptionKey();
+    if (isBlank(encryptionKey)) {
+      throw new Error('Auth.SessionEncryptionKey is required when Auth.SessionStore.Mode=Redis.');
+    }
+
+    return redisStore(prefix, redis, encryptionKey);
+  }
+
+  return memoryStore(prefix);
+}
+
+function memoryStore(prefix) {
+  const values = new Map();
+  return {
+    async get(id) {
+      const item = values.get(`${prefix}${id}`);
+      if (!item) {
+        return null;
+      }
+
+      if (Date.now() > item.expiresAt) {
+        values.delete(`${prefix}${id}`);
+        return null;
+      }
+
+      return { ...item.value };
+    },
+    async set(id, value, ttlMs = sessionTtlMs()) {
+      values.set(`${prefix}${id}`, {
+        value: { ...value, id },
+        expiresAt: Date.now() + ttlMs
+      });
+    },
+    async delete(id) {
+      values.delete(`${prefix}${id}`);
+    },
+    async list() {
+      const result = [];
+      for (const [key, item] of values.entries()) {
+        if (!key.startsWith(prefix)) {
+          continue;
+        }
+        if (Date.now() > item.expiresAt) {
+          values.delete(key);
+          continue;
+        }
+        result.push({ ...item.value, id: key.slice(prefix.length) });
+      }
+      return result;
+    }
+  };
+}
+
+function redisStore(prefix, options, encryptionKey) {
+  return {
+    async get(id) {
+      const payload = await redisCommand(options, ['GET', `${prefix}${id}`]);
+      return payload ? decryptStoredValue(payload, encryptionKey) : null;
+    },
+    async set(id, value, ttlMs = sessionTtlMs()) {
+      await redisCommand(options, [
+        'SET',
+        `${prefix}${id}`,
+        encryptStoredValue({ ...value, id }, encryptionKey),
+        'PX',
+        String(ttlMs)
+      ]);
+    },
+    async delete(id) {
+      await redisCommand(options, ['DEL', `${prefix}${id}`]);
+    },
+    async list() {
+      const keys = await redisCommand(options, ['KEYS', `${prefix}*`]);
+      const result = [];
+      for (const key of keys ?? []) {
+        const payload = await redisCommand(options, ['GET', key]);
+        if (!payload) {
+          continue;
+        }
+        const value = decryptStoredValue(payload, encryptionKey);
+        result.push({ ...value, id: String(key).slice(prefix.length) });
+      }
+      return result;
+    }
+  };
+}
+
+function normalizeRedisOptions(options) {
+  const url = new URL(options.Url ?? options.url ?? 'redis://127.0.0.1:6379/0');
+  return {
+    host: url.hostname,
+    port: Number(url.port || (url.protocol === 'rediss:' ? 6380 : 6379)),
+    tls: url.protocol === 'rediss:' || options.Tls === true || options.tls === true,
+    username: decodeURIComponent(url.username || options.Username || options.username || ''),
+    password: decodeURIComponent(url.password || options.Password || options.password || ''),
+    database: Number(url.pathname?.replace('/', '') || options.Database || options.database || 0),
+    connectTimeoutMs: Number(options.ConnectTimeoutMs ?? options.connectTimeoutMs ?? 5000),
+    rejectUnauthorized: options.RejectUnauthorized !== false && options.rejectUnauthorized !== false
+  };
+}
+
+async function redisCommand(options, args) {
+  const socket = options.tls
+    ? connectTls({
+      host: options.host,
+      port: options.port,
+      rejectUnauthorized: options.rejectUnauthorized
+    })
+    : connectNet({
+      host: options.host,
+      port: options.port
+    });
+
+  socket.setTimeout(options.connectTimeoutMs);
+  try {
+    await onceSocket(socket, options.tls ? 'secureConnect' : 'connect');
+    if (!isBlank(options.password)) {
+      const authArgs = isBlank(options.username)
+        ? ['AUTH', options.password]
+        : ['AUTH', options.username, options.password];
+      await writeRedisCommand(socket, authArgs);
+    }
+    if (options.database > 0) {
+      await writeRedisCommand(socket, ['SELECT', String(options.database)]);
+    }
+    return await writeRedisCommand(socket, args);
+  } finally {
+    socket.end();
+  }
+}
+
+function onceSocket(socket, ...events) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const cleanup = () => {
+      socket.off('error', onError);
+      socket.off('timeout', onTimeout);
+      for (const event of events) {
+        socket.off(event, onReady);
+      }
+    };
+    const onReady = () => {
+      cleanup();
+      resolvePromise();
+    };
+    const onError = error => {
+      cleanup();
+      rejectPromise(error);
+    };
+    const onTimeout = () => {
+      cleanup();
+      rejectPromise(new Error('Redis connection timed out.'));
+    };
+    socket.once('error', onError);
+    socket.once('timeout', onTimeout);
+    for (const event of events) {
+      socket.once(event, onReady);
+    }
+  });
+}
+
+function writeRedisCommand(socket, args) {
+  const payload = Buffer.concat([
+    Buffer.from(`*${args.length}\r\n`, 'utf8'),
+    ...args.flatMap(arg => {
+      const value = Buffer.from(String(arg), 'utf8');
+      return [Buffer.from(`$${value.length}\r\n`, 'utf8'), value, Buffer.from('\r\n', 'utf8')];
+    })
+  ]);
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    let buffer = Buffer.alloc(0);
+    const cleanup = () => {
+      socket.off('data', onData);
+      socket.off('error', onError);
+    };
+    const onError = error => {
+      cleanup();
+      rejectPromise(error);
+    };
+    const onData = chunk => {
+      buffer = Buffer.concat([buffer, chunk]);
+      const parsed = parseRedisResponse(buffer);
+      if (!parsed.done) {
+        return;
+      }
+      cleanup();
+      if (parsed.error) {
+        rejectPromise(new Error(parsed.error));
+        return;
+      }
+      resolvePromise(parsed.value);
+    };
+    socket.on('data', onData);
+    socket.once('error', onError);
+    socket.write(payload);
+  });
+}
+
+function parseRedisResponse(buffer, offset = 0) {
+  if (offset >= buffer.length) {
+    return { done: false };
+  }
+  const type = String.fromCharCode(buffer[offset]);
+  const lineEnd = buffer.indexOf('\r\n', offset);
+  if (lineEnd === -1) {
+    return { done: false };
+  }
+  const line = buffer.toString('utf8', offset + 1, lineEnd);
+  const next = lineEnd + 2;
+  if (type === '+') {
+    return { done: true, value: line, offset: next };
+  }
+  if (type === '-') {
+    return { done: true, error: line, offset: next };
+  }
+  if (type === ':') {
+    return { done: true, value: Number(line), offset: next };
+  }
+  if (type === '$') {
+    const length = Number(line);
+    if (length === -1) {
+      return { done: true, value: null, offset: next };
+    }
+    const end = next + length;
+    if (buffer.length < end + 2) {
+      return { done: false };
+    }
+    return { done: true, value: buffer.toString('utf8', next, end), offset: end + 2 };
+  }
+  if (type === '*') {
+    const length = Number(line);
+    const values = [];
+    let current = next;
+    for (let index = 0; index < length; index++) {
+      const parsed = parseRedisResponse(buffer, current);
+      if (!parsed.done) {
+        return { done: false };
+      }
+      values.push(parsed.value);
+      current = parsed.offset;
+    }
+    return { done: true, value: values, offset: current };
+  }
+  return { done: true, error: `Unsupported Redis response type '${type}'`, offset: next };
+}
+
+function encryptStoredValue(value, secret) {
+  const key = createHash('sha256').update(String(secret)).digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(value), 'utf8'),
+    cipher.final()
+  ]);
+  return JSON.stringify({
+    v: 1,
+    iv: iv.toString('base64url'),
+    tag: cipher.getAuthTag().toString('base64url'),
+    data: ciphertext.toString('base64url')
+  });
+}
+
+function decryptStoredValue(payload, secret) {
+  const envelope = JSON.parse(payload);
+  const key = createHash('sha256').update(String(secret)).digest();
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64url'));
+  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
+  return JSON.parse(Buffer.concat([
+    decipher.update(Buffer.from(envelope.data, 'base64url')),
+    decipher.final()
+  ]).toString('utf8'));
+}
+
+function sessionEncryptionKey() {
+  return config.Auth?.SessionEncryptionKey
+    ?? config.Auth?.sessionEncryptionKey
+    ?? process.env.MONITORING_UI_SESSION_ENCRYPTION_KEY
+    ?? '';
+}
+
+function sessionTtlMs() {
+  return Math.max(60, Number(config.Auth.SessionTimeoutMinutes ?? 60)) * 60 * 1000;
+}
+
+function oauthStateTtlMs() {
+  return Math.max(60, Number(config.Auth.RequestStateTimeoutSeconds ?? 600)) * 1000;
+}
+
+function newCsrfToken() {
+  return randomBytes(32).toString('base64url');
+}
+
+async function saveSession(session) {
+  session.csrfToken ||= newCsrfToken();
+  await sessionStore.set(session.id, session, sessionTtlMs());
+}
+
 async function ensureRuntimeDirectories() {
   for (const configuredPath of [
     config.Cmdbuild.Catalog.CacheFilePath,
@@ -1232,7 +1647,7 @@ async function login(payload) {
   if (isIdpEnabled()) {
     if (idpProvider() === 'ldap') {
       const session = await loginWithLdap(payload);
-      sessions.set(session.id, session);
+      await saveSession(session);
       return session;
     }
 
@@ -1259,6 +1674,7 @@ async function login(payload) {
     localUsername: user.username,
     createdAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
+    csrfToken: newCsrfToken(),
     roles: [role],
     passwordChangeRequired: Boolean(user.mustChangePassword),
     identity: {
@@ -1271,7 +1687,7 @@ async function login(payload) {
     zabbix: buildLocalZabbixSessionCredentials()
   };
 
-  sessions.set(session.id, session);
+  await saveSession(session);
   return session;
 }
 
@@ -1281,6 +1697,7 @@ async function ensureUsersFile() {
 
   if (!existsSync(usersPath)) {
     const now = new Date().toISOString();
+    const bootstrapPassword = randomBytes(18).toString('base64url');
     const store = {
       version: 1,
       createdAt: now,
@@ -1289,13 +1706,14 @@ async function ensureUsersFile() {
         username: user.username,
         displayName: user.displayName,
         role: user.role,
-        password: hashPassword(user.password),
-        mustChangePassword: false,
+        password: hashPassword(bootstrapPassword),
+        mustChangePassword: true,
         createdAt: now,
         updatedAt: now
       }))
     };
     await writeUsersStore(store);
+    console.warn(`Bootstrap local admin was created with one-time password: ${bootstrapPassword}`);
     return;
   }
 
@@ -1307,15 +1725,17 @@ async function ensureUsersFile() {
     }
 
     const now = new Date().toISOString();
+    const bootstrapPassword = randomBytes(18).toString('base64url');
     store.users.push({
       username: defaultUser.username,
       displayName: defaultUser.displayName,
       role: defaultUser.role,
-      password: hashPassword(defaultUser.password),
-      mustChangePassword: false,
+      password: hashPassword(bootstrapPassword),
+      mustChangePassword: true,
       createdAt: now,
       updatedAt: now
     });
+    console.warn(`Bootstrap local user '${defaultUser.username}' was created with one-time password: ${bootstrapPassword}`);
     changed = true;
   }
 
@@ -1434,6 +1854,7 @@ async function changeOwnPassword(session, payload) {
   await writeUsersStore(store);
 
   session.passwordChangeRequired = false;
+  await saveSession(session);
   return {
     success: true,
     user: publicUser(session)
@@ -1469,9 +1890,10 @@ async function resetUserPassword(payload) {
   store.updatedAt = user.updatedAt;
   await writeUsersStore(store);
 
-  for (const activeSession of sessions.values()) {
+  for (const activeSession of await sessionStore.list()) {
     if (activeSession.localUsername?.toLowerCase() === username.toLowerCase()) {
       activeSession.passwordChangeRequired = Boolean(user.mustChangePassword);
+      await saveSession(activeSession);
     }
   }
 
@@ -1505,6 +1927,7 @@ async function saveSessionCredentials(session, payload) {
     };
   }
 
+  await saveSession(session);
   return {
     success: true,
     user: publicUser(session)
@@ -2140,8 +2563,15 @@ function kafkaSslOptions(eventBrowser) {
   }
 
   return {
-    rejectUnauthorized: eventBrowser.SslRejectUnauthorized !== false
+    rejectUnauthorized: eventBrowser.SslRejectUnauthorized !== false,
+    ca: readOptionalPem(eventBrowser.SslCaLocation),
+    cert: readOptionalPem(eventBrowser.SslCertificateLocation),
+    key: readOptionalPem(eventBrowser.SslKeyLocation)
   };
+}
+
+function readOptionalPem(path) {
+  return isBlank(path) ? undefined : readFileSync(resolveServicePath(path, false), 'utf8');
 }
 
 function kafkaSaslOptions(eventBrowser) {
@@ -5396,6 +5826,7 @@ async function createSamlSession(profile) {
     authMethod: 'saml2',
     createdAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
+    csrfToken: newCsrfToken(),
     roles,
     identity,
     saml: {
@@ -5428,6 +5859,7 @@ async function createOauth2Session(claims, tokenSet) {
     authMethod: 'oauth2',
     createdAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
+    csrfToken: newCsrfToken(),
     roles: rolesFromSamlGroups(identityWithGroups.groups),
     identity: identityWithGroups,
     oauth2: {
@@ -5454,6 +5886,7 @@ async function loginWithLdap(payload) {
     authMethod: 'ldap',
     createdAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
+    csrfToken: newCsrfToken(),
     roles: rolesFromSamlGroups(identity.groups),
     identity,
     cmdbuild: buildLocalCmdbuildSessionCredentials(),
@@ -6599,12 +7032,13 @@ async function serveStatic(response, path) {
   const publicDir = resolveServicePath(config.Service.PublicDir, false);
   const requestedPath = path === '/' ? '/index.html' : path;
   const fullPath = normalize(resolve(publicDir, `.${requestedPath}`));
-  if (!fullPath.startsWith(publicDir) || !existsSync(fullPath)) {
+  if (!isPathInside(publicDir, fullPath) || !existsSync(fullPath)) {
     sendJson(response, 404, { error: 'not_found' });
     return;
   }
 
   response.writeHead(200, {
+    ...securityHeaders(),
     'content-type': contentTypeFor(fullPath),
     'cache-control': 'no-store'
   });
@@ -6649,8 +7083,8 @@ async function readBodyText(request, maxBytes) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function requireSession(request, response) {
-  const session = getSession(request);
+async function requireSession(request, response) {
+  const session = await getSession(request);
   if (!session) {
     sendJson(response, 401, {
       error: 'not_authenticated'
@@ -6661,25 +7095,60 @@ function requireSession(request, response) {
   return session;
 }
 
-function getSession(request) {
+async function getSession(request) {
   const sessionId = readCookie(request, config.Auth.SessionCookieName);
   if (!sessionId) {
     return null;
   }
 
-  const session = sessions.get(sessionId);
+  const session = await sessionStore.get(sessionId);
   if (!session) {
     return null;
   }
 
   const expiresAt = Date.parse(session.lastSeenAt) + (config.Auth.SessionTimeoutMinutes * 60 * 1000);
   if (Date.now() > expiresAt) {
-    sessions.delete(sessionId);
+    await sessionStore.delete(sessionId);
+    return null;
+  }
+
+  const absoluteLifetimeMinutes = Number(config.Auth.SessionAbsoluteLifetimeMinutes ?? 480);
+  const absoluteExpiresAt = Date.parse(session.createdAt) + (absoluteLifetimeMinutes * 60 * 1000);
+  if (Number.isFinite(absoluteExpiresAt) && Date.now() > absoluteExpiresAt) {
+    await sessionStore.delete(sessionId);
     return null;
   }
 
   session.lastSeenAt = new Date().toISOString();
+  session.csrfToken ||= newCsrfToken();
+  await saveSession(session);
   return session;
+}
+
+function isMutatingRequest(request) {
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
+}
+
+function validateCsrfRequest(request, response, session) {
+  const provided = request.headers['x-csrf-token'];
+  const expected = session.csrfToken;
+  if (isBlank(expected) || isBlank(provided)) {
+    sendJson(response, 403, {
+      error: 'csrf_required'
+    });
+    return false;
+  }
+
+  const actualBytes = Buffer.from(String(provided));
+  const expectedBytes = Buffer.from(String(expected));
+  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
+    sendJson(response, 403, {
+      error: 'csrf_invalid'
+    });
+    return false;
+  }
+
+  return true;
 }
 
 function requireRole(session, response, allowedRoles) {
@@ -7352,6 +7821,7 @@ function compileRuleRegex(pattern) {
 
 function sendJson(response, statusCode, payload, headers = {}) {
   response.writeHead(statusCode, {
+    ...securityHeaders(),
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     ...headers
@@ -7359,8 +7829,40 @@ function sendJson(response, statusCode, payload, headers = {}) {
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
+function sendText(response, statusCode, payload, contentType, headers = {}) {
+  response.writeHead(statusCode, {
+    ...securityHeaders(),
+    'content-type': contentType,
+    'cache-control': 'no-store',
+    ...headers
+  });
+  response.end(payload);
+}
+
+function incrementCounter(name, value = 1) {
+  serviceCounters.set(name, (serviceCounters.get(name) ?? 0) + value);
+}
+
+function buildPrometheusMetrics() {
+  const service = escapePrometheusLabel(config.Service.Name);
+  const lines = [
+    '# TYPE cmdb2monitoring_service_started_at_seconds gauge',
+    `cmdb2monitoring_service_started_at_seconds{service="${service}"} ${Math.floor(startedAt.getTime() / 1000)}`,
+    '# TYPE cmdb2monitoring_events_total counter'
+  ];
+  for (const [name, value] of [...serviceCounters.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    lines.push(`cmdb2monitoring_events_total{service="${service}",name="${escapePrometheusLabel(name)}"} ${value}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function escapePrometheusLabel(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 function sendRedirect(response, location, headers = {}) {
   response.writeHead(302, {
+    ...securityHeaders(),
     location,
     'cache-control': 'no-store',
     ...headers
@@ -7400,7 +7902,33 @@ function readCookie(request, name) {
 
 function buildSessionCookie(sessionId) {
   const maxAge = Math.max(60, Number(config.Auth.SessionTimeoutMinutes) * 60);
-  return `${config.Auth.SessionCookieName}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+  return `${config.Auth.SessionCookieName}=${encodeURIComponent(sessionId)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secureCookieSuffix()}`;
+}
+
+function buildExpiredSessionCookie() {
+  return `${config.Auth.SessionCookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookieSuffix()}`;
+}
+
+function secureCookieSuffix() {
+  const transport = config.Transport ?? {};
+  const secure = config.Auth.SecureCookies === true
+    || config.Auth.secureCookies === true
+    || String(transport.Mode ?? transport.mode ?? '').toLowerCase() === 'https'
+    || environment === 'Production';
+  return secure ? '; Secure' : '';
+}
+
+function securityHeaders() {
+  const headers = {
+    'X-Frame-Options': 'DENY',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy': "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+  };
+  if (String(config.Transport?.Mode ?? config.Transport?.mode ?? '').toLowerCase() === 'https') {
+    headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains';
+  }
+  return headers;
 }
 
 function safeRelayState(value) {
@@ -7710,11 +8238,11 @@ function ldapEntryDn(entry) {
   return ldapFirstValue(entry?.dn) || ldapFirstValue(entry?.distinguishedName) || ldapFirstValue(entry?.objectName);
 }
 
-function pruneOauthStates() {
-  const maxAgeMs = 10 * 60 * 1000;
-  for (const [state, record] of oauthStates.entries()) {
-    if (Date.now() - record.createdAt > maxAgeMs) {
-      oauthStates.delete(state);
+async function pruneOauthStates() {
+  const maxAgeMs = oauthStateTtlMs();
+  for (const record of await oauthStateStore.list()) {
+    if (Date.now() - Number(record.createdAt ?? 0) > maxAgeMs && record.id) {
+      await oauthStateStore.delete(record.id);
     }
   }
 }

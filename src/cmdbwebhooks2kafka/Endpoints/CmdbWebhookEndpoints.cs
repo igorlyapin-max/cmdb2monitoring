@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Cmdb2Monitoring.Logging;
+using Cmdb2Monitoring.Kafka;
+using Cmdb2Monitoring.Metrics;
 using CmdbWebhooks2Kafka.Configuration;
 using CmdbWebhooks2Kafka.Kafka;
 using CmdbWebhooks2Kafka.Models;
@@ -25,13 +27,25 @@ public static class CmdbWebhookEndpoints
             IOptions<CmdbWebhookOptions> cmdbWebhookOptions,
             IOptions<KafkaOptions> kafkaOptions,
             IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
+            WebhookRateLimiter rateLimiter,
+            IServiceMetrics metrics,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             var logger = loggerFactory.CreateLogger("CmdbWebhookEndpoints");
             var options = cmdbWebhookOptions.Value;
+            var rateLimitKey = request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            if (!rateLimiter.TryAcquire(rateLimitKey, options.RateLimit))
+            {
+                metrics.Increment("webhook_rejected_rate_limited");
+                logger.LogWarning("Rejected CMDBuild webhook from {RemoteAddress}: rate limit exceeded", rateLimitKey);
+
+                return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+            }
+
             if (!ValidateWebhookAuthorization(request, options))
             {
+                metrics.Increment("webhook_rejected_auth");
                 logger.LogWarning("Rejected CMDBuild webhook with missing or invalid Bearer token");
 
                 return Results.Unauthorized();
@@ -46,6 +60,7 @@ public static class CmdbWebhookEndpoints
             }
             catch (JsonException ex)
             {
+                metrics.Increment("webhook_rejected_invalid_json");
                 logger.LogWarning(ex, "Received CMDBuild webhook with invalid JSON payload");
 
                 return Results.BadRequest(new
@@ -54,13 +69,15 @@ public static class CmdbWebhookEndpoints
                 });
             }
 
-            var envelope = CmdbWebhookEnvelope.FromPayload(payload, options);
+            var correlationId = KafkaCorrelation.Ensure(request.Headers[KafkaCorrelation.HeaderName].FirstOrDefault());
+            var envelope = CmdbWebhookEnvelope.FromPayload(payload, options, correlationId);
             logger.LogBasic(
                 debugLoggingOptions,
-                "Received webhook payload for event {EventType}, entity type {EntityType}, entity id {EntityId}",
+                "Received webhook payload for event {EventType}, entity type {EntityType}, entity id {EntityId}, correlation {CorrelationId}",
                 envelope.EventType,
                 envelope.EntityType ?? "<unknown>",
-                envelope.EntityId ?? "<unknown>");
+                envelope.EntityId ?? "<unknown>",
+                envelope.CorrelationId);
             logger.LogVerbose(
                 debugLoggingOptions,
                 "Webhook payload JSON {WebhookPayload}",
@@ -73,13 +90,15 @@ public static class CmdbWebhookEndpoints
                 envelope.EntityId ?? "<unknown>");
 
             await publisher.PublishAsync(envelope, cancellationToken);
+            metrics.Increment("webhook_accepted");
             logger.LogBasic(
                 debugLoggingOptions,
-                "Webhook event {EventType} for {EntityType}/{EntityId} accepted for Kafka topic {Topic}",
+                "Webhook event {EventType} for {EntityType}/{EntityId} accepted for Kafka topic {Topic}, correlation {CorrelationId}",
                 envelope.EventType,
                 envelope.EntityType ?? "<unknown>",
                 envelope.EntityId ?? "<unknown>",
-                kafkaOptions.Value.Topic);
+                kafkaOptions.Value.Topic,
+                envelope.CorrelationId);
 
             return Results.Accepted(value: new
             {
@@ -88,6 +107,7 @@ public static class CmdbWebhookEndpoints
                 envelope.EventType,
                 envelope.EntityType,
                 envelope.EntityId,
+                envelope.CorrelationId,
                 envelope.ReceivedAt
             });
         });

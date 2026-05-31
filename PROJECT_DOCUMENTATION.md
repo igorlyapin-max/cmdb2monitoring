@@ -70,6 +70,27 @@ http://192.168.202.35:5080/webhooks/cmdbuild
 
 Для локального запуска `cmdbwebhooks2kafka` слушает `0.0.0.0:5080`; если запустить его только на `localhost:5080`, CMDBuild-контейнер не сможет вызвать webhook.
 
+## Transport Security
+
+Все HTTP actor-ы поддерживают конфигурируемый transport mode:
+
+- `Transport:Mode=Http|Https`;
+- `Transport:Certificate:Path`, `Transport:Certificate:KeyPath`, `Transport:Certificate:Password` для HTTPS;
+- production-запуск с `Http` требует явного `Transport:AllowPlainHttp=true`.
+
+Kafka clients поддерживают `Plaintext`, `Ssl`, `SaslPlaintext`, `SaslSsl`. Для TLS/SASL доступны поля `SslCaLocation`, `SslCertificateLocation`, `SslKeyLocation`, `SslKeyPassword`, `SslEndpointIdentificationAlgorithm` в Kafka-секциях сервисов; production-запуск с `Plaintext`/`SaslPlaintext` требует явного `AllowPlaintextKafka=true`.
+
+CMDBuild, Zabbix и PAM/AAPM HTTP clients могут использовать `https://` endpoints. В production `http://` и `RejectUnauthorized=false` считаются insecure и требуют явного override в соответствующем `Tls` блоке.
+
+Для ASP.NET actor-ов `AllowedHosts="*"` в production блокируется, если не задан явный override `HostSecurity:AllowWildcardAllowedHosts=true`.
+
+Все HTTP actor-ы публикуют:
+- `/health` - liveness;
+- `/ready` - readiness после успешной runtime-конфигурации;
+- `/metrics` - Prometheus text format с базовыми счетчиками обработки.
+
+`monitoring-ui-api` хранит session id в cookie `SameSite=Strict`; при HTTPS/Production добавляется `Secure`. Для HA можно включить `Auth:SessionStore:Mode=Redis`; sensitive session payload шифруется ключом `Auth:SessionEncryptionKey`/`MONITORING_UI_SESSION_ENCRYPTION_KEY`.
+
 ## Совместимость
 
 Подтвержденная матрица dev-окружения на 2026-05-02:
@@ -169,9 +190,11 @@ http://0.0.0.0:5080
 | `Service` | Имя сервиса, health route, rules reload route и Bearer token |
 | `Kafka:Input` | Topic `cmdbuild.webhooks.*`, group id, consumer auth/security |
 | `Kafka:Output` | Topic `zabbix.host.requests.*`, producer auth/security, `ProfileHeaderName` |
+| `DeadLetter` | DLQ topic `cmdbuild.webhooks.dlq.*` для malformed webhook events и необрабатываемых входных сообщений |
 | `ConversionRules` | `ReadFromGit`, repository URL/path, rules file path, git pull behavior, reload behavior, template engine |
 | `Cmdbuild` | CMDBuild REST base URL, lookup/reference/domain resolver limits, `LookupCacheTtlSeconds`, `HostBindingLookupEnabled`, `MainHostIdAttributeName`, `BindingClassName`, `BindingLookupLimit` |
 | `ProcessingState` | State-файл последнего обработанного объекта |
+| `Worker` | `ReplicaMode=SingleActive`, ожидаемое число replicas и явный override для нескольких active workers |
 | `ElkLogging` | Kafka log topic или будущий ELK |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на сервисные секреты CMDBuild/Kafka/reload-token |
 
@@ -205,6 +228,7 @@ Rules reload:
 - авторизация endpoint выполняется через `Authorization: Bearer <Service:RulesReloadToken>`;
 - `monitoring-ui-api` вызывает этот endpoint из dashboard-карточки `cmdbkafka2zabbix` кнопкой `Перечитать правила конвертации` для ролей `editor` и `admin`; после успешного reload UI заново читает `/api/rules/current`, обновляет summary/preview/индикаторы источника rules-файла и затем перерисовывает dashboard;
 - рядом с кнопкой показываются две версии: `rulesVersion/schemaVersion` на микросервисе из `GET /admin/rules-status` и `rulesVersion/schemaVersion` текущего rules-файла, который читает система управления;
+- `GET /admin/rules-status` также показывает источник rules, git repository/path, runtime git flags, template engine/name и trusted artifact settings;
 - при смене места хранения правил нужно заменить/настроить provider, не меняя HTTP-контракт кнопки и BFF.
 
 Публикация rules выполняется вне `monitoring-ui-api`: оператор сохраняет JSON через браузер или через `Настройка git` записывает локальную копию, проверяет diff, кладет файл в выбранный git repository и после публикации нажимает `Перечитать правила конвертации`.
@@ -218,6 +242,8 @@ Rules reload:
 При наличии блока `inventory` в Zabbix payload `inventory_mode` должен быть `0` или другим разрешенным режимом inventory. Значение `-1` отключает inventory и несовместимо с передачей inventory fields.
 
 `ProcessingState` читается при старте. После назначения Kafka partition сервис стартует чтение с `lastInputOffset + 1`, чтобы после рестарта не переобрабатывать уже обработанные сообщения.
+
+Каждому принятому webhook присваивается `correlationId`. Он передается через Kafka header `correlationId`, добавляется в `cmdb2monitoring.correlationId` внутри Zabbix request payload и затем попадает в response/binding события. Некорректный JSON в `cmdbuild.webhooks.*` публикуется в `cmdbuild.webhooks.dlq.*` с исходным payload, input topic/partition/offset, error code/message, `rulesVersion` и `correlationId`; после DLQ запись считается осознанно обработанной и offset коммитится.
 
 Webhook payload остается плоским. Для reference-полей CMDBuild webhook передает только numeric id первого reference attribute, например `АтрибутReference: 12345`; полный путь хранится в rules как `cmdbPath`, например `Класс.АтрибутReference.АтрибутLeaf`. `cmdbkafka2zabbix` по этому пути итеративно читает карточки CMDBuild REST и подставляет leaf-значение перед применением regex/T4. Для lookup leaf применяется тот же механизм, но результатом по умолчанию становится lookup `code`.
 
@@ -248,6 +274,7 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `Kafka:Input` | Topic `zabbix.host.requests.*`, group id, consumer auth/security |
 | `Kafka:Output` | Topic `zabbix.host.responses.*`, producer auth/security |
 | `Kafka:BindingOutput` | Topic `zabbix.host.bindings.*`, producer auth/security, headers `binding-event-type`, `binding-host-profile`, `binding-status` |
+| `DeadLetter` | DLQ topic `zabbix.host.requests.dlq.*` для malformed requests и Zabbix API failures после retry |
 | `Zabbix:ApiEndpoint` | URL Zabbix JSON-RPC API |
 | `Zabbix:AuthMode` | `Token`, `Login`, `LoginOrToken` или `None` |
 | `Zabbix:ApiToken` | Token для production, через secret/env |
@@ -257,11 +284,14 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `Zabbix:HostGroupCacheTtlSeconds`, `Zabbix:TemplateCacheTtlSeconds` | TTL positive-кэша для validation lookup в Zabbix, default `300`, `0` отключает |
 | `Processing` | Gentle delay, retries и retry delay |
 | `ProcessingState` | State-файл последнего обработанного объекта |
+| `Worker` | `ReplicaMode=SingleActive`, ожидаемое число replicas и явный override для нескольких active workers |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Zabbix/Kafka/ELK секреты |
 
 `Processing:DelayBetweenObjectsMs` по умолчанию 50 мс, чтобы Zabbix writer не делал лишнюю паузу между объектами.
 
 `ProcessingState` работает по тому же правилу, что и во втором сервисе: state-файл хранит последний успешно обработанный input offset, а consumer при старте начинает с `lastInputOffset + 1`.
+
+`zabbixrequests2api` читает `correlationId` из Kafka header или metadata payload и передает его в `zabbix.host.responses.*`, `zabbix.host.bindings.*` и DLQ. Некорректный JSON идет в `zabbix.host.requests.dlq.*`; transient Zabbix API exceptions повторяются по `Processing:MaxRetryAttempts`/`RetryDelayMs`, после исчерпания попыток публикуются в DLQ и затем фиксируются как error response/commit.
 
 `zabbixrequests2api` валидирует не только базовые `host.create/update/delete`, но и расширенные host поля, используемые rules: `status`, `macros`, `inventory`, TLS/PSK параметры. Также зарезервирована обработка Zabbix API methods для следующих задач: `maintenance.*`, `usermacro.*`, `proxy.*`, `valuemap.*`.
 

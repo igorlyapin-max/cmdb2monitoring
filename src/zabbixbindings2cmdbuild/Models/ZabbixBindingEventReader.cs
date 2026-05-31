@@ -28,7 +28,10 @@ public sealed class ZabbixBindingEventReader
             RulesVersion: ReadString(root, "rulesVersion"),
             SchemaVersion: ReadString(root, "schemaVersion"),
             RequestId: ReadString(root, "requestId"),
-            OccurredAt: ReadDateTimeOffset(root, "occurredAt"));
+            OccurredAt: ReadDateTimeOffset(root, "occurredAt"))
+        {
+            CorrelationId = ReadString(root, "correlationId")
+        };
     }
 
     private static string RequireString(JsonElement element, string propertyName)

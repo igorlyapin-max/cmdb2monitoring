@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
@@ -54,7 +55,7 @@ public sealed class ZabbixBindingEventPublisher : IZabbixBindingEventPublisher, 
         {
             Key = BindingKey(result),
             Value = payload,
-            Headers = BuildHeaders(result, outputOptions, eventType, bindingStatus)
+            Headers = BuildHeaders(result, outputOptions, eventType, bindingStatus, input)
         };
         logger.LogVerbose(
             debugLoggingOptions,
@@ -138,6 +139,7 @@ public sealed class ZabbixBindingEventPublisher : IZabbixBindingEventPublisher, 
         var payload = new JsonObject
         {
             ["source"] = "zabbixrequests2api",
+            ["correlationId"] = result.CorrelationId ?? KafkaCorrelation.Read(input.Message.Headers),
             ["eventType"] = eventType,
             ["operation"] = result.Method,
             ["sourceClass"] = result.SourceClass,
@@ -168,12 +170,14 @@ public sealed class ZabbixBindingEventPublisher : IZabbixBindingEventPublisher, 
         ZabbixProcessingResult result,
         KafkaBindingOutputOptions options,
         string eventType,
-        string bindingStatus)
+        string bindingStatus,
+        ConsumeResult<string, string> input)
     {
         var headers = new Headers();
         AddHeader(headers, options.EventTypeHeaderName, eventType);
         AddHeader(headers, options.HostProfileHeaderName, HostProfile(result));
         AddHeader(headers, options.BindingStatusHeaderName, bindingStatus);
+        KafkaCorrelation.Add(headers, result.CorrelationId ?? KafkaCorrelation.Read(input.Message.Headers));
         return headers;
     }
 

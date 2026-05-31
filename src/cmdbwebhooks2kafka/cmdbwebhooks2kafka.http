@@ -7,7 +7,7 @@ Accept: application/json
 
 POST {{cmdbwebhooks2kafka_HostAddress}}/webhooks/cmdbuild
 Content-Type: application/json
-Authorization: Bearer dev-cmdb-webhook-token
+Authorization: Bearer {{$dotenv CMDB_WEBHOOK_BEARER_TOKEN}}
 
 {
   "source": "cmdbuild",

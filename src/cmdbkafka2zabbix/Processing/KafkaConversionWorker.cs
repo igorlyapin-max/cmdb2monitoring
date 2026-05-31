@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
+using Cmdb2Monitoring.Metrics;
 using CmdbKafka2Zabbix.Conversion;
 using CmdbKafka2Zabbix.Kafka;
 using CmdbKafka2Zabbix.Rules;
@@ -16,7 +18,9 @@ public sealed class KafkaConversionWorker(
     CmdbSourceFieldResolver fieldResolver,
     CmdbToZabbixConverter converter,
     IZabbixRequestPublisher publisher,
+    IKafkaDeadLetterPublisher deadLetterPublisher,
     IProcessingStateStore stateStore,
+    IServiceMetrics metrics,
     IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaConversionWorker> logger) : BackgroundService
 {
@@ -59,54 +63,59 @@ public sealed class KafkaConversionWorker(
             inputOptions.Topic,
             inputOptions.GroupId);
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            ConsumeResult<string, string>? consumed = null;
-
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                consumed = consumer.Consume(TimeSpan.FromMilliseconds(inputOptions.PollTimeoutMs));
-                if (consumed is null)
+                ConsumeResult<string, string>? consumed = null;
+
+                try
                 {
-                    continue;
+                    consumed = consumer.Consume(TimeSpan.FromMilliseconds(inputOptions.PollTimeoutMs));
+                    if (consumed is null)
+                    {
+                        continue;
+                    }
+
+                    logger.LogBasic(
+                        debugLoggingOptions,
+                        "Consumed CMDBuild Kafka event from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
+                        consumed.Topic,
+                        consumed.Partition.Value,
+                        consumed.Offset.Value,
+                        consumed.Message.Key ?? "<empty>");
+                    logger.LogVerbose(
+                        debugLoggingOptions,
+                        "Consumed CMDBuild Kafka payload {KafkaPayload}",
+                        consumed.Message.Value);
+
+                    await ProcessMessageAsync(consumed, consumer, stoppingToken);
                 }
+                catch (ConsumeException ex)
+                {
+                    logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(
+                        ex,
+                        "Failed to process Kafka message from {Topic}[{Partition}]@{Offset}; message will be retried after restart or next poll",
+                        consumed?.Topic ?? "<unknown>",
+                        consumed?.Partition.Value,
+                        consumed?.Offset.Value);
 
-                logger.LogBasic(
-                    debugLoggingOptions,
-                    "Consumed CMDBuild Kafka event from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
-                    consumed.Topic,
-                    consumed.Partition.Value,
-                    consumed.Offset.Value,
-                    consumed.Message.Key ?? "<empty>");
-                logger.LogVerbose(
-                    debugLoggingOptions,
-                    "Consumed CMDBuild Kafka payload {KafkaPayload}",
-                    consumed.Message.Value);
-
-                await ProcessMessageAsync(consumed, consumer, stoppingToken);
-            }
-            catch (ConsumeException ex)
-            {
-                logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(
-                    ex,
-                    "Failed to process Kafka message from {Topic}[{Partition}]@{Offset}; message will be retried after restart or next poll",
-                    consumed?.Topic ?? "<unknown>",
-                    consumed?.Partition.Value,
-                    consumed?.Offset.Value);
-
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                }
             }
         }
-
-        consumer.Close();
+        finally
+        {
+            consumer.Close();
+        }
     }
 
     private static List<TopicPartitionOffset> BuildPartitionAssignments(
@@ -152,6 +161,7 @@ public sealed class KafkaConversionWorker(
         var rules = await rulesProvider.GetRulesAsync(cancellationToken);
         rulesMs = stageStopwatch.ElapsedMilliseconds;
         CmdbSourceEvent source;
+        var correlationId = KafkaCorrelation.Ensure(consumed.Message.Headers);
 
         try
         {
@@ -161,11 +171,12 @@ public sealed class KafkaConversionWorker(
             readResolveMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogBasic(
                 debugLoggingOptions,
-                "Resolved CMDBuild event {EventType} for {ClassName}/{EntityId} with {FieldCount} source field(s)",
+                "Resolved CMDBuild event {EventType} for {ClassName}/{EntityId} with {FieldCount} source field(s), correlation {CorrelationId}",
                 source.EventType,
                 source.ClassName ?? source.EntityType ?? "<unknown>",
                 source.EntityId ?? "<unknown>",
-                source.SourceFields.Count);
+                source.SourceFields.Count,
+                correlationId);
             logger.LogVerbose(
                 debugLoggingOptions,
                 "Resolved CMDBuild source fields for {ClassName}/{EntityId}: {SourceFields}",
@@ -182,6 +193,15 @@ public sealed class KafkaConversionWorker(
                 consumed.Topic,
                 consumed.Partition.Value,
                 consumed.Offset.Value);
+            await PublishDeadLetterAsync(
+                consumed,
+                "invalid_json",
+                ex.Message,
+                correlationId,
+                rules.RulesVersion,
+                ex,
+                cancellationToken);
+            metrics.Increment("dead_letter_published");
 
             stageStopwatch.Restart();
             await WriteStateAndCommitAsync(
@@ -239,6 +259,7 @@ public sealed class KafkaConversionWorker(
                 outputPublished: false,
                 skipReason: string.Join(';', results.Select(result => result.SkipReason).Where(reason => !string.IsNullOrWhiteSpace(reason))),
                 cancellationToken);
+            metrics.Increment("conversion_skipped");
             stateCommitMs = stageStopwatch.ElapsedMilliseconds;
             LogStageDurations(
                 consumed,
@@ -258,7 +279,7 @@ public sealed class KafkaConversionWorker(
         stageStopwatch.Restart();
         foreach (var result in publishableResults)
         {
-            lastDeliveryResult = await publisher.PublishAsync(result, cancellationToken);
+            lastDeliveryResult = await publisher.PublishAsync(result, correlationId, cancellationToken);
             logger.LogVerbose(
                 debugLoggingOptions,
                 "Published conversion result for profile {ProfileName}, method {Method}, payload {ZabbixPayload}",
@@ -278,6 +299,7 @@ public sealed class KafkaConversionWorker(
             skipReason: null,
             cancellationToken,
             outputTopic: lastDeliveryResult?.Topic);
+        metrics.Increment("conversion_published", publishableResults.Length);
         stateCommitMs = stageStopwatch.ElapsedMilliseconds;
         LogStageDurations(
             consumed,
@@ -322,6 +344,42 @@ public sealed class KafkaConversionWorker(
             convertMs,
             publishMs,
             stateCommitMs);
+    }
+
+    private async Task PublishDeadLetterAsync(
+        ConsumeResult<string, string> consumed,
+        string errorCode,
+        string errorMessage,
+        string correlationId,
+        string? rulesVersion,
+        Exception? exception,
+        CancellationToken cancellationToken)
+    {
+        var delivery = await deadLetterPublisher.PublishAsync(new KafkaDeadLetterMessage(
+            Service: "cmdbkafka2zabbix",
+            ErrorCode: errorCode,
+            ErrorMessage: errorMessage,
+            CorrelationId: correlationId,
+            InputTopic: consumed.Topic,
+            InputPartition: consumed.Partition.Value,
+            InputOffset: consumed.Offset.Value,
+            InputKey: consumed.Message.Key,
+            OriginalPayload: consumed.Message.Value,
+            RulesVersion: rulesVersion,
+            ExceptionType: exception?.GetType().FullName,
+            OccurredAt: DateTimeOffset.UtcNow), cancellationToken);
+
+        if (delivery is not null)
+        {
+            logger.LogWarning(
+                "Published dead-letter message for {InputTopic}[{Partition}]@{Offset} to {DeadLetterTopic}[{DeadLetterPartition}]@{DeadLetterOffset}",
+                consumed.Topic,
+                consumed.Partition.Value,
+                consumed.Offset.Value,
+                delivery.Topic,
+                delivery.Partition.Value,
+                delivery.Offset.Value);
+        }
     }
 
     private async Task WriteStateAndCommitAsync(

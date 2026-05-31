@@ -34,7 +34,15 @@ public sealed class GitConversionRulesProvider(
             rules.RulesVersion,
             cachedLocation ?? ResolveRulesFilePath(),
             cachedVersion,
+            ResolveRepositoryPath(),
+            options.Value.RepositoryUrl,
             options.Value.ReadFromGit,
+            options.Value.PullOnStartup,
+            options.Value.PullOnReload,
+            options.Value.TemplateEngine,
+            options.Value.TemplateName,
+            options.Value.TrustedArtifactPath,
+            options.Value.RequireTrustedArtifactInProduction,
             cachedLastWriteTime,
             DateTimeOffset.UtcNow);
     }
@@ -51,6 +59,8 @@ public sealed class GitConversionRulesProvider(
             rules.RulesVersion,
             cachedLocation ?? ResolveRulesFilePath(),
             cachedVersion,
+            ResolveRepositoryPath(),
+            options.Value.RepositoryUrl,
             options.Value.ReadFromGit && options.Value.PullOnReload,
             DateTimeOffset.UtcNow);
     }
@@ -129,14 +139,13 @@ public sealed class GitConversionRulesProvider(
 
     private string ResolveRulesFilePath()
     {
-        var repositoryPath = string.IsNullOrWhiteSpace(options.Value.RepositoryPath)
-            ? "."
-            : options.Value.RepositoryPath;
+        var repositoryPath = ResolveRepositoryPath();
         var rulesFilePath = Path.IsPathRooted(options.Value.RulesFilePath)
             ? options.Value.RulesFilePath
             : Path.Combine(repositoryPath, options.Value.RulesFilePath);
 
         var fullPath = Path.GetFullPath(rulesFilePath);
+        EnsurePathInsideBase(fullPath);
         if (!File.Exists(fullPath))
         {
             throw new FileNotFoundException("Conversion rules file was not found.", fullPath);
@@ -183,13 +192,11 @@ public sealed class GitConversionRulesProvider(
 
     private async Task<ProcessResult> RunProcessAsync(string arguments, bool captureOutput, CancellationToken cancellationToken)
     {
-        var repositoryPath = string.IsNullOrWhiteSpace(options.Value.RepositoryPath)
-            ? "."
-            : options.Value.RepositoryPath;
+        var repositoryPath = ResolveRepositoryPath();
         var startInfo = new ProcessStartInfo
         {
             FileName = options.Value.GitExecutablePath,
-            Arguments = $"-C \"{Path.GetFullPath(repositoryPath)}\" {arguments}",
+            Arguments = $"-C \"{repositoryPath}\" {arguments}",
             UseShellExecute = false,
             RedirectStandardOutput = captureOutput,
             RedirectStandardError = true
@@ -222,8 +229,40 @@ public sealed class GitConversionRulesProvider(
             logger.LogInformation(
                 "Reading conversion rules from git repository {RepositoryUrl} at {RepositoryPath}",
                 options.Value.RepositoryUrl,
-                Path.GetFullPath(string.IsNullOrWhiteSpace(options.Value.RepositoryPath) ? "." : options.Value.RepositoryPath));
+                ResolveRepositoryPath());
         }
+    }
+
+    private string ResolveRepositoryPath()
+    {
+        var repositoryPath = string.IsNullOrWhiteSpace(options.Value.RepositoryPath)
+            ? "."
+            : options.Value.RepositoryPath;
+        var basePath = ResolveBaseDirectory();
+        var fullPath = Path.IsPathRooted(repositoryPath)
+            ? Path.GetFullPath(repositoryPath)
+            : Path.GetFullPath(repositoryPath);
+        EnsurePathInsideBase(fullPath);
+        return fullPath;
+    }
+
+    private void EnsurePathInsideBase(string path)
+    {
+        var basePath = ResolveBaseDirectory();
+        var normalizedBase = basePath.EndsWith(Path.DirectorySeparatorChar)
+            ? basePath
+            : $"{basePath}{Path.DirectorySeparatorChar}";
+        var normalizedPath = Path.GetFullPath(path);
+        if (!normalizedPath.StartsWith(normalizedBase, StringComparison.Ordinal)
+            && !string.Equals(normalizedPath.TrimEnd(Path.DirectorySeparatorChar), normalizedBase.TrimEnd(Path.DirectorySeparatorChar), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Conversion rules path '{normalizedPath}' escapes base directory '{basePath}'.");
+        }
+    }
+
+    private string ResolveBaseDirectory()
+    {
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(options.Value.BaseDirectory) ? "." : options.Value.BaseDirectory);
     }
 
     private sealed record ProcessResult(int ExitCode, string? Output);

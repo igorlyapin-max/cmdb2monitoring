@@ -1,3 +1,5 @@
+using Cmdb2Monitoring.Http;
+
 namespace ZabbixBindings2Cmdbuild.Cmdbuild;
 
 public sealed class CmdbuildOptions
@@ -5,6 +7,8 @@ public sealed class CmdbuildOptions
     public const string SectionName = "Cmdbuild";
 
     public string BaseUrl { get; init; } = string.Empty;
+
+    public HttpClientTlsOptions Tls { get; init; } = new();
 
     public string Username { get; init; } = string.Empty;
 

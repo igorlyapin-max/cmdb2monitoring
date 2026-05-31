@@ -34,6 +34,7 @@
   - `SaslMechanism`;
   - `Username`;
   - `Password`;
+  - SSL certificate/CA fields для `Ssl` и `SaslSsl`;
   - `Acks`;
   - `EnableIdempotence`;
   - timeouts.
@@ -41,6 +42,10 @@
 - Сервисы, которые могут упасть при обработке, должны писать последний обработанный объект и Kafka input offset в state-файл.
 - При старте consumer должен читать state-файл и начинать чтение с `lastInputOffset + 1` для соответствующего topic/partition. State-файл не должен быть только диагностическим логом.
 - Если сервис запускается на dev host, а источник работает в Docker, HTTP endpoint должен слушать не только loopback. Для текущего webhook-сервиса dev bind: `0.0.0.0:5080`, CMDBuild вызывает `http://192.168.202.35:5080/webhooks/cmdbuild`.
+- HTTP/TLS transport выбирается конфигурацией. Dev может использовать HTTP, production должен использовать HTTPS/TLS или явный insecure override (`AllowPlainHttp`, `AllowPlaintextKafka`, `AllowInsecureHttp`).
+- `AllowedHosts="*"` в production запрещен без явного `HostSecurity:AllowWildcardAllowedHosts=true`.
+- Runtime state-файлы должны писаться атомарно и не должны выходить за разрешенный base directory.
+- Kafka workers с локальным state работают в режиме `Worker:ReplicaMode=SingleActive`; несколько active replicas допустимы только с явным override или внешним state/lock дизайном.
 
 ## Kafka и контракты
 
@@ -50,6 +55,10 @@
   - `cmdbuild.webhooks.*`;
   - `zabbix.host.requests.*`;
   - `zabbix.host.responses.*`.
+- DLQ topics:
+  - `cmdbuild.webhooks.dlq.*`;
+  - `zabbix.host.requests.dlq.*`.
+- Сквозной `correlationId` передается через Kafka header `correlationId` и payload metadata, если сообщение содержит вложенный `cmdb2monitoring` блок.
 - Log topics:
   - `cmdbwebhooks2kafka.logs.*`;
   - `cmdbkafka2zabbix.logs.*`;

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Cmdb2Monitoring.Logging;
+using Cmdb2Monitoring.Metrics;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixBindings2Cmdbuild.Cmdbuild;
@@ -14,6 +15,7 @@ public sealed class KafkaBindingWorker(
     ZabbixBindingEventReader eventReader,
     ICmdbuildBindingClient cmdbuildClient,
     IProcessingStateStore stateStore,
+    IServiceMetrics metrics,
     IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaBindingWorker> logger) : BackgroundService
 {
@@ -45,53 +47,58 @@ public sealed class KafkaBindingWorker(
             inputOptions.Topic,
             inputOptions.GroupId);
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            ConsumeResult<string, string>? consumed = null;
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                consumed = consumer.Consume(TimeSpan.FromMilliseconds(inputOptions.PollTimeoutMs));
-                if (consumed is null)
+                ConsumeResult<string, string>? consumed = null;
+                try
                 {
-                    continue;
+                    consumed = consumer.Consume(TimeSpan.FromMilliseconds(inputOptions.PollTimeoutMs));
+                    if (consumed is null)
+                    {
+                        continue;
+                    }
+
+                    logger.LogBasic(
+                        debugLoggingOptions,
+                        "Consumed Zabbix binding event from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
+                        consumed.Topic,
+                        consumed.Partition.Value,
+                        consumed.Offset.Value,
+                        consumed.Message.Key ?? "<empty>");
+                    logger.LogVerbose(
+                        debugLoggingOptions,
+                        "Consumed Zabbix binding payload {KafkaPayload}",
+                        consumed.Message.Value);
+
+                    await ProcessMessageAsync(consumed, consumer, stoppingToken);
                 }
+                catch (ConsumeException ex)
+                {
+                    logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(
+                        ex,
+                        "Failed to process binding message from {Topic}[{Partition}]@{Offset}; message will be retried after restart or next poll",
+                        consumed?.Topic ?? "<unknown>",
+                        consumed?.Partition.Value,
+                        consumed?.Offset.Value);
 
-                logger.LogBasic(
-                    debugLoggingOptions,
-                    "Consumed Zabbix binding event from {Topic}[{Partition}]@{Offset}, key {KafkaKey}",
-                    consumed.Topic,
-                    consumed.Partition.Value,
-                    consumed.Offset.Value,
-                    consumed.Message.Key ?? "<empty>");
-                logger.LogVerbose(
-                    debugLoggingOptions,
-                    "Consumed Zabbix binding payload {KafkaPayload}",
-                    consumed.Message.Value);
-
-                await ProcessMessageAsync(consumed, consumer, stoppingToken);
-            }
-            catch (ConsumeException ex)
-            {
-                logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(
-                    ex,
-                    "Failed to process binding message from {Topic}[{Partition}]@{Offset}; message will be retried after restart or next poll",
-                    consumed?.Topic ?? "<unknown>",
-                    consumed?.Partition.Value,
-                    consumed?.Offset.Value);
-
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                }
             }
         }
-
-        consumer.Close();
+        finally
+        {
+            consumer.Close();
+        }
     }
 
     private static List<TopicPartitionOffset> BuildPartitionAssignments(
@@ -139,17 +146,19 @@ public sealed class KafkaBindingWorker(
             parseMs = stageStopwatch.ElapsedMilliseconds;
             logger.LogBasic(
                 debugLoggingOptions,
-                "Applying Zabbix binding event {EventType} for {SourceClass}/{SourceCardId}, profile {HostProfile}, hostid {ZabbixHostId}",
+                "Applying Zabbix binding event {EventType} for {SourceClass}/{SourceCardId}, profile {HostProfile}, hostid {ZabbixHostId}, correlation {CorrelationId}",
                 bindingEvent.EventType,
                 bindingEvent.SourceClass,
                 bindingEvent.SourceCardId,
                 bindingEvent.HostProfile,
-                bindingEvent.ZabbixHostId);
+                bindingEvent.ZabbixHostId,
+                bindingEvent.CorrelationId ?? "<none>");
             stageStopwatch.Restart();
             await cmdbuildClient.ApplyAsync(bindingEvent, cancellationToken);
             applyMs = stageStopwatch.ElapsedMilliseconds;
             stageStopwatch.Restart();
             await WriteStateAndCommitAsync(consumed, consumer, bindingEvent, true, null, cancellationToken);
+            metrics.Increment("binding_applied");
             stateCommitMs = stageStopwatch.ElapsedMilliseconds;
             LogStageDurations(
                 consumed,
@@ -178,6 +187,7 @@ public sealed class KafkaBindingWorker(
                 consumed.Offset.Value);
             stageStopwatch.Restart();
             await WriteStateAndCommitAsync(consumed, consumer, bindingEvent, false, "invalid_json", cancellationToken);
+            metrics.Increment("binding_invalid_json");
             stateCommitMs = stageStopwatch.ElapsedMilliseconds;
             LogStageDurations(
                 consumed,

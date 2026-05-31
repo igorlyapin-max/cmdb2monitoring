@@ -14,7 +14,14 @@
 
   <ItemGroup>
     <Compile Include="../shared/Logging/*.cs" Link="Logging/Shared/%(Filename)%(Extension)" />
+    <Compile Include="../shared/Http/*.cs" Link="Http/Shared/%(Filename)%(Extension)" />
+    <Compile Include="../shared/Kafka/*.cs" Link="Kafka/Shared/%(Filename)%(Extension)" />
+    <Compile Include="../shared/Metrics/*.cs" Link="Metrics/Shared/%(Filename)%(Extension)" />
+    <Compile Include="../shared/Security/*.cs" Link="Security/Shared/%(Filename)%(Extension)" />
     <Compile Include="../shared/Secrets/*.cs" Link="Secrets/%(Filename)%(Extension)" />
+    <Compile Include="../shared/State/*.cs" Link="State/Shared/%(Filename)%(Extension)" />
+    <Compile Include="../shared/Transport/*.cs" Link="Transport/Shared/%(Filename)%(Extension)" />
+    <Compile Include="../shared/Workers/*.cs" Link="Workers/Shared/%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

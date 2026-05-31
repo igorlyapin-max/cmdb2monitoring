@@ -5,4 +5,6 @@ public sealed class ProcessingStateOptions
     public const string SectionName = "ProcessingState";
 
     public string FilePath { get; init; } = "state/zabbixbindings2cmdbuild-state.json";
+
+    public string BaseDirectory { get; init; } = ".";
 }

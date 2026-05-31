@@ -48,6 +48,7 @@ public sealed class ZabbixRequestReader
             Id = id,
             Method = method,
             RequestId = ReadScalar(id),
+            CorrelationId = ReadString(metadata, "correlationId"),
             EntityId = key,
             Host = hostOverride ?? ReadHost(method, parameters) ?? ReadString(metadata, "host"),
             HostProfileName = hostProfileName,

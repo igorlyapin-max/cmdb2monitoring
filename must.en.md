@@ -25,17 +25,23 @@ This file records mandatory project development rules. If a rule conflicts with 
 - Every service must expose `GET /health`.
 - Every service must have `appsettings.json` and `appsettings.Development.json`.
 - Configurations must pass `scripts/test-configs.sh`.
-- Kafka configuration must include bootstrap servers, topic, client id, consumer group id where applicable, security protocol, SASL mechanism, username, password, acks, idempotence, and timeouts.
+- Kafka configuration must include bootstrap servers, topic, client id, consumer group id where applicable, security protocol, SASL mechanism, username, password, SSL certificate/CA fields for `Ssl`/`SaslSsl`, acks, idempotence, and timeouts.
 - Kafka offsets are committed only after successful processing, successful result publication, or an intentional skip/error response.
 - Services that can fail during processing must persist the last processed object and Kafka input offset in a state file.
 - On startup, a consumer must read the state file and resume from `lastInputOffset + 1` for the relevant topic/partition. The state file must not be only diagnostic output.
 - If a service runs on the dev host and the source system runs in Docker, the HTTP endpoint must listen on more than loopback. The current webhook dev bind is `0.0.0.0:5080`, and CMDBuild calls `http://192.168.202.35:5080/webhooks/cmdbuild`.
+- HTTP/TLS transport is configuration-driven. Dev may use HTTP; production must use HTTPS/TLS or an explicit insecure override (`AllowPlainHttp`, `AllowPlaintextKafka`, `AllowInsecureHttp`).
+- `AllowedHosts="*"` is forbidden in production unless `HostSecurity:AllowWildcardAllowedHosts=true` is set explicitly.
+- Runtime state files must be written atomically and must not escape the configured base directory.
+- Kafka workers with local state run as `Worker:ReplicaMode=SingleActive`; multiple active replicas require an explicit override or an external state/lock design.
 
 ## Kafka And Contracts
 
 - Dev topics use the `.dev` suffix.
 - Base/prod topics do not use the `.dev` suffix.
 - Current business chain: `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`.
+- DLQ topics: `cmdbuild.webhooks.dlq.*`, `zabbix.host.requests.dlq.*`.
+- End-to-end `correlationId` is propagated through the Kafka header `correlationId` and payload metadata when a message contains a nested `cmdb2monitoring` block.
 - Log topics: `cmdbwebhooks2kafka.logs.*`, `cmdbkafka2zabbix.logs.*`, `zabbixrequests2api.logs.*`.
 - Any Kafka message structure change must update `TZ_cmdb2monitoring.txt`, `aa/asyncapi/cmdb2monitoring.asyncapi.yaml`, config validation tests when required fields/connectivity rules change, and relevant `aa/` documentation when information flows change.
 

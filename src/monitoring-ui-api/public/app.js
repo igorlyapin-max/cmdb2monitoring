@@ -71,6 +71,7 @@ const state = {
   language: 'ru',
   authenticated: false,
   user: null,
+  csrfToken: '',
   users: [],
   credentialPrompt: null,
   runtimeSettingsSnapshot: '',
@@ -2369,7 +2370,7 @@ function bindForms() {
           password: form.get('password')
         }
       });
-      renderAuth({ authenticated: true, user: result.user });
+      renderAuth({ authenticated: true, user: result.user, csrfToken: result.csrfToken });
       await loadDashboard();
       if (canUseRules()) {
         await loadRuntimeCapabilities();
@@ -2567,6 +2568,7 @@ function bindForms() {
 function renderAuth(status) {
   state.auth = status.auth ?? {};
   state.idp = status.idp ?? null;
+  state.csrfToken = status.csrfToken ?? state.csrfToken ?? '';
   if (status.runtime) {
     state.runtimeSettings = mergeRuntimeSettings(state.runtimeSettings, status.runtime);
   }
@@ -14516,9 +14518,15 @@ function isNaturallyInteractive(node) {
 }
 
 async function api(path, options = {}) {
+  const method = options.method ?? 'GET';
+  const headers = options.body ? { 'content-type': 'application/json' } : {};
+  if (state.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase())) {
+    headers['x-csrf-token'] = state.csrfToken;
+  }
+
   const response = await fetch(path, {
-    method: options.method ?? 'GET',
-    headers: options.body ? { 'content-type': 'application/json' } : {},
+    method,
+    headers,
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   const payload = await response.json();

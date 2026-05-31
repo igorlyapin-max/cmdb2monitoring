@@ -1,3 +1,5 @@
+using Cmdb2Monitoring.Http;
+
 namespace ZabbixRequests2Api.Zabbix;
 
 public sealed class ZabbixOptions
@@ -5,6 +7,8 @@ public sealed class ZabbixOptions
     public const string SectionName = "Zabbix";
 
     public string ApiEndpoint { get; init; } = string.Empty;
+
+    public HttpClientTlsOptions Tls { get; init; } = new();
 
     public string AuthMode { get; init; } = "LoginOrToken";
 

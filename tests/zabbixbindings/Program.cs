@@ -502,6 +502,7 @@ static Task BindingPublisherContractRendersDeletePayload()
     AssertEqual("management", bindingEvent.HostProfile, "HostProfile");
     AssertEqual("deleted", bindingEvent.BindingStatus, "BindingStatus");
     AssertEqual("902", bindingEvent.ZabbixHostId, "ZabbixHostId");
+    AssertEqual("corr-input", bindingEvent.CorrelationId, "CorrelationId");
     AssertTrue(!bindingEvent.IsMainProfile, "IsMainProfile");
 
     using var document = JsonDocument.Parse(payload);
@@ -515,7 +516,10 @@ static Task BindingPublisherContractRendersDeletePayload()
 
 static Task BindingPublisherContractRendersConfiguredHeaders()
 {
-    var result = ProcessingResult(method: "host.update", isMainProfile: false, hostProfile: "management");
+    var result = ProcessingResult(method: "host.update", isMainProfile: false, hostProfile: "management") with
+    {
+        CorrelationId = "corr-test"
+    };
     var options = new KafkaBindingOutputOptions
     {
         EventTypeHeaderName = "x-event",
@@ -528,11 +532,13 @@ static Task BindingPublisherContractRendersConfiguredHeaders()
         result,
         options,
         "zabbix.host.binding.updated",
-        "active");
+        "active",
+        ConsumeResult());
 
     AssertEqual("zabbix.host.binding.updated", HeaderString(headers, "x-event"), "x-event");
     AssertEqual("management", HeaderString(headers, "x-profile"), "x-profile");
     AssertEqual("active", HeaderString(headers, "x-status"), "x-status");
+    AssertEqual("corr-test", HeaderString(headers, "correlationId"), "correlationId");
     return Task.CompletedTask;
 }
 
@@ -867,7 +873,11 @@ static ConsumeResult<string, string> ConsumeResult()
         Message = new Message<string, string>
         {
             Key = "CIClass:101:management",
-            Value = "{}"
+            Value = "{}",
+            Headers = new Headers
+            {
+                { "correlationId", Encoding.UTF8.GetBytes("corr-input") }
+            }
         }
     };
 }
