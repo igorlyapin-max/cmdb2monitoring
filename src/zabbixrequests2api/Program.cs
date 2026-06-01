@@ -35,6 +35,7 @@ builder.Services.AddOptions<WorkerRuntimeOptions>()
     .Validate(options => options.HasValidReplicaMode(), "Worker replica mode must be SingleActive or ExternalState.")
     .Validate(options => options.ExpectedReplicas > 0, "Worker expected replicas must be greater than zero.")
     .Validate(options => options.AllowsConfiguredReplicaCount(), "Worker ReplicaMode=SingleActive allows only one expected replica unless Worker:AllowMultipleActiveReplicas=true.")
+    .Validate(options => options.ShutdownTimeoutSeconds > 0, "Worker shutdown timeout must be greater than zero.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ServiceOptions>()
@@ -90,6 +91,7 @@ builder.Services.AddOptions<ZabbixOptions>()
     .Validate(options => options.RequestTimeoutMs > 0, "Zabbix request timeout must be greater than zero.")
     .Validate(options => options.HostGroupCacheTtlSeconds >= 0, "Zabbix host group cache TTL cannot be negative.")
     .Validate(options => options.TemplateCacheTtlSeconds >= 0, "Zabbix template cache TTL cannot be negative.")
+    .Validate(options => options.Resilience.HasValidValues(), "Zabbix resilience settings are invalid.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ProcessingOptions>()
@@ -97,6 +99,7 @@ builder.Services.AddOptions<ProcessingOptions>()
     .Validate(options => options.DelayBetweenObjectsMs >= 0, "Delay between objects cannot be negative.")
     .Validate(options => options.MaxRetryAttempts > 0, "Max retry attempts must be greater than zero.")
     .Validate(options => options.RetryDelayMs >= 0, "Retry delay cannot be negative.")
+    .Validate(options => options.HasValidRetryBackoffValues(), "Retry backoff settings are invalid.")
     .Validate(options => !options.ProtectManagedAggregateHosts || options.HasProtectedHostMarkers(), "Protected aggregate host guard requires at least one protected host name or tag.")
     .ValidateOnStart();
 
@@ -150,6 +153,12 @@ builder.Services.AddHttpClient<ZabbixClient>((services, client) =>
     {
         var options = services.GetRequiredService<IOptions<ZabbixOptions>>().Value;
         return HttpClientTlsConfigurator.CreateHandler(options.Tls);
+    })
+    .AddHttpMessageHandler(services =>
+    {
+        var options = services.GetRequiredService<IOptions<ZabbixOptions>>().Value;
+        var logger = services.GetRequiredService<ILogger<HttpClientResilienceHandler>>();
+        return new HttpClientResilienceHandler(options.Resilience, logger);
     });
 builder.Services.AddSingleton<IZabbixClient>(services => services.GetRequiredService<ZabbixClient>());
 builder.Services.AddSingleton<ZabbixRequestReader>();
@@ -171,6 +180,7 @@ app.Logger.LogBasic(
     serviceOptions.Name,
     debugLoggingOptions.Value.Level);
 
+app.UseServiceSecurityHeaders();
 app.MapServiceRuntimeEndpoints(serviceOptions.Name, serviceOptions.HealthRoute);
 
 app.Run();

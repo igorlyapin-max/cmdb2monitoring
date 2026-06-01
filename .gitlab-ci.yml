@@ -1,0 +1,73 @@
+stages:
+  - validate
+  - build
+  - test
+  - security
+
+variables:
+  DOTNET_ROOT: "$CI_PROJECT_DIR/.dotnet"
+  DOTNET_CLI_HOME: "$CI_PROJECT_DIR/.dotnet_home"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  NUGET_PACKAGES: "$CI_PROJECT_DIR/.nuget/packages"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .dotnet/
+    - .nuget/packages/
+    - .npm/
+    - src/monitoring-ui-api/node_modules/
+
+.node_job:
+  image: node:22-bookworm
+
+.install_dotnet: &install_dotnet
+  - apt-get update
+  - apt-get install -y --no-install-recommends ca-certificates curl
+  - test -x .dotnet/dotnet || curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+  - test -x .dotnet/dotnet || bash /tmp/dotnet-install.sh --jsonfile global.json --install-dir .dotnet
+
+node_config:
+  extends: .node_job
+  stage: validate
+  script:
+    - npm ci --prefix src/monitoring-ui-api
+    - node --check src/monitoring-ui-api/server.mjs
+    - node --check src/monitoring-ui-api/public/app.js
+    - node src/monitoring-ui-api/scripts/validate-config.mjs
+
+whitespace:
+  extends: .node_job
+  stage: validate
+  script:
+    - git diff --check
+
+dotnet_build:
+  extends: .node_job
+  stage: build
+  before_script: *install_dotnet
+  script:
+    - ./scripts/dotnet build src/cmdbwebhooks2kafka/cmdbwebhooks2kafka.csproj -v minimal
+    - ./scripts/dotnet build src/cmdbkafka2zabbix/cmdbkafka2zabbix.csproj -v minimal
+    - ./scripts/dotnet build src/zabbixrequests2api/zabbixrequests2api.csproj -v minimal
+    - ./scripts/dotnet build src/zabbixbindings2cmdbuild/zabbixbindings2cmdbuild.csproj -v minimal
+    - ./scripts/dotnet build tests/configvalidation/configvalidation.csproj -v minimal
+
+repository_validation:
+  extends: .node_job
+  stage: test
+  before_script: *install_dotnet
+  script:
+    - npm ci --prefix src/monitoring-ui-api
+    - ./scripts/test-configs.sh
+
+secret_scan:
+  image:
+    name: zricethezav/gitleaks:v8.27.2
+    entrypoint:
+      - ""
+  stage: security
+  script:
+    - gitleaks detect --source . --redact --verbose

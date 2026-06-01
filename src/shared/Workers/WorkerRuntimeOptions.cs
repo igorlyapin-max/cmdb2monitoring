@@ -10,6 +10,8 @@ public sealed class WorkerRuntimeOptions
 
     public bool AllowMultipleActiveReplicas { get; init; }
 
+    public int ShutdownTimeoutSeconds { get; init; } = 60;
+
     public bool HasValidReplicaMode()
     {
         return string.Equals(ReplicaMode, "SingleActive", StringComparison.OrdinalIgnoreCase)

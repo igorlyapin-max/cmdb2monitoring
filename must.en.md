@@ -33,7 +33,7 @@ This file records mandatory project development rules. If a rule conflicts with 
 - HTTP/TLS transport is configuration-driven. Dev may use HTTP; production must use HTTPS/TLS or an explicit insecure override (`AllowPlainHttp`, `AllowPlaintextKafka`, `AllowInsecureHttp`).
 - `AllowedHosts="*"` is forbidden in production unless `HostSecurity:AllowWildcardAllowedHosts=true` is set explicitly.
 - Runtime state files must be written atomically and must not escape the configured base directory.
-- Kafka workers with local state run as `Worker:ReplicaMode=SingleActive`; multiple active replicas require an explicit override or an external state/lock design.
+- Kafka workers with local state run as `Worker:ReplicaMode=SingleActive`; multiple active replicas require an explicit override or an external state/lock design. On shutdown, a worker must drain the current message up to `Worker:ShutdownTimeoutSeconds`.
 
 ## Kafka And Contracts
 
@@ -43,7 +43,7 @@ This file records mandatory project development rules. If a rule conflicts with 
 - DLQ topics: `cmdbuild.webhooks.dlq.*`, `zabbix.host.requests.dlq.*`.
 - End-to-end `correlationId` is propagated through the Kafka header `correlationId` and payload metadata when a message contains a nested `cmdb2monitoring` block.
 - Log topics: `cmdbwebhooks2kafka.logs.*`, `cmdbkafka2zabbix.logs.*`, `zabbixrequests2api.logs.*`.
-- Any Kafka message structure change must update `TZ_cmdb2monitoring.txt`, `aa/asyncapi/cmdb2monitoring.asyncapi.yaml`, config validation tests when required fields/connectivity rules change, and relevant `aa/` documentation when information flows change.
+- Any Kafka message structure change must update `TZ_cmdb2monitoring.txt`, `aa/asyncapi/cmdb2monitoring.asyncapi.yaml`, JSON Schema contracts in `aa/schemas`, config validation tests when required fields/connectivity rules change, and relevant `aa/` documentation when information flows change.
 
 ## Zabbix Lifecycle
 

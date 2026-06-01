@@ -6,6 +6,9 @@
 
 - Added configurable HTTP/HTTPS transport settings for all services, Kafka SSL fields, UI Redis session storage option, CSRF protection, webhook rate limiting, and non-root container runtime defaults.
 - Added Kafka `correlationId` propagation, DLQ topics for webhook conversion and Zabbix request application, `/ready` and `/metrics` runtime endpoints, single-active worker config guards, Docker `HEALTHCHECK`, and a CI workflow with build/config/secret-scan gates.
+- Added GitLab CI with Node config checks, .NET builds, repository validation, whitespace check, and gitleaks secret scan.
+- Added JSON Schema contract files for Kafka envelopes, Zabbix requests/responses/bindings, DLQ payloads, and conversion rules under `aa/schemas`.
+- Dashboard queue monitoring now supports DLQ topic-depth thermometers in addition to state-file backlog thermometers.
 - CMDBuild Catalog now has an editor/admin bulk lookup-change action: select a class and writable lookup attribute, confirm, and the UI sends per-card PUT updates that rotate each card to the next active lookup value.
 - Dashboard now shows live conversion and Zabbix apply queue thermometers, refreshed every 5-10 seconds from Kafka topic high watermarks and processing state files.
 - Added `scripts/perf-baseline.mjs`, a read-only CMDBuild/Zabbix latency baseline report for comparing stands and validating optimization work.
@@ -13,6 +16,8 @@
 ### Changed
 
 - Production startup validation now rejects plain HTTP, plaintext Kafka, weak webhook tokens, and insecure TLS settings unless an explicit insecure override is configured.
+- Kafka workers now stop gracefully by draining the current message up to `Worker:ShutdownTimeoutSeconds`, and outbound CMDBuild/Zabbix HTTP clients use configurable retry/backoff/jitter/circuit-breaker settings.
+- The UI/BFF now rate-limits auth/API routes, and .NET endpoints emit basic security headers on service responses.
 - UI local bootstrap no longer creates known `viewer`/`editor`/`admin` passwords; a one-time admin password is generated when the users file is created.
 - `zabbixrequests2api` now reuses one singleton Zabbix client, caches positive host group/template validation lookups with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.
 - `cmdbkafka2zabbix` now uses a precise CMDBuild filter for additional-profile `ZabbixHostBinding` lookup, caches CMDBuild lookup values with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.

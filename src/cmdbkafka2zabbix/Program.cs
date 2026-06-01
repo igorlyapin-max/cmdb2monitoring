@@ -39,6 +39,7 @@ builder.Services.AddOptions<WorkerRuntimeOptions>()
     .Validate(options => options.HasValidReplicaMode(), "Worker replica mode must be SingleActive or ExternalState.")
     .Validate(options => options.ExpectedReplicas > 0, "Worker expected replicas must be greater than zero.")
     .Validate(options => options.AllowsConfiguredReplicaCount(), "Worker ReplicaMode=SingleActive allows only one expected replica unless Worker:AllowMultipleActiveReplicas=true.")
+    .Validate(options => options.ShutdownTimeoutSeconds > 0, "Worker shutdown timeout must be greater than zero.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ServiceOptions>()
@@ -103,6 +104,7 @@ builder.Services.AddOptions<CmdbuildOptions>()
     .Validate(options => ProductionSecurityGuards.AllowsHttpEndpoint(builder.Environment, options.BaseUrl, options.Tls.AllowInsecureHttp), "Production CMDBuild BaseUrl requires https unless Cmdbuild:Tls:AllowInsecureHttp is true.")
     .Validate(options => !builder.Environment.IsProduction() || options.Tls.RejectUnauthorized, "Production CMDBuild TLS must reject unauthorized certificates.")
     .Validate(options => options.LookupCacheTtlSeconds >= 0, "CMDBuild lookup cache TTL cannot be negative.")
+    .Validate(options => options.Resilience.HasValidValues(), "CMDBuild resilience settings are invalid.")
     .ValidateOnStart();
 
 builder.Services.AddOptions<ProcessingStateOptions>()
@@ -150,12 +152,24 @@ builder.Services.AddHttpClient<CmdbSourceFieldResolver>()
     {
         var options = services.GetRequiredService<IOptions<CmdbuildOptions>>().Value;
         return HttpClientTlsConfigurator.CreateHandler(options.Tls);
+    })
+    .AddHttpMessageHandler(services =>
+    {
+        var options = services.GetRequiredService<IOptions<CmdbuildOptions>>().Value;
+        var logger = services.GetRequiredService<ILogger<HttpClientResilienceHandler>>();
+        return new HttpClientResilienceHandler(options.Resilience, logger);
     });
 builder.Services.AddHttpClient<CmdbZabbixHostBindingResolver>()
     .ConfigurePrimaryHttpMessageHandler(services =>
     {
         var options = services.GetRequiredService<IOptions<CmdbuildOptions>>().Value;
         return HttpClientTlsConfigurator.CreateHandler(options.Tls);
+    })
+    .AddHttpMessageHandler(services =>
+    {
+        var options = services.GetRequiredService<IOptions<CmdbuildOptions>>().Value;
+        var logger = services.GetRequiredService<ILogger<HttpClientResilienceHandler>>();
+        return new HttpClientResilienceHandler(options.Resilience, logger);
     });
 builder.Services.AddSingleton<ICmdbZabbixHostBindingResolver>(services => services.GetRequiredService<CmdbZabbixHostBindingResolver>());
 builder.Services.AddSingleton<T4TemplateRenderer>();
@@ -175,6 +189,7 @@ app.Logger.LogBasic(
     serviceOptions.Name,
     debugLoggingOptions.Value.Level);
 
+app.UseServiceSecurityHeaders();
 app.MapServiceRuntimeEndpoints(serviceOptions.Name, serviceOptions.HealthRoute);
 
 if (!string.IsNullOrWhiteSpace(serviceOptions.RulesReloadRoute))

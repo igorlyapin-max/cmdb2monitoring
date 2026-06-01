@@ -110,6 +110,7 @@ app.Logger.LogBasic(
     serviceOptions.Name,
     debugLoggingOptions.Value.Level);
 
+app.UseServiceSecurityHeaders();
 app.MapServiceRuntimeEndpoints(serviceOptions.Name, serviceOptions.HealthRoute);
 app.MapCmdbWebhookEndpoints();
 

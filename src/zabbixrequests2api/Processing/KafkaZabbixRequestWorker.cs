@@ -3,6 +3,7 @@ using System.Text.Json;
 using Cmdb2Monitoring.Kafka;
 using Cmdb2Monitoring.Logging;
 using Cmdb2Monitoring.Metrics;
+using Cmdb2Monitoring.Workers;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Kafka;
@@ -22,9 +23,43 @@ public sealed class KafkaZabbixRequestWorker(
     IKafkaDeadLetterPublisher deadLetterPublisher,
     IProcessingStateStore stateStore,
     IServiceMetrics metrics,
+    IOptions<WorkerRuntimeOptions> workerOptions,
     IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaZabbixRequestWorker> logger) : BackgroundService
 {
+    private readonly object inFlightLock = new();
+    private Task? inFlightTask;
+    private volatile bool stopRequested;
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        stopRequested = true;
+        var currentTask = CurrentInFlightTask();
+        if (currentTask is { IsCompleted: false })
+        {
+            var timeoutSeconds = Math.Max(1, workerOptions.Value.ShutdownTimeoutSeconds);
+            logger.LogInformation(
+                "Waiting up to {ShutdownTimeoutSeconds} second(s) for current Zabbix request message to finish",
+                timeoutSeconds);
+            try
+            {
+                await currentTask.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                logger.LogWarning(
+                    "Timed out waiting for current Zabbix request message after {ShutdownTimeoutSeconds} second(s); stopping worker",
+                    timeoutSeconds);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Zabbix request worker shutdown wait was canceled.");
+            }
+        }
+
+        await base.StopAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var previousState = await stateStore.ReadAsync(stoppingToken);
@@ -67,7 +102,7 @@ public sealed class KafkaZabbixRequestWorker(
 
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
+            while (!stoppingToken.IsCancellationRequested && !stopRequested)
             {
                 ConsumeResult<string, string>? consumed = null;
 
@@ -91,8 +126,21 @@ public sealed class KafkaZabbixRequestWorker(
                         "Consumed Zabbix request payload {KafkaPayload}",
                         consumed.Message.Value);
 
-                    await ProcessMessageAsync(consumed, consumer, stoppingToken);
-                    await DelayBeforeNextObjectAsync(stoppingToken);
+                    var processingTask = ProcessMessageAsync(consumed, consumer, stoppingToken);
+                    TrackInFlightTask(processingTask);
+                    try
+                    {
+                        await processingTask;
+                    }
+                    finally
+                    {
+                        ClearInFlightTask(processingTask);
+                    }
+
+                    if (!stopRequested)
+                    {
+                        await DelayBeforeNextObjectAsync(stoppingToken);
+                    }
                 }
                 catch (ConsumeException ex)
                 {
@@ -111,6 +159,11 @@ public sealed class KafkaZabbixRequestWorker(
                         consumed?.Partition.Value,
                         consumed?.Offset.Value);
 
+                    if (stopRequested)
+                    {
+                        break;
+                    }
+
                     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                 }
             }
@@ -118,6 +171,33 @@ public sealed class KafkaZabbixRequestWorker(
         finally
         {
             consumer.Close();
+        }
+    }
+
+    private Task? CurrentInFlightTask()
+    {
+        lock (inFlightLock)
+        {
+            return inFlightTask;
+        }
+    }
+
+    private void TrackInFlightTask(Task task)
+    {
+        lock (inFlightLock)
+        {
+            inFlightTask = task;
+        }
+    }
+
+    private void ClearInFlightTask(Task task)
+    {
+        lock (inFlightLock)
+        {
+            if (ReferenceEquals(inFlightTask, task))
+            {
+                inFlightTask = null;
+            }
         }
     }
 
@@ -344,6 +424,7 @@ public sealed class KafkaZabbixRequestWorker(
             }
             catch (Exception ex) when (attempt < maxAttempts)
             {
+                var retryDelay = CalculateRetryDelay(attempt);
                 logger.LogWarning(
                     ex,
                     "Zabbix request {Method} for entity {EntityId} failed on attempt {Attempt}/{MaxAttempts}; retrying after {RetryDelayMs} ms",
@@ -351,9 +432,9 @@ public sealed class KafkaZabbixRequestWorker(
                     request.EntityId ?? "<unknown>",
                     attempt,
                     maxAttempts,
-                    processingOptions.Value.RetryDelayMs);
+                    retryDelay.TotalMilliseconds);
 
-                await Task.Delay(TimeSpan.FromMilliseconds(processingOptions.Value.RetryDelayMs), cancellationToken);
+                await Task.Delay(retryDelay, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -375,6 +456,23 @@ public sealed class KafkaZabbixRequestWorker(
             [],
             [],
             []);
+    }
+
+    private TimeSpan CalculateRetryDelay(int attempt)
+    {
+        var options = processingOptions.Value;
+        var baseDelay = Math.Max(0, options.RetryDelayMs);
+        var maxDelay = Math.Max(baseDelay, options.RetryMaxDelayMs);
+        var multiplier = Math.Max(1, options.RetryBackoffMultiplier);
+        var delay = Math.Min(maxDelay, baseDelay * Math.Pow(multiplier, Math.Max(0, attempt - 1)));
+        var jitterRatio = Math.Clamp(options.RetryJitterRatio, 0, 1);
+        if (jitterRatio > 0)
+        {
+            var jitterFactor = 1 + ((Random.Shared.NextDouble() * 2) - 1) * jitterRatio;
+            delay *= jitterFactor;
+        }
+
+        return TimeSpan.FromMilliseconds(Math.Max(0, delay));
     }
 
     private async Task<ZabbixProcessingResult> ProcessRequestAsync(

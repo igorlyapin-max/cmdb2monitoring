@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cmdb2monitoring.local/schemas/cmdb-webhook-envelope.schema.json",
+  "title": "CMDBuild webhook Kafka envelope",
+  "type": "object",
+  "required": [
+    "source",
+    "eventType",
+    "correlationId",
+    "receivedAt",
+    "payload"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "source": {
+      "type": "string",
+      "const": "cmdbuild"
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "entityType": {
+      "type": "string"
+    },
+    "entityId": {
+      "type": "string"
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "receivedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "source",
+        "eventType",
+        "cmdbuildEvent",
+        "className",
+        "id",
+        "code"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "create",
+            "update",
+            "delete"
+          ]
+        },
+        "cmdbuildEvent": {
+          "type": "string",
+          "enum": [
+            "card_create_after",
+            "card_update_after",
+            "card_delete_after"
+          ]
+        },
+        "className": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

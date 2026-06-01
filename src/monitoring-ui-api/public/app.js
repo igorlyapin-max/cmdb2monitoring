@@ -319,6 +319,7 @@ const translations = {
     'dashboard.queueTrendUp': 'рост +{delta}',
     'dashboard.queueTrendFlat': 'без изменения',
     'dashboard.queueHelp': 'Онлайн-размер очереди: Kafka high watermark минус последний offset, зафиксированный обрабатывающим сервисом в state-файле.',
+    'dashboard.queueHelpDepth': 'Онлайн-размер DLQ: Kafka high watermark минус low watermark topic без state-файла.',
     'account.changePassword': 'Сменить пароль',
     'account.currentPassword': 'Текущий пароль',
     'account.newPassword': 'Новый пароль',
@@ -1068,6 +1069,7 @@ const translations = {
     'dashboard.queueTrendUp': 'growth +{delta}',
     'dashboard.queueTrendFlat': 'no change',
     'dashboard.queueHelp': 'Live queue size: Kafka high watermark minus the last offset recorded by the processing service in its state file.',
+    'dashboard.queueHelpDepth': 'Live DLQ size: Kafka high watermark minus the topic low watermark without a state file.',
     'account.changePassword': 'Change password',
     'account.currentPassword': 'Current password',
     'account.newPassword': 'New password',
@@ -2723,7 +2725,7 @@ function renderQueueMonitorItem(item) {
   }
 
   card.append(main, gauge, meta);
-  setHelp(card, t('dashboard.queueHelp'));
+  setHelp(card, item.mode === 'TopicDepth' ? t('dashboard.queueHelpDepth') : t('dashboard.queueHelp'));
   return card;
 }
 

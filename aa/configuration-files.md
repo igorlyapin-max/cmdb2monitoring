@@ -162,8 +162,9 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 | `Cmdbuild:MainHostIdAttributeName` | Атрибут основного Zabbix hostid, default `zabbix_main_hostid` | Если audit model использует другое имя |
 | `Cmdbuild:BindingClassName` | Служебный класс связей дополнительных профилей, default `ZabbixHostBinding` | Если audit model использует другое имя |
 | `Cmdbuild:BindingLookupLimit` | Лимит чтения карточек binding-класса при поиске дополнительного профиля | При большом количестве дополнительных профилей |
+| `Cmdbuild:Resilience` | Retry/backoff/jitter и circuit breaker для CMDBuild REST resolver | При нестабильном CMDBuild API или сетевых сбоях |
 | `ProcessingState:FilePath` | State-файл offset/объекта | Для отдельного окружения или volume |
-| `Worker:ReplicaMode`, `Worker:ExpectedReplicas` | Single-active policy для consumer/state worker-а | При переходе на внешний state/lock дизайн |
+| `Worker:ReplicaMode`, `Worker:ExpectedReplicas`, `Worker:ShutdownTimeoutSeconds` | Single-active policy и graceful-drain timeout для consumer/state worker-а | При переходе на внешний state/lock дизайн или долгой обработке сообщений |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK |
 
 Rules-файл `rules/cmdbuild-to-zabbix-host-create.json` управляет:
@@ -224,10 +225,11 @@ Cmdbuild__BindingClassName=ZabbixHostBinding
 | `Zabbix:ValidateHostGroups` | Проверка host groups до вызова API | Отключать только для диагностики |
 | `Zabbix:ValidateTemplates` | Проверка templates до вызова API | Отключать только для диагностики |
 | `Zabbix:ValidateTemplateGroups` | Проверка template groups | Отключать только если Zabbix API ограничен |
+| `Zabbix:Resilience` | Retry/backoff/jitter и circuit breaker для Zabbix HTTP API | При нестабильном Zabbix/API |
 | `Processing:DelayBetweenObjectsMs` | Gentle delay между объектами | Увеличивать при нагрузке на Zabbix |
-| `Processing:MaxRetryAttempts` | Retry попытки | При нестабильном Zabbix/API |
+| `Processing:MaxRetryAttempts`, `Processing:RetryDelayMs`, `Processing:RetryMaxDelayMs`, `Processing:RetryBackoffMultiplier`, `Processing:RetryJitterRatio` | Retry попытки и exponential backoff для обработки одного request | При нестабильном Zabbix/API |
 | `ProcessingState:FilePath` | State-файл | Для отдельного окружения или volume |
-| `Worker:ReplicaMode`, `Worker:ExpectedReplicas` | Single-active policy для consumer/state worker-а | При переходе на внешний state/lock дизайн |
+| `Worker:ReplicaMode`, `Worker:ExpectedReplicas`, `Worker:ShutdownTimeoutSeconds` | Single-active policy и graceful-drain timeout для consumer/state worker-а | При переходе на внешний state/lock дизайн или долгой обработке сообщений |
 
 Пример prod overrides:
 
@@ -261,8 +263,9 @@ State-файл `zabbixrequests2api` также используется для �
 | `Cmdbuild:MainHostIdAttributeName` | Атрибут hostid основного профиля, default `zabbix_main_hostid` | Если модель CMDBuild использует другое имя |
 | `Cmdbuild:BindingClassName` | Класс связей дополнительных профилей, default `ZabbixHostBinding` | Если audit model создан с другим именем |
 | `Cmdbuild:BindingLookupLimit` | Лимит поиска существующих binding-карточек | При большом количестве дополнительных профилей |
+| `Cmdbuild:Resilience` | Retry/backoff/jitter и circuit breaker для CMDBuild writeback API | При нестабильном CMDBuild API |
 | `ProcessingState:FilePath` | State-файл offset/binding event | Для отдельного окружения или volume |
-| `Worker:ReplicaMode`, `Worker:ExpectedReplicas` | Single-active policy для consumer/state worker-а | При переходе на внешний state/lock дизайн |
+| `Worker:ReplicaMode`, `Worker:ExpectedReplicas`, `Worker:ShutdownTimeoutSeconds` | Single-active policy и graceful-drain timeout для consumer/state worker-а | При переходе на внешний state/lock дизайн или долгой обработке сообщений |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK |
 
 Пример prod overrides:
@@ -299,6 +302,7 @@ Base config не содержит пароль; `Development` config может 
 | `Auth:SessionCookieName` | Имя session cookie | При конфликте cookie |
 | `Auth:SessionTimeoutMinutes` | Время жизни server-side session | По требованиям ИБ |
 | `Auth:MaxSamlPostBytes` | Максимальный размер ACS POST | При больших SAML assertions |
+| `RateLimit:*` | Fixed-window limit для auth/API routes | При настройке внешнего балансировщика или требований ИБ |
 | `Cmdbuild:Catalog:MaxTraversalDepth` | Максимальная глубина раскрытия CMDBuild `domain`/`reference`/`lookup` путей в UI, диапазон `2..5`, default `2` | При необходимости разрешить более глубокие цепочки после logout и CMDBuild catalog resync |
 | `Idp:Provider` | `LDAP` для режима `MS AD`, `SAML2` или `OAuth2` для режима `IdP` | При выборе внешнего провайдера входа |
 | `Idp:MetadataUrl` | URL IdP metadata XML | Если IdP публикует metadata |
@@ -324,6 +328,7 @@ Base config не содержит пароль; `Development` config может 
 | `Rules:RulesFilePath` | Путь к JSON rules-файлу; для dev/test `rules/cmdbuild-to-zabbix-host-create.json` | Если rules вынесены |
 | `Rules:AllowUpload` | Разрешить прием локального rules JSON для validate/dry-run | Для editor/admin UI |
 | `EventBrowser:*` | Read-only просмотр Kafka topics на вкладке Events | При смене Kafka, auth или списка topics |
+| `QueueMonitor:*` | Read-only мониторинг очередей: `Lag` по state-файлу или `TopicDepth` для DLQ topics | При смене Kafka topic namespace, state paths или порогов алерта |
 | `Services:HealthEndpoints` | Health endpoints микросервисов, включая `zabbixbindings2cmdbuild`; для `cmdbkafka2zabbix` дополнительно `RulesReloadUrl`, `RulesReloadToken`, `RulesStatusUrl`, `RulesStatusToken` | При добавлении сервисов, reload-действий или read-only статуса правил |
 
 Поддержанные env overrides `monitoring-ui-api`:
@@ -390,6 +395,12 @@ Base config не содержит пароль; `Development` config может 
 | `MONITORING_UI_EVENTS_MAX_MESSAGES` | `EventBrowser:MaxMessages` |
 | `MONITORING_UI_EVENTS_READ_TIMEOUT_MS` | `EventBrowser:ReadTimeoutMs` |
 | `MONITORING_UI_EVENTS_TOPICS` | `EventBrowser:Topics`, список через запятую или точку с запятой |
+| `MONITORING_UI_QUEUE_MONITOR_ENABLED` | `QueueMonitor:Enabled` |
+| `MONITORING_UI_QUEUE_MONITOR_REFRESH_INTERVAL_MS` | `QueueMonitor:RefreshIntervalMs` |
+| `MONITORING_UI_RATE_LIMIT_ENABLED` | `RateLimit:Enabled` |
+| `MONITORING_UI_RATE_LIMIT_WINDOW_SECONDS` | `RateLimit:WindowSeconds` |
+| `MONITORING_UI_RATE_LIMIT_AUTH_PERMIT_LIMIT` | `RateLimit:AuthPermitLimit` |
+| `MONITORING_UI_RATE_LIMIT_API_PERMIT_LIMIT` | `RateLimit:ApiPermitLimit` |
 
 SAML2 endpoints:
 - SP metadata: `GET /auth/saml2/metadata`;

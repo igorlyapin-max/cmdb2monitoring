@@ -26,6 +26,10 @@ required(config, 'Auth.SessionTimeoutMinutes');
 required(config, 'Auth.SessionAbsoluteLifetimeMinutes');
 required(config, 'Auth.SessionStore.Mode');
 required(config, 'Auth.MaxSamlPostBytes');
+required(config, 'RateLimit.Enabled');
+required(config, 'RateLimit.WindowSeconds');
+required(config, 'RateLimit.AuthPermitLimit');
+required(config, 'RateLimit.ApiPermitLimit');
 required(config, 'Idp.Provider');
 required(config, 'Idp.SpEntityId');
 required(config, 'Idp.AcsUrl');
@@ -88,6 +92,22 @@ if (!['Memory', 'Redis'].includes(config.Auth?.SessionStore?.Mode)) {
   errors.push(`Auth.SessionStore.Mode has unsupported value: ${config.Auth?.SessionStore?.Mode}`);
 }
 
+if (typeof config.RateLimit?.Enabled !== 'boolean') {
+  errors.push('RateLimit.Enabled must be boolean.');
+}
+
+if (!intInRange(config.RateLimit?.WindowSeconds, 1, 3600)) {
+  errors.push('RateLimit.WindowSeconds must be an integer from 1 to 3600.');
+}
+
+if (!intInRange(config.RateLimit?.AuthPermitLimit, 1, 1000000)) {
+  errors.push('RateLimit.AuthPermitLimit must be an integer from 1 to 1000000.');
+}
+
+if (!intInRange(config.RateLimit?.ApiPermitLimit, 1, 1000000)) {
+  errors.push('RateLimit.ApiPermitLimit must be an integer from 1 to 1000000.');
+}
+
 if (config.Auth?.SessionStore?.Mode === 'Redis') {
   required(config, 'Auth.SessionStore.Redis.Url');
   required(config, 'Auth.SessionEncryptionKey');
@@ -130,7 +150,10 @@ for (const pipeline of config.QueueMonitor?.Pipelines ?? []) {
   if (!pipeline?.Topic) {
     errors.push('QueueMonitor.Pipelines items must include Topic.');
   }
-  if (!pipeline?.StateFilePath) {
+  if (!['Lag', 'TopicDepth', undefined].includes(pipeline?.Mode)) {
+    errors.push(`QueueMonitor.Pipelines item ${pipeline?.Name ?? pipeline?.Topic ?? '<unknown>'} has unsupported Mode.`);
+  }
+  if (pipeline?.Mode !== 'TopicDepth' && !pipeline?.StateFilePath) {
     errors.push('QueueMonitor.Pipelines items must include StateFilePath.');
   }
 }

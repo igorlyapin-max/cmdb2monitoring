@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Cmdb2Monitoring.Logging;
 using Cmdb2Monitoring.Metrics;
+using Cmdb2Monitoring.Workers;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using ZabbixBindings2Cmdbuild.Cmdbuild;
@@ -16,9 +17,43 @@ public sealed class KafkaBindingWorker(
     ICmdbuildBindingClient cmdbuildClient,
     IProcessingStateStore stateStore,
     IServiceMetrics metrics,
+    IOptions<WorkerRuntimeOptions> workerOptions,
     IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaBindingWorker> logger) : BackgroundService
 {
+    private readonly object inFlightLock = new();
+    private Task? inFlightTask;
+    private volatile bool stopRequested;
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        stopRequested = true;
+        var currentTask = CurrentInFlightTask();
+        if (currentTask is { IsCompleted: false })
+        {
+            var timeoutSeconds = Math.Max(1, workerOptions.Value.ShutdownTimeoutSeconds);
+            logger.LogInformation(
+                "Waiting up to {ShutdownTimeoutSeconds} second(s) for current Zabbix binding message to finish",
+                timeoutSeconds);
+            try
+            {
+                await currentTask.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                logger.LogWarning(
+                    "Timed out waiting for current Zabbix binding message after {ShutdownTimeoutSeconds} second(s); stopping worker",
+                    timeoutSeconds);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Zabbix binding worker shutdown wait was canceled.");
+            }
+        }
+
+        await base.StopAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var previousState = await stateStore.ReadAsync(stoppingToken);
@@ -49,7 +84,7 @@ public sealed class KafkaBindingWorker(
 
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
+            while (!stoppingToken.IsCancellationRequested && !stopRequested)
             {
                 ConsumeResult<string, string>? consumed = null;
                 try
@@ -72,7 +107,16 @@ public sealed class KafkaBindingWorker(
                         "Consumed Zabbix binding payload {KafkaPayload}",
                         consumed.Message.Value);
 
-                    await ProcessMessageAsync(consumed, consumer, stoppingToken);
+                    var processingTask = ProcessMessageAsync(consumed, consumer, stoppingToken);
+                    TrackInFlightTask(processingTask);
+                    try
+                    {
+                        await processingTask;
+                    }
+                    finally
+                    {
+                        ClearInFlightTask(processingTask);
+                    }
                 }
                 catch (ConsumeException ex)
                 {
@@ -91,6 +135,11 @@ public sealed class KafkaBindingWorker(
                         consumed?.Partition.Value,
                         consumed?.Offset.Value);
 
+                    if (stopRequested)
+                    {
+                        break;
+                    }
+
                     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                 }
             }
@@ -98,6 +147,33 @@ public sealed class KafkaBindingWorker(
         finally
         {
             consumer.Close();
+        }
+    }
+
+    private Task? CurrentInFlightTask()
+    {
+        lock (inFlightLock)
+        {
+            return inFlightTask;
+        }
+    }
+
+    private void TrackInFlightTask(Task task)
+    {
+        lock (inFlightLock)
+        {
+            inFlightTask = task;
+        }
+    }
+
+    private void ClearInFlightTask(Task task)
+    {
+        lock (inFlightLock)
+        {
+            if (ReferenceEquals(inFlightTask, task))
+            {
+                inFlightTask = null;
+            }
         }
     }
 

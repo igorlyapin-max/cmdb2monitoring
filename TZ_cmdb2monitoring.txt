@@ -948,7 +948,7 @@ DLQ topics:
 zabbix.host.requests.dlq.dev
 zabbix.host.requests.dlq
 
-`correlationId` должен передаваться из Kafka header/input metadata в response, binding event и DLQ payload. Некорректный JSON публикуется в DLQ сразу; transient Zabbix API exceptions повторяются по настройкам Processing retry, после исчерпания попыток публикуются в DLQ и фиксируются как error response.
+`correlationId` должен передаваться из Kafka header/input metadata в response, binding event и DLQ payload. Некорректный JSON публикуется в DLQ сразу; transient Zabbix API exceptions повторяются по настройкам Processing retry, после исчерпания попыток публикуются в DLQ и фиксируются как error response. Внешний контракт Kafka envelope/request/response/binding/DLQ и conversion rules фиксируется JSON Schema файлами в `aa/schemas`.
 
 Микросервис не создает Kafka topics при старте.
 Input/output/binding-output/log topics должны быть созданы заранее средствами инфраструктуры.
@@ -1043,7 +1043,12 @@ Processing.DelayBetweenObjectsMs
 
 Retry-настройки также задаются через конфиг:
 - Processing.MaxRetryAttempts;
-- Processing.RetryDelayMs.
+- Processing.RetryDelayMs;
+- Processing.RetryMaxDelayMs;
+- Processing.RetryBackoffMultiplier;
+- Processing.RetryJitterRatio.
+
+HTTP-вызовы CMDBuild/Zabbix должны иметь настраиваемые resilience параметры: retry count, base/max delay, jitter и circuit breaker. Kafka workers с локальным state должны при остановке переставать брать новые сообщения и дожидаться текущей обработки не дольше `Worker:ShutdownTimeoutSeconds`.
 
 Проверки Zabbix host groups/templates должны использовать positive TTL-кэш:
 - `Zabbix:HostGroupCacheTtlSeconds`, default `300`, `0` отключает;

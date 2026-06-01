@@ -191,9 +191,9 @@ Main settings:
 | `Kafka:Output` | `zabbix.host.requests.*` topic, producer auth/security, `ProfileHeaderName` |
 | `DeadLetter` | `cmdbuild.webhooks.dlq.*` topic for malformed/unprocessable input messages |
 | `ConversionRules` | `ReadFromGit`, repository URL/path, rules file path, git pull behavior, reload behavior, template engine |
-| `Cmdbuild` | CMDBuild REST base URL, lookup/reference/domain resolver limits, `HostBindingLookupEnabled`, `MainHostIdAttributeName`, `BindingClassName`, `BindingLookupLimit` |
+| `Cmdbuild` | CMDBuild REST base URL, lookup/reference/domain resolver limits, HTTP `Resilience`, `HostBindingLookupEnabled`, `MainHostIdAttributeName`, `BindingClassName`, `BindingLookupLimit` |
 | `ProcessingState` | State file for the last processed object |
-| `Worker` | `ReplicaMode=SingleActive`, expected replicas, and explicit multi-active override |
+| `Worker` | `ReplicaMode=SingleActive`, expected replicas, explicit multi-active override, and `ShutdownTimeoutSeconds` for graceful stop |
 | `ElkLogging` | Kafka log topic or future ELK |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to CMDBuild/Kafka/reload-token service secrets |
 
@@ -277,9 +277,10 @@ Main settings:
 | `Zabbix:AllowDynamicHostGroupCreate` | Allows the Zabbix writer to create missing host groups produced by dynamic `targetMode=dynamicFromLeaf` rules; enabled in the shipped configs |
 | `Zabbix:User` / `Zabbix:Password` | Login credentials, only dev or secret/env |
 | `Zabbix:Validate*` | Host group/template/template group checks before API call |
-| `Processing` | Gentle delay, retries, retry delay |
+| `Zabbix:Resilience` | HTTP retry/backoff/jitter and circuit breaker for the Zabbix API |
+| `Processing` | Gentle delay, retries, exponential backoff cap/multiplier/jitter |
 | `ProcessingState` | State file for the last processed object |
-| `Worker` | `ReplicaMode=SingleActive`, expected replicas, and explicit multi-active override |
+| `Worker` | `ReplicaMode=SingleActive`, expected replicas, explicit multi-active override, and `ShutdownTimeoutSeconds` for graceful stop |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to Zabbix/Kafka/ELK secrets |
 
 `Processing:DelayBetweenObjectsMs` defaults to `50` ms so the Zabbix writer does not add an excessive pause between objects.
@@ -341,13 +342,14 @@ Main settings:
 | `Service` | Host, port, health route, public frontend directory |
 | `UiSettings` | Runtime settings JSON saved by UI |
 | `Auth` | External auth mode, users file, session cookie, session timeout, SAML POST limit |
+| `RateLimit` | Fixed-window limit for auth/API routes: window, auth limit, and general API limit |
 | `Idp` | SAML2/OAuth2 IdP, LDAP/LDAPS/MS AD, role-to-group mapping |
 | `Cmdbuild` | CMDBuild REST base URL, catalog cache, and `Webhooks:AuthorizationHeader` for the separate Authorization synchronization of managed CMDBuild webhooks |
 | `Zabbix` | Zabbix API endpoint, optional API key, catalog cache |
 | `Rules` | Rules path and local JSON validate/dry-run policy |
 | `AuditStorage` | Provider `postgresql`/`sqlite`, connection string, schema, auto-migrate, and timeout for the future audit section |
 | `EventBrowser` | Read-only Kafka browser for Events: bootstrap, auth, topics, limits |
-| `QueueMonitor` | Read-only backlog monitoring: topic, state file path, polling interval `5000..10000` ms, and warning/critical thresholds |
+| `QueueMonitor` | Read-only backlog/topic-depth monitoring: topic, optional state file path, polling interval `5000..10000` ms, mode `Lag`/`TopicDepth`, and warning/critical thresholds |
 | `Services:HealthEndpoints` | Microservice health endpoints and optional rules reload URL/token |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to the Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB secrets, and rules reload tokens |
 

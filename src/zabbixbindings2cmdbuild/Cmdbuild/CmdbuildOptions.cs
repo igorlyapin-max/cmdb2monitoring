@@ -10,6 +10,8 @@ public sealed class CmdbuildOptions
 
     public HttpClientTlsOptions Tls { get; init; } = new();
 
+    public HttpClientResilienceOptions Resilience { get; init; } = new();
+
     public string Username { get; init; } = string.Empty;
 
     public string Password { get; init; } = string.Empty;

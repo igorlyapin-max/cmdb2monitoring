@@ -53,6 +53,7 @@ const auditBindingClassName = 'ZabbixHostBinding';
 const cmdbuildLookupBulkBatchTtlMs = 30 * 60 * 1000;
 const cmdbuildLookupBulkBatches = new Map();
 const queueMonitorSnapshots = new Map();
+const rateLimitBuckets = new Map();
 const auditBindingAttributes = [
   { name: 'OwnerClass', description: 'CMDBuild owner class', maxLength: 100 },
   { name: 'OwnerCardId', description: 'CMDBuild owner card id', maxLength: 64 },
@@ -113,6 +114,10 @@ async function route(request, response) {
   const path = trimTrailingSlash(url.pathname);
   incrementCounter('http_requests_total');
 
+  if (!applyRequestRateLimit(request, response, path)) {
+    return;
+  }
+
   if (request.method === 'GET' && path === config.Service.HealthRoute) {
     sendJson(response, 200, {
       service: config.Service.Name,
@@ -151,6 +156,80 @@ async function route(request, response) {
   }
 
   await serveStatic(response, path);
+}
+
+function applyRequestRateLimit(request, response, path) {
+  const options = config.RateLimit ?? {};
+  if (options.Enabled === false) {
+    return true;
+  }
+
+  const scope = rateLimitScope(path);
+  if (!scope) {
+    return true;
+  }
+
+  const configuredLimit = scope === 'auth'
+    ? Number(options.AuthPermitLimit ?? options.authPermitLimit ?? 60)
+    : Number(options.ApiPermitLimit ?? options.apiPermitLimit ?? 600);
+  const configuredWindowSeconds = Number(options.WindowSeconds ?? options.windowSeconds ?? 60);
+  const defaultLimit = scope === 'auth' ? 60 : 600;
+  const limit = Number.isFinite(configuredLimit) ? Math.max(1, Math.floor(configuredLimit)) : defaultLimit;
+  const windowMs = (Number.isFinite(configuredWindowSeconds) ? Math.max(1, configuredWindowSeconds) : 60) * 1000;
+  const key = `${scope}:${request.socket?.remoteAddress ?? 'unknown'}`;
+  if (tryAcquireRateLimit(key, limit, windowMs)) {
+    return true;
+  }
+
+  incrementCounter(`rate_limited_${scope}`);
+  sendJson(response, 429, {
+    error: 'rate_limited',
+    message: 'Too many requests.'
+  });
+  return false;
+}
+
+function rateLimitScope(path) {
+  if (path.startsWith('/auth/') || path.startsWith('/api/auth/')) {
+    return 'auth';
+  }
+  if (path.startsWith('/api/')) {
+    return 'api';
+  }
+
+  return '';
+}
+
+function tryAcquireRateLimit(key, limit, windowMs) {
+  const now = Date.now();
+  const current = rateLimitBuckets.get(key);
+  if (!current || now - current.windowStartMs >= windowMs) {
+    rateLimitBuckets.set(key, {
+      windowStartMs: now,
+      count: 1
+    });
+    cleanupRateLimitBuckets(now, windowMs);
+    return true;
+  }
+
+  if (current.count >= limit) {
+    return false;
+  }
+
+  current.count++;
+  return true;
+}
+
+function cleanupRateLimitBuckets(now, windowMs) {
+  if (rateLimitBuckets.size < 10000) {
+    return;
+  }
+
+  for (const [key, bucket] of rateLimitBuckets.entries()) {
+    if (now - bucket.windowStartMs >= windowMs) {
+      rateLimitBuckets.delete(key);
+    }
+  }
 }
 
 async function routeApi(request, response, url, path) {
@@ -1136,7 +1215,11 @@ function applyEnvOverrides(target) {
     MONITORING_UI_EVENTS_MAX_MESSAGES: ['EventBrowser', 'MaxMessages'],
     MONITORING_UI_EVENTS_READ_TIMEOUT_MS: ['EventBrowser', 'ReadTimeoutMs'],
     MONITORING_UI_QUEUE_MONITOR_ENABLED: ['QueueMonitor', 'Enabled'],
-    MONITORING_UI_QUEUE_MONITOR_REFRESH_INTERVAL_MS: ['QueueMonitor', 'RefreshIntervalMs']
+    MONITORING_UI_QUEUE_MONITOR_REFRESH_INTERVAL_MS: ['QueueMonitor', 'RefreshIntervalMs'],
+    MONITORING_UI_RATE_LIMIT_ENABLED: ['RateLimit', 'Enabled'],
+    MONITORING_UI_RATE_LIMIT_WINDOW_SECONDS: ['RateLimit', 'WindowSeconds'],
+    MONITORING_UI_RATE_LIMIT_AUTH_PERMIT_LIMIT: ['RateLimit', 'AuthPermitLimit'],
+    MONITORING_UI_RATE_LIMIT_API_PERMIT_LIMIT: ['RateLimit', 'ApiPermitLimit']
   };
 
   for (const [envName, path] of Object.entries(mapping)) {
@@ -2023,6 +2106,7 @@ function normalizeQueueMonitorPipelines(monitor) {
     .map((pipeline, index) => ({
       name: String(pipeline.Name ?? pipeline.name ?? `Queue ${index + 1}`).trim(),
       topic: String(pipeline.Topic ?? pipeline.topic ?? '').trim(),
+      mode: normalizeQueueMonitorMode(pipeline.Mode ?? pipeline.mode),
       stateFilePath: String(pipeline.StateFilePath ?? pipeline.stateFilePath ?? '').trim(),
       warningThreshold: clampInt(
         pipeline.WarningThreshold ?? pipeline.warningThreshold,
@@ -2040,6 +2124,10 @@ function normalizeQueueMonitorPipelines(monitor) {
 
 async function readQueuePipelineStatus(pipeline) {
   const offsets = await readKafkaTopicOffsets(pipeline.topic);
+  if (pipeline.mode === 'TopicDepth') {
+    return readTopicDepthQueueStatus(pipeline, offsets);
+  }
+
   const stateInfo = await readQueueStateDocument(pipeline.stateFilePath);
   const stateDocument = stateInfo.document;
   const stateTopic = queueStateValue(stateDocument, 'lastInputTopic', 'LastInputTopic');
@@ -2061,6 +2149,7 @@ async function readQueuePipelineStatus(pipeline) {
   return {
     name: pipeline.name,
     topic: pipeline.topic,
+    mode: pipeline.mode,
     status,
     lag,
     warningThreshold: pipeline.warningThreshold,
@@ -2085,10 +2174,47 @@ async function readQueuePipelineStatus(pipeline) {
   };
 }
 
+function readTopicDepthQueueStatus(pipeline, offsets) {
+  const highOffset = queueOffsetsSum(offsets, 'high');
+  const lowOffset = queueOffsetsSum(offsets, 'low');
+  const depth = queueNumberFromBigInt(highOffset > lowOffset ? highOffset - lowOffset : 0n);
+  const partitions = offsets.map(offset => queueTopicDepthPartitionStatus(offset));
+  const snapshot = updateQueueMonitorSnapshot(pipeline, depth);
+  const status = queueLagStatus(depth, pipeline, null);
+
+  return {
+    name: pipeline.name,
+    topic: pipeline.topic,
+    mode: pipeline.mode,
+    status,
+    lag: depth,
+    warningThreshold: pipeline.warningThreshold,
+    criticalThreshold: pipeline.criticalThreshold,
+    highOffset: queueNumberFromBigInt(highOffset),
+    lowOffset: queueNumberFromBigInt(lowOffset),
+    processedNextOffset: queueNumberFromBigInt(lowOffset),
+    lastInputOffset: null,
+    lastInputPartition: null,
+    lastEntityId: null,
+    lastMethod: null,
+    lastEventType: null,
+    lastOperation: 'dead-letter',
+    lastProcessedAt: null,
+    stateFilePath: pipeline.stateFilePath,
+    resolvedStateFilePath: '',
+    stateError: null,
+    lagDelta: snapshot.lagDelta,
+    drainRatePerSecond: snapshot.drainRatePerSecond,
+    etaSeconds: snapshot.etaSeconds,
+    partitions
+  };
+}
+
 function queuePipelineErrorStatus(pipeline, error) {
   return {
     name: pipeline.name,
     topic: pipeline.topic,
+    mode: pipeline.mode,
     status: 'unknown',
     lag: null,
     warningThreshold: pipeline.warningThreshold,
@@ -2111,6 +2237,15 @@ function queuePipelineErrorStatus(pipeline, error) {
     etaSeconds: null,
     partitions: []
   };
+}
+
+function normalizeQueueMonitorMode(value) {
+  const mode = String(value ?? 'Lag').trim().toLowerCase();
+  if (mode === 'topicdepth' || mode === 'topic_depth' || mode === 'depth') {
+    return 'TopicDepth';
+  }
+
+  return 'Lag';
 }
 
 async function readKafkaTopicOffsets(topic) {
@@ -2185,6 +2320,20 @@ function queuePartitionStatus(offset, statePartition, lastInputOffset, canCalcul
   };
 }
 
+function queueTopicDepthPartitionStatus(offset) {
+  const partition = Number(offset.partition);
+  const low = parseQueueOffset(offset.low);
+  const high = parseQueueOffset(offset.high ?? offset.offset);
+  const lag = high > low ? high - low : 0n;
+  return {
+    partition,
+    low: queueNumberFromBigInt(low),
+    high: queueNumberFromBigInt(high),
+    processedNext: queueNumberFromBigInt(low),
+    lag: queueNumberFromBigInt(lag)
+  };
+}
+
 function queueOffsetsSum(offsets, key) {
   return offsets.reduce((sum, offset) => sum + parseQueueOffset(offset[key] ?? offset.offset), 0n);
 }
@@ -2211,7 +2360,7 @@ function queueLagStatus(lag, pipeline, stateError) {
 }
 
 function updateQueueMonitorSnapshot(pipeline, lag) {
-  const key = `${pipeline.topic}|${pipeline.stateFilePath}`;
+  const key = `${pipeline.mode}|${pipeline.topic}|${pipeline.stateFilePath}`;
   const now = Date.now();
   const previous = queueMonitorSnapshots.get(key);
   const result = {

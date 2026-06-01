@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cmdb2monitoring.local/schemas/zabbix-binding-event.schema.json",
+  "title": "Zabbix host binding event",
+  "type": "object",
+  "required": [
+    "source",
+    "eventType",
+    "operation",
+    "sourceClass",
+    "sourceCardId",
+    "hostProfile",
+    "isMainProfile",
+    "zabbixHostId",
+    "bindingStatus",
+    "occurredAt",
+    "input"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "source": {
+      "type": "string",
+      "const": "zabbixrequests2api"
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "zabbix.host.binding.created",
+        "zabbix.host.binding.updated",
+        "zabbix.host.binding.deleted"
+      ]
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "host.create",
+        "host.update",
+        "host.delete"
+      ]
+    },
+    "sourceClass": {
+      "type": "string"
+    },
+    "sourceCardId": {
+      "type": "string"
+    },
+    "sourceCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hostProfile": {
+      "type": "string"
+    },
+    "isMainProfile": {
+      "type": "boolean"
+    },
+    "zabbixHostId": {
+      "type": "string"
+    },
+    "zabbixHostName": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bindingStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "deleted"
+      ]
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "input": {
+      "type": "object",
+      "required": [
+        "topic",
+        "partition",
+        "offset",
+        "key"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

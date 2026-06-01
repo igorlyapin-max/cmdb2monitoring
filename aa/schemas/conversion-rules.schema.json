@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cmdb2monitoring.local/schemas/conversion-rules.schema.json",
+  "title": "CMDBuild to Zabbix conversion rules",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "rulesVersion",
+    "name",
+    "source",
+    "eventRoutingRules",
+    "hostProfiles",
+    "t4Templates"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rulesVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "eventRoutingRules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "eventType"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "eventType": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ]
+          }
+        }
+      }
+    },
+    "hostProfiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "t4Templates": {
+      "type": "object",
+      "required": [
+        "hostCreateJsonRpcRequestLines",
+        "hostUpdateJsonRpcRequestLines",
+        "hostDeleteJsonRpcRequestLines"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "hostCreateJsonRpcRequestLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hostUpdateJsonRpcRequestLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hostDeleteJsonRpcRequestLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

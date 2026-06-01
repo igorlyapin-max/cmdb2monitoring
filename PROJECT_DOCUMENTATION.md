@@ -192,9 +192,9 @@ http://0.0.0.0:5080
 | `Kafka:Output` | Topic `zabbix.host.requests.*`, producer auth/security, `ProfileHeaderName` |
 | `DeadLetter` | DLQ topic `cmdbuild.webhooks.dlq.*` для malformed webhook events и необрабатываемых входных сообщений |
 | `ConversionRules` | `ReadFromGit`, repository URL/path, rules file path, git pull behavior, reload behavior, template engine |
-| `Cmdbuild` | CMDBuild REST base URL, lookup/reference/domain resolver limits, `LookupCacheTtlSeconds`, `HostBindingLookupEnabled`, `MainHostIdAttributeName`, `BindingClassName`, `BindingLookupLimit` |
+| `Cmdbuild` | CMDBuild REST base URL, lookup/reference/domain resolver limits, `LookupCacheTtlSeconds`, HTTP `Resilience`, `HostBindingLookupEnabled`, `MainHostIdAttributeName`, `BindingClassName`, `BindingLookupLimit` |
 | `ProcessingState` | State-файл последнего обработанного объекта |
-| `Worker` | `ReplicaMode=SingleActive`, ожидаемое число replicas и явный override для нескольких active workers |
+| `Worker` | `ReplicaMode=SingleActive`, ожидаемое число replicas, явный override для нескольких active workers и `ShutdownTimeoutSeconds` для graceful stop |
 | `ElkLogging` | Kafka log topic или будущий ELK |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на сервисные секреты CMDBuild/Kafka/reload-token |
 
@@ -282,9 +282,10 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `Zabbix:Validate*` | Проверки host groups/templates/template groups до API call |
 | `Zabbix:AllowDynamicHostGroupCreate` | Разрешение Zabbix writer создавать отсутствующие host groups, пришедшие из dynamic `targetMode=dynamicFromLeaf` rules; в поставляемых конфигах включено |
 | `Zabbix:HostGroupCacheTtlSeconds`, `Zabbix:TemplateCacheTtlSeconds` | TTL positive-кэша для validation lookup в Zabbix, default `300`, `0` отключает |
-| `Processing` | Gentle delay, retries и retry delay |
+| `Zabbix:Resilience` | HTTP retry/backoff/jitter и circuit breaker для Zabbix API |
+| `Processing` | Gentle delay, retries, exponential backoff cap/multiplier/jitter |
 | `ProcessingState` | State-файл последнего обработанного объекта |
-| `Worker` | `ReplicaMode=SingleActive`, ожидаемое число replicas и явный override для нескольких active workers |
+| `Worker` | `ReplicaMode=SingleActive`, ожидаемое число replicas, явный override для нескольких active workers и `ShutdownTimeoutSeconds` для graceful stop |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Zabbix/Kafka/ELK секреты |
 
 `Processing:DelayBetweenObjectsMs` по умолчанию 50 мс, чтобы Zabbix writer не делал лишнюю паузу между объектами.
@@ -347,13 +348,14 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `Service` | Host, port, health route, public frontend dir |
 | `UiSettings` | Путь к runtime settings JSON, который сохраняет UI |
 | `Auth` | Режим внешней авторизации, users file, session cookie, session timeout, SAML POST limit |
+| `RateLimit` | Fixed-window limit для auth/API routes: окно, auth limit и общий API limit |
 | `Idp` | Настройки SAML2/OAuth2 IdP, LDAP/LDAPS/MS AD и маппинг групп в роли |
 | `Cmdbuild` | CMDBuild REST base URL, catalog cache и `Webhooks:AuthorizationHeader` для отдельной синхронизации Authorization управляемых CMDBuild webhook |
 | `Zabbix` | Zabbix API endpoint, optional API key и catalog cache |
 | `Rules` | Rules path, local JSON validate/dry-run policy |
 | `AuditStorage` | Provider `postgresql`/`sqlite`, connection string, schema, auto-migrate и timeout для будущего раздела аудита |
 | `EventBrowser` | Kafka read-only browser для вкладки Events: bootstrap, auth, topics, limits |
-| `QueueMonitor` | Read-only мониторинг backlog: topic, state file path, интервал опроса `5000..10000` ms и пороги warning/critical |
+| `QueueMonitor` | Read-only мониторинг backlog/topic depth: topic, optional state file path, интервал опроса `5000..10000` ms, mode `Lag`/`TopicDepth` и пороги warning/critical |
 | `Services:HealthEndpoints` | Health endpoints микросервисов для dashboard; optional rules reload URL/token для converter |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB секреты и rules reload tokens |
 
@@ -398,7 +400,7 @@ Runtime settings:
 - runtime-файл и файл пользователей не коммитятся и могут содержать dev secrets;
 - dev config не заполняет CMDBuild/Zabbix пароли по умолчанию;
 - текущий dev `EventBrowser` смотрит Kafka `localhost:9092` и topics `*.dev`.
-- текущий dev `QueueMonitor` включен для очередей `cmdbuild.webhooks.dev` и `zabbix.host.requests.dev`; он читает state-файлы `../cmdbkafka2zabbix/state/cmdbkafka2zabbix-state.dev.json` и `../zabbixrequests2api/state/zabbixrequests2api-state.dev.json`, а dashboard пересчитывает backlog каждые 5 секунд.
+- текущий dev `QueueMonitor` включен для очередей `cmdbuild.webhooks.dev` и `zabbix.host.requests.dev`; он читает state-файлы `../cmdbkafka2zabbix/state/cmdbkafka2zabbix-state.dev.json` и `../zabbixrequests2api/state/zabbixrequests2api-state.dev.json`, а также показывает topic-depth для `cmdbuild.webhooks.dlq.dev` и `zabbix.host.requests.dlq.dev`. Dashboard пересчитывает показатели каждые 5 секунд.
 
 Audit model:
 - раздел `Аудит` готовит CMDBuild model для обратной связи с Zabbix. Проверка строит план без изменений, а применение от имени администратора создает недостающие элементы в управляемой CMDBuild;

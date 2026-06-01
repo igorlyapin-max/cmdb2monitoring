@@ -45,7 +45,7 @@
 - HTTP/TLS transport выбирается конфигурацией. Dev может использовать HTTP, production должен использовать HTTPS/TLS или явный insecure override (`AllowPlainHttp`, `AllowPlaintextKafka`, `AllowInsecureHttp`).
 - `AllowedHosts="*"` в production запрещен без явного `HostSecurity:AllowWildcardAllowedHosts=true`.
 - Runtime state-файлы должны писаться атомарно и не должны выходить за разрешенный base directory.
-- Kafka workers с локальным state работают в режиме `Worker:ReplicaMode=SingleActive`; несколько active replicas допустимы только с явным override или внешним state/lock дизайном.
+- Kafka workers с локальным state работают в режиме `Worker:ReplicaMode=SingleActive`; несколько active replicas допустимы только с явным override или внешним state/lock дизайном. При остановке worker должен дожидаться текущей обработки до `Worker:ShutdownTimeoutSeconds`.
 
 ## Kafka и контракты
 
@@ -66,6 +66,7 @@
 - При изменении структуры Kafka-сообщения обязательно обновлять:
   - `TZ_cmdb2monitoring.txt`;
   - `aa/asyncapi/cmdb2monitoring.asyncapi.yaml`;
+  - JSON Schema contracts в `aa/schemas`;
   - config validation tests, если меняются правила связности/обязательные поля;
   - документацию в `aa/`, если меняются информационные потоки.
 

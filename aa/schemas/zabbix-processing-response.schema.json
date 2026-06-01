@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cmdb2monitoring.local/schemas/zabbix-processing-response.schema.json",
+  "title": "Zabbix processing response",
+  "type": "object",
+  "required": [
+    "source",
+    "success",
+    "method",
+    "processedAt",
+    "input",
+    "missing"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "source": {
+      "type": "string",
+      "const": "zabbixrequests2api"
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "method": {
+      "type": "string"
+    },
+    "entityId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requestId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "errorCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "errorMessage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "zabbixRequestSent": {
+      "type": "boolean"
+    },
+    "processedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "input": {
+      "type": "object",
+      "required": [
+        "topic",
+        "partition",
+        "offset",
+        "key"
+      ],
+      "additionalProperties": true
+    },
+    "missing": {
+      "type": "object",
+      "required": [
+        "hostGroups",
+        "templates",
+        "templateGroups"
+      ],
+      "additionalProperties": true
+    },
+    "zabbixResponse": {
+      "type": "object"
+    }
+  }
+}

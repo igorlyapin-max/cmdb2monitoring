@@ -327,6 +327,7 @@ static void ValidateCmdbuildResolver(JsonObject config, string context, List<str
     RequireNonEmpty(config, "Cmdbuild:BindingClassName", context, errors);
     RequirePositiveInt(config, "Cmdbuild:BindingLookupLimit", context, errors);
     RequireNonNegativeInt(config, "Cmdbuild:LookupCacheTtlSeconds", context, errors);
+    ValidateHttpResilience(config, "Cmdbuild:Resilience", context, errors);
 }
 
 static void ValidateZabbix(JsonObject config, string context, List<string> errors, List<string> warnings)
@@ -342,6 +343,7 @@ static void ValidateZabbix(JsonObject config, string context, List<string> error
     RequirePositiveInt(config, "Zabbix:RequestTimeoutMs", context, errors);
     RequireNonNegativeInt(config, "Zabbix:HostGroupCacheTtlSeconds", context, errors);
     RequireNonNegativeInt(config, "Zabbix:TemplateCacheTtlSeconds", context, errors);
+    ValidateHttpResilience(config, "Zabbix:Resilience", context, errors);
     foreach (var switchPath in new[]
     {
         "Zabbix:ValidateHostGroups",
@@ -375,6 +377,25 @@ static void ValidateProcessing(JsonObject config, string context, List<string> e
     RequireNonNegativeInt(config, "Processing:DelayBetweenObjectsMs", context, errors);
     RequirePositiveInt(config, "Processing:MaxRetryAttempts", context, errors);
     RequireNonNegativeInt(config, "Processing:RetryDelayMs", context, errors);
+    RequireNonNegativeInt(config, "Processing:RetryMaxDelayMs", context, errors);
+    var retryDelayMs = GetInt(config, "Processing:RetryDelayMs");
+    var retryMaxDelayMs = GetInt(config, "Processing:RetryMaxDelayMs");
+    if (retryDelayMs is not null && retryMaxDelayMs is not null && retryMaxDelayMs < retryDelayMs)
+    {
+        errors.Add($"{context} Processing:RetryMaxDelayMs must be greater than or equal to Processing:RetryDelayMs.");
+    }
+
+    var multiplier = GetDouble(config, "Processing:RetryBackoffMultiplier");
+    if (multiplier is null || multiplier < 1)
+    {
+        errors.Add($"{context} Processing:RetryBackoffMultiplier must be greater than or equal to 1.");
+    }
+
+    var jitter = GetDouble(config, "Processing:RetryJitterRatio");
+    if (jitter is null || jitter is < 0 or > 1)
+    {
+        errors.Add($"{context} Processing:RetryJitterRatio must be from 0 to 1.");
+    }
 }
 
 static void ValidateProcessingState(JsonObject config, string context, List<string> errors)
@@ -430,6 +451,8 @@ static void ValidateWorker(JsonObject config, string context, List<string> error
     {
         errors.Add($"{context} Worker ReplicaMode=SingleActive allows only one expected replica unless Worker:AllowMultipleActiveReplicas=true.");
     }
+
+    RequirePositiveInt(config, "Worker:ShutdownTimeoutSeconds", context, errors);
 }
 
 static void ValidateTopicChain(
@@ -472,6 +495,34 @@ static void ValidateCmdbuildBinding(JsonObject config, string context, List<stri
     RequireNonEmpty(config, "Cmdbuild:MainHostIdAttributeName", context, errors);
     RequireNonEmpty(config, "Cmdbuild:BindingClassName", context, errors);
     RequirePositiveInt(config, "Cmdbuild:BindingLookupLimit", context, errors);
+    ValidateHttpResilience(config, "Cmdbuild:Resilience", context, errors);
+}
+
+static void ValidateHttpResilience(JsonObject config, string sectionPath, string context, List<string> errors)
+{
+    if (GetBool(config, $"{sectionPath}:Enabled") is null)
+    {
+        errors.Add($"{context} {sectionPath}:Enabled must be configured as a boolean switch.");
+    }
+
+    RequirePositiveInt(config, $"{sectionPath}:MaxRetryAttempts", context, errors);
+    RequireNonNegativeInt(config, $"{sectionPath}:BaseDelayMs", context, errors);
+    RequireNonNegativeInt(config, $"{sectionPath}:MaxDelayMs", context, errors);
+    var baseDelay = GetInt(config, $"{sectionPath}:BaseDelayMs");
+    var maxDelay = GetInt(config, $"{sectionPath}:MaxDelayMs");
+    if (baseDelay is not null && maxDelay is not null && maxDelay < baseDelay)
+    {
+        errors.Add($"{context} {sectionPath}:MaxDelayMs must be greater than or equal to {sectionPath}:BaseDelayMs.");
+    }
+
+    var jitter = GetDouble(config, $"{sectionPath}:JitterRatio");
+    if (jitter is null || jitter is < 0 or > 1)
+    {
+        errors.Add($"{context} {sectionPath}:JitterRatio must be from 0 to 1.");
+    }
+
+    RequirePositiveInt(config, $"{sectionPath}:CircuitBreakerFailureThreshold", context, errors);
+    RequirePositiveInt(config, $"{sectionPath}:CircuitBreakerBreakSeconds", context, errors);
 }
 
 static void ValidateRulesFile(string repositoryRoot, List<string> errors)
@@ -1754,6 +1805,12 @@ static void ValidateArchitectureArtifacts(string repositoryRoot, List<string> er
         "aa/openapi/cmdbwebhooks2kafka.openapi.yaml",
         "aa/openapi/health.openapi.yaml",
         "aa/openapi/monitoring-ui-api.openapi.yaml",
+        "aa/schemas/cmdb-webhook-envelope.schema.json",
+        "aa/schemas/zabbix-jsonrpc-request.schema.json",
+        "aa/schemas/zabbix-processing-response.schema.json",
+        "aa/schemas/zabbix-binding-event.schema.json",
+        "aa/schemas/dead-letter-message.schema.json",
+        "aa/schemas/conversion-rules.schema.json",
         "aa/maps/healthcheck-map.md",
         "aa/maps/kafka-access-map.md",
         "aa/maps/metrics-map.md",
@@ -1774,7 +1831,26 @@ static void ValidateArchitectureArtifacts(string repositoryRoot, List<string> er
         {
             errors.Add($"Architecture artifact is empty: {relativeFile}");
         }
+
+        if (relativeFile.EndsWith(".schema.json", StringComparison.OrdinalIgnoreCase))
+        {
+            ValidateJsonSchemaArtifact(fullPath, relativeFile, errors);
+        }
     }
+}
+
+static void ValidateJsonSchemaArtifact(string fullPath, string relativeFile, List<string> errors)
+{
+    var schema = LoadJsonObject(fullPath, errors);
+    if (schema is null)
+    {
+        return;
+    }
+
+    RequireNonEmpty(schema, "$schema", relativeFile, errors);
+    RequireNonEmpty(schema, "$id", relativeFile, errors);
+    RequireNonEmpty(schema, "title", relativeFile, errors);
+    RequireNonEmpty(schema, "type", relativeFile, errors);
 }
 
 static void ValidateNoProductionSecrets(ServiceDefinition service, JsonObject baseConfig, List<string> errors)
@@ -1978,6 +2054,17 @@ static int? GetInt(JsonObject config, string path)
     if (value is JsonValue jsonValue && jsonValue.TryGetValue<int>(out var intValue))
     {
         return intValue;
+    }
+
+    return null;
+}
+
+static double? GetDouble(JsonObject config, string path)
+{
+    var value = GetNode(config, path);
+    if (value is JsonValue jsonValue && jsonValue.TryGetValue<double>(out var doubleValue))
+    {
+        return doubleValue;
     }
 
     return null;

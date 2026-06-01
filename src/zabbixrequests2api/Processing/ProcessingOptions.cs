@@ -10,6 +10,12 @@ public sealed class ProcessingOptions
 
     public int RetryDelayMs { get; init; } = 5000;
 
+    public int RetryMaxDelayMs { get; init; } = 30000;
+
+    public double RetryBackoffMultiplier { get; init; } = 2.0;
+
+    public double RetryJitterRatio { get; init; } = 0.2;
+
     public bool ProtectManagedAggregateHosts { get; init; } = true;
 
     public string[] ProtectedHostNames { get; init; } = ["cmdb2monitoring-suppression-aggregates"];
@@ -27,6 +33,14 @@ public sealed class ProcessingOptions
     {
         return (ProtectedHostNames ?? []).Any(name => !string.IsNullOrWhiteSpace(name))
             || (ProtectedHostTags ?? []).Any(tag => !string.IsNullOrWhiteSpace(tag.Tag));
+    }
+
+    public bool HasValidRetryBackoffValues()
+    {
+        return RetryDelayMs >= 0
+            && RetryMaxDelayMs >= RetryDelayMs
+            && RetryBackoffMultiplier >= 1
+            && RetryJitterRatio is >= 0 and <= 1;
     }
 }
 

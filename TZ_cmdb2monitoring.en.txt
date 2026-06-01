@@ -342,6 +342,12 @@ If a catalog reference is missing or template compatibility fails, the service m
 
 `Processing:DelayBetweenObjectsMs` defaults to `50` ms so the Zabbix writer does not add an excessive pause between objects.
 
+Retry settings are configured through `Processing:MaxRetryAttempts`, `Processing:RetryDelayMs`, `Processing:RetryMaxDelayMs`, `Processing:RetryBackoffMultiplier`, and `Processing:RetryJitterRatio`.
+
+CMDBuild/Zabbix HTTP calls must have configurable resilience settings: retry count, base/max delay, jitter, and circuit breaker. Kafka workers with local state must stop gracefully by not taking new messages and by draining the current message for no longer than `Worker:ShutdownTimeoutSeconds`.
+
+The external Kafka envelope/request/response/binding/DLQ and conversion-rules contracts are fixed by JSON Schema files under `aa/schemas`.
+
 14.7. Response Topic Contract
 
 Responses include source request metadata, success/failure status, Zabbix API result or error, and processing diagnostics.

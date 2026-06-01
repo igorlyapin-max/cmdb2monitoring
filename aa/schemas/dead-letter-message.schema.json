@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cmdb2monitoring.local/schemas/dead-letter-message.schema.json",
+  "title": "Kafka dead-letter message",
+  "type": "object",
+  "required": [
+    "service",
+    "errorCode",
+    "errorMessage",
+    "inputTopic",
+    "inputPartition",
+    "inputOffset",
+    "originalPayload",
+    "occurredAt"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "service": {
+      "type": "string"
+    },
+    "errorCode": {
+      "type": "string"
+    },
+    "errorMessage": {
+      "type": "string"
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "inputTopic": {
+      "type": "string"
+    },
+    "inputPartition": {
+      "type": "integer"
+    },
+    "inputOffset": {
+      "type": "integer"
+    },
+    "inputKey": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "originalPayload": {
+      "type": "string"
+    },
+    "rulesVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "exceptionType": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

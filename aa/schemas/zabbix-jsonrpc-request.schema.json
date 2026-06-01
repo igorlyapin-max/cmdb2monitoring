@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cmdb2monitoring.local/schemas/zabbix-jsonrpc-request.schema.json",
+  "title": "Zabbix JSON-RPC request",
+  "type": "object",
+  "required": [
+    "jsonrpc",
+    "method",
+    "params",
+    "id"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "jsonrpc": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "host.create",
+        "host.get",
+        "host.update",
+        "host.delete"
+      ]
+    },
+    "params": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "array"
+        }
+      ]
+    },
+    "id": {
+      "oneOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "cmdb2monitoring": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "eventType": {
+          "type": "string"
+        },
+        "correlationId": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "hostProfile": {
+          "type": "string"
+        },
+        "fallbackForMethod": {
+          "type": "string",
+          "enum": [
+            "host.update",
+            "host.delete"
+          ]
+        },
+        "createOnUpdateWhenMissing": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

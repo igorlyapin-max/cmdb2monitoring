@@ -67,6 +67,8 @@ dotnet --info
 - `must.md` / `must.en.md`: mandatory development agreements.
 - `aa/`: architecture artifacts, AsyncAPI/OpenAPI, maps, diagrams, and configuration documentation.
 - `aa/configuration-files.md`: what to configure in each microservice and when.
+- `.github/workflows/ci.yml` and `.gitlab-ci.yml`: equivalent CI gates for GitHub Actions and GitLab CI.
+- `aa/schemas/`: JSON Schema contracts for Kafka messages, DLQ payloads, and conversion rules.
 
 Architecture artifacts under `aa/` are not translated by default. Non-architecture documentation changes must update the English companion file in the same change.
 

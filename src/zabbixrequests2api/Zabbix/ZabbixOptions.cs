@@ -10,6 +10,8 @@ public sealed class ZabbixOptions
 
     public HttpClientTlsOptions Tls { get; init; } = new();
 
+    public HttpClientResilienceOptions Resilience { get; init; } = new();
+
     public string AuthMode { get; init; } = "LoginOrToken";
 
     public string ApiToken { get; init; } = string.Empty;
