@@ -125,6 +125,7 @@ CMDBuild, Zabbix и PAM/AAPM HTTP clients могут использовать `h
 | `cmdbkafka2zabbix.logs.dev` | `cmdbkafka2zabbix.logs` | `cmdbkafka2zabbix` | будущий ELK shipper |
 | `zabbixrequests2api.logs.dev` | `zabbixrequests2api.logs` | `zabbixrequests2api` | будущий ELK shipper |
 | `zabbixbindings2cmdbuild.logs.dev` | `zabbixbindings2cmdbuild.logs` | `zabbixbindings2cmdbuild` | будущий ELK shipper |
+| `monitoring-ui-api.logs.dev` | `monitoring-ui-api.logs` | `monitoring-ui-api` | будущий ELK shipper |
 
 Topics создаются внешней инфраструктурой. Код сервисов не создает topics при старте.
 
@@ -356,6 +357,8 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `AuditStorage` | Provider `postgresql`/`sqlite`, connection string, schema, auto-migrate и timeout для будущего раздела аудита |
 | `EventBrowser` | Kafka read-only browser для вкладки Events: bootstrap, auth, topics, limits |
 | `QueueMonitor` | Read-only мониторинг backlog/topic depth: topic, optional state file path, интервал опроса `5000..10000` ms, mode `Lag`/`TopicDepth` и пороги warning/critical |
+| `Logging` / `DebugLogging` | Structured logs и временный debug/diagnostic режим `Basic`/`Verbose`, выключенный по умолчанию |
+| `ElkLogging` | Kafka log sink `monitoring-ui-api.logs*` или будущий ELK endpoint |
 | `Services:HealthEndpoints` | Health endpoints микросервисов для dashboard; optional rules reload URL/token для converter |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB секреты и rules reload tokens |
 
@@ -384,7 +387,7 @@ IdP/MS AD настройки:
 
 Local users and roles:
 - при первом старте `monitoring-ui-api` создает `src/monitoring-ui-api/state/users.json` рядом с `ui-settings.json`;
-- стартовые пользователи: `viewer/viewer`, `editor/editor`, `admin/admin`;
+- стартовый пользователь: `admin` с одноразовым bootstrap password в локальном state-файле `bootstrap-admin-password.txt` рядом с users-файлом; пароль не пишется в stdout/stderr или Kafka log topic;
 - пароли хранятся только как PBKDF2-SHA256 hash/salt, plaintext в state-файл не пишется;
 - роли: `viewer` видит только `Панель` и `События`; `editor` видит все кроме `Авторизация`, `Runtime-настройки` и `Настройка git`; `admin` видит все;
 - пользователь может сменить свой пароль в UI, а администратор может сбросить пароль в подменю `Авторизация`.
@@ -555,13 +558,17 @@ MONITORING_UI_KAFKA_SECURITY_PROTOCOL=SaslSsl
 MONITORING_UI_KAFKA_SASL_MECHANISM=ScramSha512
 MONITORING_UI_KAFKA_USERNAME=<secret>
 MONITORING_UI_KAFKA_PASSWORD=<secret>
+MONITORING_UI_DEBUG_LOGGING_ENABLED=false
+MONITORING_UI_DEBUG_LOGGING_LEVEL=Basic
+MONITORING_UI_LOGS_KAFKA_TOPIC=monitoring-ui-api.logs
 MONITORING_UI_EVENTS_TOPICS=cmdbuild.webhooks,zabbix.host.requests,zabbix.host.responses,zabbix.host.bindings
 ```
 
 Runtime cache/state:
 - `src/monitoring-ui-api/data/*.json` - catalog cache, не коммитить;
 - `src/monitoring-ui-api/state/ui-settings.json` - persisted UI settings, не коммитить;
-- `src/monitoring-ui-api/state/users.json` - local UI users с PBKDF2-SHA256 hash/salt, не коммитить.
+- `src/monitoring-ui-api/state/users.json` - local UI users с PBKDF2-SHA256 hash/salt, не коммитить;
+- `src/monitoring-ui-api/state/bootstrap-*-password.txt` - одноразовые bootstrap password файлы, не коммитить.
 
 ## Rules conversion model
 
@@ -648,7 +655,7 @@ Webhook body для этой demo-схемы остается плоским: `i
 
 ## ELK logging
 
-Пока ELK нет, каждый .NET-сервис пишет structured JSON logs в Kafka log topic.
+Пока ELK нет, каждый .NET-сервис и `monitoring-ui-api` пишут structured JSON logs в свой Kafka log topic и продолжают писать JSON logs в stdout/stderr.
 Когда ELK появится:
 - задать `ElkLogging:Mode=Elk` или включить `ElkLogging:Elk:Enabled`;
 - заполнить `ElkLogging:Elk:Endpoint`, `Index`, `ApiKey`;
@@ -656,7 +663,7 @@ Webhook body для этой demo-схемы остается плоским: `i
 
 ## Extended debug logging
 
-Все .NET-микросервисы поддерживают секцию `DebugLogging`:
+Все backend-сервисы, включая Node.js `monitoring-ui-api`, поддерживают секцию `DebugLogging`:
 
 ```json
 "DebugLogging": {
@@ -665,9 +672,9 @@ Webhook body для этой demo-схемы остается плоским: `i
 }
 ```
 
-Поддержанные уровни: `Basic` и `Verbose`. События расширенного режима пишутся через обычный `ILogger` на уровне `Information`, поэтому попадают в Docker stdout/stderr, Kafka log topic при `ElkLogging:Mode=Kafka`, ELK при включенном ELK sink и в syslog, если Docker настроен с syslog logging driver.
+Поддержанные уровни: `Basic` и `Verbose`. События расширенного режима пишутся через основной structured logging pipeline на уровне `Information`, поэтому попадают в Docker stdout/stderr, Kafka log topic при `ElkLogging:Mode=Kafka`, ELK при включенном ELK sink и в syslog, если Docker настроен с syslog logging driver.
 
-`Basic` включает диагностическую трассу прохождения события между webhook, Kafka, converter, Zabbix API и обратной записью binding в CMDBuild, включая длительности основных стадий обработки. `Verbose` дополнительно пишет payload/request/response JSON и должен включаться только на время диагностики: в этих сообщениях могут быть значения CMDBuild attributes, Zabbix request/response и другие операционные данные.
+`Basic` включает диагностическую трассу прохождения события между webhook, Kafka, converter, Zabbix API, обратной записью binding в CMDBuild и startup/runtime состоянием BFF. `Verbose` дополнительно пишет payload/request/response или runtime config детали только с маскированием `Authorization`, tokens, passwords, secrets, API keys, private keys и connection strings; включать его нужно только на время диагностики.
 
 ## Проверки перед commit/push
 

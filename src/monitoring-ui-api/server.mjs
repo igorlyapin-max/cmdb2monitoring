@@ -16,7 +16,9 @@ const serviceRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const repositoryRoot = resolve(serviceRoot, '../..');
 const environment = process.env.NODE_ENV || 'Development';
 const resolvedSecretReferences = new Map();
+let logger = createBootstrapLogger();
 const config = await loadConfig();
+logger = createStructuredLogger(config);
 validateRuntimeSecurityConfig(config);
 const startedAt = new Date();
 const serviceCounters = new Map();
@@ -81,12 +83,20 @@ await ensureRuntimeDirectories();
 await ensureUsersFile();
 
 if (config.Zabbix?.Catalog?.SyncOnStartup) {
-  console.warn('Zabbix catalog SyncOnStartup is configured but requires user credentials; skipping startup sync.');
+  logger.warn('Zabbix catalog SyncOnStartup is configured but requires user credentials; skipping startup sync.');
 }
 
 if (config.Cmdbuild?.Catalog?.SyncOnStartup) {
-  console.warn('CMDBuild catalog SyncOnStartup is configured but requires user credentials; skipping startup sync.');
+  logger.warn('CMDBuild catalog SyncOnStartup is configured but requires user credentials; skipping startup sync.');
 }
+
+logger.debugBasic('Service started with extended debug logging', {
+  debugLoggingLevel: config.DebugLogging?.Level ?? 'Basic'
+});
+
+logger.debugVerbose('Runtime configuration loaded', {
+  config
+});
 
 const server = await createApplicationServer(async (request, response) => {
   try {
@@ -94,7 +104,11 @@ const server = await createApplicationServer(async (request, response) => {
   } catch (error) {
     const statusCode = error?.statusCode ?? 500;
     if (statusCode >= 500) {
-      console.error(error);
+      logger.error('HTTP request failed', {
+        method: request.method,
+        url: request.url,
+        statusCode
+      }, error);
     }
 
     sendJson(response, statusCode, {
@@ -105,8 +119,18 @@ const server = await createApplicationServer(async (request, response) => {
   }
 });
 
+server.on('error', error => {
+  logger.error('Service listen failed', {
+    host: config.Service.Host,
+    port: config.Service.Port
+  }, error);
+  process.exit(1);
+});
+
 server.listen(config.Service.Port, config.Service.Host, () => {
-  console.log(`${config.Service.Name} listening on ${serviceBaseUrl()}`);
+  logger.info('Service is listening', {
+    url: serviceBaseUrl()
+  });
 });
 
 async function route(request, response) {
@@ -156,6 +180,348 @@ async function route(request, response) {
   }
 
   await serveStatic(response, path);
+}
+
+function createBootstrapLogger() {
+  const configuration = {
+    Service: {
+      Name: 'monitoring-ui-api'
+    },
+    ElkLogging: {
+      Kafka: {
+        ServiceName: 'monitoring-ui-api',
+        Environment: environment
+      }
+    }
+  };
+
+  return {
+    info(message, labels = {}) {
+      writeConsoleLogRecord(buildLogRecord(configuration, 'Information', message, labels), 'Information');
+    },
+    warn(message, labels = {}) {
+      writeConsoleLogRecord(buildLogRecord(configuration, 'Warning', message, labels), 'Warning');
+    },
+    error(message, labels = {}, error = null) {
+      writeConsoleLogRecord(buildLogRecord(configuration, 'Error', message, labels, error), 'Error');
+    },
+    debugBasic() {},
+    debugVerbose() {},
+    async close() {}
+  };
+}
+
+function createStructuredLogger(configuration) {
+  const loggingOptions = configuration.Logging ?? {};
+  const minimumLevel = normalizeLogLevel(
+    loggingOptions.MinimumLevel
+    ?? loggingOptions.minimumLevel
+    ?? loggingOptions.LogLevel?.Default
+    ?? loggingOptions.logLevel?.default
+    ?? 'Information');
+  const debugLoggingOptions = configuration.DebugLogging ?? {};
+  const kafkaLogSink = createKafkaLogSink(configuration);
+
+  return {
+    info(message, labels = {}) {
+      writeLog('Information', message, labels);
+    },
+    warn(message, labels = {}) {
+      writeLog('Warning', message, labels);
+    },
+    error(message, labels = {}, error = null) {
+      writeLog('Error', message, labels, error);
+    },
+    debugBasic(message, labels = {}) {
+      writeExtendedDebugLog('Basic', message, labels);
+    },
+    debugVerbose(message, labels = {}) {
+      writeExtendedDebugLog('Verbose', message, labels);
+    },
+    async close() {
+      await kafkaLogSink.close();
+    }
+  };
+
+  function writeExtendedDebugLog(debugLevel, message, labels) {
+    if (!isDebugLoggingEnabled(debugLoggingOptions, debugLevel)) {
+      return;
+    }
+
+    writeLog('Information', `ExtendedDebug ${debugLevel}: ${message}`, {
+      ...labels,
+      debugLevel
+    });
+  }
+
+  function writeLog(level, message, labels = {}, error = null) {
+    if (!isLogLevelEnabled(level, minimumLevel)) {
+      return;
+    }
+
+    const record = buildLogRecord(configuration, level, message, labels, error);
+    writeConsoleLogRecord(record, level);
+    void kafkaLogSink.write(record);
+  }
+}
+
+function createKafkaLogSink(configuration) {
+  const elkLogging = configuration.ElkLogging ?? {};
+  const kafkaOptions = elkLogging.Kafka ?? elkLogging.kafka ?? {};
+  const enabled = elkLogging.Enabled === true && kafkaOptions.Enabled === true;
+  const topic = kafkaOptions.Topic ?? kafkaOptions.topic ?? '';
+  const flushTimeoutMs = clampInt(kafkaOptions.FlushTimeoutMs ?? kafkaOptions.flushTimeoutMs, 5000, 250, 30000);
+  const messageTimeoutMs = clampInt(kafkaOptions.MessageTimeoutMs ?? kafkaOptions.messageTimeoutMs, 30000, 250, 120000);
+  let producerPromise = null;
+  let producer = null;
+  let lastErrorAt = 0;
+
+  return {
+    async write(record) {
+      if (!enabled || isBlank(topic)) {
+        return;
+      }
+
+      try {
+        const connectedProducer = await getProducer();
+        await connectedProducer.send({
+          topic,
+          acks: kafkaAcks(kafkaOptions.Acks ?? kafkaOptions.acks),
+          timeout: messageTimeoutMs,
+          messages: [
+            {
+              key: record['event.id'] ?? record['log.logger'] ?? configuration.Service?.Name ?? 'monitoring-ui-api',
+              value: JSON.stringify(record),
+              headers: {
+                service: String(record['service.name'] ?? ''),
+                environment: String(record['service.environment'] ?? ''),
+                level: String(record['log.level'] ?? '')
+              }
+            }
+          ]
+        });
+      } catch (error) {
+        producerPromise = null;
+        producer = null;
+        const now = Date.now();
+        if (now - lastErrorAt >= 60000) {
+          lastErrorAt = now;
+          writeConsoleLogRecord(buildLogRecord(
+            configuration,
+            'Error',
+            'Failed to write log event to Kafka log topic',
+            { topic },
+            error), 'Error');
+        }
+      }
+    },
+    async close() {
+      if (!producer) {
+        return;
+      }
+
+      try {
+        await Promise.race([
+          producer.disconnect(),
+          new Promise(resolve => setTimeout(resolve, flushTimeoutMs))
+        ]);
+      } catch {
+        // Ignore shutdown-time sink cleanup errors.
+      }
+    }
+  };
+
+  async function getProducer() {
+    if (!producerPromise) {
+      producerPromise = createProducer();
+    }
+
+    producer = await producerPromise;
+    return producer;
+  }
+
+  async function createProducer() {
+    const brokers = normalizeStringArray(kafkaOptions.BootstrapServers ?? kafkaOptions.bootstrapServers);
+    if (brokers.length === 0) {
+      throw new Error('ElkLogging.Kafka.BootstrapServers is not configured.');
+    }
+
+    const kafka = new Kafka({
+      clientId: kafkaOptions.ClientId || kafkaOptions.clientId || `${configuration.Service?.Name ?? 'monitoring-ui-api'}-logs`,
+      brokers,
+      ssl: kafkaGenericSslOptions(kafkaOptions),
+      sasl: kafkaGenericSaslOptions(kafkaOptions),
+      logLevel: logLevel.NOTHING
+    });
+    const createdProducer = kafka.producer({
+      idempotent: kafkaOptions.EnableIdempotence === true
+    });
+    await createdProducer.connect();
+    return createdProducer;
+  }
+}
+
+function buildLogRecord(configuration, level, message, labels = {}, error = null) {
+  const serviceName = configuration.ElkLogging?.Kafka?.ServiceName
+    || configuration.Service?.Name
+    || 'monitoring-ui-api';
+  const serviceEnvironment = configuration.ElkLogging?.Kafka?.Environment || environment;
+  const record = {
+    '@timestamp': new Date().toISOString(),
+    message: redactSecretString(String(message ?? '')),
+    'log.level': level,
+    'log.logger': 'monitoring-ui-api',
+    'service.name': serviceName,
+    'service.environment': serviceEnvironment
+  };
+
+  const redactedLabels = redactForLog(labels);
+  if (isPlainObject(redactedLabels) && Object.keys(redactedLabels).length > 0) {
+    record.labels = redactedLabels;
+  }
+
+  if (error) {
+    record['error.type'] = error?.constructor?.name ?? typeof error;
+    record['error.message'] = redactSecretString(error instanceof Error ? error.message : String(error));
+    if (error instanceof Error && error.stack) {
+      record['error.stack_trace'] = redactSecretString(error.stack);
+    }
+  }
+
+  return record;
+}
+
+function writeConsoleLogRecord(record, level) {
+  const stream = logLevelNumber(level) >= logLevelNumber('Warning')
+    ? process.stderr
+    : process.stdout;
+  stream.write(`${JSON.stringify(record)}\n`);
+}
+
+function redactForLog(value, key = '') {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return isSecretKey(key) ? 'XXXXX' : redactSecretString(value);
+  }
+
+  if (value instanceof Error) {
+    return {
+      type: value.constructor?.name ?? 'Error',
+      message: redactSecretString(value.message)
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(item => redactForLog(item, key));
+  }
+
+  if (!isPlainObject(value)) {
+    return redactSecretString(String(value));
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([nestedKey, nested]) => [
+    nestedKey,
+    isSecretKey(nestedKey) ? 'XXXXX' : redactForLog(nested, nestedKey)
+  ]));
+}
+
+function isDebugLoggingEnabled(options = {}, eventLevel = 'Basic') {
+  if (options.Enabled !== true) {
+    return false;
+  }
+
+  const configuredLevel = normalizeDebugLoggingLevel(options.Level);
+  const requestedLevel = normalizeDebugLoggingLevel(eventLevel);
+  return requestedLevel === 'Basic' || configuredLevel === 'Verbose';
+}
+
+function normalizeDebugLoggingLevel(value) {
+  return String(value ?? 'Basic').toLowerCase() === 'verbose' ? 'Verbose' : 'Basic';
+}
+
+function isLogLevelEnabled(level, minimumLevel) {
+  return logLevelNumber(level) >= minimumLevel;
+}
+
+function normalizeLogLevel(value) {
+  const normalized = String(value ?? 'Information').toLowerCase();
+  return logLevelNumber({
+    trace: 'Trace',
+    debug: 'Debug',
+    information: 'Information',
+    info: 'Information',
+    warning: 'Warning',
+    warn: 'Warning',
+    error: 'Error',
+    critical: 'Critical',
+    fatal: 'Critical'
+  }[normalized] ?? 'Information');
+}
+
+function logLevelNumber(level) {
+  return {
+    Trace: 0,
+    Debug: 1,
+    Information: 2,
+    Warning: 3,
+    Error: 4,
+    Critical: 5
+  }[String(level)] ?? 2;
+}
+
+function kafkaAcks(value) {
+  const normalized = String(value ?? 'All').toLowerCase();
+  if (normalized === 'none' || normalized === '0') {
+    return 0;
+  }
+  if (normalized === 'leader' || normalized === '1') {
+    return 1;
+  }
+
+  return -1;
+}
+
+function kafkaGenericSslOptions(options) {
+  const protocol = options.SecurityProtocol ?? options.securityProtocol ?? 'Plaintext';
+  if (!String(protocol).toLowerCase().includes('ssl')) {
+    return undefined;
+  }
+
+  return {
+    rejectUnauthorized: options.SslRejectUnauthorized !== false,
+    ca: readOptionalPem(options.SslCaLocation ?? options.sslCaLocation),
+    cert: readOptionalPem(options.SslCertificateLocation ?? options.sslCertificateLocation),
+    key: readOptionalPem(options.SslKeyLocation ?? options.sslKeyLocation)
+  };
+}
+
+function kafkaGenericSaslOptions(options) {
+  const protocol = options.SecurityProtocol ?? options.securityProtocol ?? 'Plaintext';
+  if (!String(protocol).toLowerCase().includes('sasl')) {
+    return undefined;
+  }
+
+  const mechanism = kafkaSaslMechanism(options.SaslMechanism ?? options.saslMechanism);
+  if (!mechanism) {
+    throw new Error('ElkLogging.Kafka.SaslMechanism is not supported by monitoring-ui-api.');
+  }
+
+  if (isBlank(options.Username ?? options.username) || isBlank(options.Password ?? options.password)) {
+    throw new Error('ElkLogging Kafka SASL username/password are required.');
+  }
+
+  return {
+    mechanism,
+    username: options.Username ?? options.username,
+    password: options.Password ?? options.password
+  };
 }
 
 function applyRequestRateLimit(request, response, path) {
@@ -994,7 +1360,7 @@ async function readIndeedPamAapmSecret(target, serviceName, secretId) {
     headers.Authorization = `Basic ${Buffer.from(`${applicationCredentials.username}:${applicationCredentials.password}`).toString('base64')}`;
 
     if (aapm.SendApplicationCredentialsInQuery === true || aapm.sendApplicationCredentialsInQuery === true) {
-      console.warn('Secrets.IndeedPamAapm.SendApplicationCredentialsInQuery is deprecated and can leak credentials through URLs.');
+      logger.warn('Secrets.IndeedPamAapm.SendApplicationCredentialsInQuery is deprecated and can leak credentials through URLs.');
       url.searchParams.set('username', applicationCredentials.username);
       url.searchParams.set('password', applicationCredentials.password);
     }
@@ -1219,7 +1585,28 @@ function applyEnvOverrides(target) {
     MONITORING_UI_RATE_LIMIT_ENABLED: ['RateLimit', 'Enabled'],
     MONITORING_UI_RATE_LIMIT_WINDOW_SECONDS: ['RateLimit', 'WindowSeconds'],
     MONITORING_UI_RATE_LIMIT_AUTH_PERMIT_LIMIT: ['RateLimit', 'AuthPermitLimit'],
-    MONITORING_UI_RATE_LIMIT_API_PERMIT_LIMIT: ['RateLimit', 'ApiPermitLimit']
+    MONITORING_UI_RATE_LIMIT_API_PERMIT_LIMIT: ['RateLimit', 'ApiPermitLimit'],
+    MONITORING_UI_LOG_LEVEL: ['Logging', 'MinimumLevel'],
+    MONITORING_UI_DEBUG_LOGGING_ENABLED: ['DebugLogging', 'Enabled'],
+    MONITORING_UI_DEBUG_LOGGING_LEVEL: ['DebugLogging', 'Level'],
+    MONITORING_UI_LOGS_ENABLED: ['ElkLogging', 'Enabled'],
+    MONITORING_UI_LOGS_KAFKA_ENABLED: ['ElkLogging', 'Kafka', 'Enabled'],
+    MONITORING_UI_LOGS_KAFKA_BOOTSTRAP_SERVERS: ['ElkLogging', 'Kafka', 'BootstrapServers'],
+    MONITORING_UI_LOGS_KAFKA_TOPIC: ['ElkLogging', 'Kafka', 'Topic'],
+    MONITORING_UI_LOGS_KAFKA_CLIENT_ID: ['ElkLogging', 'Kafka', 'ClientId'],
+    MONITORING_UI_LOGS_KAFKA_SECURITY_PROTOCOL: ['ElkLogging', 'Kafka', 'SecurityProtocol'],
+    MONITORING_UI_LOGS_KAFKA_ALLOW_PLAINTEXT: ['ElkLogging', 'Kafka', 'AllowPlaintextKafka'],
+    MONITORING_UI_LOGS_KAFKA_SASL_MECHANISM: ['ElkLogging', 'Kafka', 'SaslMechanism'],
+    MONITORING_UI_LOGS_KAFKA_USERNAME: ['ElkLogging', 'Kafka', 'Username'],
+    MONITORING_UI_LOGS_KAFKA_PASSWORD: ['ElkLogging', 'Kafka', 'Password'],
+    MONITORING_UI_LOGS_KAFKA_SSL_CA_LOCATION: ['ElkLogging', 'Kafka', 'SslCaLocation'],
+    MONITORING_UI_LOGS_KAFKA_SSL_CERTIFICATE_LOCATION: ['ElkLogging', 'Kafka', 'SslCertificateLocation'],
+    MONITORING_UI_LOGS_KAFKA_SSL_KEY_LOCATION: ['ElkLogging', 'Kafka', 'SslKeyLocation'],
+    MONITORING_UI_LOGS_KAFKA_SSL_REJECT_UNAUTHORIZED: ['ElkLogging', 'Kafka', 'SslRejectUnauthorized'],
+    MONITORING_UI_LOGS_KAFKA_ACKS: ['ElkLogging', 'Kafka', 'Acks'],
+    MONITORING_UI_LOGS_KAFKA_MESSAGE_TIMEOUT_MS: ['ElkLogging', 'Kafka', 'MessageTimeoutMs'],
+    MONITORING_UI_LOGS_KAFKA_MINIMUM_LEVEL: ['ElkLogging', 'Kafka', 'MinimumLevel'],
+    MONITORING_UI_LOGS_KAFKA_FLUSH_TIMEOUT_MS: ['ElkLogging', 'Kafka', 'FlushTimeoutMs']
   };
 
   for (const [envName, path] of Object.entries(mapping)) {
@@ -1322,6 +1709,15 @@ function validateRuntimeSecurityConfig(target) {
   const protocol = String(eventBrowser.SecurityProtocol ?? 'Plaintext').toLowerCase();
   if ((protocol === 'plaintext' || protocol === 'saslplaintext') && eventBrowser.AllowPlaintextKafka !== true) {
     throw new Error('Production EventBrowser Kafka requires Ssl/SaslSsl unless EventBrowser.AllowPlaintextKafka=true.');
+  }
+
+  const elkLoggingKafka = target.ElkLogging?.Kafka ?? {};
+  const logProtocol = String(elkLoggingKafka.SecurityProtocol ?? 'Plaintext').toLowerCase();
+  if (target.ElkLogging?.Enabled === true
+    && elkLoggingKafka.Enabled === true
+    && (logProtocol === 'plaintext' || logProtocol === 'saslplaintext')
+    && elkLoggingKafka.AllowPlaintextKafka !== true) {
+    throw new Error('Production ElkLogging Kafka requires Ssl/SaslSsl unless ElkLogging.Kafka.AllowPlaintextKafka=true.');
   }
 }
 
@@ -1796,7 +2192,11 @@ async function ensureUsersFile() {
       }))
     };
     await writeUsersStore(store);
-    console.warn(`Bootstrap local admin was created with one-time password: ${bootstrapPassword}`);
+    const bootstrapPasswordPath = await writeBootstrapPasswordFile('admin', bootstrapPassword);
+    logger.warn('Bootstrap local admin was created with a one-time password file', {
+      username: 'admin',
+      bootstrapPasswordPath
+    });
     return;
   }
 
@@ -1818,7 +2218,11 @@ async function ensureUsersFile() {
       createdAt: now,
       updatedAt: now
     });
-    console.warn(`Bootstrap local user '${defaultUser.username}' was created with one-time password: ${bootstrapPassword}`);
+    const bootstrapPasswordPath = await writeBootstrapPasswordFile(defaultUser.username, bootstrapPassword);
+    logger.warn('Bootstrap local user was created with a one-time password file', {
+      username: defaultUser.username,
+      bootstrapPasswordPath
+    });
     changed = true;
   }
 
@@ -1826,6 +2230,27 @@ async function ensureUsersFile() {
     store.updatedAt = new Date().toISOString();
     await writeUsersStore(store);
   }
+}
+
+async function writeBootstrapPasswordFile(username, password) {
+  const usersPath = resolveUsersFile(config);
+  const safeUsername = sanitizeFileSegment(username);
+  const passwordPath = join(dirname(usersPath), `bootstrap-${safeUsername}-password.txt`);
+  const content = [
+    `username=${username}`,
+    `password=${password}`,
+    `createdAt=${new Date().toISOString()}`,
+    'rotateAfterFirstLogin=true',
+    ''
+  ].join('\n');
+
+  await writeFile(passwordPath, content, { mode: 0o600 });
+  return passwordPath;
+}
+
+function sanitizeFileSegment(value) {
+  const normalized = String(value ?? '').replace(/[^A-Za-z0-9._-]/g, '-');
+  return normalized || 'user';
 }
 
 async function readUsersStore() {
@@ -5864,7 +6289,10 @@ function redactSecretString(value) {
     return value;
   }
 
-  return value.replace(/Bearer\s+[-._~+/=A-Za-z0-9]+/gi, 'Bearer XXXXX');
+  return value
+    .replace(/Bearer\s+[-._~+/=A-Za-z0-9]+/gi, 'Bearer XXXXX')
+    .replace(/Basic\s+[+/=A-Za-z0-9]+/gi, 'Basic XXXXX')
+    .replace(/((?:password|token|secret|api[_-]?key)=)[^&\s]+/gi, '$1XXXXX');
 }
 
 function isSecretKey(key) {
@@ -5873,7 +6301,10 @@ function isSecretKey(key) {
     || normalized.includes('token')
     || normalized.includes('password')
     || normalized.includes('secret')
-    || normalized.includes('apikey');
+    || normalized.includes('apikey')
+    || normalized.includes('privatekey')
+    || normalized.includes('connectionstring')
+    || normalized.includes('sessionencryptionkey');
 }
 
 function applyRuntimeSettings(target, persisted = {}) {
@@ -8552,5 +8983,5 @@ function parseEnvValue(value) {
 }
 
 process.on('unhandledRejection', error => {
-  console.error(error);
+  logger.error('Unhandled promise rejection', {}, error);
 });

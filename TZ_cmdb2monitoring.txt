@@ -373,7 +373,11 @@ Kafka key:
 - cmdbuild.webhooks.dlq.dev для dev DLQ;
 - cmdbuild.webhooks.dlq для production/base DLQ;
 - cmdbwebhooks2kafka.logs.dev для dev-логов;
-- cmdbwebhooks2kafka.logs для production/base config логов.
+- cmdbwebhooks2kafka.logs для production/base config логов;
+- cmdbkafka2zabbix.logs.dev / cmdbkafka2zabbix.logs;
+- zabbixrequests2api.logs.dev / zabbixrequests2api.logs;
+- zabbixbindings2cmdbuild.logs.dev / zabbixbindings2cmdbuild.logs;
+- monitoring-ui-api.logs.dev / monitoring-ui-api.logs.
 
 7. Логирование и ELK
 
@@ -1539,6 +1543,9 @@ Cache не должен содержать секреты и не должен �
 Основные секции:
 - Service;
 - Auth;
+- Logging;
+- DebugLogging;
+- ElkLogging;
 - Idp;
 - Cmdbuild;
 - Zabbix;
@@ -1553,7 +1560,9 @@ Runtime settings:
 - подменю `Авторизация` должно позволять выбирать один из режимов `Локальная`, `MS AD`, `IdP`, редактировать SAML2/OAuth2 и LDAP/LDAPS/MS AD параметры, маппинг ролей к группам и локальных пользователей;
 - сохранение выполняется в файл `src/monitoring-ui-api/state/ui-settings.json`;
 - runtime state/settings не попадают в git;
-- текущий dev-контур должен быть заполнен значениями `CMDBuild localhost:8090`, `Zabbix localhost:8081`, `Kafka localhost:9092`, topics `*.dev`.
+- текущий dev-контур должен быть заполнен значениями `CMDBuild localhost:8090`, `Zabbix localhost:8081`, `Kafka localhost:9092`, topics `*.dev`;
+- `DebugLogging` должен поддерживать уровни `Basic` и `Verbose`, быть выключенным по умолчанию и включаться через config/env без изменения кода;
+- `ElkLogging:Kafka:Topic` для BFF должен указывать на `monitoring-ui-api.logs.dev` в dev и `monitoring-ui-api.logs` в base/prod config.
 
 Audit model:
 - UI должен иметь раздел `Аудит`, доступный ролям `editor` и `admin`; проверка модели доступна `editor/admin`, применение изменений в CMDBuild доступно только `admin`;
@@ -1571,7 +1580,7 @@ Events Kafka browser:
 - браузер не подключается к Kafka напрямую;
 - `monitoring-ui-api` читает Kafka через backend adapter;
 - список topics берется из `EventBrowser:Topics`;
-- текущие topics: `cmdbuild.webhooks.dev`, `zabbix.host.requests.dev`, `zabbix.host.responses.dev`, `zabbix.host.bindings.dev`, `cmdbwebhooks2kafka.logs.dev`, `cmdbkafka2zabbix.logs.dev`, `zabbixrequests2api.logs.dev`, `zabbixbindings2cmdbuild.logs.dev`;
+- текущие topics: `cmdbuild.webhooks.dev`, `zabbix.host.requests.dev`, `zabbix.host.responses.dev`, `zabbix.host.bindings.dev`, `cmdbwebhooks2kafka.logs.dev`, `cmdbkafka2zabbix.logs.dev`, `zabbixrequests2api.logs.dev`, `zabbixbindings2cmdbuild.logs.dev`, `monitoring-ui-api.logs.dev`;
 - поддерживаются настройки `BootstrapServers`, `ClientId`, `SecurityProtocol`, `SaslMechanism`, `Username`, `Password`, `MaxMessages`, `ReadTimeoutMs`;
 - просмотр read-only, topics не создаются;
 - по умолчанию выводятся последние сообщения, сортировка от более новых к более старым;

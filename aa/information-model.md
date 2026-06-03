@@ -9,7 +9,7 @@
 | IF-003 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
 | IF-004 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |
 | IF-005 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.responses.*` | Результат вызова Zabbix API |
-| IF-006 | Микросервисы `:5080/:5081/:5082/:5083` | Kafka `:9092` | `*.logs.*` topics | Structured JSON logs для будущего ELK |
+| IF-006 | Микросервисы `:5080/:5081/:5082/:5083` и `monitoring-ui-api` `:5090` | Kafka `:9092` | `*.logs.*` topics | Structured JSON logs для будущего ELK |
 | IF-007 | cmdbkafka2zabbix `:5081` | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
 | IF-008 | Микросервисы `:5080/:5081/:5082/:5083` | Local FS | `state/*.json` | Последний обработанный объект |
 | IF-009 | Browser | monitoring-ui-api `:5090` | HTTP UI/API | Session, dashboard, rules actions, catalog actions |

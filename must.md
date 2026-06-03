@@ -62,7 +62,9 @@
 - Log topics:
   - `cmdbwebhooks2kafka.logs.*`;
   - `cmdbkafka2zabbix.logs.*`;
-  - `zabbixrequests2api.logs.*`.
+  - `zabbixrequests2api.logs.*`;
+  - `zabbixbindings2cmdbuild.logs.*`;
+  - `monitoring-ui-api.logs.*`.
 - При изменении структуры Kafka-сообщения обязательно обновлять:
   - `TZ_cmdb2monitoring.txt`;
   - `aa/asyncapi/cmdb2monitoring.asyncapi.yaml`;

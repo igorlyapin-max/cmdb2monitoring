@@ -30,6 +30,19 @@ required(config, 'RateLimit.Enabled');
 required(config, 'RateLimit.WindowSeconds');
 required(config, 'RateLimit.AuthPermitLimit');
 required(config, 'RateLimit.ApiPermitLimit');
+required(config, 'Logging.MinimumLevel');
+required(config, 'DebugLogging.Enabled');
+required(config, 'DebugLogging.Level');
+required(config, 'ElkLogging.Enabled');
+required(config, 'ElkLogging.Mode');
+required(config, 'ElkLogging.Kafka.Enabled');
+required(config, 'ElkLogging.Kafka.Topic');
+required(config, 'ElkLogging.Kafka.ClientId');
+required(config, 'ElkLogging.Kafka.SecurityProtocol');
+required(config, 'ElkLogging.Kafka.MinimumLevel');
+required(config, 'ElkLogging.Kafka.ServiceName');
+required(config, 'ElkLogging.Kafka.Environment');
+required(config, 'ElkLogging.Kafka.FlushTimeoutMs');
 required(config, 'Idp.Provider');
 required(config, 'Idp.SpEntityId');
 required(config, 'Idp.AcsUrl');
@@ -96,6 +109,52 @@ if (typeof config.RateLimit?.Enabled !== 'boolean') {
   errors.push('RateLimit.Enabled must be boolean.');
 }
 
+if (!validLogLevel(config.Logging?.MinimumLevel)) {
+  errors.push(`Logging.MinimumLevel has unsupported value: ${config.Logging?.MinimumLevel}`);
+}
+
+if (typeof config.DebugLogging?.Enabled !== 'boolean') {
+  errors.push('DebugLogging.Enabled must be boolean.');
+}
+
+if (!['Basic', 'Verbose'].includes(config.DebugLogging?.Level)) {
+  errors.push(`DebugLogging.Level has unsupported value: ${config.DebugLogging?.Level}`);
+}
+
+if (!['Kafka', 'Elasticsearch'].includes(config.ElkLogging?.Mode)) {
+  errors.push(`ElkLogging.Mode has unsupported value: ${config.ElkLogging?.Mode}`);
+}
+
+if (typeof config.ElkLogging?.Enabled !== 'boolean') {
+  errors.push('ElkLogging.Enabled must be boolean.');
+}
+
+if (typeof config.ElkLogging?.Kafka?.Enabled !== 'boolean') {
+  errors.push('ElkLogging.Kafka.Enabled must be boolean.');
+}
+
+if (config.ElkLogging?.Enabled && config.ElkLogging?.Kafka?.Enabled) {
+  required(config, 'ElkLogging.Kafka.BootstrapServers');
+  if (!['Plaintext', 'Ssl', 'SaslPlaintext', 'SaslSsl'].includes(config.ElkLogging.Kafka.SecurityProtocol)) {
+    errors.push(`ElkLogging.Kafka.SecurityProtocol has unsupported value: ${config.ElkLogging.Kafka.SecurityProtocol}`);
+  }
+  if (!['', 'Plain', 'ScramSha256', 'ScramSha512'].includes(config.ElkLogging.Kafka.SaslMechanism ?? '')) {
+    errors.push(`ElkLogging.Kafka.SaslMechanism has unsupported value: ${config.ElkLogging.Kafka.SaslMechanism}`);
+  }
+  if (!['All', 'Leader', 'None', -1, 1, 0].includes(config.ElkLogging.Kafka.Acks)) {
+    errors.push(`ElkLogging.Kafka.Acks has unsupported value: ${config.ElkLogging.Kafka.Acks}`);
+  }
+  if (!validLogLevel(config.ElkLogging.Kafka.MinimumLevel)) {
+    errors.push(`ElkLogging.Kafka.MinimumLevel has unsupported value: ${config.ElkLogging.Kafka.MinimumLevel}`);
+  }
+  if (!intInRange(config.ElkLogging.Kafka.MessageTimeoutMs, 1, 120000)) {
+    errors.push('ElkLogging.Kafka.MessageTimeoutMs must be an integer from 1 to 120000.');
+  }
+  if (!intInRange(config.ElkLogging.Kafka.FlushTimeoutMs, 250, 30000)) {
+    errors.push('ElkLogging.Kafka.FlushTimeoutMs must be an integer from 250 to 30000.');
+  }
+}
+
 if (!intInRange(config.RateLimit?.WindowSeconds, 1, 3600)) {
   errors.push('RateLimit.WindowSeconds must be an integer from 1 to 3600.');
 }
@@ -158,7 +217,7 @@ for (const pipeline of config.QueueMonitor?.Pipelines ?? []) {
   }
 }
 
-for (const expectedTopic of ['zabbix.host.bindings', 'cmdbuild.webhooks.dlq', 'zabbix.host.requests.dlq', 'zabbixbindings2cmdbuild.logs']) {
+for (const expectedTopic of ['zabbix.host.bindings', 'cmdbuild.webhooks.dlq', 'zabbix.host.requests.dlq', 'zabbixbindings2cmdbuild.logs', 'monitoring-ui-api.logs']) {
   if (!config.EventBrowser.Topics.some(topic => topic?.Name === expectedTopic)) {
     errors.push(`EventBrowser.Topics must include ${expectedTopic}.`);
   }
@@ -206,4 +265,8 @@ function required(object, path) {
 function intInRange(value, min, max) {
   const number = Number(value);
   return Number.isInteger(number) && number >= min && number <= max;
+}
+
+function validLogLevel(value) {
+  return ['Trace', 'Debug', 'Information', 'Warning', 'Error', 'Critical'].includes(value);
 }

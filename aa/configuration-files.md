@@ -303,6 +303,9 @@ Base config не содержит пароль; `Development` config может 
 | `Auth:SessionTimeoutMinutes` | Время жизни server-side session | По требованиям ИБ |
 | `Auth:MaxSamlPostBytes` | Максимальный размер ACS POST | При больших SAML assertions |
 | `RateLimit:*` | Fixed-window limit для auth/API routes | При настройке внешнего балансировщика или требований ИБ |
+| `Logging:MinimumLevel` | Минимальный уровень structured logs в stdout/stderr и внешних sinks | При настройке шумности логов |
+| `DebugLogging:Enabled`, `DebugLogging:Level` | Временный диагностический режим `Basic`/`Verbose`, выключен по умолчанию | Только на время диагностики |
+| `ElkLogging:*` | Kafka log sink `monitoring-ui-api.logs*` или будущий ELK endpoint | При подключении ELK, смене log topic или Kafka auth |
 | `Cmdbuild:Catalog:MaxTraversalDepth` | Максимальная глубина раскрытия CMDBuild `domain`/`reference`/`lookup` путей в UI, диапазон `2..5`, default `2` | При необходимости разрешить более глубокие цепочки после logout и CMDBuild catalog resync |
 | `Idp:Provider` | `LDAP` для режима `MS AD`, `SAML2` или `OAuth2` для режима `IdP` | При выборе внешнего провайдера входа |
 | `Idp:MetadataUrl` | URL IdP metadata XML | Если IdP публикует metadata |
@@ -401,6 +404,17 @@ Base config не содержит пароль; `Development` config может 
 | `MONITORING_UI_RATE_LIMIT_WINDOW_SECONDS` | `RateLimit:WindowSeconds` |
 | `MONITORING_UI_RATE_LIMIT_AUTH_PERMIT_LIMIT` | `RateLimit:AuthPermitLimit` |
 | `MONITORING_UI_RATE_LIMIT_API_PERMIT_LIMIT` | `RateLimit:ApiPermitLimit` |
+| `MONITORING_UI_LOG_LEVEL` | `Logging:MinimumLevel` |
+| `MONITORING_UI_DEBUG_LOGGING_ENABLED` | `DebugLogging:Enabled` |
+| `MONITORING_UI_DEBUG_LOGGING_LEVEL` | `DebugLogging:Level` |
+| `MONITORING_UI_LOGS_ENABLED` | `ElkLogging:Enabled` |
+| `MONITORING_UI_LOGS_KAFKA_ENABLED` | `ElkLogging:Kafka:Enabled` |
+| `MONITORING_UI_LOGS_KAFKA_BOOTSTRAP_SERVERS` | `ElkLogging:Kafka:BootstrapServers` |
+| `MONITORING_UI_LOGS_KAFKA_TOPIC` | `ElkLogging:Kafka:Topic` |
+| `MONITORING_UI_LOGS_KAFKA_SECURITY_PROTOCOL` | `ElkLogging:Kafka:SecurityProtocol` |
+| `MONITORING_UI_LOGS_KAFKA_USERNAME` | `ElkLogging:Kafka:Username` |
+| `MONITORING_UI_LOGS_KAFKA_PASSWORD` | `ElkLogging:Kafka:Password` |
+| `MONITORING_UI_LOGS_KAFKA_MINIMUM_LEVEL` | `ElkLogging:Kafka:MinimumLevel` |
 
 SAML2 endpoints:
 - SP metadata: `GET /auth/saml2/metadata`;
@@ -417,7 +431,7 @@ OAuth2/OIDC endpoints:
 - `MS AD`: `Auth:UseIdp=true`, `Idp:Provider=LDAP`, общий endpoint `POST /api/auth/login` проверяет login/password через LDAP bind и назначает роли по AD-группам;
 - `IdP`: `Auth:UseIdp=true`, `Idp:Provider=SAML2` или `OAuth2`, IdP выполняет идентификацию, а BFF при настроенном LDAP service bind ищет login в MS AD и назначает роли по AD-группам. Если AD lookup не настроен, используется fallback по group claims из IdP.
 
-Локальные UI-пользователи хранятся в `Auth:UsersFilePath` рядом с `UiSettings:FilePath`; при первом старте создаются `viewer`, `editor`, `admin` с PBKDF2-SHA256 hash/salt паролей. Для deployment начальные UI-пароли меняются после первого входа или через заранее подготовленный/mounted users-файл.
+Локальные UI-пользователи хранятся в `Auth:UsersFilePath` рядом с `UiSettings:FilePath`; при первом старте создается локальный `admin` с PBKDF2-SHA256 hash/salt пароля. Одноразовый bootstrap password пишется в локальный state-файл `bootstrap-admin-password.txt` рядом с users-файлом и не выводится в логи. Для deployment начальные UI-пароли меняются после первого входа или через заранее подготовленный/mounted users-файл.
 Если выбран режим `MS AD` или `IdP`, блок локальных пользователей в UI неактивен; роли внешних пользователей назначаются по таблице соответствия группам.
 
 CMDBuild/Zabbix login/password не задаются в runtime config. Вход в UI выполняется локальным пользователем, через MS AD или через IdP, но эти credentials не используются для backend-доступа к CMDBuild/Zabbix. CMDBuild login/password запрашиваются только при первой операции с CMDBuild API и хранятся в памяти server-side session. Для Zabbix сначала используется `Zabbix:ApiToken`; если API key не задан, Zabbix login/password запрашиваются на session. Постоянный секрет для Zabbix допускается только как `Zabbix:ApiToken`.
@@ -453,6 +467,7 @@ Events:
 - `EventBrowser:BootstrapServers` в dev равен `localhost:9092`;
 - `EventBrowser:SecurityProtocol=Plaintext` для текущей локальной Kafka без авторизации;
 - `EventBrowser:Topics` должен содержать используемые сервисами topics, включая request/response/log topics;
+- `ElkLogging:Kafka:Topic` для самого BFF в dev равен `monitoring-ui-api.logs.dev`;
 - `EventBrowser:MaxMessages` задает количество последних сообщений к выводу, например `5` означает 5 последних;
 - `Runtime-настройки` сохраняют runtime overrides в `UiSettings:FilePath`, по умолчанию `src/monitoring-ui-api/state/ui-settings.json`.
 - Изменение `Cmdbuild:Catalog:MaxTraversalDepth` через `Runtime-настройки` применяется к редактору правил после logout и пересинхронизации CMDBuild catalog; новый cache получает поле `maxTraversalDepth`.

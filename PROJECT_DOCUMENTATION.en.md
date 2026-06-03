@@ -128,6 +128,7 @@ Expected compatible versions are CMDBuild `4.x` with REST v3, Zabbix `7.0.x LTS`
 | `cmdbkafka2zabbix.logs.dev` | `cmdbkafka2zabbix.logs` | `cmdbkafka2zabbix` | future ELK shipper |
 | `zabbixrequests2api.logs.dev` | `zabbixrequests2api.logs` | `zabbixrequests2api` | future ELK shipper |
 | `zabbixbindings2cmdbuild.logs.dev` | `zabbixbindings2cmdbuild.logs` | `zabbixbindings2cmdbuild` | future ELK shipper |
+| `monitoring-ui-api.logs.dev` | `monitoring-ui-api.logs` | `monitoring-ui-api` | future ELK shipper |
 
 Topics are created by external infrastructure. Services must not create Kafka topics at startup.
 
@@ -350,6 +351,8 @@ Main settings:
 | `AuditStorage` | Provider `postgresql`/`sqlite`, connection string, schema, auto-migrate, and timeout for the future audit section |
 | `EventBrowser` | Read-only Kafka browser for Events: bootstrap, auth, topics, limits |
 | `QueueMonitor` | Read-only backlog/topic-depth monitoring: topic, optional state file path, polling interval `5000..10000` ms, mode `Lag`/`TopicDepth`, and warning/critical thresholds |
+| `Logging` / `DebugLogging` | Structured logs and temporary `Basic`/`Verbose` diagnostic mode, disabled by default |
+| `ElkLogging` | Kafka log sink `monitoring-ui-api.logs*` or future ELK endpoint |
 | `Services:HealthEndpoints` | Microservice health endpoints and optional rules reload URL/token |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to the Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB secrets, and rules reload tokens |
 
@@ -359,7 +362,7 @@ Authorization modes:
 - `MS AD`: `Auth:UseIdp=true`, `Idp:Provider=LDAP`, login/password verified through LDAP/LDAPS bind and roles assigned from AD groups;
 - `IdP`: `Auth:UseIdp=true`, `Idp:Provider=SAML2` or `OAuth2`; IdP identifies the user, and the BFF reads MS AD groups through LDAP service bind when configured. If AD lookup is not configured, group claims from IdP are used as fallback.
 
-Local UI users are stored in `Auth:UsersFilePath` near `UiSettings:FilePath`. First startup creates `viewer`, `editor`, and `admin` with PBKDF2-SHA256 hashes. Deployment initial passwords must be changed after first login or supplied through a mounted users file.
+Local UI users are stored in `Auth:UsersFilePath` near `UiSettings:FilePath`. First startup creates a local `admin` user with a one-time bootstrap password written to `bootstrap-admin-password.txt` next to the users file. The password is not written to stdout/stderr or Kafka log topics. Deployment initial passwords must be changed after first login or supplied through a mounted users file.
 When `Zabbix:ApiToken`, `EventBrowser:Password`, LDAP/OAuth2 secrets, or the Audit DB connection string are configured as `secret://id`, the UI/BFF resolves them through Indeed PAM/AAPM and shows the reference in the interface instead of the actual secret.
 
 Roles:
@@ -414,6 +417,7 @@ Do not commit:
 - `src/monitoring-ui-api/data/*.json` catalog cache;
 - `src/monitoring-ui-api/state/ui-settings.json`;
 - `src/monitoring-ui-api/state/users.json`;
+- `src/monitoring-ui-api/state/bootstrap-*-password.txt`;
 - runtime state files under service `state/`;
 - production secrets.
 
@@ -438,8 +442,12 @@ To add a new fixed IP to the main host, add a CMDBuild attribute, webhook field,
 
 ## ELK Logging
 
-Until ELK exists, .NET services write structured JSON logs to Kafka log topics.
+Until ELK exists, .NET services and `monitoring-ui-api` write structured JSON logs to their Kafka log topics and continue writing JSON logs to stdout/stderr.
 When ELK is available, set `ElkLogging:Mode=Elk` or enable `ElkLogging:Elk:Enabled`, fill endpoint/index/API key, and disable Kafka log sink if needed.
+
+## Extended Debug Logging
+
+All backend services, including Node.js `monitoring-ui-api`, support the `DebugLogging` section with `Basic` and `Verbose` levels. Extended debug events are emitted through the main structured logging pipeline at `Information`, so they reach Docker stdout/stderr, Kafka log topics while `ElkLogging:Mode=Kafka`, ELK when the ELK sink is enabled, and syslog if Docker uses a syslog logging driver. `Verbose` details are redacted for `Authorization`, tokens, passwords, secrets, API keys, private keys, and connection strings.
 
 ## Pre-Commit / Pre-Push Checks
 

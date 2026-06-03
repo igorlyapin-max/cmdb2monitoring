@@ -90,6 +90,11 @@ channels:
     publish:
       message:
         $ref: '#/components/messages/StructuredLog'
+  monitoring-ui-api.logs.dev:
+    description: Structured JSON logs frontend/BFF.
+    publish:
+      message:
+        $ref: '#/components/messages/StructuredLog'
 components:
   messages:
     CmdbWebhookEnvelope:
