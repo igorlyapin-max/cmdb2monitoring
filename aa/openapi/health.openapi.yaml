@@ -51,6 +51,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+  /metrics:
+    get:
+      summary: Service Prometheus metrics
+      operationId: getServiceMetrics
+      responses:
+        '200':
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # TYPE cmdb2monitoring_service_started_at_seconds gauge
+                  cmdb2monitoring_service_started_at_seconds{service="monitoring-ui-api"} 1780490000
+                  # TYPE cmdb2monitoring_events_total counter
+                  cmdb2monitoring_events_total{service="monitoring-ui-api",name="http_requests_total"} 42
+                  # TYPE cmdb2monitoring_queue_lag gauge
+                  cmdb2monitoring_queue_lag{service="monitoring-ui-api",pipeline="CMDBuild webhooks",topic="cmdbuild.webhooks",mode="Lag"} 0
   /admin/reload-rules:
     post:
       summary: Reload cmdbkafka2zabbix conversion rules

@@ -26,6 +26,7 @@
 | IF-020 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT/DELETE `/etl/webhook/` | Чтение и применение выбранного плана CMDBuild webhooks в разделе `Настройка webhooks` |
 | IF-021 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.bindings.*` | Событие связи CMDBuild card/profile -> Zabbix hostid после успешного host.create/update/delete |
 | IF-022 | zabbixbindings2cmdbuild `:5083` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT `/classes/.../cards` | Запись `zabbix_main_hostid` или карточки `ZabbixHostBinding` |
+| IF-023 | Prometheus | Микросервисы `:5080/:5081/:5082/:5083` и `monitoring-ui-api` `:5090` | HTTP GET `/metrics` | Prometheus text metrics: service uptime, event counters, queue lag/DLQ depth gauges |
 
 ## Срез бизнес-описания
 
@@ -47,6 +48,7 @@
 - обратная запись Zabbix binding-ов в CMDBuild после успешного применения мониторинга;
 - Authorization session и settings для локального входа, MS AD LDAP/LDAPS и IdP SAML2/OAuth2/OIDC;
 - секреты и credentials через конфиги/переменные окружения.
+- Prometheus scrape `/metrics`, alert rules и Grafana dashboard для health/readiness, queue lag, DLQ, auth, catalog sync и rules reload.
 
 ## Основные объекты данных
 

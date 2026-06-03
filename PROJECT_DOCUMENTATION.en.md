@@ -463,6 +463,29 @@ To add a new fixed IP to the main host, add a CMDBuild attribute, webhook field,
 Until ELK exists, .NET services and `monitoring-ui-api` write structured JSON logs to their Kafka log topics and continue writing JSON logs to stdout/stderr.
 When ELK is available, set `ElkLogging:Mode=Elk` or enable `ElkLogging:Elk:Enabled`, fill endpoint/index/API key, and disable Kafka log sink if needed.
 
+## Observability
+
+All backend services expose `GET /metrics` in Prometheus text format. Baseline metrics include `cmdb2monitoring_service_started_at_seconds` and `cmdb2monitoring_events_total{service,name}`; `monitoring-ui-api` also publishes `cmdb2monitoring_queue_lag`, `cmdb2monitoring_queue_status`, `cmdb2monitoring_queue_threshold`, and `cmdb2monitoring_queue_state_error` from the current `QueueMonitor` configuration. For `mode="Lag"` the value is consumer pipeline lag from Kafka high watermark and worker state; for `mode="TopicDepth"` the value is DLQ topic depth.
+
+Operational artifacts:
+
+- `deploy/observability/prometheus/cmdb2monitoring-alerts.yml` - alert rules for missing metrics, queue lag/DLQ depth, auth failures, catalog sync failures, rules reload failures, DLQ publication, and Zabbix request failures;
+- `deploy/observability/grafana/cmdb2monitoring-dashboard.json` - service, queue, and pipeline event dashboard;
+- `scripts/validate-observability.sh` - static validation for dashboard/rules and `scripts/live-smoke.mjs`.
+
+Prometheus should scrape `/metrics` from `cmdbwebhooks2kafka`, `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild`, and `monitoring-ui-api`. If Kafka is unavailable to `monitoring-ui-api`, queue gauges remain exposed, but `cmdb2monitoring_queue_status` becomes `0` and `cmdb2monitoring_queue_state_error` is `1`.
+
+## Live Smoke
+
+Use the guarded script for live create/update/delete checks:
+
+```bash
+node scripts/live-smoke.mjs --dry-run
+node scripts/live-smoke.mjs --execute --code C2M-SMOKE-001 --confirm C2M-SMOKE-001
+```
+
+By default it targets the dev environment: `C2MTestCI`, webhook `http://localhost:5080/webhooks/cmdbuild`, Zabbix `http://localhost:8081/api_jsonrpc.php`, and `Admin/zabbix`. Production-like execution requires explicit `--environment prod`, a test `--code` with the `C2M-SMOKE-` prefix, matching `--confirm`, and real service credentials/tokens through CLI arguments or `C2M_SMOKE_*` environment variables. The script checks `/ready`, reloads rules, cleans up an old test host, sends `create`, `update`, and `delete` webhooks, and verifies the final state through the Zabbix API.
+
 ## Extended Debug Logging
 
 All backend services, including Node.js `monitoring-ui-api`, support the `DebugLogging` section with `Basic` and `Verbose` levels. Extended debug events are emitted through the main structured logging pipeline at `Information`, so they reach Docker stdout/stderr, Kafka log topics while `ElkLogging:Mode=Kafka`, ELK when the ELK sink is enabled, and syslog if Docker uses a syslog logging driver. `Verbose` details are redacted for `Authorization`, tokens, passwords, secrets, API keys, private keys, and connection strings.
@@ -477,7 +500,9 @@ All backend services, including Node.js `monitoring-ui-api`, support the `DebugL
 ./scripts/dotnet build src/zabbixbindings2cmdbuild/zabbixbindings2cmdbuild.csproj -v minimal
 ./scripts/dotnet build tests/configvalidation/configvalidation.csproj -v minimal
 ./scripts/dotnet build tests/cmdbresolver/cmdbresolver.csproj -v minimal
-node src/monitoring-ui-api/scripts/validate-config.mjs
+npm --prefix src/monitoring-ui-api test
+./scripts/validate-production-runtime.sh
+./scripts/validate-observability.sh
 git diff --check
 ```
 

@@ -679,6 +679,28 @@ Webhook body для этой demo-схемы остается плоским: `i
 - заполнить `ElkLogging:Elk:Endpoint`, `Index`, `ApiKey`;
 - при необходимости отключить Kafka log sink.
 
+## Observability
+
+Все backend-сервисы публикуют `GET /metrics` в Prometheus text format. Базовые метрики включают `cmdb2monitoring_service_started_at_seconds` и `cmdb2monitoring_events_total{service,name}`; `monitoring-ui-api` дополнительно публикует `cmdb2monitoring_queue_lag`, `cmdb2monitoring_queue_status`, `cmdb2monitoring_queue_threshold` и `cmdb2monitoring_queue_state_error` по текущей конфигурации `QueueMonitor`. Для `mode="Lag"` значение показывает отставание consumer pipeline по Kafka high watermark и worker state, для `mode="TopicDepth"` - глубину DLQ topic.
+
+Операционные артефакты:
+- `deploy/observability/prometheus/cmdb2monitoring-alerts.yml` - alert rules для отсутствующих метрик, queue lag/DLQ depth, auth failures, catalog sync failures, rules reload failures, DLQ publication и Zabbix request failures;
+- `deploy/observability/grafana/cmdb2monitoring-dashboard.json` - dashboard для состояния сервисов, очередей и событий конвейера;
+- `scripts/validate-observability.sh` - статическая проверка dashboard/rules и `scripts/live-smoke.mjs`.
+
+Prometheus должен scrape-ить `/metrics` у `cmdbwebhooks2kafka`, `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild` и `monitoring-ui-api`. Если Kafka недоступна для `monitoring-ui-api`, queue gauges остаются доступными, но `cmdb2monitoring_queue_status` становится `0` и `cmdb2monitoring_queue_state_error` равен `1`.
+
+## Live smoke
+
+Для live create/update/delete проверки используется guarded script:
+
+```bash
+node scripts/live-smoke.mjs --dry-run
+node scripts/live-smoke.mjs --execute --code C2M-SMOKE-001 --confirm C2M-SMOKE-001
+```
+
+По умолчанию скрипт рассчитан на dev-контур: `C2MTestCI`, webhook `http://localhost:5080/webhooks/cmdbuild`, Zabbix `http://localhost:8081/api_jsonrpc.php`, `Admin/zabbix`. Production-like запуск требует явный `--environment prod`, тестовый `--code` с префиксом `C2M-SMOKE-`, `--confirm` с тем же значением и реальные сервисные credentials/token через CLI или `C2M_SMOKE_*` env. Скрипт проверяет `/ready`, reload rules, cleanup старого тестового host, `create`, `update`, `delete` webhook и подтверждает итоговое состояние через Zabbix API.
+
 ## Extended debug logging
 
 Все backend-сервисы, включая Node.js `monitoring-ui-api`, поддерживают секцию `DebugLogging`:
@@ -706,6 +728,7 @@ Webhook body для этой demo-схемы остается плоским: `i
 ./scripts/dotnet build tests/cmdbresolver/cmdbresolver.csproj -v minimal
 npm --prefix src/monitoring-ui-api test
 ./scripts/validate-production-runtime.sh
+./scripts/validate-observability.sh
 git diff --check
 ```
 

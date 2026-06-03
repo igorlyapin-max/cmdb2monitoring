@@ -8,3 +8,4 @@ cd "$ROOT_DIR"
 ./scripts/dotnet run --project tests/cmdbresolver/cmdbresolver.csproj -- "$ROOT_DIR"
 ./scripts/dotnet run --project tests/zabbixbindings/zabbixbindings.csproj -- "$ROOT_DIR"
 npm --prefix src/monitoring-ui-api test
+./scripts/validate-observability.sh

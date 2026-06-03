@@ -63,6 +63,7 @@ repository_validation:
     - npm ci --prefix src/monitoring-ui-api
     - ./scripts/test-configs.sh
     - ./scripts/validate-production-runtime.sh
+    - ./scripts/validate-observability.sh
 
 secret_scan:
   image:

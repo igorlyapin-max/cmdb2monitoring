@@ -24,6 +24,11 @@ flowchart LR
     api -->|IF-021 zabbix.host.bindings.* :9092| kafka
     kafka -->|zabbix.host.bindings.* :9092| bind[zabbixbindings2cmdbuild :5083]
     bind -->|IF-022 binding write :8090| cmdb
+    prom[Prometheus] -->|IF-023 GET /metrics :5080| wh
+    prom -->|IF-023 GET /metrics :5081| conv
+    prom -->|IF-023 GET /metrics :5082| api
+    prom -->|IF-023 GET /metrics :5083| bind
+    prom -->|IF-023 GET /metrics :5090| ui
     wh -->|IF-006 logs :9092| kafka
     conv -->|IF-006 logs :9092| kafka
     api -->|IF-006 logs :9092| kafka

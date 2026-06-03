@@ -79,6 +79,13 @@ Production Docker Compose is defined in `deploy/compose.production.yml`; start f
 docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config
 ```
 
+Observability artifacts are under `deploy/observability/`. Validate them with:
+
+```bash
+./scripts/validate-observability.sh
+node scripts/live-smoke.mjs --dry-run
+```
+
 Architecture artifacts under `aa/` are not translated by default. Non-architecture documentation changes must update the English companion file in the same change.
 
 ## Checks
@@ -92,6 +99,7 @@ Architecture artifacts under `aa/` are not translated by default. Non-architectu
 ./scripts/dotnet run --project tests/zabbixbindings/zabbixbindings.csproj
 npm --prefix src/monitoring-ui-api test
 ./scripts/validate-production-runtime.sh
+./scripts/validate-observability.sh
 ```
 
 Run the frontend slice:

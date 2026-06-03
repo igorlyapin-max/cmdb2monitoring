@@ -46,6 +46,9 @@ jobs:
       - name: Validate production runtime contract
         run: ./scripts/validate-production-runtime.sh
 
+      - name: Validate observability contract
+        run: ./scripts/validate-observability.sh
+
       - name: Check whitespace
         run: git diff --check
 

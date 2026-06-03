@@ -103,6 +103,7 @@ const server = await createApplicationServer(async (request, response) => {
     await route(request, response);
   } catch (error) {
     const statusCode = error?.statusCode ?? 500;
+    recordHttpFailureMetrics(request, statusCode);
     if (statusCode >= 500) {
       logger.error('HTTP request failed', {
         method: request.method,
@@ -158,7 +159,7 @@ async function route(request, response) {
   }
 
   if (request.method === 'GET' && path === '/metrics') {
-    sendText(response, 200, buildPrometheusMetrics(), 'text/plain; version=0.0.4; charset=utf-8');
+    sendText(response, 200, await buildPrometheusMetrics(), 'text/plain; version=0.0.4; charset=utf-8');
     return;
   }
 
@@ -619,6 +620,7 @@ async function routeApi(request, response, url, path) {
     const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
     const session = await login(payload);
     const cookie = buildSessionCookie(session.id);
+    incrementCounter('auth_login_success');
     sendJson(response, 200, {
       authenticated: true,
       user: publicUser(session),
@@ -2914,6 +2916,17 @@ async function readManagementRulesStatus() {
 }
 
 async function reloadServiceRules(serviceName) {
+  try {
+    const result = await reloadServiceRulesCore(serviceName);
+    incrementCounter('rules_reload_success');
+    return result;
+  } catch (error) {
+    incrementCounter('rules_reload_failure');
+    throw error;
+  }
+}
+
+async function reloadServiceRulesCore(serviceName) {
   const endpoint = (config.Services.HealthEndpoints ?? [])
     .find(item => String(item.Name ?? item.name ?? '').toLowerCase() === String(serviceName ?? '').toLowerCase());
   if (!endpoint) {
@@ -3126,6 +3139,8 @@ function createKafkaClient() {
     brokers,
     ssl: kafkaSslOptions(eventBrowser),
     sasl: kafkaSaslOptions(eventBrowser),
+    connectionTimeout: clampInt(eventBrowser.ReadTimeoutMs, 2500, 500, 30000),
+    requestTimeout: clampInt(eventBrowser.ReadTimeoutMs, 2500, 500, 30000),
     logLevel: logLevel.NOTHING
   });
 }
@@ -3772,6 +3787,17 @@ function sameNormalized(left, right) {
 }
 
 async function syncZabbixCatalog(session) {
+  try {
+    const catalog = await syncZabbixCatalogCore(session);
+    incrementCounter('zabbix_catalog_sync_success');
+    return catalog;
+  } catch (error) {
+    incrementCounter('zabbix_catalog_sync_failure');
+    throw error;
+  }
+}
+
+async function syncZabbixCatalogCore(session) {
   const credentials = requireZabbixSessionCredentials(session);
   const apiEndpoint = credentials.apiEndpoint || config.Zabbix.ApiEndpoint;
   const token = await resolveZabbixToken(apiEndpoint, credentials);
@@ -3857,6 +3883,17 @@ async function readZabbixVersion(apiEndpoint) {
 }
 
 async function syncCmdbuildCatalog(session) {
+  try {
+    const catalog = await syncCmdbuildCatalogCore(session);
+    incrementCounter('cmdbuild_catalog_sync_success');
+    return catalog;
+  } catch (error) {
+    incrementCounter('cmdbuild_catalog_sync_failure');
+    throw error;
+  }
+}
+
+async function syncCmdbuildCatalogCore(session) {
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
   const classesResult = await cmdbuildGet(baseUrl, '/classes', credentials);
@@ -7666,6 +7703,7 @@ async function readBodyText(request, maxBytes) {
 async function requireSession(request, response) {
   const session = await getSession(request);
   if (!session) {
+    incrementCounter('auth_failure');
     sendJson(response, 401, {
       error: 'not_authenticated'
     });
@@ -7713,6 +7751,7 @@ function validateCsrfRequest(request, response, session) {
   const provided = request.headers['x-csrf-token'];
   const expected = session.csrfToken;
   if (isBlank(expected) || isBlank(provided)) {
+    incrementCounter('auth_failure');
     sendJson(response, 403, {
       error: 'csrf_required'
     });
@@ -7722,6 +7761,7 @@ function validateCsrfRequest(request, response, session) {
   const actualBytes = Buffer.from(String(provided));
   const expectedBytes = Buffer.from(String(expected));
   if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
+    incrementCounter('auth_failure');
     sendJson(response, 403, {
       error: 'csrf_invalid'
     });
@@ -7735,6 +7775,7 @@ function requireRole(session, response, allowedRoles) {
   const normalizedAllowed = allowedRoles.map(normalizeRoleKey);
   const normalizedSessionRoles = (session.roles ?? []).map(normalizeRoleKey);
   if (!normalizedAllowed.some(role => normalizedSessionRoles.includes(role))) {
+    incrementCounter('authorization_failure');
     sendJson(response, 403, {
       error: 'forbidden'
     });
@@ -8423,17 +8464,95 @@ function incrementCounter(name, value = 1) {
   serviceCounters.set(name, (serviceCounters.get(name) ?? 0) + value);
 }
 
-function buildPrometheusMetrics() {
-  const service = escapePrometheusLabel(config.Service.Name);
+function recordHttpFailureMetrics(request, statusCode) {
+  if (statusCode < 400) {
+    return;
+  }
+
+  incrementCounter('http_error');
+  const path = requestPathname(request);
+  if (isAuthFailurePath(path)) {
+    incrementCounter('auth_failure');
+  }
+}
+
+function requestPathname(request) {
+  try {
+    return trimTrailingSlash(new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`).pathname);
+  } catch {
+    return '';
+  }
+}
+
+function isAuthFailurePath(path) {
+  return path.startsWith('/auth/') || path.startsWith('/api/auth/');
+}
+
+async function buildPrometheusMetrics() {
+  const serviceName = config.Service.Name;
+  const service = escapePrometheusLabel(serviceName);
   const lines = [
+    '# HELP cmdb2monitoring_service_started_at_seconds Unix timestamp when the service started.',
     '# TYPE cmdb2monitoring_service_started_at_seconds gauge',
     `cmdb2monitoring_service_started_at_seconds{service="${service}"} ${Math.floor(startedAt.getTime() / 1000)}`,
+    '# HELP cmdb2monitoring_events_total Service event counters. The name label identifies the event.',
     '# TYPE cmdb2monitoring_events_total counter'
   ];
   for (const [name, value] of [...serviceCounters.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     lines.push(`cmdb2monitoring_events_total{service="${service}",name="${escapePrometheusLabel(name)}"} ${value}`);
   }
+  appendQueueMonitorPrometheusMetrics(lines, serviceName, await readQueueMonitorStatus());
   return `${lines.join('\n')}\n`;
+}
+
+function appendQueueMonitorPrometheusMetrics(lines, service, status) {
+  const serviceLabel = escapePrometheusLabel(service);
+  lines.push(
+    '# HELP cmdb2monitoring_queue_monitor_enabled Queue monitor enabled flag from monitoring-ui-api.',
+    '# TYPE cmdb2monitoring_queue_monitor_enabled gauge',
+    `cmdb2monitoring_queue_monitor_enabled{service="${serviceLabel}"} ${status.enabled ? 1 : 0}`,
+    '# HELP cmdb2monitoring_queue_lag Kafka queue lag or topic depth for configured QueueMonitor pipelines.',
+    '# TYPE cmdb2monitoring_queue_lag gauge',
+    '# HELP cmdb2monitoring_queue_status Queue status: 0 unknown, 1 ok, 2 warning, 3 critical.',
+    '# TYPE cmdb2monitoring_queue_status gauge',
+    '# HELP cmdb2monitoring_queue_threshold Queue warning or critical threshold.',
+    '# TYPE cmdb2monitoring_queue_threshold gauge',
+    '# HELP cmdb2monitoring_queue_state_error Queue state or offset read error flag.',
+    '# TYPE cmdb2monitoring_queue_state_error gauge'
+  );
+
+  for (const item of status.items ?? []) {
+    const labels = queueMetricLabels(service, item);
+    if (Number.isFinite(item.lag)) {
+      lines.push(`cmdb2monitoring_queue_lag{${labels}} ${prometheusNumber(item.lag)}`);
+    }
+    lines.push(`cmdb2monitoring_queue_status{${labels}} ${queueStatusMetricValue(item.status)}`);
+    lines.push(`cmdb2monitoring_queue_threshold{${labels},threshold="warning"} ${prometheusNumber(item.warningThreshold)}`);
+    lines.push(`cmdb2monitoring_queue_threshold{${labels},threshold="critical"} ${prometheusNumber(item.criticalThreshold)}`);
+    lines.push(`cmdb2monitoring_queue_state_error{${labels}} ${item.stateError ? 1 : 0}`);
+  }
+}
+
+function queueMetricLabels(service, item) {
+  return [
+    ['service', service],
+    ['pipeline', item.name],
+    ['topic', item.topic],
+    ['mode', item.mode]
+  ].map(([name, value]) => `${name}="${escapePrometheusLabel(String(value ?? ''))}"`).join(',');
+}
+
+function queueStatusMetricValue(status) {
+  return {
+    ok: 1,
+    warning: 2,
+    critical: 3
+  }[String(status ?? '').toLowerCase()] ?? 0;
+}
+
+function prometheusNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(number) : '0';
 }
 
 async function buildReadinessReport() {

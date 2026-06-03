@@ -1,0 +1,92 @@
+groups:
+  - name: cmdb2monitoring.runtime
+    rules:
+      - alert: Cmdb2MonitoringServiceMetricsMissing
+        expr: absent(cmdb2monitoring_service_started_at_seconds{service=~"cmdbwebhooks2kafka|cmdbkafka2zabbix|zabbixrequests2api|zabbixbindings2cmdbuild|monitoring-ui-api"})
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: cmdb2monitoring metrics are missing
+          description: No cmdb2monitoring service metrics were scraped for more than 3 minutes.
+
+      - alert: Cmdb2MonitoringQueueCritical
+        expr: max by (pipeline, topic, mode) (cmdb2monitoring_queue_status{service="monitoring-ui-api"} == 3) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: cmdb2monitoring queue is critical
+          description: Queue {{ $labels.pipeline }} on topic {{ $labels.topic }} is above the configured critical threshold.
+
+      - alert: Cmdb2MonitoringQueueStateError
+        expr: max by (pipeline, topic, mode) (cmdb2monitoring_queue_state_error{service="monitoring-ui-api"} == 1) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring queue state cannot be read
+          description: Queue {{ $labels.pipeline }} cannot calculate lag/depth from Kafka offsets or state files.
+
+      - alert: Cmdb2MonitoringDeadLetterPublished
+        expr: sum by (service) (increase(cmdb2monitoring_events_total{name="dead_letter_published"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring DLQ message was published
+          description: Service {{ $labels.service }} published one or more dead-letter messages.
+
+      - alert: Cmdb2MonitoringDeadLetterDepth
+        expr: max by (pipeline, topic) (cmdb2monitoring_queue_lag{service="monitoring-ui-api",mode="TopicDepth"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring DLQ topic is not empty
+          description: DLQ pipeline {{ $labels.pipeline }} on topic {{ $labels.topic }} has backlog.
+
+      - alert: Cmdb2MonitoringWebhookAuthRejected
+        expr: sum(increase(cmdb2monitoring_events_total{name="webhook_rejected_auth"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring webhook authorization failure
+          description: cmdbwebhooks2kafka rejected one or more webhook calls by authorization.
+
+      - alert: Cmdb2MonitoringUiAuthFailures
+        expr: sum(increase(cmdb2monitoring_events_total{service="monitoring-ui-api",name=~"auth_failure|authorization_failure"}[10m])) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring UI authentication failures
+          description: monitoring-ui-api recorded more than 10 auth/authz failures in 10 minutes.
+
+      - alert: Cmdb2MonitoringCatalogSyncFailures
+        expr: sum(increase(cmdb2monitoring_events_total{service="monitoring-ui-api",name=~"zabbix_catalog_sync_failure|cmdbuild_catalog_sync_failure"}[15m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring catalog sync failed
+          description: CMDBuild or Zabbix catalog synchronization failed in monitoring-ui-api.
+
+      - alert: Cmdb2MonitoringRulesReloadFailures
+        expr: sum(increase(cmdb2monitoring_events_total{service="monitoring-ui-api",name="rules_reload_failure"}[15m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring rules reload failed
+          description: monitoring-ui-api could not reload conversion rules in a backend service.
+
+      - alert: Cmdb2MonitoringZabbixRequestFailures
+        expr: sum(increase(cmdb2monitoring_events_total{service="zabbixrequests2api",name="zabbix_request_failed"}[10m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: cmdb2monitoring Zabbix request failed
+          description: zabbixrequests2api recorded one or more failed Zabbix API requests.

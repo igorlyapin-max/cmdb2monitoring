@@ -334,6 +334,8 @@ Base config не содержит пароль; `Development` config может 
 | `QueueMonitor:*` | Read-only мониторинг очередей: `Lag` по state-файлу или `TopicDepth` для DLQ topics | При смене Kafka topic namespace, state paths или порогов алерта |
 | `Services:HealthEndpoints` | Health endpoints микросервисов, включая `zabbixbindings2cmdbuild`; для `cmdbkafka2zabbix` дополнительно `RulesReloadUrl`, `RulesReloadToken`, `RulesStatusUrl`, `RulesStatusToken` | При добавлении сервисов, reload-действий или read-only статуса правил |
 
+`QueueMonitor` используется не только UI dashboard: `monitoring-ui-api` публикует его результаты в `/metrics` как `cmdb2monitoring_queue_lag`, `cmdb2monitoring_queue_status`, `cmdb2monitoring_queue_threshold` и `cmdb2monitoring_queue_state_error`. Эти значения используются alert rules из `deploy/observability/prometheus/cmdb2monitoring-alerts.yml`.
+
 Поддержанные env overrides `monitoring-ui-api`:
 
 | Env | Конфиг |
@@ -422,6 +424,11 @@ Production Compose:
 - `deploy/compose.production.yml` задает Docker healthcheck через `/ready`, syslog driver, Kafka log topics и persisted volumes;
 - `deploy/production.env.example` содержит только placeholder и `secret://` значения, реальные секреты задаются deployment-слоем;
 - `./scripts/validate-production-runtime.sh` проверяет, что Compose/Dockerfiles/CI сохраняют production runtime contract.
+
+Observability:
+- `deploy/observability/prometheus/cmdb2monitoring-alerts.yml` содержит Prometheus alert rules;
+- `deploy/observability/grafana/cmdb2monitoring-dashboard.json` содержит Grafana dashboard;
+- `./scripts/validate-observability.sh` проверяет observability artifacts и live smoke script.
 
 SAML2 endpoints:
 - SP metadata: `GET /auth/saml2/metadata`;

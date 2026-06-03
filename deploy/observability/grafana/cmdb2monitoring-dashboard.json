@@ -1,0 +1,311 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "count(cmdb2monitoring_service_started_at_seconds)",
+          "legendFormat": "services",
+          "refId": "A"
+        }
+      ],
+      "title": "Scraped services",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "disabled"
+                },
+                "1": {
+                  "text": "enabled"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "cmdb2monitoring_queue_monitor_enabled{service=\"monitoring-ui-api\"}",
+          "legendFormat": "queue monitor",
+          "refId": "A"
+        }
+      ],
+      "title": "Queue monitor",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(increase(cmdb2monitoring_events_total{name=\"dead_letter_published\"}[1h]))",
+          "legendFormat": "DLQ",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ events, 1h",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum(increase(cmdb2monitoring_events_total{service=\"monitoring-ui-api\",name=~\"auth_failure|authorization_failure\"}[1h]))",
+          "legendFormat": "auth failures",
+          "refId": "A"
+        }
+      ],
+      "title": "Auth failures, 1h",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "cmdb2monitoring_queue_lag{service=\"monitoring-ui-api\"}",
+          "legendFormat": "{{pipeline}} {{mode}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Kafka lag and DLQ depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum by (service, name) (increase(cmdb2monitoring_events_total{name=~\"webhook_accepted|webhook_rejected_auth|conversion_published|conversion_skipped|zabbix_request_success|zabbix_request_failed|binding_applied\"}[5m]))",
+          "legendFormat": "{{service}} {{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Pipeline events, 5m",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum by (name) (increase(cmdb2monitoring_events_total{service=\"monitoring-ui-api\",name=~\"zabbix_catalog_sync_success|zabbix_catalog_sync_failure|cmdbuild_catalog_sync_success|cmdbuild_catalog_sync_failure|rules_reload_success|rules_reload_failure\"}[30m]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "BFF catalog and rules events, 30m",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "unknown"
+                },
+                "1": {
+                  "text": "ok"
+                },
+                "2": {
+                  "text": "warning"
+                },
+                "3": {
+                  "text": "critical"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "cmdb2monitoring_queue_status{service=\"monitoring-ui-api\"}",
+          "legendFormat": "{{pipeline}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Queue status",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "cmdb2monitoring",
+    "observability"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus datasource",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "cmdb2monitoring operations",
+  "uid": "cmdb2monitoring-operations",
+  "version": 1,
+  "weekStart": ""
+}

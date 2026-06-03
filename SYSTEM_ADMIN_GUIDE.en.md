@@ -39,6 +39,7 @@ The rule developer is responsible for rules-file content: source fields, `cmdbPa
    - `monitoring-ui-api`: endpoints, Kafka Event Browser, auth, runtime settings, git settings.
    - For temporary backend-service diagnostics, including `monitoring-ui-api`, enable `DebugLogging:Enabled=true` with `Basic` or `Verbose`; `Verbose` exposes payload/request/response or runtime config details only with secret redaction and must not remain enabled permanently.
    - For production Docker/Compose, use `deploy/compose.production.yml` and the env template `deploy/production.env.example`; Docker healthchecks must call `/ready`, state/cache must be mounted as volumes, and logs must go to stdout/stderr, Kafka log topics, and the syslog driver.
+   - For Prometheus/Grafana, use `deploy/observability/prometheus/cmdb2monitoring-alerts.yml` and `deploy/observability/grafana/cmdb2monitoring-dashboard.json`; live create/update/delete smoke starts with `node scripts/live-smoke.mjs --dry-run`, then `--execute --confirm`.
    - Docker image build, local registry publishing, Kafka topics, per-service secrets, and external-system permissions are described in `DEPLOYMENT_LOCAL_REGISTRY.md`.
 
 4. Configure UI roles.
