@@ -18,6 +18,7 @@ const config = JSON.parse(readFileSync(join(serviceRoot, 'config/appsettings.jso
 required(config, 'Service.Name');
 required(config, 'Service.HealthRoute');
 required(config, 'Transport.Mode');
+required(config, 'Transport.AllowPlainHttp');
 required(config, 'Secrets.Provider');
 required(config, 'UiSettings.FilePath');
 required(config, 'Auth.UsersFilePath');
@@ -86,6 +87,10 @@ if (typeof config.Rules.ReadFromGit !== 'boolean') {
 
 if (!['Http', 'Https'].includes(config.Transport?.Mode)) {
   errors.push(`Transport.Mode has unsupported value: ${config.Transport?.Mode}`);
+}
+
+if (typeof config.Transport?.AllowPlainHttp !== 'boolean') {
+  errors.push('Transport.AllowPlainHttp must be boolean.');
 }
 
 if (config.Transport?.Mode === 'Https') {

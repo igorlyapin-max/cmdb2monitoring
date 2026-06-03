@@ -9,4 +9,6 @@
 | HC-003A | IF-016 | zabbixbindings2cmdbuild | `GET http://localhost:5083/health` | `{"service":"zabbixbindings2cmdbuild-dev","status":"ok"}` | Готовность обратной записи binding-ов в CMDBuild |
 | HC-004 | IF-009 | monitoring-ui-api | `GET http://localhost:5090/health` | `{"service":"monitoring-ui-api-dev","status":"ok"}` | Готовность frontend/BFF |
 
-Health endpoints не проверяют внешние зависимости глубоко. Проверки Kafka/Zabbix выполняются отдельными smoke-тестами или мониторингом.
+Для Docker healthcheck и production readiness используется `GET /ready`. Ожидаемый успешный ответ содержит `status:"ready"`, `startedAt`, `checkedAt` и массив `checks[]`; при неготовности возвращается HTTP `503` и `status:"not_ready"`. У Kafka worker-ов readiness проверяет запись в state volume, у `monitoring-ui-api` - runtime/cache/state paths и Redis session store, если он включен.
+
+`/health` остается lightweight liveness и не проверяет внешние зависимости глубоко. Проверки Kafka/Zabbix выполняются отдельными smoke-тестами или мониторингом.

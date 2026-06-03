@@ -36,7 +36,7 @@ node_config:
     - npm ci --prefix src/monitoring-ui-api
     - node --check src/monitoring-ui-api/server.mjs
     - node --check src/monitoring-ui-api/public/app.js
-    - node src/monitoring-ui-api/scripts/validate-config.mjs
+    - npm --prefix src/monitoring-ui-api test
 
 whitespace:
   extends: .node_job
@@ -62,6 +62,7 @@ repository_validation:
   script:
     - npm ci --prefix src/monitoring-ui-api
     - ./scripts/test-configs.sh
+    - ./scripts/validate-production-runtime.sh
 
 secret_scan:
   image:

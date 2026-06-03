@@ -119,6 +119,13 @@ builder.Services.AddHttpClient<ICmdbuildBindingClient, CmdbuildBindingClient>((s
 builder.Services.AddSingleton<ZabbixBindingEventReader>();
 builder.Services.AddSingleton<IProcessingStateStore, FileProcessingStateStore>();
 builder.Services.AddSingleton<IServiceMetrics, ServiceMetrics>();
+builder.Services.AddSingleton<IReadinessCheck>(services =>
+{
+    var options = services.GetRequiredService<IOptions<ProcessingStateOptions>>();
+    return ReadinessChecks.WritableStateFile(
+        "processing-state",
+        () => (options.Value.FilePath, options.Value.BaseDirectory));
+});
 builder.Services.AddHostedService<KafkaBindingWorker>();
 
 var app = builder.Build();

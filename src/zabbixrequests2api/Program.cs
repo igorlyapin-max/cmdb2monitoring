@@ -169,6 +169,13 @@ builder.Services.AddSingleton<IZabbixBindingEventPublisher, ZabbixBindingEventPu
 builder.Services.AddSingleton<IKafkaDeadLetterPublisher, KafkaDeadLetterPublisher>();
 builder.Services.AddSingleton<IProcessingStateStore, FileProcessingStateStore>();
 builder.Services.AddSingleton<IServiceMetrics, ServiceMetrics>();
+builder.Services.AddSingleton<IReadinessCheck>(services =>
+{
+    var options = services.GetRequiredService<IOptions<ProcessingStateOptions>>();
+    return ReadinessChecks.WritableStateFile(
+        "processing-state",
+        () => (options.Value.FilePath, options.Value.BaseDirectory));
+});
 builder.Services.AddHostedService<KafkaZabbixRequestWorker>();
 
 var app = builder.Build();

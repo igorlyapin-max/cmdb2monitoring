@@ -4,7 +4,7 @@ import { connect as connectNet } from 'node:net';
 import { connect as connectTls } from 'node:tls';
 import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Kafka, logLevel } from 'kafkajs';
@@ -152,10 +152,8 @@ async function route(request, response) {
   }
 
   if (request.method === 'GET' && path === '/ready') {
-    sendJson(response, 200, {
-      service: config.Service.Name,
-      status: 'ready'
-    });
+    const readiness = await buildReadinessReport();
+    sendJson(response, readiness.ready ? 200 : 503, readiness);
     return;
   }
 
@@ -1499,6 +1497,7 @@ function applyEnvOverrides(target) {
     PORT: ['Service', 'Port'],
     MONITORING_UI_HOST: ['Service', 'Host'],
     MONITORING_UI_TRANSPORT_MODE: ['Transport', 'Mode'],
+    MONITORING_UI_TRANSPORT_ALLOW_PLAIN_HTTP: ['Transport', 'AllowPlainHttp'],
     MONITORING_UI_TRANSPORT_CERT_PATH: ['Transport', 'Certificate', 'Path'],
     MONITORING_UI_TRANSPORT_KEY_PATH: ['Transport', 'Certificate', 'KeyPath'],
     MONITORING_UI_TRANSPORT_CERT_PASSWORD: ['Transport', 'Certificate', 'Password'],
@@ -1571,6 +1570,7 @@ function applyEnvOverrides(target) {
     MONITORING_UI_EVENTS_ENABLED: ['EventBrowser', 'Enabled'],
     MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS: ['EventBrowser', 'BootstrapServers'],
     MONITORING_UI_KAFKA_SECURITY_PROTOCOL: ['EventBrowser', 'SecurityProtocol'],
+    MONITORING_UI_KAFKA_ALLOW_PLAINTEXT: ['EventBrowser', 'AllowPlaintextKafka'],
     MONITORING_UI_KAFKA_SASL_MECHANISM: ['EventBrowser', 'SaslMechanism'],
     MONITORING_UI_KAFKA_USERNAME: ['EventBrowser', 'Username'],
     MONITORING_UI_KAFKA_PASSWORD: ['EventBrowser', 'Password'],
@@ -8434,6 +8434,130 @@ function buildPrometheusMetrics() {
     lines.push(`cmdb2monitoring_events_total{service="${service}",name="${escapePrometheusLabel(name)}"} ${value}`);
   }
   return `${lines.join('\n')}\n`;
+}
+
+async function buildReadinessReport() {
+  const checks = [];
+  for (const [name, configuredPath] of runtimeReadinessPaths()) {
+    checks.push(await runReadinessCheck(name, () => checkWritableConfiguredFile(configuredPath)));
+  }
+
+  if (config.Rules?.ReadFromGit === true) {
+    checks.push(await runReadinessCheck(
+      'rules-repository',
+      () => checkWritableConfiguredDirectory(config.Rules.RepositoryPath ?? 'rules-git-working-copy')));
+  }
+
+  checks.push(await runReadinessCheck('session-store', checkSessionStoreReady));
+
+  const ready = checks.every(check => check.ready);
+  return {
+    service: config.Service.Name,
+    status: ready ? 'ready' : 'not_ready',
+    ready,
+    startedAt: startedAt.toISOString(),
+    checkedAt: new Date().toISOString(),
+    checks: checks.map(check => ({
+      name: check.name,
+      status: check.ready ? 'ready' : 'not_ready',
+      message: check.message
+    }))
+  };
+}
+
+function runtimeReadinessPaths() {
+  const paths = [
+    ['ui-settings', config.UiSettings?.FilePath ?? 'state/ui-settings.json'],
+    ['local-users', config.Auth?.UsersFilePath ?? join(dirname(config.UiSettings?.FilePath ?? 'state/ui-settings.json'), 'users.json')],
+    ['cmdbuild-catalog-cache', config.Cmdbuild?.Catalog?.CacheFilePath],
+    ['zabbix-catalog-cache', config.Zabbix?.Catalog?.CacheFilePath]
+  ];
+
+  if (String(config.AuditStorage?.Provider ?? '').toLowerCase() === 'sqlite') {
+    const auditPath = sqliteDataSourcePath(config.AuditStorage?.ConnectionString);
+    if (!isBlank(auditPath)) {
+      paths.push(['audit-storage', auditPath]);
+    }
+  }
+
+  return paths.filter(([, configuredPath]) => !isBlank(configuredPath));
+}
+
+async function runReadinessCheck(name, check) {
+  try {
+    const message = await check();
+    return { name, ready: true, message };
+  } catch (error) {
+    return {
+      name,
+      ready: false,
+      message: redactSecretString(error instanceof Error ? error.message : String(error))
+    };
+  }
+}
+
+async function checkWritableConfiguredFile(configuredPath) {
+  const resolvedPath = resolveServiceFile(configuredPath);
+  if (!isPathInside(serviceRoot, resolvedPath)) {
+    throw new Error(`Configured path escapes service root: ${configuredPath}`);
+  }
+
+  const directory = dirname(resolvedPath);
+  await mkdir(directory, { recursive: true });
+  const probePath = join(directory, `.${basename(resolvedPath)}.ready-${randomUUID()}.tmp`);
+  try {
+    await writeFile(probePath, 'ready', 'utf8');
+    return `Writable: ${relative(serviceRoot, directory) || '.'}`;
+  } finally {
+    try {
+      await unlink(probePath);
+    } catch {
+      // Ignore cleanup errors after a successful readiness write attempt.
+    }
+  }
+}
+
+async function checkWritableConfiguredDirectory(configuredPath) {
+  const directory = resolveServiceFile(configuredPath);
+  if (!isPathInside(serviceRoot, directory)) {
+    throw new Error(`Configured directory escapes service root: ${configuredPath}`);
+  }
+
+  await mkdir(directory, { recursive: true });
+  const probePath = join(directory, `.ready-${randomUUID()}.tmp`);
+  try {
+    await writeFile(probePath, 'ready', 'utf8');
+    return `Writable: ${relative(serviceRoot, directory) || '.'}`;
+  } finally {
+    try {
+      await unlink(probePath);
+    } catch {
+      // Ignore cleanup errors after a successful readiness write attempt.
+    }
+  }
+}
+
+async function checkSessionStoreReady() {
+  const storeOptions = config.Auth?.SessionStore ?? {};
+  const mode = String(storeOptions.Mode ?? storeOptions.mode ?? 'Memory').toLowerCase();
+  if (mode !== 'redis') {
+    return 'Memory session store is ready.';
+  }
+
+  await redisCommand(normalizeRedisOptions(storeOptions.Redis ?? storeOptions.redis ?? {}), ['PING']);
+  return 'Redis session store is reachable.';
+}
+
+function sqliteDataSourcePath(connectionString) {
+  for (const segment of String(connectionString ?? '').split(';')) {
+    const [rawKey, ...rawValue] = segment.split('=');
+    const key = rawKey?.trim().toLowerCase();
+    if (key === 'data source' || key === 'filename') {
+      return rawValue.join('=').trim();
+    }
+  }
+
+  return '';
 }
 
 function escapePrometheusLabel(value) {

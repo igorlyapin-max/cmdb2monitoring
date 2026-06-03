@@ -30,7 +30,7 @@ jobs:
         run: |
           node --check src/monitoring-ui-api/server.mjs
           node --check src/monitoring-ui-api/public/app.js
-          node src/monitoring-ui-api/scripts/validate-config.mjs
+          npm --prefix src/monitoring-ui-api test
 
       - name: Build .NET services
         run: |
@@ -42,6 +42,9 @@ jobs:
 
       - name: Run repository validation
         run: ./scripts/test-configs.sh
+
+      - name: Validate production runtime contract
+        run: ./scripts/validate-production-runtime.sh
 
       - name: Check whitespace
         run: git diff --check

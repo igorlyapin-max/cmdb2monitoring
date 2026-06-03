@@ -34,6 +34,23 @@ paths:
                   status:
                     type: string
                     example: ok
+  /ready:
+    get:
+      summary: Service readiness check
+      operationId: getServiceReadiness
+      responses:
+        '200':
+          description: Service is ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: Service is not ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
   /admin/reload-rules:
     post:
       summary: Reload cmdbkafka2zabbix conversion rules
@@ -65,6 +82,37 @@ paths:
         '503':
           description: Reload token is not configured.
 components:
+  schemas:
+    ReadinessResponse:
+      type: object
+      required: [service, status, startedAt, checkedAt, checks]
+      properties:
+        service:
+          type: string
+        status:
+          type: string
+          enum: [ready, not_ready]
+        ready:
+          type: boolean
+        startedAt:
+          type: string
+          format: date-time
+        checkedAt:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items:
+            type: object
+            required: [name, status, message]
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+                enum: [ready, not_ready]
+              message:
+                type: string
   securitySchemes:
     reloadBearer:
       type: http

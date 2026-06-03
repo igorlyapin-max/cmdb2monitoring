@@ -23,6 +23,6 @@ COPY src/monitoring-ui-api/public ./public
 COPY src/monitoring-ui-api/scripts ./scripts
 RUN mkdir -p /app/state /app/data && chown -R appuser:appgroup /app
 USER appuser
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- http://127.0.0.1:5090/health >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- http://127.0.0.1:5090/ready >/dev/null || exit 1
 
 CMD ["npm", "start"]

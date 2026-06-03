@@ -101,6 +101,25 @@ Supported levels are `Basic` and `Verbose`. Events are written through regular `
 
 The UI/BFF reads `config/appsettings.json`, then `config/appsettings.${NODE_ENV}.json`, then `state/ui-settings.json`, then env overrides. The UI Dockerfile sets `NODE_ENV=Production`; mount an override as `/app/config/appsettings.Production.json` when needed.
 
+## Production Compose
+
+For production rollout, use `deploy/compose.production.yml` and prepare an env file from `deploy/production.env.example`:
+
+```bash
+cp deploy/production.env.example production.env
+# fill real hostnames, topics, and secret:// references or deployment secrets
+docker compose --env-file production.env -f deploy/compose.production.yml config
+docker compose --env-file production.env -f deploy/compose.production.yml up -d
+```
+
+The Compose file publishes only webhook/UI bind ports from env, runs Docker healthchecks against `/ready`, persists worker state in Docker volumes, and sends stdout/stderr to the Docker syslog driver by default. Kafka log topics stay enabled as the project's primary structured logging sink.
+
+Validate the production runtime contract without starting containers:
+
+```bash
+./scripts/validate-production-runtime.sh
+```
+
 ## Indeed PAM/AAPM Secret Provider
 
 All microservices and `monitoring-ui-api` support corporate service-secret storage through the `Secrets` section.

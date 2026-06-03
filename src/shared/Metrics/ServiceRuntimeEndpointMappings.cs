@@ -17,11 +17,30 @@ public static class ServiceRuntimeEndpointMappings
             startedAt = metrics.StartedAt
         }));
 
-        app.MapGet("/ready", () => Results.Ok(new
+        app.MapGet("/ready", async (
+            IEnumerable<IReadinessCheck> checks,
+            IServiceMetrics metrics,
+            CancellationToken cancellationToken) =>
         {
-            service = serviceName,
-            status = "ready"
-        }));
+            var readiness = await ReadinessProbe.CheckAsync(checks, cancellationToken);
+            var payload = new
+            {
+                service = serviceName,
+                status = readiness.Ready ? "ready" : "not_ready",
+                startedAt = metrics.StartedAt,
+                checkedAt = readiness.CheckedAt,
+                checks = readiness.Checks.Select(check => new
+                {
+                    name = check.Name,
+                    status = check.Ready ? "ready" : "not_ready",
+                    message = check.Message
+                })
+            };
+
+            return readiness.Ready
+                ? Results.Ok(payload)
+                : Results.Json(payload, statusCode: StatusCodes.Status503ServiceUnavailable);
+        });
 
         app.MapGet("/metrics", (IServiceMetrics metrics) => Results.Text(
             metrics.ToPrometheusText(serviceName),

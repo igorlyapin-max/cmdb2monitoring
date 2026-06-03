@@ -89,9 +89,27 @@ CMDBuild, Zabbix, and PAM/AAPM HTTP clients can use `https://` endpoints. In pro
 
 For ASP.NET actors, `AllowedHosts="*"` is rejected in production unless `HostSecurity:AllowWildcardAllowedHosts=true` is set explicitly.
 
-All HTTP actors expose `/health` for liveness, `/ready` for readiness after runtime configuration, and `/metrics` in Prometheus text format with basic processing counters.
+All HTTP actors expose `/health` for liveness, `/ready` for readiness after runtime configuration, and `/metrics` in Prometheus text format with basic processing counters. Kafka workers also check that their state volume is writable; `monitoring-ui-api` checks runtime/cache/state paths and the Redis session store when Redis mode is enabled.
 
 `monitoring-ui-api` stores only the session id in the browser cookie with `SameSite=Strict`; HTTPS/Production also adds `Secure`. For HA, enable `Auth:SessionStore:Mode=Redis`; sensitive session payload is encrypted with `Auth:SessionEncryptionKey`/`MONITORING_UI_SESSION_ENCRYPTION_KEY`.
+
+## Production Docker Compose
+
+The production Compose contract is in `deploy/compose.production.yml`; sample variables are in `deploy/production.env.example`. The target topology expects TLS termination or a reverse proxy in front of the containers: services listen on HTTP inside the Docker network with explicit `Transport__AllowPlainHttp=true`, while CMDBuild, Zabbix, Kafka, and PAM endpoints must use HTTPS/TLS/SASL unless an insecure override is set explicitly.
+
+Compose pins:
+- Docker healthchecks to `/ready`, not only `/health`;
+- `Worker__ReplicaMode=SingleActive`, `Worker__ExpectedReplicas=1`, and persisted `/app/state` volumes for Kafka workers;
+- persisted `/app/state` and `/app/data` for `monitoring-ui-api`;
+- structured JSON logs to stdout/stderr, Kafka log topics, and Docker syslog driver by default;
+- required production env/secret inputs for webhook token, rules reload token, Kafka, CMDBuild, Zabbix, and audit storage.
+
+Static production runtime validation:
+
+```bash
+./scripts/validate-production-runtime.sh
+docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config
+```
 
 ## Compatibility
 

@@ -96,8 +96,8 @@ SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles
 | Параметр | Назначение | Когда менять |
 | --- | --- | --- |
 | `Service:Name` | Имя сервиса в health/logs | При смене окружения или имени deployment |
-| `Service:HealthRoute` | Health endpoint | Если меняется route healthcheck |
-| `Transport:Mode`, `Transport:Certificate:*` | HTTP/HTTPS listener и certificate paths | При включении TLS на actor-е |
+| `Service:HealthRoute` | Health/liveness endpoint | Если меняется route healthcheck |
+| `Transport:Mode`, `Transport:Certificate:*`, `Transport:AllowPlainHttp` | HTTP/HTTPS listener, certificate paths и явный production override для HTTP внутри trusted network | При включении TLS на actor-е или запуске за reverse proxy |
 | `HostSecurity:AllowWildcardAllowedHosts` | Явный override для `AllowedHosts="*"` в production | Только если wildcard host filter осознанно принят |
 | `CmdbWebhook:Route` | Endpoint приема webhook | Если CMDBuild должен вызывать другой путь |
 | `CmdbWebhook:AuthorizationMode`, `CmdbWebhook:BearerToken` | Проверка `Authorization: Bearer ...` от CMDBuild | В production задавать token через env/secret storage |
@@ -392,6 +392,7 @@ Base config не содержит пароль; `Development` config может 
 | `MONITORING_UI_EVENTS_ENABLED` | `EventBrowser:Enabled` |
 | `MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS` | `EventBrowser:BootstrapServers` |
 | `MONITORING_UI_KAFKA_SECURITY_PROTOCOL` | `EventBrowser:SecurityProtocol` |
+| `MONITORING_UI_KAFKA_ALLOW_PLAINTEXT` | `EventBrowser:AllowPlaintextKafka` |
 | `MONITORING_UI_KAFKA_SASL_MECHANISM` | `EventBrowser:SaslMechanism` |
 | `MONITORING_UI_KAFKA_USERNAME` | `EventBrowser:Username` |
 | `MONITORING_UI_KAFKA_PASSWORD` | `EventBrowser:Password` |
@@ -412,9 +413,15 @@ Base config не содержит пароль; `Development` config может 
 | `MONITORING_UI_LOGS_KAFKA_BOOTSTRAP_SERVERS` | `ElkLogging:Kafka:BootstrapServers` |
 | `MONITORING_UI_LOGS_KAFKA_TOPIC` | `ElkLogging:Kafka:Topic` |
 | `MONITORING_UI_LOGS_KAFKA_SECURITY_PROTOCOL` | `ElkLogging:Kafka:SecurityProtocol` |
+| `MONITORING_UI_LOGS_KAFKA_ALLOW_PLAINTEXT` | `ElkLogging:Kafka:AllowPlaintextKafka` |
 | `MONITORING_UI_LOGS_KAFKA_USERNAME` | `ElkLogging:Kafka:Username` |
 | `MONITORING_UI_LOGS_KAFKA_PASSWORD` | `ElkLogging:Kafka:Password` |
 | `MONITORING_UI_LOGS_KAFKA_MINIMUM_LEVEL` | `ElkLogging:Kafka:MinimumLevel` |
+
+Production Compose:
+- `deploy/compose.production.yml` задает Docker healthcheck через `/ready`, syslog driver, Kafka log topics и persisted volumes;
+- `deploy/production.env.example` содержит только placeholder и `secret://` значения, реальные секреты задаются deployment-слоем;
+- `./scripts/validate-production-runtime.sh` проверяет, что Compose/Dockerfiles/CI сохраняют production runtime contract.
 
 SAML2 endpoints:
 - SP metadata: `GET /auth/saml2/metadata`;

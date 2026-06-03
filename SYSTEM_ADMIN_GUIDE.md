@@ -38,6 +38,7 @@
    - `zabbixbindings2cmdbuild`: CMDBuild REST URL, service account для записи binding-ов.
    - `monitoring-ui-api`: endpoints, Kafka Event Browser, auth, runtime settings, git settings.
    - Для временной диагностики backend-сервисов, включая `monitoring-ui-api`, включайте `DebugLogging:Enabled=true` и уровень `Basic` или `Verbose`; `Verbose` раскрывает payload/request/response или runtime config детали только с маскированием секретов и не должен оставаться включенным постоянно.
+   - Для production Docker/Compose используйте `deploy/compose.production.yml` и env-шаблон `deploy/production.env.example`; Docker healthcheck должен обращаться к `/ready`, state/cache должны быть вынесены в volumes, а логи должны идти в stdout/stderr, Kafka log topics и syslog driver.
    - Сборка Docker images, публикация в локальный registry, Kafka topics, секреты по сервисам и права внешних систем описаны в `DEPLOYMENT_LOCAL_REGISTRY.md`.
 
 4. Настройте роли UI.

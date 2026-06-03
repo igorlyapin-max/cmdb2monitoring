@@ -1,0 +1,233 @@
+x-syslog-logging: &syslog_logging
+  driver: ${DOCKER_LOG_DRIVER:-syslog}
+  options:
+    syslog-address: ${SYSLOG_ADDRESS:-udp://127.0.0.1:514}
+    tag: "cmdb2monitoring.{{.Name}}"
+
+x-dotnet-common-env: &dotnet_common_env
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_URLS: http://0.0.0.0:8080
+  AllowedHosts: ${ALLOWED_HOSTS:?set ALLOWED_HOSTS to production service hostnames}
+  Transport__Mode: Http
+  Transport__AllowPlainHttp: "true"
+  HostSecurity__AllowWildcardAllowedHosts: "false"
+  DebugLogging__Enabled: ${DEBUG_LOGGING_ENABLED:-false}
+  DebugLogging__Level: ${DEBUG_LOGGING_LEVEL:-Basic}
+  Secrets__Provider: ${SECRETS_PROVIDER:-None}
+  Secrets__IndeedPamAapm__BaseUrl: ${PAMURL:-}
+  Secrets__IndeedPamAapm__ApplicationToken: ${PAMTOKEN:-}
+  Secrets__IndeedPamAapm__ApplicationUsername: ${PAMUSERNAME:-}
+  Secrets__IndeedPamAapm__ApplicationPassword: ${PAMPASSWORD:-}
+  Secrets__IndeedPamAapm__SendApplicationCredentialsInQuery: "false"
+  SASLUSERNAME: ${SASLUSERNAME:-}
+  SASLPASSWORD: ${SASLPASSWORD:-}
+  SASLPASSWORDSECRET: ${SASLPASSWORDSECRET:-}
+  ElkLogging__Enabled: "true"
+  ElkLogging__Mode: Kafka
+  ElkLogging__Kafka__Enabled: "true"
+  ElkLogging__Kafka__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+  ElkLogging__Kafka__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+  ElkLogging__Kafka__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+  ElkLogging__Kafka__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+  ElkLogging__Kafka__Acks: All
+  ElkLogging__Kafka__MinimumLevel: ${LOG_MINIMUM_LEVEL:-Information}
+  ElkLogging__Kafka__Environment: Production
+  ElkLogging__Kafka__FlushTimeoutMs: "5000"
+
+x-worker-env: &worker_env
+  Worker__ReplicaMode: SingleActive
+  Worker__ExpectedReplicas: "1"
+  Worker__AllowMultipleActiveReplicas: "false"
+  Worker__ShutdownTimeoutSeconds: ${WORKER_SHUTDOWN_TIMEOUT_SECONDS:-60}
+  ProcessingState__BaseDirectory: /app
+
+x-healthcheck-dotnet: &healthcheck_dotnet
+  test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null || exit 1"]
+  interval: 30s
+  timeout: 5s
+  start_period: 20s
+  retries: 3
+
+services:
+  cmdbwebhooks2kafka:
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/cmdbwebhooks2kafka:${VERSION:-0.8.2}
+    restart: unless-stopped
+    logging: *syslog_logging
+    environment:
+      <<: *dotnet_common_env
+      Service__Name: cmdbwebhooks2kafka
+      Kafka__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      Kafka__Topic: ${CMDB_WEBHOOKS_TOPIC:-cmdbuild.webhooks}
+      Kafka__ClientId: cmdbwebhooks2kafka
+      Kafka__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      Kafka__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      Kafka__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      CmdbWebhook__BearerToken: ${CMDB_WEBHOOK_BEARER_TOKEN:?set CMDB_WEBHOOK_BEARER_TOKEN or secret reference}
+      ElkLogging__Kafka__Topic: ${CMDBWEBHOOKS_LOG_TOPIC:-cmdbwebhooks2kafka.logs}
+      ElkLogging__Kafka__ClientId: cmdbwebhooks2kafka-logs
+      ElkLogging__Kafka__ServiceName: cmdbwebhooks2kafka
+    ports:
+      - "${CMDBWEBHOOKS_BIND:-127.0.0.1}:${CMDBWEBHOOKS_PORT:-5080}:8080"
+    healthcheck: *healthcheck_dotnet
+
+  cmdbkafka2zabbix:
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/cmdbkafka2zabbix:${VERSION:-0.8.2}
+    restart: unless-stopped
+    logging: *syslog_logging
+    environment:
+      <<: [*dotnet_common_env, *worker_env]
+      Service__Name: cmdbkafka2zabbix
+      Service__RulesReloadToken: ${RULES_RELOAD_TOKEN:?set RULES_RELOAD_TOKEN or secret reference}
+      Service__RulesStatusToken: ${RULES_STATUS_TOKEN:-}
+      Kafka__Input__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      Kafka__Input__Topic: ${CMDB_WEBHOOKS_TOPIC:-cmdbuild.webhooks}
+      Kafka__Input__GroupId: cmdbkafka2zabbix
+      Kafka__Input__ClientId: cmdbkafka2zabbix-consumer
+      Kafka__Input__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      Kafka__Input__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      Kafka__Input__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      Kafka__Output__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      Kafka__Output__Topic: ${ZABBIX_REQUESTS_TOPIC:-zabbix.host.requests}
+      Kafka__Output__ClientId: cmdbkafka2zabbix-producer
+      Kafka__Output__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      Kafka__Output__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      Kafka__Output__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      DeadLetter__Topic: ${CMDB_WEBHOOKS_DLQ_TOPIC:-cmdbuild.webhooks.dlq}
+      ConversionRules__BaseDirectory: /app
+      ConversionRules__RepositoryPath: /app
+      ConversionRules__ReadFromGit: "false"
+      ConversionRules__RulesFilePath: rules/cmdbuild-to-zabbix-host-create.json
+      Cmdbuild__BaseUrl: ${CMDBUILD_BASE_URL:?set CMDBUILD_BASE_URL}
+      Cmdbuild__Username: ${CMDBUILD_USERNAME:-}
+      Cmdbuild__Password: ${CMDBUILD_PASSWORD:-}
+      ProcessingState__FilePath: state/cmdbkafka2zabbix-state.json
+      ElkLogging__Kafka__Topic: ${CMDBKAFKA2ZABBIX_LOG_TOPIC:-cmdbkafka2zabbix.logs}
+      ElkLogging__Kafka__ClientId: cmdbkafka2zabbix-logs
+      ElkLogging__Kafka__ServiceName: cmdbkafka2zabbix
+    volumes:
+      - cmdbkafka2zabbix-state:/app/state
+      - ${RULES_HOST_PATH:?set RULES_HOST_PATH to a directory containing rules/}:/app/rules:ro
+    healthcheck: *healthcheck_dotnet
+
+  zabbixrequests2api:
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/zabbixrequests2api:${VERSION:-0.8.2}
+    restart: unless-stopped
+    logging: *syslog_logging
+    environment:
+      <<: [*dotnet_common_env, *worker_env]
+      Service__Name: zabbixrequests2api
+      Kafka__Input__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      Kafka__Input__Topic: ${ZABBIX_REQUESTS_TOPIC:-zabbix.host.requests}
+      Kafka__Input__GroupId: zabbixrequests2api
+      Kafka__Input__ClientId: zabbixrequests2api-consumer
+      Kafka__Input__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      Kafka__Input__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      Kafka__Input__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      Kafka__Output__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      Kafka__Output__Topic: ${ZABBIX_RESPONSES_TOPIC:-zabbix.host.responses}
+      Kafka__Output__ClientId: zabbixrequests2api-producer
+      Kafka__Output__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      Kafka__Output__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      Kafka__Output__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      Kafka__BindingOutput__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      Kafka__BindingOutput__Topic: ${ZABBIX_BINDINGS_TOPIC:-zabbix.host.bindings}
+      Kafka__BindingOutput__ClientId: zabbixrequests2api-bindings-producer
+      Kafka__BindingOutput__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      Kafka__BindingOutput__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      Kafka__BindingOutput__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      DeadLetter__Topic: ${ZABBIX_REQUESTS_DLQ_TOPIC:-zabbix.host.requests.dlq}
+      Zabbix__ApiEndpoint: ${ZABBIX_API_ENDPOINT:?set ZABBIX_API_ENDPOINT}
+      Zabbix__AuthMode: ${ZABBIX_AUTH_MODE:-Token}
+      Zabbix__ApiToken: ${ZABBIX_API_TOKEN:?set ZABBIX_API_TOKEN or secret reference}
+      ProcessingState__FilePath: state/zabbixrequests2api-state.json
+      ElkLogging__Kafka__Topic: ${ZABBIXREQUESTS2API_LOG_TOPIC:-zabbixrequests2api.logs}
+      ElkLogging__Kafka__ClientId: zabbixrequests2api-logs
+      ElkLogging__Kafka__ServiceName: zabbixrequests2api
+    volumes:
+      - zabbixrequests2api-state:/app/state
+    healthcheck: *healthcheck_dotnet
+
+  zabbixbindings2cmdbuild:
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/zabbixbindings2cmdbuild:${VERSION:-0.8.2}
+    restart: unless-stopped
+    logging: *syslog_logging
+    environment:
+      <<: [*dotnet_common_env, *worker_env]
+      Service__Name: zabbixbindings2cmdbuild
+      Kafka__Input__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      Kafka__Input__Topic: ${ZABBIX_BINDINGS_TOPIC:-zabbix.host.bindings}
+      Kafka__Input__GroupId: zabbixbindings2cmdbuild
+      Kafka__Input__ClientId: zabbixbindings2cmdbuild-consumer
+      Kafka__Input__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      Kafka__Input__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      Kafka__Input__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      Cmdbuild__BaseUrl: ${CMDBUILD_BASE_URL:?set CMDBUILD_BASE_URL}
+      Cmdbuild__Username: ${CMDBUILD_WRITEBACK_USERNAME:?set CMDBUILD_WRITEBACK_USERNAME}
+      Cmdbuild__Password: ${CMDBUILD_WRITEBACK_PASSWORD:?set CMDBUILD_WRITEBACK_PASSWORD or secret reference}
+      ProcessingState__FilePath: state/zabbixbindings2cmdbuild-state.json
+      ElkLogging__Kafka__Topic: ${ZABBIXBINDINGS2CMDBUILD_LOG_TOPIC:-zabbixbindings2cmdbuild.logs}
+      ElkLogging__Kafka__ClientId: zabbixbindings2cmdbuild-logs
+      ElkLogging__Kafka__ServiceName: zabbixbindings2cmdbuild
+    volumes:
+      - zabbixbindings2cmdbuild-state:/app/state
+    healthcheck: *healthcheck_dotnet
+
+  monitoring-ui-api:
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/monitoring-ui-api:${VERSION:-0.8.2}
+    restart: unless-stopped
+    logging: *syslog_logging
+    environment:
+      NODE_ENV: Production
+      PORT: "5090"
+      MONITORING_UI_HOST: 0.0.0.0
+      MONITORING_UI_TRANSPORT_MODE: Http
+      MONITORING_UI_TRANSPORT_ALLOW_PLAIN_HTTP: "true"
+      MONITORING_UI_SECURE_COOKIES: "true"
+      MONITORING_UI_DEBUG_LOGGING_ENABLED: ${DEBUG_LOGGING_ENABLED:-false}
+      MONITORING_UI_DEBUG_LOGGING_LEVEL: ${DEBUG_LOGGING_LEVEL:-Basic}
+      MONITORING_UI_SESSION_STORE_MODE: ${MONITORING_UI_SESSION_STORE_MODE:-Memory}
+      MONITORING_UI_SESSION_ENCRYPTION_KEY: ${MONITORING_UI_SESSION_ENCRYPTION_KEY:-}
+      PAMURL: ${PAMURL:-}
+      PAMTOKEN: ${PAMTOKEN:-}
+      PAMUSERNAME: ${PAMUSERNAME:-}
+      PAMPASSWORD: ${PAMPASSWORD:-}
+      CMDBUILD_BASE_URL: ${CMDBUILD_BASE_URL:?set CMDBUILD_BASE_URL}
+      ZABBIX_API_ENDPOINT: ${ZABBIX_API_ENDPOINT:?set ZABBIX_API_ENDPOINT}
+      ZABBIX_API_TOKEN: ${ZABBIX_API_TOKEN:-}
+      RULES_FILE_PATH: rules/cmdbuild-to-zabbix-host-create.json
+      AUDIT_STORAGE_PROVIDER: ${AUDIT_STORAGE_PROVIDER:-postgresql}
+      AUDIT_STORAGE_CONNECTION_STRING: ${AUDIT_STORAGE_CONNECTION_STRING:?set AUDIT_STORAGE_CONNECTION_STRING or secret reference}
+      MONITORING_UI_EVENTS_ENABLED: "true"
+      MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      MONITORING_UI_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      MONITORING_UI_KAFKA_ALLOW_PLAINTEXT: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      MONITORING_UI_LOGS_ENABLED: "true"
+      MONITORING_UI_LOGS_KAFKA_ENABLED: "true"
+      MONITORING_UI_LOGS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}
+      MONITORING_UI_LOGS_KAFKA_TOPIC: ${MONITORING_UI_LOG_TOPIC:-monitoring-ui-api.logs}
+      MONITORING_UI_LOGS_KAFKA_CLIENT_ID: monitoring-ui-api-logs
+      MONITORING_UI_LOGS_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
+      MONITORING_UI_LOGS_KAFKA_ALLOW_PLAINTEXT: ${ALLOW_PLAINTEXT_KAFKA:-false}
+      MONITORING_UI_LOGS_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-Plain}
+      SASLUSERNAME: ${SASLUSERNAME:-}
+      SASLPASSWORD: ${SASLPASSWORD:-}
+      SASLPASSWORDSECRET: ${SASLPASSWORDSECRET:-}
+    ports:
+      - "${MONITORING_UI_BIND:-127.0.0.1}:${MONITORING_UI_PORT:-5090}:5090"
+    volumes:
+      - monitoring-ui-state:/app/state
+      - monitoring-ui-data:/app/data
+      - ${RULES_HOST_PATH:?set RULES_HOST_PATH to a directory containing rules/}:/app/rules:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5090/ready >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  cmdbkafka2zabbix-state: {}
+  zabbixrequests2api-state: {}
+  zabbixbindings2cmdbuild-state: {}
+  monitoring-ui-state: {}
+  monitoring-ui-data: {}

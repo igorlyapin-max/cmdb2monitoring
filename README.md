@@ -70,6 +70,15 @@ dotnet --info
 - `.github/workflows/ci.yml` and `.gitlab-ci.yml`: equivalent CI gates for GitHub Actions and GitLab CI.
 - `aa/schemas/`: JSON Schema contracts for Kafka messages, DLQ payloads, and conversion rules.
 
+## Production Runtime
+
+Production Docker Compose is defined in `deploy/compose.production.yml`; start from `deploy/production.env.example`, fill real endpoints and secret references, then validate with:
+
+```bash
+./scripts/validate-production-runtime.sh
+docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config
+```
+
 Architecture artifacts under `aa/` are not translated by default. Non-architecture documentation changes must update the English companion file in the same change.
 
 ## Checks
@@ -81,6 +90,8 @@ Architecture artifacts under `aa/` are not translated by default. Non-architectu
 ./scripts/dotnet build src/zabbixrequests2api/zabbixrequests2api.csproj
 ./scripts/dotnet build src/zabbixbindings2cmdbuild/zabbixbindings2cmdbuild.csproj
 ./scripts/dotnet run --project tests/zabbixbindings/zabbixbindings.csproj
+npm --prefix src/monitoring-ui-api test
+./scripts/validate-production-runtime.sh
 ```
 
 Run the frontend slice:

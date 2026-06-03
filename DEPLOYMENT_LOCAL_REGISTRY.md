@@ -101,6 +101,25 @@ DebugLogging__Level=Basic
 
 UI/BFF использует `config/appsettings.json`, затем `config/appsettings.${NODE_ENV}.json`, затем `state/ui-settings.json`, затем env overrides. В Dockerfile для UI задано `NODE_ENV=Production`; если нужен файл override, монтируйте его как `/app/config/appsettings.Production.json`.
 
+## Production Compose
+
+Для production rollout используйте `deploy/compose.production.yml` и подготовьте env-файл на основе `deploy/production.env.example`:
+
+```bash
+cp deploy/production.env.example production.env
+# заполнить реальные hostnames, topics и secret:// ссылки или deployment secrets
+docker compose --env-file production.env -f deploy/compose.production.yml config
+docker compose --env-file production.env -f deploy/compose.production.yml up -d
+```
+
+Compose публикует наружу только webhook/UI bind-порты из env, запускает Docker healthcheck через `/ready`, сохраняет worker state в Docker volumes и по умолчанию отправляет stdout/stderr в Docker syslog driver. Kafka log topics остаются включенными как основной structured logging sink проекта.
+
+Для диагностики production runtime без старта контейнеров:
+
+```bash
+./scripts/validate-production-runtime.sh
+```
+
 ## Indeed PAM/AAPM secret provider
 
 Все микросервисы и `monitoring-ui-api` поддерживают корпоративное хранилище сервисных секретов через секцию `Secrets`.

@@ -86,10 +86,28 @@ CMDBuild, Zabbix и PAM/AAPM HTTP clients могут использовать `h
 
 Все HTTP actor-ы публикуют:
 - `/health` - liveness;
-- `/ready` - readiness после успешной runtime-конфигурации;
+- `/ready` - readiness после успешной runtime-конфигурации; у Kafka worker-ов дополнительно проверяется доступность state volume на запись, у `monitoring-ui-api` - runtime/cache/state paths и Redis session store, если он включен;
 - `/metrics` - Prometheus text format с базовыми счетчиками обработки.
 
 `monitoring-ui-api` хранит session id в cookie `SameSite=Strict`; при HTTPS/Production добавляется `Secure`. Для HA можно включить `Auth:SessionStore:Mode=Redis`; sensitive session payload шифруется ключом `Auth:SessionEncryptionKey`/`MONITORING_UI_SESSION_ENCRYPTION_KEY`.
+
+## Production Docker Compose
+
+Production Compose contract хранится в `deploy/compose.production.yml`, пример переменных - в `deploy/production.env.example`. Контур рассчитан на TLS termination/reverse proxy перед контейнерами: внутри Docker network сервисы слушают HTTP с явным `Transport__AllowPlainHttp=true`, а CMDBuild/Zabbix/Kafka/PAM endpoints должны быть HTTPS/TLS/SASL либо иметь явный insecure override.
+
+Compose закрепляет:
+- Docker healthcheck через `/ready`, а не только `/health`;
+- `Worker__ReplicaMode=SingleActive`, `Worker__ExpectedReplicas=1` и persisted `/app/state` volumes для Kafka worker-ов;
+- persisted `/app/state` и `/app/data` для `monitoring-ui-api`;
+- structured JSON logs в stdout/stderr, Kafka log topics и Docker syslog driver по умолчанию;
+- обязательные production env/secret inputs для webhook token, rules reload token, Kafka, CMDBuild, Zabbix и audit storage.
+
+Статическая проверка production runtime:
+
+```bash
+./scripts/validate-production-runtime.sh
+docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config
+```
 
 ## Совместимость
 
@@ -686,7 +704,8 @@ Webhook body для этой demo-схемы остается плоским: `i
 ./scripts/dotnet build src/zabbixbindings2cmdbuild/zabbixbindings2cmdbuild.csproj -v minimal
 ./scripts/dotnet build tests/configvalidation/configvalidation.csproj -v minimal
 ./scripts/dotnet build tests/cmdbresolver/cmdbresolver.csproj -v minimal
-node src/monitoring-ui-api/scripts/validate-config.mjs
+npm --prefix src/monitoring-ui-api test
+./scripts/validate-production-runtime.sh
 git diff --check
 ```
 

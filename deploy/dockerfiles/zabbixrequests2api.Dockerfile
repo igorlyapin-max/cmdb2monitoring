@@ -27,5 +27,5 @@ RUN apt-get update \
     && mkdir -p /app/state /app/data \
     && chown -R appuser:appgroup /app
 USER appuser
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD curl -fsS http://127.0.0.1:8080/ready || exit 1
 ENTRYPOINT ["dotnet", "zabbixrequests2api.dll"]
