@@ -2,10 +2,10 @@
 
 Документ фиксирует текущий контракт `cmdb2monitoring` с CMDBuild. Это не полный справочник CMDBuild REST API, а практическое описание того, какие endpoints использует наше ПО и какие нюансы важны при эксплуатации.
 
-Проверенная версия: CMDBuild `4.1.0`, REST API v3, base URL вида:
+Целевой контракт: CMDBuild `4.2.x`, REST API v4, base URL вида:
 
 ```text
-http://<host>:<port>/cmdbuild/services/rest/v3
+http://<host>:<port>/cmdbuild/services/rest/v4
 ```
 
 ## Где используется CMDBuild REST API
@@ -33,10 +33,11 @@ HTTP headers:
 Accept: application/json
 Authorization: Basic <base64(username:password)>
 Content-Type: application/json   # только когда есть body
-CMDBuild-View: admin             # для ETL/webhook и части admin/write операций
 ```
 
 `monitoring-ui-api` технически умеет отправлять `Authorization: Bearer <accessToken>`, если credential object уже содержит `accessToken`, но штатный пользовательский сценарий сейчас основан на Basic credentials.
+
+`CMDBuild-View: admin` для REST API v4 не используется. Административные операции идут через явные `/administration/...` paths.
 
 ## Endpoints
 
@@ -65,13 +66,13 @@ CMDBuild-View: admin             # для ETL/webhook и части admin/write 
 
 | Method | Path | Назначение |
 | --- | --- | --- |
-| `GET` | `/etl/webhook/?detailed=true` | Загрузить текущие CMDBuild webhooks |
-| `POST` | `/etl/webhook/` | Создать managed webhook |
-| `PUT` | `/etl/webhook/{id}/` | Изменить managed webhook |
-| `DELETE` | `/etl/webhook/{id}/` | Удалить managed webhook |
+| `GET` | `/administration/etl/webhook/?detailed=true` | Загрузить текущие CMDBuild webhooks |
+| `POST` | `/administration/etl/webhook/` | Создать managed webhook |
+| `PUT` | `/administration/etl/webhook/{id}/` | Изменить managed webhook |
+| `DELETE` | `/administration/etl/webhook/{id}/` | Удалить managed webhook |
 
 Нюансы:
-- Для этих вызовов используется `CMDBuild-View: admin`.
+- Для этих вызовов нужны административные права ETL в CMDBuild.
 - UI применяет изменения только к webhooks с prefix `cmdbwebhooks2kafka-`.
 - Undo/redo в UI не откатывает уже выполненные изменения в CMDBuild.
 - `Save file as` может сохранить webhook artifact рядом с rules, но token/password/secret/API key/Authorization значения должны быть замаскированы как `XXXXX`.
@@ -147,8 +148,8 @@ CMDBuild-View: admin             # для ETL/webhook и части admin/write 
 
 | Method | Path | Назначение |
 | --- | --- | --- |
-| `POST` | `/classes` | Создать service class `ZabbixHostBinding` |
-| `POST` | `/classes/{class}/attributes` | Создать `zabbix_main_hostid` или атрибуты binding class |
+| `POST` | `/administration/classes` | Создать service class `ZabbixHostBinding` |
+| `POST` | `/administration/classes/{class}/attributes` | Создать `zabbix_main_hostid` или атрибуты binding class |
 
 Нужны права администратора модели CMDBuild. Для простого анализа плана эти права не нужны.
 
@@ -158,11 +159,11 @@ CMDBuild-View: admin             # для ETL/webhook и части admin/write 
 
 | Method | Path | Назначение |
 | --- | --- | --- |
-| `POST` | `/classes` | Создание тестовых классов |
-| `POST` | `/classes/{class}/attributes` | Создание атрибутов |
-| `POST` | `/lookup_types` | Создание lookup type |
-| `POST` | `/lookup_types/{lookupType}/values` | Создание lookup value |
-| `POST` | `/domains` | Создание domain |
+| `POST` | `/administration/classes` | Создание тестовых классов |
+| `POST` | `/administration/classes/{class}/attributes` | Создание атрибутов |
+| `POST` | `/administration/lookup_types` | Создание lookup type |
+| `POST` | `/administration/lookup_types/{lookupType}/values` | Создание lookup value |
+| `POST` | `/administration/domains` | Создание domain |
 | `POST` | `/classes/{class}/cards` | Создание карточки |
 | `PUT` | `/classes/{class}/cards/{cardId}` | Обновление карточки |
 | `POST` | `/domains/{domain}/relations` | Создание relation, основной вариант |
@@ -219,4 +220,3 @@ CMDBuild-View: admin             # для ETL/webhook и части admin/write 
 8. Создать или обновить тестовую карточку CMDBuild.
 9. Проверить цепочку Events: CMDBuild event -> Zabbix request -> Zabbix response -> binding event.
 10. Запустить Quick audit по выбранному классу.
-

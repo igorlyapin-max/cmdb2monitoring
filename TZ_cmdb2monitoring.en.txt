@@ -28,7 +28,7 @@ monitoring-ui-api does not write active rules files and does not commit/push rul
 - C# / .NET `net10.0` for backend microservices.
 - Node.js `>=22` for `monitoring-ui-api`.
 - Apache Kafka for event, request, response, and structured log topics.
-- CMDBuild REST API v3 for catalog/reference/lookup/domain resolution.
+- CMDBuild REST API v4 for catalog/reference/lookup/domain resolution.
 - Zabbix JSON-RPC `/api_jsonrpc.php`.
 - JSON conversion rules and T4 templates for request rendering.
 - Mermaid/OpenAPI/AsyncAPI architecture artifacts under `aa/`.
@@ -39,7 +39,7 @@ Verified development environment:
 
 | Component | Version | Status |
 | --- | --- | --- |
-| CMDBuild | `4.1.0` | Verified with REST API v3 and flat webhook JSON |
+| CMDBuild | `4.2.x` | Target customer stand and product contract with REST API v4 and flat webhook JSON |
 | Zabbix | `7.0.25` | Verified through `apiinfo.version` and JSON-RPC |
 | Apache Kafka | `3.9.2` | Verified in PLAINTEXT/KRaft dev mode |
 | CMDBuild DB | PostgreSQL `17.9` + PostGIS `3.5.x` | Used by CMDBuild only |
@@ -48,7 +48,7 @@ Verified development environment:
 | .NET SDK | `10.0.203` | Repository wrapper `scripts/dotnet` |
 | Node.js | `>=22` | Required by monitoring-ui-api |
 
-Expected compatibility is contract-based: CMDBuild `4.x` with REST v3, Zabbix `7.0.x LTS` and newer 7.x versions that keep `template.get` subselects `selectTemplateGroups`, `selectItems`, and `selectDiscoveryRules`, Kafka `3.x`. Any major/minor upgrade requires health checks, catalog sync, rules validation/dry-run, and create/update/delete smoke tests.
+Expected compatibility is contract-based: CMDBuild `4.2.x` with REST v4, Zabbix `7.0.x LTS` and newer 7.x versions that keep `template.get` subselects `selectTemplateGroups`, `selectItems`, and `selectDiscoveryRules`, Kafka `3.x`. Any major/minor upgrade requires health checks, catalog sync, rules validation/dry-run, and create/update/delete smoke tests.
 
 3. Repository Structure
 
@@ -148,7 +148,7 @@ Base configs must not contain production secrets. Development configs may contai
 
 The development CMDBuild endpoint is:
 
-`http://localhost:8090/cmdbuild/services/rest/v3`
+`http://localhost:8090/cmdbuild/services/rest/v4`
 
 Webhook calls from CMDBuild Docker container must use the host-reachable address.
 
@@ -491,8 +491,8 @@ With a switch disabled, `Tag rule`/`Host group rule` must require an existing Za
 18.3.1. Minimum Permissions By Operation
 
 - CMDBuild for UI/catalog sync: REST API login and read-only access to metadata classes/attributes/domains, lookup types/values, current-card relations, and target cards reachable through reference/domain chains used by `source.fields[].cmdbPath`. CMDBuild card create/update/delete permissions are not required for catalog sync.
-- CMDBuild for `Webhook Setup` load/analyze: read access to ETL/webhook records through REST v3 `/etl/webhook/?detailed=true`.
-- CMDBuild for `Load into CMDB`: create/update/delete, or equivalent modify permissions, on ETL/webhook records through REST v3 `/etl/webhook/`. These permissions are needed only by operators who apply webhook plans to CMDBuild.
+- CMDBuild for `Webhook Setup` load/analyze: read access to ETL/webhook records through REST v4 `/administration/etl/webhook/?detailed=true`.
+- CMDBuild for `Load into CMDB`: create/update/delete, or equivalent modify permissions, on ETL/webhook records through REST v4 `/administration/etl/webhook/`. These permissions are needed only by operators who apply webhook plans to CMDBuild.
 - CMDBuild service account for `cmdbkafka2zabbix`: read-only access to source cards and `ZabbixHostBinding` when `Cmdbuild:HostBindingLookupEnabled` is enabled.
 - CMDBuild service account for `zabbixbindings2cmdbuild`: read/update access to cards of classes participating in conversion rules, plus read/create/update access to `ZabbixHostBinding`.
 - The backend must restrict writes to the managed `cmdbwebhooks2kafka-*` prefix, but this is an application guard, not a replacement for CMDBuild permissions. The CMDBuild account must still be restricted as narrowly as the CMDBuild permission model allows.
@@ -522,7 +522,7 @@ Access:
 
 Behavior:
 - using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved together with the conversion rules file;
-- `Load from CMDB` reads current CMDBuild ETL/webhook records through REST v3 `/etl/webhook/?detailed=true`;
+- `Load from CMDB` reads current CMDBuild ETL/webhook records through REST v4 `/administration/etl/webhook/?detailed=true`;
 - after only loading from CMDB, the UI must show current webhooks for reference even when the operation plan has not been built yet;
 - `Analyze rules` reloads the current rules JSON and CMDBuild catalog cache every time, treats conversion rules as the source of truth for webhook payload composition, builds `webhook requirements` from the used source fields, and derives the desired webhook set from those requirements without creating or changing CMDBuild records;
 - when rules use a leaf through lookup/reference/domain, the desired webhook must send only the nearest scalar/id for the current card: the CMDBuild attribute for lookup/reference paths or the current card `Id` for domain paths; the converter resolves the concrete leaf through `rules.source.fields[].cmdbPath` metadata;
@@ -542,7 +542,7 @@ Behavior:
 - undo/redo works on the operation selection in the current UI session;
 - undo/redo must not promise or perform rollback of configuration already loaded into CMDBuild;
 - `Save file as` exports the JSON webhook plan through the browser and does not change CMDBuild, the backend rules file, or git;
-- `Load into CMDB` applies only selected operations after confirmation and really changes CMDBuild through REST v3 `/etl/webhook/`;
+- `Load into CMDB` applies only selected operations after confirmation and really changes CMDBuild through REST v4 `/administration/etl/webhook/`;
 - `Load into CMDB` must not change `headers.Authorization` on existing webhooks; a separate `Sync Authorization` command must change only that header on owned managed webhooks and must not change payload/rules;
 - the backend must restrict apply operations to the managed prefix `cmdbwebhooks2kafka-`;
 - new or updated webhook bodies remain flat: reference/domain/lookup leaf paths stay in `rules.source.fields[].cmdbPath`, while the CMDBuild webhook sends the scalar/id of the current attribute or current card id for a domain path.
@@ -570,7 +570,7 @@ Audit model:
 - attribute meaning: `OwnerClass`/`OwnerCardId`/`OwnerCode` identify the source CMDBuild card; `HostProfile` identifies the profile from rules; `ZabbixHostId`/`ZabbixHostName` identify the Zabbix object; `BindingStatus`, `RulesVersion`, and `LastSyncAt` store binding state, rules version, and last synchronization time;
 - after successful Zabbix writes, `zabbixbindings2cmdbuild` must fill `zabbix_main_hostid` for the main profile and `ZabbixHostBinding` cards for additional profiles automatically;
 - the UI must provide quick audit as a read-only `editor/admin` operation: choose a CMDBuild class with child-class scope and a rules-only filter, read cards through `limit/offset`, calculate expected host/profile/interface/groups/templates/maintenance/status from current conversion rules, and compare them with Zabbix `host.get` and bulk `maintenance.get`. `Run quick audit` must read the current offset, while `Next batch` must increase offset by the current max-cards-per-class limit. Quick audit must not perform auto-fixes;
-- applying the audit model requires CMDBuild model-administration permissions to create classes and attributes through REST (`POST /classes?scope=service`, `POST /classes/{class}/attributes`). These write permissions are not required for checking the plan.
+- applying the audit model requires CMDBuild model-administration permissions to create classes and attributes through REST v4 (`POST /administration/classes`, `POST /administration/classes/{class}/attributes`). These write permissions are not required for checking the plan.
 
 18.7. Checks
 

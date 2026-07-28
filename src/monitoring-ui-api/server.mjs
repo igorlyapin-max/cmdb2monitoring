@@ -19,6 +19,7 @@ const resolvedSecretReferences = new Map();
 let logger = createBootstrapLogger();
 const config = await loadConfig();
 logger = createStructuredLogger(config);
+validateCmdbuildApiConfig(config);
 validateRuntimeSecurityConfig(config);
 const startedAt = new Date();
 const serviceCounters = new Map();
@@ -1550,6 +1551,7 @@ function applyEnvOverrides(target) {
     LDAP_GROUPS_ATTRIBUTE: ['Idp', 'Ldap', 'GroupsAttribute'],
     LDAP_TLS_REJECT_UNAUTHORIZED: ['Idp', 'Ldap', 'TlsRejectUnauthorized'],
     CMDBUILD_BASE_URL: ['Cmdbuild', 'BaseUrl'],
+    CMDBUILD_API_VERSION: ['Cmdbuild', 'ApiVersion'],
     CMDBUILD_ALLOW_INSECURE_HTTP: ['Cmdbuild', 'Tls', 'AllowInsecureHttp'],
     CMDBUILD_TLS_REJECT_UNAUTHORIZED: ['Cmdbuild', 'Tls', 'RejectUnauthorized'],
     CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER: ['Cmdbuild', 'Webhooks', 'AuthorizationHeader'],
@@ -1679,6 +1681,40 @@ function applyCommonSaslCompatibility(target) {
       section.Password = ensureSecretReference(passwordSecret);
     }
   }
+}
+
+function validateCmdbuildApiConfig(target) {
+  target.Cmdbuild ??= {};
+  target.Cmdbuild.ApiVersion = normalizeCmdbuildApiVersion(target.Cmdbuild.ApiVersion);
+  target.Cmdbuild.BaseUrl = normalizeCmdbuildRestV4BaseUrl(target.Cmdbuild.BaseUrl);
+  if (target.Cmdbuild.ApiVersion !== 'v4') {
+    throw new Error(`CMDBuild ApiVersion must be v4; '${target.Cmdbuild.ApiVersion}' is not supported.`);
+  }
+
+  if (!isBlank(target.Cmdbuild.BaseUrl) && !isCmdbuildRestV4BaseUrl(target.Cmdbuild.BaseUrl)) {
+    throw new Error('CMDBuild BaseUrl must point to /cmdbuild/services/rest/v4.');
+  }
+}
+
+function normalizeCmdbuildApiVersion(value) {
+  const normalized = String(value ?? 'v4').trim().toLowerCase();
+  return normalized === '4' ? 'v4' : normalized;
+}
+
+function normalizeCmdbuildRestV4BaseUrl(value) {
+  if (isBlank(value)) {
+    return value ?? '';
+  }
+
+  return String(value).trim().replace(/\/services\/rest\/v3\/?$/i, '/services/rest/v4');
+}
+
+function isCmdbuildRestV4BaseUrl(value) {
+  if (!URL.canParse(value)) {
+    return false;
+  }
+
+  return /\/services\/rest\/v4\/?$/i.test(new URL(value).pathname);
 }
 
 function validateRuntimeSecurityConfig(target) {
@@ -3896,7 +3932,8 @@ async function syncCmdbuildCatalog(session) {
 async function syncCmdbuildCatalogCore(session) {
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
-  const classesResult = await cmdbuildGet(baseUrl, '/classes', credentials);
+  const catalogScope = config.Cmdbuild.Catalog.IncludeInactiveClasses ? 'administration' : 'management';
+  const classesResult = await cmdbuildGet(baseUrl, cmdbuildRestPath('/classes', catalogScope), credentials);
   const classes = normalizeCmdbuildList(classesResult).map(item => ({
     name: item.name ?? item._id ?? item.id,
     description: item.description ?? item.label ?? '',
@@ -3911,7 +3948,10 @@ async function syncCmdbuildCatalogCore(session) {
   const attributes = [];
   for (const cmdbClass of selectedClasses.slice(0, 250)) {
     try {
-      const attributesResult = await cmdbuildGet(baseUrl, `/classes/${encodeURIComponent(cmdbClass.name)}/attributes`, credentials);
+      const attributesResult = await cmdbuildGet(
+        baseUrl,
+        cmdbuildRestPath(`/classes/${encodeURIComponent(cmdbClass.name)}/attributes`, catalogScope),
+        credentials);
       attributes.push({
         className: cmdbClass.name,
         items: normalizeCmdbuildList(attributesResult)
@@ -3928,7 +3968,7 @@ async function syncCmdbuildCatalogCore(session) {
   let lookups = [];
   if (config.Cmdbuild.Catalog.IncludeLookupValues) {
     try {
-      const lookupTypes = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/lookup_types', credentials));
+      const lookupTypes = normalizeCmdbuildList(await cmdbuildGet(baseUrl, cmdbuildRestPath('/lookup_types'), credentials));
       for (const lookup of lookupTypes.slice(0, 500)) {
         const lookupName = lookup.name ?? lookup._id ?? lookup.id;
         if (isBlank(lookupName)) {
@@ -3936,7 +3976,10 @@ async function syncCmdbuildCatalogCore(session) {
         }
 
         try {
-          const valuesResult = await cmdbuildGet(baseUrl, `/lookup_types/${encodeURIComponent(lookupName)}/values`, credentials);
+          const valuesResult = await cmdbuildGet(
+            baseUrl,
+            cmdbuildRestPath(`/lookup_types/${encodeURIComponent(lookupName)}/values`),
+            credentials);
           lookups.push({
             ...lookup,
             name: lookup.name ?? lookupName,
@@ -3958,13 +4001,16 @@ async function syncCmdbuildCatalogCore(session) {
 
   let domains = [];
   try {
-    const domainSummaries = normalizeCmdbuildList(await cmdbuildGet(baseUrl, '/domains', credentials));
+    const domainSummaries = normalizeCmdbuildList(await cmdbuildGet(baseUrl, cmdbuildRestPath('/domains'), credentials));
     for (const summary of domainSummaries.slice(0, 500)) {
       const domainName = summary.name ?? summary._id ?? summary.id ?? '';
       let item = summary;
       if (!isBlank(domainName)) {
         try {
-          item = normalizeCmdbuildItem(await cmdbuildGet(baseUrl, `/domains/${encodeURIComponent(domainName)}`, credentials)) ?? summary;
+          item = normalizeCmdbuildItem(await cmdbuildGet(
+            baseUrl,
+            cmdbuildRestPath(`/domains/${encodeURIComponent(domainName)}`),
+            credentials)) ?? summary;
         } catch (error) {
           item = {
             ...summary,
@@ -4044,7 +4090,7 @@ async function runCmdbuildLookupBulkChange(session, payload = {}) {
 
   const attribute = normalizeCmdbuildItem(await cmdbuildGet(
     baseUrl,
-    `/classes/${encodeURIComponent(className)}/attributes/${encodeURIComponent(attributeName)}`,
+    cmdbuildRestPath(`/classes/${encodeURIComponent(className)}/attributes/${encodeURIComponent(attributeName)}`),
     credentials
   ));
   if (!isCmdbuildWritableLookupAttribute(attribute)) {
@@ -4058,7 +4104,7 @@ async function runCmdbuildLookupBulkChange(session, payload = {}) {
 
   const values = normalizeCmdbuildList(await cmdbuildGet(
     baseUrl,
-    `/lookup_types/${encodeURIComponent(lookupType)}/values?limit=500`,
+    cmdbuildRestPath(`/lookup_types/${encodeURIComponent(lookupType)}/values?limit=500`),
     credentials
   ))
     .filter(item => item.active !== false)
@@ -4148,7 +4194,7 @@ async function runCmdbuildLookupBulkChange(session, payload = {}) {
     try {
       await cmdbuildRequest(
         baseUrl,
-        `/classes/${encodeURIComponent(className)}/cards/${encodeURIComponent(cardId)}`,
+        cmdbuildRestPath(`/classes/${encodeURIComponent(className)}/cards/${encodeURIComponent(cardId)}`),
         credentials,
         {
           method: 'PUT',
@@ -4225,7 +4271,7 @@ async function ensureCmdbuildAttributeExists(baseUrl, credentials, className, at
   try {
     await cmdbuildGet(
       baseUrl,
-      `/classes/${encodeURIComponent(className)}/attributes/${encodeURIComponent(attributeName)}`,
+      cmdbuildRestPath(`/classes/${encodeURIComponent(className)}/attributes/${encodeURIComponent(attributeName)}`),
       credentials
     );
   } catch (error) {
@@ -4321,9 +4367,7 @@ function normalizeCmdbuildDomain(item = {}) {
 async function readCmdbuildWebhooks(session) {
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
-  const result = await cmdbuildGet(baseUrl, '/etl/webhook/?detailed=true', credentials, {
-    'CMDBuild-View': 'admin'
-  });
+  const result = await cmdbuildGet(baseUrl, cmdbuildRestPath('/etl/webhook/?detailed=true', 'administration'), credentials);
 
   return {
     loadedAt: new Date().toISOString(),
@@ -4360,8 +4404,8 @@ async function applyCmdbuildWebhookOperations(session, payload) {
       rejectConflictingForeignCmdbuildWebhook(existingByCode, code);
       await cmdbuildRequest(baseUrl, '/etl/webhook/', credentials, {
         method: 'POST',
-        body: desired,
-        headers: { 'CMDBuild-View': 'admin' }
+        pathScope: 'administration',
+        body: desired
       });
       results.push({ action, code, status: 'applied' });
       continue;
@@ -4375,8 +4419,8 @@ async function applyCmdbuildWebhookOperations(session, payload) {
       const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
       await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
         method: 'PUT',
-        body: desired,
-        headers: { 'CMDBuild-View': 'admin' }
+        pathScope: 'administration',
+        body: desired
       });
       results.push({ action, code, status: 'applied' });
       continue;
@@ -4387,7 +4431,7 @@ async function applyCmdbuildWebhookOperations(session, payload) {
       const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
       await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
         method: 'DELETE',
-        headers: { 'CMDBuild-View': 'admin' }
+        pathScope: 'administration'
       });
       results.push({ action, code, status: 'applied' });
       continue;
@@ -4439,8 +4483,8 @@ async function syncCmdbuildWebhookAuthorization(session, payload = {}) {
     const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
     await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
       method: 'PUT',
-      body: desired,
-      headers: { 'CMDBuild-View': 'admin' }
+      pathScope: 'administration',
+      body: desired
     });
     results.push({ action: 'syncAuthorization', code, status: 'applied' });
   }
@@ -4456,9 +4500,7 @@ async function syncCmdbuildWebhookAuthorization(session, payload = {}) {
 }
 
 async function readCmdbuildWebhooksByCode(baseUrl, credentials) {
-  const result = await cmdbuildGet(baseUrl, '/etl/webhook/?detailed=true', credentials, {
-    'CMDBuild-View': 'admin'
-  });
+  const result = await cmdbuildGet(baseUrl, cmdbuildRestPath('/etl/webhook/?detailed=true', 'administration'), credentials);
   return new Map(normalizeCmdbuildList(result)
     .map(normalizeCmdbuildWebhook)
     .filter(item => item.code)
@@ -4948,7 +4990,10 @@ async function readCmdbuildCardsPage(baseUrl, credentials, className, limit, off
     limit: String(limit),
     start: String(offset)
   });
-  const result = await cmdbuildGet(baseUrl, `/classes/${encodeURIComponent(className)}/cards?${params}`, credentials);
+  const result = await cmdbuildGet(
+    baseUrl,
+    cmdbuildRestPath(`/classes/${encodeURIComponent(className)}/cards?${params}`),
+    credentials);
   return {
     cards: normalizeCmdbuildList(result),
     total: normalizeCmdbuildResultTotal(result)
@@ -5643,10 +5688,10 @@ async function createCmdbuildClass(baseUrl, credentials, parentClass, definition
     active: true,
     parent: stringOrDefault(parentClass, 'Class')
   };
-  await cmdbuildRequest(baseUrl, '/classes?scope=service', credentials, {
+  await cmdbuildRequest(baseUrl, '/classes', credentials, {
     method: 'POST',
-    body,
-    headers: { 'CMDBuild-View': 'admin' }
+    pathScope: 'administration',
+    body
   });
 }
 
@@ -5665,8 +5710,8 @@ async function createCmdbuildStringAttribute(baseUrl, credentials, className, de
   };
   await cmdbuildRequest(baseUrl, `/classes/${encodeURIComponent(className)}/attributes`, credentials, {
     method: 'POST',
-    body,
-    headers: { 'CMDBuild-View': 'admin' }
+    pathScope: 'administration',
+    body
   });
 }
 
@@ -5805,8 +5850,15 @@ function requireZabbixSessionCredentials(session) {
 function requireCmdbuildSessionCredentials(session) {
   session.cmdbuild = {
     ...(session.cmdbuild ?? {}),
-    baseUrl: session.cmdbuild?.baseUrl || config.Cmdbuild.BaseUrl || ''
+    baseUrl: normalizeCmdbuildRestV4BaseUrl(session.cmdbuild?.baseUrl || config.Cmdbuild.BaseUrl || '')
   };
+
+  if (!isBlank(session.cmdbuild.baseUrl) && !isCmdbuildRestV4BaseUrl(session.cmdbuild.baseUrl)) {
+    throw httpError(400, 'unsupported_cmdbuild_api_version', 'CMDBuild BaseUrl must point to REST API v4.', {
+      service: 'cmdbuild',
+      baseUrl: session.cmdbuild.baseUrl
+    });
+  }
 
   if (!isBlank(session.cmdbuild.username) && !isBlank(session.cmdbuild.password)) {
     return session.cmdbuild;
@@ -5822,6 +5874,15 @@ function currentZabbixApiToken(session) {
   const serviceAccount = config.Zabbix.ServiceAccount ?? {};
   return [config.Zabbix.ApiToken, config.Zabbix.apiToken, serviceAccount.ApiToken, serviceAccount.apiToken]
     .find(value => !isBlank(value)) ?? '';
+}
+
+function cmdbuildRestPath(path, scope = 'management') {
+  const normalizedPath = String(path ?? '').replace(/^\/+/, '');
+  if (scope === 'administration' && !normalizedPath.startsWith('administration/')) {
+    return `/administration/${normalizedPath}`;
+  }
+
+  return `/${normalizedPath}`;
 }
 
 async function zabbixCall(apiEndpoint, token, method, params) {
@@ -5865,10 +5926,21 @@ async function cmdbuildGet(baseUrl, path, credentials, headers = {}) {
 }
 
 async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
+  const normalizedBaseUrl = normalizeCmdbuildRestV4BaseUrl(baseUrl);
+  if (!isCmdbuildRestV4BaseUrl(normalizedBaseUrl)) {
+    throw httpError(400, 'unsupported_cmdbuild_api_version', 'CMDBuild BaseUrl must point to REST API v4.', {
+      service: 'cmdbuild',
+      baseUrl: normalizedBaseUrl
+    });
+  }
+
+  const requestPath = options.pathScope
+    ? cmdbuildRestPath(path, options.pathScope)
+    : path;
   const authorization = !isBlank(credentials.accessToken)
     ? `Bearer ${credentials.accessToken}`
     : `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`;
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetch(`${withoutTrailingSlash(normalizedBaseUrl)}${requestPath}`, {
     method: options.method ?? 'GET',
     headers: {
       accept: 'application/json',
@@ -5881,7 +5953,7 @@ async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
   });
 
   if (!response.ok) {
-    throw httpError(502, 'cmdbuild_api_error', `CMDBuild returned HTTP ${response.status} for ${path}.`);
+    throw httpError(502, 'cmdbuild_api_error', `CMDBuild returned HTTP ${response.status} for ${requestPath}.`);
   }
 
   if (response.status === 204) {
@@ -6348,7 +6420,8 @@ function applyRuntimeSettings(target, persisted = {}) {
   if (persisted.cmdbuild) {
     target.Cmdbuild ??= {};
     target.Cmdbuild.Catalog ??= {};
-    target.Cmdbuild.BaseUrl = persisted.cmdbuild.baseUrl ?? target.Cmdbuild.BaseUrl;
+    target.Cmdbuild.BaseUrl = normalizeCmdbuildRestV4BaseUrl(persisted.cmdbuild.baseUrl ?? target.Cmdbuild.BaseUrl);
+    target.Cmdbuild.ApiVersion = 'v4';
     target.Cmdbuild.Catalog.MaxTraversalDepth = cmdbuildTraversalMaxDepth(
       persisted.cmdbuild.maxTraversalDepth ?? target.Cmdbuild.Catalog.MaxTraversalDepth);
     delete target.Cmdbuild.UseIdp;

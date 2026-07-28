@@ -21,6 +21,15 @@ require_pattern() {
   grep -Eq "$pattern" "$path" || fail "$message"
 }
 
+reject_pattern() {
+  local pattern="$1"
+  local path="$2"
+  local message="$3"
+  if grep -Eq "$pattern" "$path"; then
+    fail "$message"
+  fi
+}
+
 COMPOSE_FILE="deploy/compose.production.yml"
 ENV_EXAMPLE_FILE="deploy/production.env.example"
 require_file "$COMPOSE_FILE"
@@ -39,9 +48,15 @@ require_pattern "monitoring-ui-data:/app/data" "$COMPOSE_FILE" "monitoring-ui-ap
 require_pattern "CMDB_WEBHOOK_BEARER_TOKEN:\\?" "$COMPOSE_FILE" "Production compose must require CMDB webhook bearer token."
 require_pattern "RULES_RELOAD_TOKEN:\\?" "$COMPOSE_FILE" "Production compose must require rules reload token."
 require_pattern "ZABBIX_API_TOKEN:\\?" "$COMPOSE_FILE" "Production compose must require Zabbix API token or secret reference."
-require_pattern "^SECRETS_PROVIDER=IndeedPamAapm$" "$ENV_EXAMPLE_FILE" "Production env example must use secret references by default."
-require_pattern "^CMDB_WEBHOOK_BEARER_TOKEN=secret://" "$ENV_EXAMPLE_FILE" "Production env example must not contain a literal webhook token."
-require_pattern "^ZABBIX_API_TOKEN=secret://" "$ENV_EXAMPLE_FILE" "Production env example must not contain a literal Zabbix API token."
+require_pattern "^SECRETS_PROVIDER=None$" "$ENV_EXAMPLE_FILE" "Production env example must disable PAM/AAPM by default."
+require_pattern "^PAMURL=$" "$ENV_EXAMPLE_FILE" "Production env example must leave PAMURL empty in no-PAM mode."
+require_pattern "^PAMTOKEN=$" "$ENV_EXAMPLE_FILE" "Production env example must leave PAMTOKEN empty in no-PAM mode."
+require_pattern "^PAMUSERNAME=$" "$ENV_EXAMPLE_FILE" "Production env example must leave PAMUSERNAME empty in no-PAM mode."
+require_pattern "^PAMPASSWORD=$" "$ENV_EXAMPLE_FILE" "Production env example must leave PAMPASSWORD empty in no-PAM mode."
+require_pattern "^SASLPASSWORDSECRET=$" "$ENV_EXAMPLE_FILE" "Production env example must leave SASLPASSWORDSECRET empty in no-PAM mode."
+require_pattern "^CMDB_WEBHOOK_BEARER_TOKEN=REPLACE_" "$ENV_EXAMPLE_FILE" "Production env example must use a safe webhook-token placeholder."
+require_pattern "^ZABBIX_API_TOKEN=REPLACE_" "$ENV_EXAMPLE_FILE" "Production env example must use a safe Zabbix-token placeholder."
+reject_pattern "(secret|aapm)://" "$ENV_EXAMPLE_FILE" "Production env example must not contain PAM/AAPM secret references in no-PAM mode."
 
 for dockerfile in deploy/dockerfiles/*.Dockerfile; do
   require_pattern "/ready" "$dockerfile" "$dockerfile healthcheck must call /ready."

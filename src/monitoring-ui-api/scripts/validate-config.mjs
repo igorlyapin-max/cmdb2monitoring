@@ -61,6 +61,7 @@ required(config, 'Idp.Ldap.GroupFilter');
 required(config, 'Idp.Ldap.LoginAttribute');
 required(config, 'Idp.Ldap.GroupsAttribute');
 required(config, 'Cmdbuild.BaseUrl');
+required(config, 'Cmdbuild.ApiVersion');
 required(config, 'Cmdbuild.Catalog.MaxTraversalDepth');
 required(config, 'Zabbix.ApiEndpoint');
 required(config, 'Rules.ReadFromGit');
@@ -238,6 +239,14 @@ if (!['Plaintext', 'Ssl', 'SaslPlaintext', 'SaslSsl'].includes(config.EventBrows
 
 if (!intInRange(config.Cmdbuild?.Catalog?.MaxTraversalDepth, 2, 5)) {
   errors.push('Cmdbuild.Catalog.MaxTraversalDepth must be an integer from 2 to 5.');
+}
+
+if (String(config.Cmdbuild?.ApiVersion ?? '').toLowerCase() !== 'v4') {
+  errors.push('Cmdbuild.ApiVersion must be v4.');
+}
+
+if (!String(config.Cmdbuild?.BaseUrl ?? '').includes('/services/rest/v4')) {
+  errors.push('Cmdbuild.BaseUrl must point to REST API v4.');
 }
 
 for (const relativePath of ['package.json', 'package-lock.json', 'server.mjs', 'public/index.html', 'public/styles.css', 'public/app.js']) {

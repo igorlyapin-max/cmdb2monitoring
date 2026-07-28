@@ -911,10 +911,7 @@ static void AssertCmdbHeaders(HttpRequestMessage request)
         Convert.ToBase64String(Encoding.UTF8.GetBytes("svc:secret")),
         request.Headers.Authorization?.Parameter,
         "Authorization parameter");
-    AssertTrue(request.Headers.TryGetValues("CMDBuild-View", out var values), "CMDBuild-View header is missing");
-    var viewValues = values?.ToArray() ?? [];
-    AssertEqual(1, viewValues.Length, "CMDBuild-View value count");
-    AssertEqual("admin", viewValues[0], "CMDBuild-View");
+    AssertTrue(!request.Headers.Contains("CMDBuild-View"), "CMDBuild-View header must not be sent for CMDBuild REST API v4");
 }
 
 static void AssertJsonBody(HttpRequestMessage request, Action<JsonObject> assert)

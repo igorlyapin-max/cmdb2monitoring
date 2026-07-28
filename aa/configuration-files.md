@@ -153,7 +153,8 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 | `ConversionRules:RulesFilePath` | Путь к JSON rules; для dev/test `rules/cmdbuild-to-zabbix-host-create.json` | Если меняется файл правил |
 | `ConversionRules:PullOnStartup` | Выполнять `git pull` при старте | Только вместе с `ReadFromGit=true` |
 | `ConversionRules:PullOnReload` | Выполнять `git pull --ff-only` по сигналу reload | Только вместе с `ReadFromGit=true`; при другом storage реализуется provider |
-| `Cmdbuild:BaseUrl` | CMDBuild REST v3 base URL для lookup/reference/domain resolver | Для каждого окружения, через secret/env в prod |
+| `Cmdbuild:ApiVersion` | Обязательное значение `v4`; legacy REST v3 не поддерживается | Не менять |
+| `Cmdbuild:BaseUrl` | CMDBuild REST v4 base URL для lookup/reference/domain resolver | Для каждого окружения, через secret/env в prod |
 | `Cmdbuild:Username` / `Cmdbuild:Password` | Учетная запись resolver для чтения attributes/cards/lookups | Через secret/env в prod |
 | `Cmdbuild:Enabled` | Включает lookup/reference/domain resolver | Отключать только если rules не используют `cmdbPath` или resolver временно недоступен |
 | `Cmdbuild:RequestTimeoutMs` | Timeout REST-запросов resolver | При медленном CMDBuild API |
@@ -195,7 +196,8 @@ State-файл хранит последний успешно обработан
 ```bash
 Service__RulesReloadToken=<secret>
 Cmdbuild__Enabled=true
-Cmdbuild__BaseUrl=https://cmdbuild.example/cmdbuild/services/rest/v3
+Cmdbuild__ApiVersion=v4
+Cmdbuild__BaseUrl=https://cmdbuild.example/cmdbuild/services/rest/v4
 Cmdbuild__Username=<secret>
 Cmdbuild__Password=<secret>
 Cmdbuild__MaxPathDepth=2
@@ -258,7 +260,8 @@ State-файл `zabbixrequests2api` также используется для �
 | --- | --- | --- |
 | `Kafka:Input:Topic` | Входной topic binding events | Должен совпадать с `zabbixrequests2api` `Kafka:BindingOutput:Topic` |
 | `Kafka:Input:GroupId` | Consumer group | Менять при отдельном независимом потребителе |
-| `Cmdbuild:BaseUrl` | CMDBuild REST v3 base URL | Для каждого окружения |
+| `Cmdbuild:ApiVersion` | Обязательное значение `v4`; legacy REST v3 не поддерживается | Не менять |
+| `Cmdbuild:BaseUrl` | CMDBuild REST v4 base URL | Для каждого окружения |
 | `Cmdbuild:Username` / `Cmdbuild:Password` | Service account для записи `zabbix_main_hostid` и `ZabbixHostBinding` | Через secret/env в test/prod |
 | `Cmdbuild:MainHostIdAttributeName` | Атрибут hostid основного профиля, default `zabbix_main_hostid` | Если модель CMDBuild использует другое имя |
 | `Cmdbuild:BindingClassName` | Класс связей дополнительных профилей, default `ZabbixHostBinding` | Если audit model создан с другим именем |
@@ -271,7 +274,8 @@ State-файл `zabbixrequests2api` также используется для �
 Пример prod overrides:
 
 ```bash
-Cmdbuild__BaseUrl=https://cmdbuild.example/cmdbuild/services/rest/v3
+Cmdbuild__ApiVersion=v4
+Cmdbuild__BaseUrl=https://cmdbuild.example/cmdbuild/services/rest/v4
 Cmdbuild__Username=<secret>
 Cmdbuild__Password=<secret>
 Kafka__Input__BootstrapServers=kafka01:9093,kafka02:9093
@@ -320,7 +324,8 @@ Base config не содержит пароль; `Development` config может 
 | `Idp:OAuth2:*` | Authorization/token/userinfo URL, client id/secret, redirect URI, scopes и claim names | Для OAuth2/OIDC provider |
 | `Idp:Ldap:*` | LDAP/LDAPS host, port, Base DN, bind DN/password, user/group filters и AD attributes | Для режима MS AD и для чтения AD-групп в режиме IdP |
 | `Idp:RoleMapping` | Маппинг групп AD/IdP в роли UI | При смене групп доступа |
-| `Cmdbuild:BaseUrl` | CMDBuild REST base URL | Для каждого окружения |
+| `Cmdbuild:ApiVersion` | Обязательное значение `v4`; legacy REST v3 не поддерживается | Не менять |
+| `Cmdbuild:BaseUrl` | CMDBuild REST v4 base URL | Для каждого окружения |
 | `Cmdbuild:Catalog:*` | Cache и validation настроек CMDBuild catalog | При смене cache policy |
 | `Zabbix:ApiEndpoint` | Zabbix JSON-RPC URL | Для каждого окружения |
 | `Zabbix:ApiToken` | Optional Zabbix API key для чтения catalog через BFF | Через secret/env в prod, если не хотим спрашивать login/password на сессию |
@@ -384,6 +389,7 @@ Base config не содержит пароль; `Development` config может 
 | `LDAP_DISPLAY_NAME_ATTRIBUTE` | `Idp:Ldap:DisplayNameAttribute` |
 | `LDAP_GROUPS_ATTRIBUTE` | `Idp:Ldap:GroupsAttribute` |
 | `LDAP_TLS_REJECT_UNAUTHORIZED` | `Idp:Ldap:TlsRejectUnauthorized` |
+| `CMDBUILD_API_VERSION` | `Cmdbuild:ApiVersion` |
 | `CMDBUILD_BASE_URL` | `Cmdbuild:BaseUrl` |
 | `ZABBIX_API_ENDPOINT` | `Zabbix:ApiEndpoint` |
 | `ZABBIX_API_TOKEN` | `Zabbix:ApiToken` |
@@ -526,7 +532,8 @@ npm start
 
 ```bash
 PORT=5090
-CMDBUILD_BASE_URL=http://cmdbuild:8080/cmdbuild/services/rest/v3
+CMDBUILD_API_VERSION=v4
+CMDBUILD_BASE_URL=http://cmdbuild:8080/cmdbuild/services/rest/v4
 ZABBIX_API_ENDPOINT=http://zabbix/api_jsonrpc.php
 RULES_FILE_PATH=rules/cmdbuild-to-zabbix-host-create.json
 MONITORING_UI_USE_IDP=true

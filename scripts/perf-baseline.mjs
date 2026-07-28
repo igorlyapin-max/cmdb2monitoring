@@ -8,7 +8,7 @@ import { performance } from 'node:perf_hooks';
 const args = parseArgs(process.argv.slice(2));
 const config = {
   samples: readInt(args.samples ?? process.env.PERF_SAMPLES, 10),
-  cmdbBaseUrl: trimTrailingSlash(args.cmdbUrl ?? process.env.CMDBUILD_BASE_URL ?? 'http://localhost:8090/cmdbuild/services/rest/v3'),
+  cmdbBaseUrl: trimTrailingSlash(args.cmdbUrl ?? process.env.CMDBUILD_BASE_URL ?? 'http://localhost:8090/cmdbuild/services/rest/v4'),
   cmdbUser: args.cmdbUser ?? process.env.CMDBUILD_USERNAME ?? 'admin',
   cmdbPassword: args.cmdbPassword ?? process.env.CMDBUILD_PASSWORD ?? 'admin',
   cmdbClass: args.cmdbClass ?? process.env.PERF_CMDB_CLASS ?? 'NTbook',

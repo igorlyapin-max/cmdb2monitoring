@@ -4,7 +4,7 @@ export function parseCommonArgs(argv) {
   const args = {
     apply: false,
     updateExisting: true,
-    baseUrl: process.env.CMDBUILD_BASE_URL || 'http://localhost:8090/cmdbuild/services/rest/v3',
+    baseUrl: process.env.CMDBUILD_BASE_URL || 'http://localhost:8090/cmdbuild/services/rest/v4',
     username: process.env.CMDBUILD_USERNAME || 'admin',
     password: process.env.CMDBUILD_PASSWORD || 'admin',
     prefix: process.env.C2M_DEMO_PREFIX || 'C2MTest'
@@ -100,6 +100,13 @@ export function statusLine(args) {
     : `DRY-RUN for ${args.baseUrl} as ${args.username}. Add --apply to write.`;
 }
 
+export function adminPath(path) {
+  const normalized = String(path ?? '').replace(/^\/+/, '');
+  return normalized.startsWith('administration/')
+    ? `/${normalized}`
+    : `/administration/${normalized}`;
+}
+
 export function className(prefix, suffix) {
   return `${prefix}${suffix}`;
 }
@@ -113,7 +120,7 @@ export function domainName(prefix, suffix) {
 }
 
 export async function ensureClass(client, args, definition) {
-  const classes = await client.get('/classes');
+  const classes = await client.get(adminPath('/classes'));
   const existing = asArray(classes).find(item => equals(item.name, definition.name) || equals(item._id, definition.name));
   if (existing) {
     console.log(`class exists: ${definition.name}`);
@@ -125,7 +132,7 @@ export async function ensureClass(client, args, definition) {
     return definition;
   }
 
-  return client.post('/classes', {
+  return client.post(adminPath('/classes'), {
     type: 'standard',
     speciality: 'default',
     active: true,
@@ -138,7 +145,7 @@ export async function ensureClass(client, args, definition) {
 export async function ensureAttribute(client, args, classNameValue, definition) {
   let attributes = [];
   try {
-    attributes = await client.get(`/classes/${encodePath(classNameValue)}/attributes`);
+    attributes = await client.get(adminPath(`/classes/${encodePath(classNameValue)}/attributes`));
   } catch (error) {
     if (args.apply) {
       throw error;
@@ -155,7 +162,7 @@ export async function ensureAttribute(client, args, classNameValue, definition) 
     return definition;
   }
 
-  return client.post(`/classes/${encodePath(classNameValue)}/attributes`, {
+  return client.post(adminPath(`/classes/${encodePath(classNameValue)}/attributes`), {
     active: true,
     mode: 'write',
     showInGrid: true,
@@ -167,7 +174,7 @@ export async function ensureAttribute(client, args, classNameValue, definition) 
 }
 
 export async function ensureLookupType(client, args, definition) {
-  const lookupTypes = await client.get('/lookup_types');
+  const lookupTypes = await client.get(adminPath('/lookup_types'));
   const existing = asArray(lookupTypes).find(item => equals(item.name, definition.name) || equals(item._id, definition.name));
   if (existing) {
     console.log(`lookup type exists: ${definition.name}`);
@@ -179,7 +186,7 @@ export async function ensureLookupType(client, args, definition) {
     return definition;
   }
 
-  return client.post('/lookup_types', {
+  return client.post(adminPath('/lookup_types'), {
     parent: null,
     speciality: 'default',
     accessType: 'default',
@@ -190,7 +197,7 @@ export async function ensureLookupType(client, args, definition) {
 export async function ensureLookupValue(client, args, lookupType, definition) {
   let values = [];
   try {
-    values = await client.get(`/lookup_types/${encodePath(lookupType)}/values`);
+    values = await client.get(adminPath(`/lookup_types/${encodePath(lookupType)}/values`));
   } catch (error) {
     if (args.apply) {
       throw error;
@@ -207,14 +214,14 @@ export async function ensureLookupValue(client, args, lookupType, definition) {
     return definition;
   }
 
-  return client.post(`/lookup_types/${encodePath(lookupType)}/values`, {
+  return client.post(adminPath(`/lookup_types/${encodePath(lookupType)}/values`), {
     active: true,
     ...definition
   });
 }
 
 export async function lookupValueId(client, lookupType, code) {
-  const values = await client.get(`/lookup_types/${encodePath(lookupType)}/values`);
+  const values = await client.get(adminPath(`/lookup_types/${encodePath(lookupType)}/values`));
   const value = asArray(values).find(item => equals(item.code, code) || equals(item.description, code));
   if (!value?._id) {
     throw new Error(`Lookup value not found: ${lookupType}.${code}`);
@@ -223,7 +230,7 @@ export async function lookupValueId(client, lookupType, code) {
 }
 
 export async function ensureDomain(client, args, definition) {
-  const domains = await client.get('/domains');
+  const domains = await client.get(adminPath('/domains'));
   const existing = asArray(domains).find(item => equals(item.name, definition.name) || equals(item._id, definition.name));
   if (existing) {
     console.log(`domain exists: ${definition.name}`);
@@ -235,7 +242,7 @@ export async function ensureDomain(client, args, definition) {
     return definition;
   }
 
-  return client.post('/domains', {
+  return client.post(adminPath('/domains'), {
     active: true,
     sourceProcess: false,
     destinationProcess: false,

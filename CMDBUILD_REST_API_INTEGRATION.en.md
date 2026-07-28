@@ -2,10 +2,10 @@
 
 This document records the current `cmdb2monitoring` contract with CMDBuild. It is not a full CMDBuild REST API reference; it describes the endpoints used by this product and the operational details that matter for this integration.
 
-Verified version: CMDBuild `4.1.0`, REST API v3, base URL:
+Target contract: CMDBuild `4.2.x`, REST API v4, base URL:
 
 ```text
-http://<host>:<port>/cmdbuild/services/rest/v3
+http://<host>:<port>/cmdbuild/services/rest/v4
 ```
 
 ## Where CMDBuild REST API Is Used
@@ -33,10 +33,11 @@ HTTP headers:
 Accept: application/json
 Authorization: Basic <base64(username:password)>
 Content-Type: application/json   # only when a body is present
-CMDBuild-View: admin             # for ETL/webhook and selected admin/write operations
 ```
 
 `monitoring-ui-api` can technically send `Authorization: Bearer <accessToken>` when the credential object already contains `accessToken`, but the normal user flow currently uses Basic credentials.
+
+`CMDBuild-View: admin` is not used for REST API v4. Administrative operations use explicit `/administration/...` paths.
 
 ## Endpoints
 
@@ -65,13 +66,13 @@ Used by the `Webhook Setup` menu.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/etl/webhook/?detailed=true` | Load current CMDBuild webhooks |
-| `POST` | `/etl/webhook/` | Create managed webhook |
-| `PUT` | `/etl/webhook/{id}/` | Update managed webhook |
-| `DELETE` | `/etl/webhook/{id}/` | Delete managed webhook |
+| `GET` | `/administration/etl/webhook/?detailed=true` | Load current CMDBuild webhooks |
+| `POST` | `/administration/etl/webhook/` | Create managed webhook |
+| `PUT` | `/administration/etl/webhook/{id}/` | Update managed webhook |
+| `DELETE` | `/administration/etl/webhook/{id}/` | Delete managed webhook |
 
 Notes:
-- These calls use `CMDBuild-View: admin`.
+- These calls require ETL administration permissions in CMDBuild.
 - The UI applies changes only to webhooks with the `cmdbwebhooks2kafka-` prefix.
 - UI undo/redo does not roll back changes already applied to CMDBuild.
 - `Save file as` can export a webhook artifact next to the rules file, but token/password/secret/API key/Authorization values must be masked as `XXXXX`.
@@ -147,8 +148,8 @@ Used by the UI `Audit` menu.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/classes` | Create service class `ZabbixHostBinding` |
-| `POST` | `/classes/{class}/attributes` | Create `zabbix_main_hostid` or binding-class attributes |
+| `POST` | `/administration/classes` | Create service class `ZabbixHostBinding` |
+| `POST` | `/administration/classes/{class}/attributes` | Create `zabbix_main_hostid` or binding-class attributes |
 
 CMDBuild model administrator rights are required. They are not required to analyze the plan.
 
@@ -158,11 +159,11 @@ Test scripts use additional write endpoints:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/classes` | Create test classes |
-| `POST` | `/classes/{class}/attributes` | Create attributes |
-| `POST` | `/lookup_types` | Create lookup type |
-| `POST` | `/lookup_types/{lookupType}/values` | Create lookup value |
-| `POST` | `/domains` | Create domain |
+| `POST` | `/administration/classes` | Create test classes |
+| `POST` | `/administration/classes/{class}/attributes` | Create attributes |
+| `POST` | `/administration/lookup_types` | Create lookup type |
+| `POST` | `/administration/lookup_types/{lookupType}/values` | Create lookup value |
+| `POST` | `/administration/domains` | Create domain |
 | `POST` | `/classes/{class}/cards` | Create card |
 | `PUT` | `/classes/{class}/cards/{cardId}` | Update card |
 | `POST` | `/domains/{domain}/relations` | Create relation, primary option |
@@ -219,4 +220,3 @@ Minimum permissions depend on the scenario:
 8. Create or update a test CMDBuild card.
 9. Check Events: CMDBuild event -> Zabbix request -> Zabbix response -> binding event.
 10. Run Quick audit for the selected class.
-

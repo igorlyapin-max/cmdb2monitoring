@@ -86,7 +86,8 @@ docker push localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0
 ```bash
 Kafka__Input__BootstrapServers=kafka:29092
 Kafka__Output__BootstrapServers=kafka:29092
-Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v3
+Cmdbuild__ApiVersion=v4
+Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v4
 Zabbix__ApiEndpoint=http://zabbix-web:8080/api_jsonrpc.php
 ```
 
@@ -148,6 +149,19 @@ Compose публикует наружу только webhook/UI bind-порты 
   }
 }
 ```
+
+### Развертывание без PAM/AAPM
+
+deploy/production.env.example использует no-PAM профиль по умолчанию:
+
+    SECRETS_PROVIDER=None
+    PAMURL=
+    PAMTOKEN=
+    PAMUSERNAME=
+    PAMPASSWORD=
+    SASLPASSWORDSECRET=
+
+Скопируйте шаблон в deployment .env, замените все значения REPLACE_* реальными значениями через разрешенный deployment-layer secret source и не добавляйте secret://... или aapm://... ссылки. Непустой PAMURL вместе с PAMTOKEN либо PAMUSERNAME/PAMPASSWORD включает совместимый режим IndeedPamAapm, даже если SECRETS_PROVIDER=None; в no-PAM профиле эти переменные должны оставаться пустыми.
 
 Чтобы использовать Indeed PAM/AAPM:
 
@@ -404,7 +418,8 @@ docker run --rm \
   -e Kafka__Output__BootstrapServers=kafka:29092 \
   -e ConversionRules__RepositoryPath=/app \
   -e ConversionRules__RulesFilePath=rules/cmdbuild-to-zabbix-host-create.json \
-  -e Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v3 \
+  -e Cmdbuild__ApiVersion=v4 \
+  -e Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v4 \
   -e Cmdbuild__Username='<secret>' \
   -e Cmdbuild__Password='<secret>' \
   localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0

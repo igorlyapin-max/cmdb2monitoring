@@ -19,7 +19,7 @@ The rule developer is responsible for rules-file content: source fields, `cmdbPa
 ## Initial Preparation
 
 1. Check environment compatibility.
-   - CMDBuild: `4.x` with REST API v3 and flat webhook JSON.
+   - CMDBuild: `4.2.x` with REST API v4 and flat webhook JSON.
    - Zabbix: `7.0.x LTS` or a compatible 7.x JSON-RPC version.
    - Kafka: `3.x`, topics are created by external infrastructure.
    - Audit storage: PostgreSQL for medium and large installations; SQLite is allowed for development and small installations.
@@ -83,6 +83,7 @@ Important separation:
 - UI/BFF settings in `Runtime settings` do not automatically change microservice configuration;
 - `cmdbkafka2zabbix`, `zabbixrequests2api`, and `zabbixbindings2cmdbuild` settings live in their `appsettings*.json` or env/secret values;
 - external UI authentication through MS AD/IdP is not used as CMDBuild/Zabbix API credentials.
+- when PAM/AAPM is not used, set Secrets:Provider=None, leave PAMURL/PAMTOKEN/PAMUSERNAME/PAMPASSWORD and SASLPASSWORDSECRET empty, do not use secret:// or aapm://, and supply actual values through the protected deployment layer;
 - service accounts can use `Secrets:Provider=IndeedPamAapm` and `secret://id` references; the actual secret is read from Indeed PAM/AAPM and must not be stored in git or Docker images.
 - the AAPM application token or application login/password is the application's bootstrap secret and must be provided through a Docker/Kubernetes secret, protected mount, another deployment-layer mechanism, or `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD` env aliases.
 - Kafka SASL can use the corporate `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET` format; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` becomes `secret://AAA.LOCAL\PROD.contractorProfiles` and is read from PAM/AAPM.

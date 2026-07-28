@@ -275,7 +275,6 @@ public sealed class CmdbuildBindingClient(
             "Basic",
             Convert.ToBase64String(Encoding.UTF8.GetBytes($"{options.Value.Username}:{options.Value.Password}")));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Add("CMDBuild-View", "admin");
 
         if (body is not null)
         {

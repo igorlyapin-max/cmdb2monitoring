@@ -321,6 +321,7 @@ static void ValidateConversionRules(
 
 static void ValidateCmdbuildResolver(JsonObject config, string context, List<string> errors)
 {
+    RequireCmdbuildApiV4(config, context, errors, requireBaseUrl: false);
     RequirePositiveInt(config, "Cmdbuild:RequestTimeoutMs", context, errors);
     RequireIntRange(config, "Cmdbuild:MaxPathDepth", 2, 5, context, errors);
     RequireNonEmpty(config, "Cmdbuild:MainHostIdAttributeName", context, errors);
@@ -490,12 +491,34 @@ static void ValidateTopicChain(
 
 static void ValidateCmdbuildBinding(JsonObject config, string context, List<string> errors)
 {
-    RequireNonEmpty(config, "Cmdbuild:BaseUrl", context, errors);
+    RequireCmdbuildApiV4(config, context, errors, requireBaseUrl: true);
     RequirePositiveInt(config, "Cmdbuild:RequestTimeoutMs", context, errors);
     RequireNonEmpty(config, "Cmdbuild:MainHostIdAttributeName", context, errors);
     RequireNonEmpty(config, "Cmdbuild:BindingClassName", context, errors);
     RequirePositiveInt(config, "Cmdbuild:BindingLookupLimit", context, errors);
     ValidateHttpResilience(config, "Cmdbuild:Resilience", context, errors);
+}
+
+static void RequireCmdbuildApiV4(JsonObject config, string context, List<string> errors, bool requireBaseUrl)
+{
+    RequireNonEmpty(config, "Cmdbuild:ApiVersion", context, errors);
+    var apiVersion = GetString(config, "Cmdbuild:ApiVersion");
+    if (!string.Equals(apiVersion, "v4", StringComparison.OrdinalIgnoreCase))
+    {
+        errors.Add($"{context} Cmdbuild:ApiVersion must be v4.");
+    }
+
+    if (requireBaseUrl)
+    {
+        RequireNonEmpty(config, "Cmdbuild:BaseUrl", context, errors);
+    }
+
+    var baseUrl = GetString(config, "Cmdbuild:BaseUrl");
+    if (!string.IsNullOrWhiteSpace(baseUrl)
+        && !baseUrl.Contains("/services/rest/v4", StringComparison.OrdinalIgnoreCase))
+    {
+        errors.Add($"{context} Cmdbuild:BaseUrl must point to REST API v4.");
+    }
 }
 
 static void ValidateHttpResilience(JsonObject config, string sectionPath, string context, List<string> errors)

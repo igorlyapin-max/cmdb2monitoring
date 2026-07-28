@@ -86,7 +86,8 @@ Images include base config from the repository. For real runtime, do not edit fi
 ```bash
 Kafka__Input__BootstrapServers=kafka:29092
 Kafka__Output__BootstrapServers=kafka:29092
-Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v3
+Cmdbuild__ApiVersion=v4
+Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v4
 Zabbix__ApiEndpoint=http://zabbix-web:8080/api_jsonrpc.php
 ```
 
@@ -148,6 +149,19 @@ The provider is disabled by default:
   }
 }
 ```
+
+### Deployment Without PAM/AAPM
+
+deploy/production.env.example uses a no-PAM profile by default:
+
+    SECRETS_PROVIDER=None
+    PAMURL=
+    PAMTOKEN=
+    PAMUSERNAME=
+    PAMPASSWORD=
+    SASLPASSWORDSECRET=
+
+Copy the template to the deployment .env, replace every REPLACE_* value through an approved deployment-layer secret source, and do not add secret://... or aapm://... references. A non-empty PAMURL with PAMTOKEN or PAMUSERNAME/PAMPASSWORD enables compatibility mode IndeedPamAapm even when SECRETS_PROVIDER=None; these variables must stay empty in the no-PAM profile.
 
 To use Indeed PAM/AAPM:
 
@@ -404,7 +418,8 @@ docker run --rm \
   -e Kafka__Output__BootstrapServers=kafka:29092 \
   -e ConversionRules__RepositoryPath=/app \
   -e ConversionRules__RulesFilePath=rules/cmdbuild-to-zabbix-host-create.json \
-  -e Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v3 \
+  -e Cmdbuild__ApiVersion=v4 \
+  -e Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v4 \
   -e Cmdbuild__Username='<secret>' \
   -e Cmdbuild__Password='<secret>' \
   localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0

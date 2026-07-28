@@ -8,6 +8,8 @@ public sealed class CmdbuildOptions
 
     public string BaseUrl { get; init; } = string.Empty;
 
+    public string ApiVersion { get; init; } = "v4";
+
     public HttpClientTlsOptions Tls { get; init; } = new();
 
     public HttpClientResilienceOptions Resilience { get; init; } = new();

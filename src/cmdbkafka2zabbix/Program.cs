@@ -96,6 +96,8 @@ builder.Services.AddOptions<KafkaDeadLetterOptions>()
 
 builder.Services.AddOptions<CmdbuildOptions>()
     .Bind(builder.Configuration.GetSection(CmdbuildOptions.SectionName))
+    .Validate(options => string.Equals(options.ApiVersion, "v4", StringComparison.OrdinalIgnoreCase), "CMDBuild ApiVersion must be v4.")
+    .Validate(options => string.IsNullOrWhiteSpace(options.BaseUrl) || options.BaseUrl.Contains("/services/rest/v4", StringComparison.OrdinalIgnoreCase), "CMDBuild BaseUrl must point to REST API v4.")
     .Validate(options => options.RequestTimeoutMs > 0, "CMDBuild request timeout must be greater than zero.")
     .Validate(options => options.MaxPathDepth is >= 2 and <= 5, "CMDBuild max path depth must be from 2 to 5.")
     .Validate(options => !options.HostBindingLookupEnabled || !string.IsNullOrWhiteSpace(options.MainHostIdAttributeName), "CMDBuild main host id attribute name is required when host binding lookup is enabled.")

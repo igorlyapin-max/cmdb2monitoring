@@ -115,7 +115,7 @@ docker compose --env-file deploy/production.env.example -f deploy/compose.produc
 
 | Компонент | Версия | Примечание |
 | --- | --- | --- |
-| CMDBuild | `4.1.0` | Образ `itmicus/cmdbuild:4.1.0`, WAR manifest `CMDBuild-Version: 4.1.0`; используется REST API v3 и webhook JSON |
+| CMDBuild | `4.2.x` | Целевой стенд заказчика и продуктовый контракт; используется REST API v4 и webhook JSON |
 | Zabbix | `7.0.25` | `apiinfo.version=7.0.25`; контейнеры `zabbix-*-pgsql:alpine-7.0-latest` фактически собраны как `7.0.25` |
 | Kafka | `3.9.2` | Образ `apache/kafka:3.9.2`, dev KRaft/PLAINTEXT |
 | CMDBuild DB | PostgreSQL `17.9`, PostGIS `3.5.x` | Наши сервисы напрямую к этой БД не подключаются |
@@ -125,11 +125,11 @@ docker compose --env-file deploy/production.env.example -f deploy/compose.produc
 | Node.js | `>=22` | Требуется для `monitoring-ui-api` |
 
 Поддерживаемым считается не имя Docker tag, а сохранение контрактов:
-- CMDBuild webhook body остается плоским JSON, а catalog/reference/lookup/domain чтение доступно через REST v3;
+- CMDBuild webhook body остается плоским JSON, а catalog/reference/lookup/domain чтение доступно через REST v4;
 - Zabbix предоставляет JSON-RPC `/api_jsonrpc.php` с методами и payload structures, которые используют rules/T4;
 - Kafka topics созданы внешней инфраструктурой, а broker доступен по настроенному protocol/security.
 
-Ожидаемо совместимые версии: CMDBuild `4.x` с REST v3, Zabbix `7.0.x LTS` и более новые 7.x версии, сохраняющие `template.get` subselects `selectTemplateGroups`, `selectItems`, `selectDiscoveryRules`, Kafka `3.x`. Все остальные major/minor переходы требуют отдельного smoke: health, catalog sync, rules dry-run и create/update/delete цепочка.
+Ожидаемо совместимые версии: CMDBuild `4.2.x` с REST v4, Zabbix `7.0.x LTS` и более новые 7.x версии, сохраняющие `template.get` subselects `selectTemplateGroups`, `selectItems`, `selectDiscoveryRules`, Kafka `3.x`. Все остальные major/minor переходы требуют отдельного smoke: health, catalog sync, rules dry-run и create/update/delete цепочка.
 
 ## Kafka topics
 
@@ -152,6 +152,7 @@ Topics создаются внешней инфраструктурой. Код 
 Base config не должен содержать production secrets.
 Dev config может содержать локальные значения для стенда.
 Production secrets задаются через env, secret storage или local config, исключенный из git.
+Indeed PAM/AAPM не является обязательным: для deployment без PAM используйте Secrets:Provider=None, пустые PAM*/SASLPASSWORDSECRET, реальные значения из защищенного deployment-layer source и не используйте secret:// или aapm:// ссылки.
 Дополнительно поддержан provider корпоративного хранилища `IndeedPamAapm`: чувствительное строковое поле может содержать `secret://id` или `aapm://id`, а фактическое значение запрашивается из `Secrets:References`/`Secrets:IndeedPamAapm` при старте сервиса и подставляется только в память процесса. Bootstrap-секрет `Secrets:IndeedPamAapm:ApplicationToken`, `ApplicationTokenFile` или `ApplicationUsername`/`ApplicationPassword` передается deployment-слоем через Docker/Kubernetes secret, защищенный mount или env aliases `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD`. Для Kafka SASL поддержан совместимый формат `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET`; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` разбирается как `AccountPath=AAA.LOCAL\PROD`, `AccountName=contractorProfiles`.
 
 .NET-сервисы используют env override с `__`, например:
@@ -334,7 +335,8 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | Секция | Что задавать |
 | --- | --- |
 | `Kafka:Input` | Topic `zabbix.host.bindings.*`, group id, consumer auth/security |
-| `Cmdbuild:BaseUrl` | CMDBuild REST v3 base URL |
+| `Cmdbuild:ApiVersion` | Обязательное значение `v4`; legacy REST v3 не поддерживается |
+| `Cmdbuild:BaseUrl` | CMDBuild REST v4 base URL |
 | `Cmdbuild:Username` / `Cmdbuild:Password` | Service account для записи audit binding-ов, через secret/env в test/prod |
 | `Cmdbuild:MainHostIdAttributeName` | Атрибут основного hostid, default `zabbix_main_hostid` |
 | `Cmdbuild:BindingClassName` | Служебный класс дополнительных профилей, default `ZabbixHostBinding` |
@@ -442,10 +444,10 @@ CMDBuild/Zabbix credentials:
 
 Минимальные права по операциям:
 - CMDBuild user для UI/catalog sync должен иметь доступ к REST API и read-only права на metadata classes/attributes/domains, lookup types/values и карточки целевых классов, включая классы, до которых ведут reference-атрибуты и domain-связи; для domain path также нужен read-only доступ к relations текущей карточки. Create/update/delete на карточках CMDBuild для catalog sync не нужны.
-- CMDBuild user для `Настройка webhooks` должен иметь read-доступ к ETL/webhook records через REST v3 `/etl/webhook/?detailed=true` для `Загрузить из CMDB` и анализа текущего состояния.
-- CMDBuild user, который нажимает `Загрузить в CMDB`, дополнительно должен иметь create/update/delete или эквивалентные modify-права на ETL/webhook records REST v3 `/etl/webhook/`. Эти права нужны только оператору, который реально применяет webhook-план в CMDBuild; они не нужны viewer и не нужны для обычного catalog sync.
+- CMDBuild user для `Настройка webhooks` должен иметь read-доступ к ETL/webhook records через REST v4 `/administration/etl/webhook/?detailed=true` для `Загрузить из CMDB` и анализа текущего состояния.
+- CMDBuild user, который нажимает `Загрузить в CMDB`, дополнительно должен иметь create/update/delete или эквивалентные modify-права на ETL/webhook records REST v4 `/administration/etl/webhook/`. Эти права нужны только оператору, который реально применяет webhook-план в CMDBuild; они не нужны viewer и не нужны для обычного catalog sync.
 - CMDBuild user для быстрого аудита должен иметь read-only доступ к metadata classes/attributes, карточкам выбранных классов и классу `ZabbixHostBinding`; Zabbix user/API token должен иметь read-only `host.get` с groups, parent templates и interfaces, а также `maintenance.get` для проверки membership по ожидаемым maintenance.
-- CMDBuild user, который нажимает `Применить подготовку CMDBuild` в разделе `Аудит`, должен иметь права администратора модели CMDBuild на создание класса и атрибутов: `POST /classes?scope=service` и `POST /classes/{class}/attributes`. Эти права не нужны для обычной проверки плана аудита.
+- CMDBuild user, который нажимает `Применить подготовку CMDBuild` в разделе `Аудит`, должен иметь права администратора модели CMDBuild на создание класса и атрибутов: `POST /administration/classes` и `POST /administration/classes/{class}/attributes`. Эти права не нужны для обычной проверки плана аудита.
 - CMDBuild service account для `cmdbkafka2zabbix` должен иметь read-only права на исходные карточки и `ZabbixHostBinding`, если включено `Cmdbuild:HostBindingLookupEnabled`; эти права дополняют уже нужные права resolver-а на attributes/cards/relations/lookups при `cmdbPath`.
 - CMDBuild service account для `zabbixbindings2cmdbuild` должен иметь read/update права на карточки классов, участвующих в conversion rules, чтобы записывать/очищать `zabbix_main_hostid`; а также read/create/update права на служебный класс `ZabbixHostBinding`. Если используются дополнительные профили, сервису нужен read list cards на этот класс для поиска существующей связи.
 - Backend ограничивает запись managed-префиксом `cmdbwebhooks2kafka-*` и ownership-маркером `managedIdentifier=cmdb2monitoring-zabbix-host-lifecycle`; для `Изменить`/`Удалить` перед применением заново читает `/etl/webhook/?detailed=true` и выбирает только свой CMDBuild record по managed `code`. Желаемые lifecycle-webhooks всегда используют namespaced code `cmdbwebhooks2kafka-zabbix-host-<class>-<event>`; старые owned short-code records `cmdbwebhooks2kafka-<class>-<event>` считаются obsolete и удаляются только отдельной выбранной delete-операцией. Webhook другого микросервиса с тем же prefix/code не перезаписывается и не удаляется. `current.id` из browser payload не используется как источник истины. Обычный `Загрузить в CMDB` не ротирует `headers.Authorization` у существующих webhook: backend сохраняет текущий заголовок при update. Ротация выполняется отдельной операцией `Синхронизировать Authorization`, которая обновляет только owned managed webhook и берет целевой header из `Cmdbuild:Webhooks:AuthorizationHeader` или `CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER`. Это защитное ограничение приложения, а не замена правам CMDBuild. CMDBuild service account все равно должен быть ограничен на уровне CMDBuild настолько узко, насколько позволяет модель прав.
@@ -529,7 +531,7 @@ Events:
 - `Undo`/`Redo` работают с выбором операций в текущей browser-сессии;
 - `Undo`/`Redo` не откатывают уже выполненную команду `Загрузить в CMDB`, потому что она меняет управляемую систему;
 - `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git; token/password/secret/API key/Authorization значения в export заменяются на `XXXXX`;
-- `Загрузить в CMDB` применяет только выбранные операции и действительно меняет CMDBuild records через REST v3 `/etl/webhook/`, но сохраняет текущий `headers.Authorization` у существующих webhook; для смены токена есть отдельная команда `Синхронизировать Authorization`, которая меняет только этот заголовок у owned managed records и берет целевой header из `Cmdbuild:Webhooks:AuthorizationHeader` или `CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER`; backend ограничивает операции managed-префиксом `cmdbwebhooks2kafka-` и `managedIdentifier=cmdb2monitoring-zabbix-host-lifecycle`, а для `update`/`delete` перечитывает текущие CMDBuild webhooks и применяет действие только к своей найденной записи с тем же `code`.
+- `Загрузить в CMDB` применяет только выбранные операции и действительно меняет CMDBuild records через REST v4 `/administration/etl/webhook/`, но сохраняет текущий `headers.Authorization` у существующих webhook; для смены токена есть отдельная команда `Синхронизировать Authorization`, которая меняет только этот заголовок у owned managed records и берет целевой header из `Cmdbuild:Webhooks:AuthorizationHeader` или `CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER`; backend ограничивает операции managed-префиксом `cmdbwebhooks2kafka-` и `managedIdentifier=cmdb2monitoring-zabbix-host-lifecycle`, а для `update`/`delete` перечитывает текущие CMDBuild webhooks и применяет действие только к своей найденной записи с тем же `code`.
 
 Поддержанные env vars:
 
@@ -565,7 +567,8 @@ LDAP_BIND_DN=CN=cmdb2monitoring,OU=Service Accounts,DC=example,DC=local
 LDAP_BIND_PASSWORD=<secret>
 LDAP_USER_FILTER="(|(sAMAccountName={login})(userPrincipalName={login}))"
 LDAP_GROUP_FILTER="(member={dn})"
-CMDBUILD_BASE_URL=https://cmdbuild.example/cmdbuild/services/rest/v3
+CMDBUILD_BASE_URL=https://cmdbuild.example/cmdbuild/services/rest/v4
+CMDBUILD_API_VERSION=v4
 CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER="Bearer <cmdbwebhooks2kafka-token>"
 ZABBIX_API_ENDPOINT=https://zabbix.example/api_jsonrpc.php
 ZABBIX_API_TOKEN=<secret>

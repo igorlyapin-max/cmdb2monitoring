@@ -19,7 +19,7 @@
 ## Начальная подготовка
 
 1. Проверьте совместимость окружения.
-   - CMDBuild: `4.x` с REST API v3 и плоским webhook JSON.
+   - CMDBuild: `4.2.x` с REST API v4 и плоским webhook JSON.
    - Zabbix: `7.0.x LTS` или совместимая 7.x версия JSON-RPC.
    - Kafka: `3.x`, topics создаются внешней инфраструктурой.
    - Audit storage: PostgreSQL для средних и крупных инсталляций; SQLite допустим для разработки и небольших инсталляций.
@@ -83,6 +83,7 @@ AuditStorage:
 - настройки UI/BFF в `Runtime-настройках` не меняют автоматически конфигурацию микросервисов;
 - настройки `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild` живут в их `appsettings*.json` или env/secret;
 - внешняя авторизация UI через MS AD/IdP не используется как credential для CMDBuild/Zabbix API.
+- если PAM/AAPM не используется, укажите Secrets:Provider=None, оставьте PAMURL/PAMTOKEN/PAMUSERNAME/PAMPASSWORD и SASLPASSWORDSECRET пустыми, не применяйте secret:// или aapm:// и передайте фактические значения защищенным deployment-слоем;
 - для сервисных учеток можно использовать `Secrets:Provider=IndeedPamAapm` и ссылки `secret://id`; фактический секрет будет считан из Indeed PAM/AAPM и не должен храниться в git или Docker image.
 - AAPM application token или application login/password является bootstrap-секретом самого приложения и должен передаваться через Docker/Kubernetes secret, защищенный mount, иной механизм deployment-слоя или env aliases `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD`.
 - Kafka SASL можно задавать корпоративным форматом `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET`; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` будет преобразован в `secret://AAA.LOCAL\PROD.contractorProfiles` и прочитан из PAM/AAPM.

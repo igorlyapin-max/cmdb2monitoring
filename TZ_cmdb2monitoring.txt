@@ -79,7 +79,7 @@ Frontend/BFF: monitoring-ui-api.
 2.1. Совместимость и подтвержденные версии
 
 Текущий проект использует интеграционные контракты продуктов, а не прямой доступ к их внутренним БД:
-- CMDBuild: webhook JSON и REST API v3;
+- CMDBuild: webhook JSON и REST API v4;
 - Zabbix: JSON-RPC API `/api_jsonrpc.php`;
 - Kafka: стандартный Kafka protocol и заранее созданные topics.
 
@@ -87,8 +87,8 @@ Frontend/BFF: monitoring-ui-api.
 
 | Компонент | Подтвержденная версия | Как проверено | Статус совместимости |
 | --- | --- | --- | --- |
-| CMDBuild | `4.1.0` | Docker image `itmicus/cmdbuild:4.1.0`, `CMDBuild-Version: 4.1.0` в WAR manifest | Поддержано и используется для smoke/e2e |
-| CMDBuild API | REST v3 | endpoints `/services/rest/v3/...` | Обязательный контракт для catalog sync и `cmdbPath` resolver |
+| CMDBuild | `4.2.x` | Целевой стенд заказчика и продуктовый контракт | Поддержано после перехода на REST API v4 |
+| CMDBuild API | REST v4 | endpoints `/services/rest/v4/...`, включая `/administration/...` для admin/schema/ETL операций | Обязательный контракт для catalog sync и `cmdbPath` resolver |
 | Zabbix | `7.0.25` | `apiinfo.version` вернул `7.0.25`, container labels `org.opencontainers.image.version=7.0.25` | Поддержано и используется для smoke/e2e |
 | Zabbix API | JSON-RPC 7.0 LTS | `/api_jsonrpc.php` | Обязательный контракт для `host.create/get/update/delete` и catalog validation |
 | Apache Kafka | `3.9.2` | image `apache/kafka:3.9.2`, `/opt/kafka/bin/kafka-topics.sh --version` | Поддержано в PLAINTEXT/KRaft dev-режиме |
@@ -99,7 +99,7 @@ Frontend/BFF: monitoring-ui-api.
 | Node.js | `>=22` | `src/monitoring-ui-api/package.json engines.node` | Требуется для `monitoring-ui-api` |
 
 Ожидаемая совместимость без изменения кода:
-- CMDBuild `4.x`, если сохранены webhook-события, плоский JSON body, REST API v3 endpoints `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/classes/{class}/cards/{id}/relations`, `/domains`, `/lookup_types/{type}/values` и поведение lookup/reference/domain id;
+- CMDBuild `4.2.x`, если сохранены webhook-события, плоский JSON body, REST API v4 endpoints `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/classes/{class}/cards/{id}/relations`, `/domains`, `/lookup_types/{type}/values`, `/administration/etl/webhook/`, `/administration/classes`, `/administration/classes/{class}/attributes` и поведение lookup/reference/domain id;
 - Zabbix `7.0.x LTS` и новее в рамках 7.x, если сохранены JSON-RPC методы и поля, используемые rules/T4: `host.create`, `host.get`, `host.update`, `host.delete`, `templates_clear`, `selectParentTemplates`, `selectTemplateGroups`, `selectDiscoveryRules`, `interfaces[]`, `groups[]`, `templates[]`, `tags[]`, inventory и catalog lookup methods;
 - Kafka `3.x`, если доступен Kafka protocol, заранее созданы topics, а настройки security/auth соответствуют `Confluent.Kafka` и `kafkajs`.
 
@@ -450,7 +450,7 @@ admin/admin
 
 REST base URL:
 
-http://localhost:8090/cmdbuild/services/rest/v3
+http://localhost:8090/cmdbuild/services/rest/v4
 
 Webhook URL для текущего локального сервиса:
 
@@ -1455,8 +1455,8 @@ CMDBuild/Zabbix credentials при MS AD/IdP:
 
 Минимальные права по операциям:
 - CMDBuild user для UI/catalog sync должен иметь REST API login и read-only доступ к metadata classes/attributes/domains, lookup types/values, relations текущих карточек и карточкам целевых классов, включая reference/domain-цепочки, которые используются в `source.fields[].cmdbPath`; права create/update/delete на карточки CMDBuild для catalog sync не требуются;
-- CMDBuild user для `Настройка webhooks` должен иметь read-доступ к ETL/webhook records через REST v3 `/etl/webhook/?detailed=true`, чтобы выполнять `Загрузить из CMDB` и сравнивать текущее состояние с rules;
-- CMDBuild user для `Загрузить в CMDB` должен иметь create/update/delete или эквивалентные modify-права на ETL/webhook records через REST v3 `/etl/webhook/`; эти права нужны только оператору, который применяет webhook-план в CMDBuild;
+- CMDBuild user для `Настройка webhooks` должен иметь read-доступ к ETL/webhook records через REST v4 `/administration/etl/webhook/?detailed=true`, чтобы выполнять `Загрузить из CMDB` и сравнивать текущее состояние с rules;
+- CMDBuild user для `Загрузить в CMDB` должен иметь create/update/delete или эквивалентные modify-права на ETL/webhook records через REST v4 `/administration/etl/webhook/`; эти права нужны только оператору, который применяет webhook-план в CMDBuild;
 - CMDBuild service account для `cmdbkafka2zabbix` должен иметь read-only доступ к исходным карточкам и `ZabbixHostBinding`, если включено `Cmdbuild:HostBindingLookupEnabled`;
 - CMDBuild service account для `zabbixbindings2cmdbuild` должен иметь read/update права на карточки классов, участвующих в conversion rules, чтобы записывать/очищать `zabbix_main_hostid`, а также read/create/update права на класс `ZabbixHostBinding`;
 - backend обязан ограничивать запись managed-префиксом `cmdbwebhooks2kafka-*`, но это не заменяет CMDBuild permission model: учетная запись CMDBuild должна быть ограничена настолько узко, насколько позволяет CMDBuild;
@@ -1574,7 +1574,7 @@ Audit model:
 - назначение атрибутов: `OwnerClass`/`OwnerCardId`/`OwnerCode` описывают исходную карточку CMDBuild; `HostProfile` указывает профиль из rules; `ZabbixHostId`/`ZabbixHostName` указывают объект Zabbix; `BindingStatus`, `RulesVersion`, `LastSyncAt` нужны для состояния связи, версии правил и времени последней синхронизации;
 - после успешной записи в Zabbix микросервис `zabbixbindings2cmdbuild` должен автоматически заполнять `zabbix_main_hostid` для основного профиля и карточки `ZabbixHostBinding` для дополнительных профилей;
 - UI должен предоставлять быстрый аудит как read-only операцию для `editor/admin`: выбор класса CMDBuild с учетом дочерних классов и фильтра только участвующих в rules, чтение карточек через `limit/offset`, расчет ожидаемых host/profile/interface/groups/templates/maintenance/status по текущим conversion rules и сравнение с Zabbix `host.get` и bulk `maintenance.get`. `Запустить быстрый аудит` должен читать текущий offset, `Следующий пакет` должен увеличивать offset на текущий лимит карточек на класс. Быстрый аудит не должен выполнять автоисправления;
-- для применения audit model CMDBuild user должен иметь права администратора модели на создание классов и атрибутов через REST (`POST /classes?scope=service`, `POST /classes/{class}/attributes`). Для проверки плана эти write-права не требуются.
+- для применения audit model CMDBuild user должен иметь права администратора модели на создание классов и атрибутов через REST v4 (`POST /administration/classes`, `POST /administration/classes/{class}/attributes`). Для проверки плана эти write-права не требуются.
 
 Events Kafka browser:
 - браузер не подключается к Kafka напрямую;
@@ -1777,7 +1777,7 @@ Model.Field("fieldName")
 
 Требования к поведению:
 - пользоваться этим разделом не обязательно: webhooks можно настроить вручную в CMDBuild или использовать webhook-файлы, которые сохраняются вместе с файлом правил конвертации;
-- `Загрузить из CMDB` читает текущие CMDBuild ETL/webhook records через REST v3 `/etl/webhook/?detailed=true`;
+- `Загрузить из CMDB` читает текущие CMDBuild ETL/webhook records через REST v4 `/administration/etl/webhook/?detailed=true`;
 - после одной только загрузки из CMDB UI должен показывать текущие webhooks справочно, даже если план операций еще не построен;
 - `Проанализировать rules` каждый раз заново читает актуальный rules JSON и CMDBuild catalog cache, считает conversion rules источником правды для состава webhook payload, строит `webhook requirements` по используемым source fields и уже из них формирует желаемый набор webhooks, не создавая и не меняя records в CMDBuild;
 - если rules используют leaf через lookup/reference/domain, desired webhook должен передавать только ближайший scalar/id текущей карточки: CMDBuild attribute для lookup/reference path или `Id` текущей карточки для domain path; конкретный leaf поднимает converter по metadata `rules.source.fields[].cmdbPath`;
@@ -1797,10 +1797,10 @@ Model.Field("fieldName")
 - undo/redo должны работать с выбором операций текущей UI-сессии;
 - undo/redo не должны обещать и выполнять откат уже выполненной загрузки конфигурации в CMDBuild;
 - `Сохранить файл как` выгружает JSON-план webhooks через браузер и не меняет CMDBuild, backend rules-файл или git;
-- `Загрузить в CMDB` после подтверждения применяет только выбранные операции и действительно меняет CMDBuild через REST v3 `/etl/webhook/`;
+- `Загрузить в CMDB` после подтверждения применяет только выбранные операции и действительно меняет CMDBuild через REST v4 `/administration/etl/webhook/`;
 - `Загрузить в CMDB` не должен менять `headers.Authorization` у существующих webhook; отдельная команда `Синхронизировать Authorization` должна менять только этот заголовок у owned managed webhook и не менять payload/rules;
 - backend должен ограничивать apply workflow управляемым префиксом `cmdbwebhooks2kafka-`, чтобы не удалить или изменить чужие CMDBuild webhooks;
-- для `Изменить` и `Удалить` backend перед записью должен перечитывать текущие CMDBuild webhooks через `/etl/webhook/?detailed=true` и выбирать целевой record по managed `code`; `current.id` из browser payload не должен использоваться как доверенный идентификатор целевой записи;
+- для `Изменить` и `Удалить` backend перед записью должен перечитывать текущие CMDBuild webhooks через `/administration/etl/webhook/?detailed=true` и выбирать целевой record по managed `code`; `current.id` из browser payload не должен использоваться как доверенный идентификатор целевой записи;
 - для новых или изменяемых hooks body остается плоским: reference/domain/lookup leaf path хранится в `rules.source.fields[].cmdbPath`, а CMDBuild webhook передает scalar/id текущего атрибута или id текущей карточки для domain path.
 
 Для проверки полноты редактора правил ведется отдельный план `TEST_PLAN_MAPPING_EDITOR.md`. Тестовая модель строится под абстрактным `CI` / `КЕ` и использует scripts:

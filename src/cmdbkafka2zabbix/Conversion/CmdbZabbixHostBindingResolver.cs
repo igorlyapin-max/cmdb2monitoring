@@ -153,7 +153,6 @@ public sealed class CmdbZabbixHostBindingResolver(
         var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{options.Value.Username}:{options.Value.Password}"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Basic", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Add("CMDBuild-View", "admin");
 
         using var response = await httpClient.SendAsync(request, timeout.Token);
         response.EnsureSuccessStatusCode();

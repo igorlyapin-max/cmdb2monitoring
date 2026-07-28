@@ -97,6 +97,7 @@ services:
       ConversionRules__RepositoryPath: /app
       ConversionRules__ReadFromGit: "false"
       ConversionRules__RulesFilePath: rules/cmdbuild-to-zabbix-host-create.json
+      Cmdbuild__ApiVersion: v4
       Cmdbuild__BaseUrl: ${CMDBUILD_BASE_URL:?set CMDBUILD_BASE_URL}
       Cmdbuild__Username: ${CMDBUILD_USERNAME:-}
       Cmdbuild__Password: ${CMDBUILD_PASSWORD:-}
@@ -161,6 +162,7 @@ services:
       Kafka__Input__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
       Kafka__Input__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
       Kafka__Input__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}
+      Cmdbuild__ApiVersion: v4
       Cmdbuild__BaseUrl: ${CMDBUILD_BASE_URL:?set CMDBUILD_BASE_URL}
       Cmdbuild__Username: ${CMDBUILD_WRITEBACK_USERNAME:?set CMDBUILD_WRITEBACK_USERNAME}
       Cmdbuild__Password: ${CMDBUILD_WRITEBACK_PASSWORD:?set CMDBUILD_WRITEBACK_PASSWORD or secret reference}
@@ -192,6 +194,7 @@ services:
       PAMUSERNAME: ${PAMUSERNAME:-}
       PAMPASSWORD: ${PAMPASSWORD:-}
       CMDBUILD_BASE_URL: ${CMDBUILD_BASE_URL:?set CMDBUILD_BASE_URL}
+      CMDBUILD_API_VERSION: v4
       ZABBIX_API_ENDPOINT: ${ZABBIX_API_ENDPOINT:?set ZABBIX_API_ENDPOINT}
       ZABBIX_API_TOKEN: ${ZABBIX_API_TOKEN:-}
       RULES_FILE_PATH: rules/cmdbuild-to-zabbix-host-create.json

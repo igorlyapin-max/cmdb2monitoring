@@ -45,7 +45,8 @@ node scripts/cmdbuild-demo-schema.mjs --apply
 По умолчанию используются:
 
 ```bash
-CMDBUILD_BASE_URL=http://localhost:8090/cmdbuild/services/rest/v3
+CMDBUILD_API_VERSION=v4
+CMDBUILD_BASE_URL=http://localhost:8090/cmdbuild/services/rest/v4
 CMDBUILD_USERNAME=admin
 CMDBUILD_PASSWORD=admin
 C2M_DEMO_PREFIX=C2MTest

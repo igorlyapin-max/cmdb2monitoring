@@ -16,6 +16,7 @@
 
 ### Changed
 
+- Production deployment now defaults to SECRETS_PROVIDER=None; the env template uses safe REPLACE_* placeholders, while Indeed PAM/AAPM remains an optional secret-source profile.
 - Production startup validation now rejects plain HTTP, plaintext Kafka, weak webhook tokens, and insecure TLS settings unless an explicit insecure override is configured.
 - Kafka workers now stop gracefully by draining the current message up to `Worker:ShutdownTimeoutSeconds`, and outbound CMDBuild/Zabbix HTTP clients use configurable retry/backoff/jitter/circuit-breaker settings.
 - The UI/BFF now rate-limits auth/API routes, and .NET endpoints emit basic security headers on service responses.
@@ -24,6 +25,7 @@
 - `zabbixrequests2api` now reuses one singleton Zabbix client, caches positive host group/template validation lookups with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.
 - `cmdbkafka2zabbix` now uses a precise CMDBuild filter for additional-profile `ZabbixHostBinding` lookup, caches CMDBuild lookup values with configurable TTL, and logs per-message stage durations in `DebugLogging:Basic`.
 - `zabbixbindings2cmdbuild` now uses a precise CMDBuild filter for binding-card lookup and logs parse/apply/writeback stage durations in `DebugLogging:Basic`.
+- CMDBuild integrations now target CMDBuild 4.2 REST API v4 only; schema/webhook operations use explicit `/administration/...` paths and runtime config requires `Cmdbuild:ApiVersion=v4`.
 
 ### Fixed
 
