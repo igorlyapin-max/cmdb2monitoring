@@ -254,7 +254,7 @@ Rules reload:
 - `monitoring-ui-api` calls this endpoint from the `cmdbkafka2zabbix` dashboard card through `Перечитать правила конвертации` / reload rules for `editor` and `admin`; next to the button it shows two versions: `rulesVersion/schemaVersion` currently loaded by the microservice from `GET /admin/rules-status`, and `rulesVersion/schemaVersion` of the rules file read by the management system;
 - storage location changes require provider/config changes, not HTTP-contract changes.
 
-Rules publication happens outside `monitoring-ui-api`: the operator saves JSON through the browser or writes a local copy through `Git Settings`, reviews the diff, puts the file into the chosen git repository, and then clicks reload rules.
+Active-rules publication uses `POST /api/rules/publish`: the UI sends the draft and the revision returned by `GET /api/rules/current`. If another editor changed the active file, the backend returns `409 rules_revision_conflict` without writing; the local draft remains available for a manual merge. Publication atomically replaces only the active JSON and then calls reload. `Git Settings` still writes only the local git working copy and does not commit or push.
 `Git Settings` shows `RulesFilePath`, a `Use git as the conversion data source` checkbox, local working-copy `RepositoryPath`, and `Git repository URL` with an example URL. For the dev/test system, the default mode is read from disk, file `rules/cmdbuild-to-zabbix-host-create.json`. When git reading is enabled, the rules file is expected inside the repository at the same path, or at the path explicitly configured in `RulesFilePath`; the UI can write a matching `*.webhooks.json` artifact next to it. That artifact is generated from current rules plus CMDBuild catalog/current webhooks, but all token/password/secret/API key/Authorization values are replaced with `XXXXX`. These fields control UI/BFF settings for reading the local rules file and checking `schemaVersion`/`rulesVersion`; the application does not commit or push. The converter service has the matching switch in `src/cmdbkafka2zabbix/appsettings*.json` under `ConversionRules`; that service section decides whether the microservice reads the local file as-is or runs git pull from an already prepared working copy on startup/reload.
 `rulesVersion` must include both the date and the time of the change in a human-readable form, for example `2026.05.03-2027-serveri-webhook-fix`, so the dashboard and git diff show not only the revision purpose but also the release moment of the file.
 
@@ -373,7 +373,7 @@ Main settings:
 | `QueueMonitor` | Read-only backlog/topic-depth monitoring: topic, optional state file path, polling interval `5000..10000` ms, mode `Lag`/`TopicDepth`, and warning/critical thresholds |
 | `Logging` / `DebugLogging` | Structured logs and temporary `Basic`/`Verbose` diagnostic mode, disabled by default |
 | `ElkLogging` | Kafka log sink `monitoring-ui-api.logs*` or future ELK endpoint |
-| `Services:HealthEndpoints` | Microservice health endpoints and optional rules reload URL/token |
+| `Services:HealthEndpoints` / `MONITORING_UI_HEALTH_ENDPOINTS_JSON` | Dashboard health endpoints; production Compose uses service DNS while token references remain in environment variables |
 | `Secrets` | `None` or `IndeedPamAapm`; maps `secret://id` to the Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB secrets, and rules reload tokens |
 
 Authorization modes:
@@ -420,7 +420,7 @@ Audit model:
 - `zabbixbindings2cmdbuild` fills these elements automatically after a successful Zabbix write: the main profile writes `zabbix_main_hostid` to the source card, while additional profiles write separate `ZabbixHostBinding` cards.
 - quick audit in the `Audit` section performs a read-only comparison between selected CMDBuild classes and Zabbix: using current conversion rules it calculates the expected host/profile, binding (`zabbix_main_hostid` or `ZabbixHostBinding`), interface address, host groups, templates, maintenance, and status, then compares them with `host.get` and bulk `maintenance.get`. It does not perform auto-fixes and is intended as the first discrepancy check before full audit. CMDBuild cards are read in `limit/offset` batches: `Run quick audit` reads the current offset, while `Next batch` increases offset by the current max-cards-per-class limit;
 
-The Rules view loads current JSON, validates local JSON, performs dry-run, creates an empty production starter, and saves JSON through the browser. `monitoring-ui-api` does not write active rules files and does not commit/push git.
+The Rules view loads current JSON, validates local JSON, performs dry-run, creates an empty production starter, saves JSON through the browser, and can publish a revision-checked draft to the configured active rules mount. `monitoring-ui-api` does not commit or push git.
 
 `Create empty` generates a no-op starter from runtime settings and CMDBuild/Zabbix catalog caches. CMDBuild cache must contain classes/attributes, and Zabbix cache must contain host groups/templates. The generated JSON is stored in the local file area and saved only through the browser.
 

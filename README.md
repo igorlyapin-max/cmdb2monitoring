@@ -1,6 +1,8 @@
 # cmdb2monitoring
 
-Current release version: `0.8.2`.
+Release version is stored in root `VERSION`. Before the first versioned handoff,
+the UI displays `0.0.0.0`; release images receive the same `VERSION` value during
+the canonical image build.
 
 Local .NET development environment is installed in `.dotnet`.
 The repository wrapper also keeps .NET CLI state and NuGet packages inside this workspace, which makes it work without a global SDK installation.
@@ -78,6 +80,8 @@ Production Docker Compose is defined in `deploy/compose.production.yml`; start f
 ./scripts/validate-production-runtime.sh
 docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config
 ```
+
+`monitoring-ui-api` reads dashboard health endpoints from `MONITORING_UI_HEALTH_ENDPOINTS_JSON` before startup. Production requires all four declared internal Compose services on their DNS names and port `8080`; `localhost:5080..5083` is development-only. Paths and token env references remain configurable in the deployment `.env` without source changes.
 
 Observability artifacts are under `deploy/observability/`. Validate them with:
 

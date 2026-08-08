@@ -318,6 +318,8 @@
                 <button id="mappingUndo" class="secondary" type="button" disabled data-i18n="common.undo">Отменить</button>
                 <button id="mappingRedo" class="secondary" type="button" disabled data-i18n="common.redo">Вернуть</button>
                 <button id="mappingSaveAs" class="secondary" type="button" disabled data-i18n="common.saveFileAs">Сохранить файл как</button>
+                <button id="mappingPublish" type="button" disabled data-i18n="mapping.publish">Сохранить и применить</button>
+                <button id="mappingRetryReload" class="secondary hidden" type="button" disabled data-i18n="mapping.retryReload">Повторить применение</button>
                 <button id="loadMapping" type="button" data-i18n="common.load">Загрузить</button>
               </div>
             </div>
@@ -868,6 +870,7 @@
             <div class="surface about-panel">
               <p data-i18n="about.text">Спроектировано и овеществлено Игорем Ляпиным email:igor.lyapin@gmail.com 2026
 Под лицензией GNU GPLv3.</p>
+              <p class="about-version"><span data-i18n="about.version">Версия приложения</span><strong id="applicationVersion">0.0.0.0</strong></p>
             </div>
           </section>
 
@@ -901,7 +904,7 @@
                   <li data-i18n="help.mapping.4">Режим редактирования скрывает нижний просмотр и меняет draft JSON текущей сессии: можно начать с любого узла формы, а зависимые поля фильтруются и подсвечиваются.</li>
                   <li data-i18n="help.mapping.5">Действие Модификация правила начинается без автоматически выбранного rule: можно начать с rule, class, field или conversion structure. Связанные списки фильтруются, единственный найденный rule выбирается автоматически, а Сбросить поля возвращает форму к пустым фильтрам. Target, отсутствующий в Zabbix catalog, считается неконсистентным и блокирует сохранение.</li>
                   <li data-i18n="help.mapping.6">Действие Удаление правил и классов показывает rules текущего draft JSON деревом по CMDBuild, Zabbix или коллекциям правил. Можно отметить весь класс, атрибут CMDBuild, Zabbix payload field, Zabbix object group или отдельное rule; source classes/class attribute fields очищаются через логический контроль правил конвертации.</li>
-                  <li data-i18n="help.mapping.7">Undo и Redo работают с историей изменений текущей сессии, а Save file as сохраняет draft в отдельный JSON-файл с новым rulesVersion без отправки на backend.</li>
+                  <li data-i18n="help.mapping.7">Undo и Redo работают с историей изменений текущей сессии. Save file as сохраняет отдельный JSON-файл, а Сохранить и применить публикует активный файл и перезагружает конвертер, если deployment разрешает запись.</li>
                   <li data-i18n="help.mapping.8">Save file as дополнительно проверяет, что каждый настроенный класс имеет IP или DNS class attribute field, связанный с Zabbix interface rules или hostProfiles[].interfaces.</li>
                   <li data-i18n="help.mapping.9">Повторное нажатие на выбранный элемент снимает выделение.</li>
                   <li data-i18n="help.mapping.10">Правила выбора адреса интерфейса выбирают, чем заполнить Zabbix interfaces[]: ipAddress дает useip=1, dnsName дает useip=0.</li>

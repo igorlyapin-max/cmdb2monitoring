@@ -88,18 +88,25 @@ AuditStorage:
 - AAPM application token или application login/password является bootstrap-секретом самого приложения и должен передаваться через Docker/Kubernetes secret, защищенный mount, иной механизм deployment-слоя или env aliases `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD`.
 - Kafka SASL можно задавать корпоративным форматом `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET`; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` будет преобразован в `secret://AAA.LOCAL\PROD.contractorProfiles` и прочитан из PAM/AAPM.
 
-## Настройка git и rules-файла
+## Активный rules-файл и git-копии
 
-Меню `Настройка git` управляет только локальными копиями файла правил для системы управления. Микросервис `cmdbkafka2zabbix` читает правила по своей конфигурации `ConversionRules`.
+В production `RULES_HOST_PATH` указывает на каталог хоста, содержащий `rules/cmdbuild-to-zabbix-host-create.json`. Он монтируется в `cmdbkafka2zabbix` как `/app/rules:ro` и в `monitoring-ui-api` как `/app/rules:rw`. После `docker compose up -d` UI сразу читает этот активный файл.
 
-Рекомендуемый поток:
-1. Разработчик правил сохраняет JSON из браузера или через локальную git working copy.
-2. Администратор проверяет diff.
-3. Администратор публикует файл в согласованный git repository или локальный путь, используемый микросервисом.
-4. В Панели нажимает `Перечитать правила конвертации`.
-5. Сверяет две версии:
-   - версия правил, загруженная на микросервисе;
-   - версия файла, который видит UI управления.
+Подготовьте каталог до запуска Compose:
+
+```bash
+install -d -m 0755 /opt/cmdb2monitoring/rules
+install -d -m 0755 -o 10001 -g 10001 /opt/cmdb2monitoring/rules/rules
+install -m 0644 -o 10001 -g 10001 rules/cmdbuild-to-zabbix-host-create.json /opt/cmdb2monitoring/rules/rules/cmdbuild-to-zabbix-host-create.json
+```
+
+В разделе `Управление правилами конвертации` роль `Редактирование правил` или `Администрирование` может нажать `Сохранить и применить`. UI валидирует JSON, атомарно заменяет только активный JSON и вызывает reload `cmdbkafka2zabbix`. Webhook-артефакты и git не меняются. Публикация требует revision активного файла, прочитанного редактором: если другой редактор уже сохранил изменения, UI вернет конфликт и сохранит локальный draft без перезаписи. Если reload не подтвержден, новый файл остается на mount; устраните причину и нажмите `Повторить применение`.
+
+Меню `Настройка git` управляет только локальными git working copy. Оно не меняет активный production rules-файл и не выполняет commit/push.
+
+Проверяйте две версии:
+- версия правил, загруженная на микросервисе;
+- версия активного файла, который читает UI.
 
 `rulesVersion` должен включать дату и время, например `2026.05.05-1530-change-name`, чтобы визуально отличать редакции.
 

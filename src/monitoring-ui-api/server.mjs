@@ -11,9 +11,16 @@ import { Kafka, logLevel } from 'kafkajs';
 import { Client as LdapClient } from 'ldapts';
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from '@node-saml/node-saml';
 import { parseStringPromise } from 'xml2js';
+import {
+  createSerialExecutor,
+  readActiveRulesDocument,
+  writeRulesAtomically
+} from './lib/active-rules-publication.mjs';
+import { applyHealthEndpointsConfig } from './lib/health-endpoints-config.mjs';
 
 const serviceRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const repositoryRoot = resolve(serviceRoot, '../..');
+const applicationVersion = readApplicationVersion();
 const environment = process.env.NODE_ENV || 'Development';
 const resolvedSecretReferences = new Map();
 let logger = createBootstrapLogger();
@@ -21,10 +28,15 @@ const config = await loadConfig();
 logger = createStructuredLogger(config);
 validateCmdbuildApiConfig(config);
 validateRuntimeSecurityConfig(config);
+logger.info('Health endpoints configured', {
+  count: config.Services?.HealthEndpoints?.length ?? 0,
+  names: (config.Services?.HealthEndpoints ?? []).map(endpoint => endpoint.Name)
+});
 const startedAt = new Date();
 const serviceCounters = new Map();
 const sessionStore = await createSessionStore('session');
 const oauthStateStore = await createSessionStore('oauth');
+const runActiveRulesOperation = createSerialExecutor();
 let samlMetadataCache = null;
 
 const roles = {
@@ -148,6 +160,7 @@ async function route(request, response) {
     sendJson(response, 200, {
       service: config.Service.Name,
       status: 'ok',
+      applicationVersion,
       startedAt: startedAt.toISOString()
     });
     return;
@@ -603,6 +616,7 @@ async function routeApi(request, response, url, path) {
     const session = await getSession(request);
     sendJson(response, 200, {
       authenticated: Boolean(session),
+      applicationVersion,
       user: session ? publicUser(session) : null,
       csrfToken: session?.csrfToken ?? null,
       idp: publicIdpSettings(),
@@ -624,6 +638,7 @@ async function routeApi(request, response, url, path) {
     incrementCounter('auth_login_success');
     sendJson(response, 200, {
       authenticated: true,
+      applicationVersion,
       user: publicUser(session),
       csrfToken: session.csrfToken
     }, {
@@ -749,6 +764,27 @@ async function routeApi(request, response, url, path) {
     }
 
     sendJson(response, 200, await readCurrentRules());
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/rules/publish') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, config.Rules.MaxUploadBytes);
+    sendJson(response, 200, await publishActiveRules(payload));
+    return;
+  }
+
+  if (request.method === 'POST' && path === '/api/rules/retry-reload') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, await retryActiveRulesReload());
     return;
   }
 
@@ -1255,10 +1291,29 @@ async function loadConfig() {
 
   await applyPersistedUiSettings(merged);
   applyEnvOverrides(merged);
+  applyHealthEndpointsConfig(merged, { environment });
   applyPamCompatibilityEnvironment(merged);
   applySecretCompanionReferences(merged);
   await resolveSecretReferences(merged, 'monitoring-ui-api');
   return merged;
+}
+
+function readApplicationVersion() {
+  const versionFile = [
+    join(serviceRoot, 'VERSION'),
+    join(repositoryRoot, 'VERSION')
+  ].find(existsSync);
+
+  if (!versionFile) {
+    return '0.0.0.0';
+  }
+
+  const version = readFileSync(versionFile, 'utf8').trim();
+  if (version !== '0.0.0.0' && !/^\d{2}\.\d{2}\.\d{2}\.\d{2}$/.test(version)) {
+    throw new Error(`VERSION must have format XX.YY.ZZ.NN: ${versionFile}`);
+  }
+
+  return version;
 }
 
 async function resolveSecretReferences(target, serviceName) {
@@ -1564,6 +1619,9 @@ function applyEnvOverrides(target) {
     RULES_REPOSITORY_URL: ['Rules', 'RepositoryUrl'],
     RULES_REPOSITORY_PATH: ['Rules', 'RepositoryPath'],
     RULES_FILE_PATH: ['Rules', 'RulesFilePath'],
+    RULES_ACTIVE_BASE_DIRECTORY: ['Rules', 'ActiveBaseDirectory'],
+    RULES_ACTIVE_FILE_PATH: ['Rules', 'ActiveFilePath'],
+    RULES_ACTIVE_WRITE_ENABLED: ['Rules', 'ActiveWriteEnabled'],
     AUDIT_STORAGE_PROVIDER: ['AuditStorage', 'Provider'],
     AUDIT_STORAGE_CONNECTION_STRING: ['AuditStorage', 'ConnectionString'],
     AUDIT_STORAGE_SCHEMA: ['AuditStorage', 'Schema'],
@@ -3248,14 +3306,16 @@ function headersToObject(headers = {}) {
 }
 
 async function readCurrentRules() {
-  const settings = publicRulesSettings();
-  const path = resolveRulesStoragePath(settings);
-  const content = await readFile(path, 'utf8');
-  const rules = JSON.parse(content);
+  const settings = activeRulesSettings();
+  const path = resolveActiveRulesPath(settings);
+  const document = await readActiveRulesDocument(path);
+  const rules = document.rules;
   return {
-    path: settings.rulesFilePath,
+    path: settings.filePath,
     resolvedPath: path,
-    source: settings.readFromGit ? 'git' : 'disk',
+    source: 'active',
+    revision: document.revision,
+    publishEnabled: settings.writeEnabled,
     fileName: basename(path),
     schemaVersion: rules.schemaVersion,
     rulesVersion: rules.rulesVersion ?? '',
@@ -3263,6 +3323,93 @@ async function readCurrentRules() {
     validation: await validateRulesObject(rules),
     content: rules
   };
+}
+
+async function publishActiveRules(payload) {
+  const settings = activeRulesSettings();
+  if (!settings.writeEnabled) {
+    throw httpError(403, 'rules_publish_disabled', 'Active rules publishing is disabled by configuration.');
+  }
+
+  const expectedRevision = requiredActiveRulesRevision(payload);
+  const rules = normalizeRulesPayload(payload);
+  const validation = await validateRulesObject(rules);
+  if (!validation.valid) {
+    throw httpError(422, 'rules_validation_failed', 'Conversion rules validation failed.', { validation });
+  }
+
+  return runActiveRulesOperation(async () => {
+    const path = resolveActiveRulesPath(settings);
+    const current = await readActiveRulesDocument(path);
+    if (current.revision !== expectedRevision) {
+      throw httpError(409, 'rules_revision_conflict', 'The active rules file changed. Reload it before publishing your draft.', {
+        expectedRevision,
+        currentRevision: current.revision,
+        currentRulesVersion: current.rules.rulesVersion ?? ''
+      });
+    }
+
+    const written = await writeRulesAtomically(path, rules);
+    try {
+      const reload = await reloadServiceRules('cmdbkafka2zabbix');
+      return {
+        saved: true,
+        applied: true,
+        path: settings.filePath,
+        resolvedPath: path,
+        revision: written.revision,
+        rulesVersion: rules.rulesVersion ?? '',
+        validation,
+        reload
+      };
+    } catch (error) {
+      logger.warn('Conversion rules were saved but the converter reload failed', {
+        path: settings.filePath,
+        rulesVersion: rules.rulesVersion ?? '',
+        error: error instanceof Error ? error.message : 'rules_reload_failed'
+      });
+      return {
+        saved: true,
+        applied: false,
+        path: settings.filePath,
+        resolvedPath: path,
+        revision: written.revision,
+        rulesVersion: rules.rulesVersion ?? '',
+        validation,
+        reload: {
+          ok: false,
+          error: error instanceof Error ? error.message : 'rules_reload_failed'
+        }
+      };
+    }
+  });
+}
+
+async function retryActiveRulesReload() {
+  const settings = activeRulesSettings();
+  if (!settings.writeEnabled) {
+    throw httpError(403, 'rules_publish_disabled', 'Active rules publishing is disabled by configuration.');
+  }
+
+  return runActiveRulesOperation(async () => {
+    const document = await readActiveRulesDocument(resolveActiveRulesPath(settings));
+    const reload = await reloadServiceRules('cmdbkafka2zabbix');
+    return {
+      applied: true,
+      revision: document.revision,
+      rulesVersion: document.rules.rulesVersion ?? '',
+      reload
+    };
+  });
+}
+
+function requiredActiveRulesRevision(payload) {
+  const revision = String(payload?.expectedRevision ?? '').trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(revision)) {
+    throw httpError(422, 'rules_revision_required', 'expectedRevision must be the 64-character revision returned by /api/rules/current.');
+  }
+
+  return revision;
 }
 
 async function validateRulesPayload(payload) {
@@ -6356,6 +6503,25 @@ function normalizeRulesSettingsPayload(rules = {}) {
   };
 }
 
+function activeRulesSettings() {
+  const rules = config.Rules ?? {};
+  return {
+    baseDirectory: stringOrDefault(rules.ActiveBaseDirectory, '../..'),
+    filePath: stringOrDefault(rules.ActiveFilePath, 'rules/cmdbuild-to-zabbix-host-create.json'),
+    writeEnabled: Boolean(rules.ActiveWriteEnabled)
+  };
+}
+
+function resolveActiveRulesPath(settings = activeRulesSettings()) {
+  const root = resolve(serviceRoot, settings.baseDirectory);
+  const fullPath = resolve(root, settings.filePath);
+  if (!isPathInside(root, fullPath)) {
+    throw httpError(400, 'invalid_active_rules_path', 'Active rules file path escapes configured storage root.');
+  }
+
+  return fullPath;
+}
+
 function resolveRulesStorageRoot(rules) {
   if (!rules.readFromGit || isBlank(rules.repositoryPath)) {
     return repositoryRoot;
@@ -8640,6 +8806,8 @@ async function buildReadinessReport() {
       () => checkWritableConfiguredDirectory(config.Rules.RepositoryPath ?? 'rules-git-working-copy')));
   }
 
+  checks.push(await runReadinessCheck('active-rules', checkActiveRulesReady));
+
   checks.push(await runReadinessCheck('session-store', checkSessionStoreReady));
 
   const ready = checks.every(check => check.ready);
@@ -8726,6 +8894,24 @@ async function checkWritableConfiguredDirectory(configuredPath) {
     } catch {
       // Ignore cleanup errors after a successful readiness write attempt.
     }
+  }
+}
+
+async function checkActiveRulesReady() {
+  const settings = activeRulesSettings();
+  const rulesPath = resolveActiveRulesPath(settings);
+  JSON.parse(await readFile(rulesPath, 'utf8'));
+  if (!settings.writeEnabled) {
+    return `Readable: ${rulesPath}`;
+  }
+
+  const directory = dirname(rulesPath);
+  const probePath = join(directory, `.${basename(rulesPath)}.ready-${randomUUID()}.tmp`);
+  try {
+    await writeFile(probePath, 'ready', { encoding: 'utf8', flag: 'wx' });
+    return `Readable and writable: ${rulesPath}`;
+  } finally {
+    await unlink(probePath).catch(() => {});
   }
 }
 

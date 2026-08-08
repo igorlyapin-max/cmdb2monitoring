@@ -38,6 +38,7 @@ const state = {
   mappingMode: 'edit',
   mappingEditAction: 'add',
   mappingDeleteView: 'cmdbuild',
+  mappingReloadPending: false,
   mappingDraftRules: null,
   mappingHistory: [],
   mappingHistoryIndex: -1,
@@ -297,10 +298,11 @@ const translations = {
     'dashboard.rulesVersionManagement': 'В системе управления',
     'dashboard.rulesVersionUnavailable': 'версия недоступна',
     'dashboard.rulesVersionSchema': 'schema',
+    'dashboard.rulesSourceActive': 'активный mount',
     'dashboard.rulesSourceDisk': 'диск',
     'dashboard.rulesSourceGit': 'git-копия',
     'dashboard.rulesSourcePath': 'Источник: {source}, {path}',
-    'dashboard.rulesVersionMismatch': 'Версии отличаются. Проверьте источник rules в настройках git и путь, который использует микросервис.',
+    'dashboard.rulesVersionMismatch': 'Версии отличаются. Проверьте активный rules-файл и путь, который использует микросервис.',
     'dashboard.serviceHelp': 'Проверка сервиса "{name}". Показывает HTTP-статус, задержку, проверяемый URL и версии rules, если сервис их отдает.',
     'dashboard.queueTitle': 'Очереди обработки',
     'dashboard.queueDisabled': 'Мониторинг очереди выключен',
@@ -598,6 +600,7 @@ const translations = {
     'toast.rulesFileSaved': 'Файл rules сохранен: {name}',
     'rules.sourceStatus': 'Источник правил: {mode}; версия: {version}',
     'rules.sourceStatusHelp': 'Источник правил: {mode}; версия: {version}; файл: {path}; resolved path: {resolvedPath}',
+    'rules.sourceActive': 'активный файл',
     'rules.sourceDisk': 'диск',
     'rules.sourceGit': 'git',
     'rules.sourceUnknown': 'не определен',
@@ -616,6 +619,7 @@ const translations = {
     'settings.runtimeDiscardConfirm': 'Есть несохраненные Runtime-настройки. Загрузить значения из файла и сбросить текущие изменения?',
     'about.title': 'About',
     'about.text': 'Спроектировано и овеществлено Игорем Ляпиным email:igor.lyapin@gmail.com 2026\nПод лицензией GNU GPLv3.',
+    'about.version': 'Версия приложения',
     'common.clearSelection': 'Снять выделение',
     'common.close': 'Закрыть',
     'common.load': 'Загрузить',
@@ -702,6 +706,8 @@ const translations = {
     'mapping.confirm.saveIpDnsTitle': 'В rules найдены проблемы связи IP/DNS class attribute field с Zabbix interface structure.',
     'mapping.confirm.saveIpDnsMore': '... еще {count}',
     'mapping.confirm.saveAnyway': 'Сохранить файлы несмотря на ошибки?',
+    'mapping.publish': 'Сохранить и применить',
+    'mapping.retryReload': 'Повторить применение',
     'mapping.status.modifyStart': 'Выберите правило для модификации или начните с класса, атрибута или структуры конвертации.',
     'mapping.status.beforeSave': 'Перед сохранением проверьте логический контроль правил конвертации: для создания/обновления host должен приходить ipAddress или dnsName.',
     'mapping.status.actionDelete': 'Выберите правила в дереве удаления: по CMDBuild class/attribute, Zabbix payload/object group или коллекциям правил. Классы и class attribute fields не удаляются автоматически.',
@@ -805,6 +811,9 @@ const translations = {
     'mapping.status.rulesFileSavedWebhookNotSaved': 'Файл rules сохранен: {name}. Второй файл webhook bodies не сохранен.',
     'mapping.status.filesSaved': 'Файлы сохранены: {rulesName}, {webhookName}.{warning}',
     'mapping.status.saveWarnings': ' Есть предупреждения: {count}.',
+    'mapping.status.publishApplied': 'Активный файл правил сохранен. Конвертер применил версию {version}.',
+    'mapping.status.publishReloadPending': 'Активный файл правил сохранен, но reload конвертера не подтвержден: {message}. Повторите применение после устранения причины.',
+    'mapping.status.publishConflict': 'Активный rules-файл изменен другим редактором. Draft сохранен локально; перечитайте правила и объедините изменения перед публикацией.',
     'mapping.option.anyClass': 'Любой класс',
     'mapping.option.chooseClass': 'Выберите класс',
     'mapping.option.chooseClassFirst': 'Сначала выберите класс',
@@ -882,6 +891,7 @@ const translations = {
     'sessionTraffic.notRead': 'Не прочитано',
     'sessionTraffic.loaded': 'Загружено',
     'sessionTraffic.synced': 'Sync',
+    'sessionTraffic.readActive': 'Прочитано из активного mount',
     'sessionTraffic.readDisk': 'Прочитано с диска',
     'sessionTraffic.readGit': 'Прочитано из git',
     'sessionTraffic.savedGit': 'Записано в git-копию',
@@ -970,6 +980,8 @@ const translations = {
     'tooltip.mappingUndo': 'Отменяет последнее изменение draft-правил текущей сессии.',
     'tooltip.mappingRedo': 'Возвращает отмененное изменение draft-правил.',
     'tooltip.mappingSaveAs': 'Сохраняет текущий draft JSON правил с новым rulesVersion без отправки на backend. Вторым файлом формируются только webhook Body/DELETE-инструкции по добавленным и удаленным правилам текущей сессии.',
+    'tooltip.mappingPublish': 'Проверяет и атомарно записывает текущий draft JSON в активный внешний файл, затем вызывает reload конвертера. Webhook-файлы и git не изменяются.',
+    'tooltip.mappingRetryReload': 'Повторно вызывает reload конвертера для уже сохраненного активного файла без записи JSON.',
     'tooltip.mappingAddRule': 'Добавляет новое правило или сохраняет изменения выбранного правила в draft JSON.',
     'tooltip.mappingResetForm': 'В режиме модификации очищает выбранное rule и фильтры; в режиме добавления очищает leaf field и target.',
     'tooltip.mappingEditStringTemplate': 'Шаблон строки для создаваемого Zabbix payload/object. Пустое значение означает прямое чтение выбранного CMDBuild leaf.',
@@ -1047,10 +1059,11 @@ const translations = {
     'dashboard.rulesVersionManagement': 'In management system',
     'dashboard.rulesVersionUnavailable': 'version unavailable',
     'dashboard.rulesVersionSchema': 'schema',
+    'dashboard.rulesSourceActive': 'active mount',
     'dashboard.rulesSourceDisk': 'disk',
     'dashboard.rulesSourceGit': 'git copy',
     'dashboard.rulesSourcePath': 'Source: {source}, {path}',
-    'dashboard.rulesVersionMismatch': 'Versions differ. Check the rules source in Git settings and the path used by the microservice.',
+    'dashboard.rulesVersionMismatch': 'Versions differ. Check the active rules file and the path used by the microservice.',
     'dashboard.serviceHelp': 'Service "{name}" probe. Shows HTTP status, latency, checked URL, and rules versions when the service exposes them.',
     'dashboard.queueTitle': 'Processing Queues',
     'dashboard.queueDisabled': 'Queue monitoring is disabled',
@@ -1347,6 +1360,7 @@ const translations = {
     'toast.rulesFileSaved': 'Rules file saved: {name}',
     'rules.sourceStatus': 'Rules source: {mode}; version: {version}',
     'rules.sourceStatusHelp': 'Rules source: {mode}; version: {version}; file: {path}; resolved path: {resolvedPath}',
+    'rules.sourceActive': 'active file',
     'rules.sourceDisk': 'disk',
     'rules.sourceGit': 'git',
     'rules.sourceUnknown': 'unknown',
@@ -1365,6 +1379,7 @@ const translations = {
     'settings.runtimeDiscardConfirm': 'There are unsaved Runtime settings. Load values from the file and discard current changes?',
     'about.title': 'About',
     'about.text': 'Designed and materialized by Igor Lyapin email:igor.lyapin@gmail.com 2026\nLicensed under GNU GPLv3.',
+    'about.version': 'Application version',
     'common.clearSelection': 'Clear selection',
     'common.close': 'Close',
     'common.load': 'Load',
@@ -1451,6 +1466,8 @@ const translations = {
     'mapping.confirm.saveIpDnsTitle': 'Rules contain IP/DNS class attribute field links with Zabbix interface structure problems.',
     'mapping.confirm.saveIpDnsMore': '... {count} more',
     'mapping.confirm.saveAnyway': 'Save files despite the errors?',
+    'mapping.publish': 'Save and apply',
+    'mapping.retryReload': 'Retry apply',
     'mapping.status.modifyStart': 'Choose a rule to modify or start from a class, field, or conversion structure.',
     'mapping.status.beforeSave': 'Before saving, run logical control of conversion rules: create/update host must receive ipAddress or dnsName.',
     'mapping.status.actionDelete': 'Choose rules in the delete tree: by CMDBuild class/attribute, Zabbix payload/object group, or rule collections. Classes and class attribute fields are not removed automatically.',
@@ -1554,6 +1571,9 @@ const translations = {
     'mapping.status.rulesFileSavedWebhookNotSaved': 'Rules file saved: {name}. The second webhook bodies file was not saved.',
     'mapping.status.filesSaved': 'Files saved: {rulesName}, {webhookName}.{warning}',
     'mapping.status.saveWarnings': ' Warnings: {count}.',
+    'mapping.status.publishApplied': 'The active rules file was saved. The converter applied version {version}.',
+    'mapping.status.publishReloadPending': 'The active rules file was saved, but converter reload was not confirmed: {message}. Retry apply after resolving the cause.',
+    'mapping.status.publishConflict': 'The active rules file changed in another editor. The draft is kept locally; reload rules and merge changes before publishing.',
     'mapping.option.anyClass': 'Any class',
     'mapping.option.chooseClass': 'Choose class',
     'mapping.option.chooseClassFirst': 'Choose a class first',
@@ -1631,6 +1651,7 @@ const translations = {
     'sessionTraffic.notRead': 'Not read',
     'sessionTraffic.loaded': 'Loaded',
     'sessionTraffic.synced': 'Sync',
+    'sessionTraffic.readActive': 'Read from active mount',
     'sessionTraffic.readDisk': 'Read from disk',
     'sessionTraffic.readGit': 'Read from git',
     'sessionTraffic.savedGit': 'Saved to git copy',
@@ -1719,6 +1740,8 @@ const translations = {
     'tooltip.mappingUndo': 'Undoes the latest draft-rules change in the current session.',
     'tooltip.mappingRedo': 'Restores the reverted draft-rules change.',
     'tooltip.mappingSaveAs': 'Saves the current draft rules JSON with a new rulesVersion without sending it to the backend. A second file contains only webhook Body/DELETE instructions for rules added or removed in the current session.',
+    'tooltip.mappingPublish': 'Validates and atomically writes the current draft JSON to the active external file, then calls converter reload. Webhook files and git are unchanged.',
+    'tooltip.mappingRetryReload': 'Calls converter reload again for the already saved active rules file without writing JSON.',
     'tooltip.mappingAddRule': 'Adds a new rule or saves changes to the selected rule in draft JSON.',
     'tooltip.mappingResetForm': 'In modify mode, clears the selected rule and filters; in add mode, clears the leaf field and target.',
     'tooltip.mappingEditStringTemplate': 'String template for the created Zabbix payload/object. Empty means direct read from the selected CMDBuild leaf.',
@@ -2420,6 +2443,8 @@ function bindForms() {
   $('#mappingUndo').addEventListener('click', undoMappingEdit);
   $('#mappingRedo').addEventListener('click', redoMappingEdit);
   bindAction('#mappingSaveAs', saveMappingDraftAsFile, { statusSelector: '#mappingActionStatus' });
+  bindAction('#mappingPublish', publishMappingDraft, { statusSelector: '#mappingActionStatus', success: false });
+  bindAction('#mappingRetryReload', retryMappingRulesReload, { statusSelector: '#mappingActionStatus', success: false });
   $('#mappingEditTargetType').addEventListener('change', handleMappingEditorStructureChange);
   $('#mappingEditClass').addEventListener('change', handleMappingEditorClassChange);
   $('#mappingEditField').addEventListener('change', handleMappingEditorFieldChange);
@@ -2571,6 +2596,7 @@ function renderAuth(status) {
   state.auth = status.auth ?? {};
   state.idp = status.idp ?? null;
   state.csrfToken = status.csrfToken ?? state.csrfToken ?? '';
+  $('#applicationVersion').textContent = String(status.applicationVersion ?? $('#applicationVersion').textContent ?? '0.0.0.0');
   if (status.runtime) {
     state.runtimeSettings = mergeRuntimeSettings(state.runtimeSettings, status.runtime);
   }
@@ -2904,16 +2930,18 @@ function formatDashboardRulesVersion(rules, status) {
 
   const versionText = rulesVersion || '-';
   return schemaVersion
-    ? `${versionText} / ${t('dashboard.rulesVersionSchema')} ${schemaVersion}`
+    ? versionText + ' / ' + t('dashboard.rulesVersionSchema') + ' ' + schemaVersion
     : versionText;
 }
 
 function formatDashboardRulesSource(rules, status) {
-  const source = rules?.readFromGit === true || status?.source === 'git'
-    ? t('dashboard.rulesSourceGit')
-    : rules?.readFromGit === false || status?.source === 'disk'
-      ? t('dashboard.rulesSourceDisk')
-      : '';
+  const source = status?.source === 'active'
+    ? t('dashboard.rulesSourceActive')
+    : rules?.readFromGit === true || status?.source === 'git'
+      ? t('dashboard.rulesSourceGit')
+      : rules?.readFromGit === false || status?.source === 'disk'
+        ? t('dashboard.rulesSourceDisk')
+        : '';
   const path = rules?.location ?? status?.resolvedPath ?? status?.path ?? '';
   if (!source && !path) {
     return '';
@@ -3060,7 +3088,7 @@ async function loadRules(options = {}) {
   setSessionIndicator(
     'gitRules',
     'read',
-    rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    rulesDocument.source === 'active' ? 'sessionTraffic.readActive' : rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
     rulesVersionLabel(rulesDocument)
   );
   if (options.syncLoadedRuleEditors) {
@@ -3128,6 +3156,9 @@ function rulesVersionLabel(rulesDocument) {
 function rulesSourceModeLabel(rulesDocument) {
   if (rulesDocument?.source === 'git') {
     return t('rules.sourceGit');
+  }
+  if (rulesDocument?.source === 'active') {
+    return t('rules.sourceActive');
   }
   if (rulesDocument?.source === 'disk') {
     return t('rules.sourceDisk');
@@ -4004,7 +4035,7 @@ async function loadMapping(options = {}) {
   setSessionIndicator(
     'gitRules',
     'read',
-    rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    rulesDocument.source === 'active' ? 'sessionTraffic.readActive' : rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
     rulesVersionLabel(rulesDocument)
   );
   state.mappingCmdbuildCatalog = cmdbuildCatalog;
@@ -4209,7 +4240,7 @@ async function analyzeCmdbuildWebhooks() {
   setSessionIndicator(
     'gitRules',
     'read',
-    state.currentRules.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    state.currentRules.source === 'active' ? 'sessionTraffic.readActive' : state.currentRules.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
     rulesVersionLabel(state.currentRules)
   );
   if (!state.webhooksLoaded) {
@@ -5430,6 +5461,9 @@ function updateMappingEditorControls() {
   $('#mappingUndo').disabled = !hasDraft || state.mappingHistoryIndex <= 0;
   $('#mappingRedo').disabled = !hasDraft || state.mappingHistoryIndex >= state.mappingHistory.length - 1;
   $('#mappingSaveAs').disabled = !hasDraft;
+  $('#mappingPublish').disabled = !hasDraft || !state.currentRules?.publishEnabled;
+  $('#mappingRetryReload').disabled = !state.mappingReloadPending || !state.currentRules?.publishEnabled;
+  $('#mappingRetryReload').classList.toggle('hidden', !state.mappingReloadPending);
   updateMappingClearSelectionButton();
   $('#mapping')?.classList.toggle('mapping-edit-mode', editMode);
   $('#mappingEditor')?.classList.toggle('hidden', !editMode);
@@ -9782,28 +9816,12 @@ function updateMappingEditorSuggestedName() {
 }
 
 async function saveMappingDraftAsFile() {
-  if (!state.mappingDraftRules) {
+  const prepared = await prepareMappingDraftForSave();
+  if (!prepared) {
     return false;
   }
 
-  const rulesToSave = rulesWithNextRulesVersionForSave(state.mappingDraftRules);
-  const validation = validateMappingDraftBeforeSave(rulesToSave, state.mappingCmdbuildCatalog);
-  const changes = mappingSessionChanges(initialMappingRules(), state.mappingDraftRules);
-  if (validation.issues.length > 0) {
-    setMappingEditorStatusForDraft(tf('mapping.status.saveIpDnsInconsistent', { count: sessionWebhookChangeCount(changes) }));
-    const confirmed = window.confirm([
-      t('mapping.confirm.saveIpDnsTitle'),
-      '',
-      ...validation.issues.slice(0, 12).map(issue => `- ${issue}`),
-      validation.issues.length > 12 ? `- ${tf('mapping.confirm.saveIpDnsMore', { count: validation.issues.length - 12 })}` : '',
-      '',
-      t('mapping.confirm.saveAnyway')
-    ].filter(Boolean).join('\n'));
-    if (!confirmed) {
-      setMappingEditorStatus(t('mapping.status.saveCancelledFixIpDns'));
-      return false;
-    }
-  }
+  const { rulesToSave, validation, changes } = prepared;
 
   const defaultName = `${normalizeRuleName(rulesToSave.name || 'cmdbuild-to-zabbix-rules')}.json`;
   const content = `${JSON.stringify(rulesToSave, null, 2)}\n`;
@@ -9833,6 +9851,95 @@ async function saveMappingDraftAsFile() {
     warning: warningText
   }));
   return { rulesResult, webhookResult };
+}
+async function publishMappingDraft() {
+  const prepared = await prepareMappingDraftForSave();
+  if (!prepared) {
+    return false;
+  }
+
+  const { rulesToSave } = prepared;
+  let result;
+  try {
+    result = await api('/api/rules/publish', {
+      method: 'POST',
+      body: {
+        rules: rulesToSave,
+        expectedRevision: state.currentRules?.revision ?? ''
+      }
+    });
+  } catch (error) {
+    if (error.status === 409 && error.payload?.error === 'rules_revision_conflict') {
+      const message = t('mapping.status.publishConflict');
+      setActionStatus($('#mappingActionStatus'), message, 'warning');
+      toast(message);
+      return null;
+    }
+    throw error;
+  }
+
+  rememberSavedRulesContent(rulesToSave, { updateMapping: true });
+  state.mappingReloadPending = !result.applied;
+  await loadRules({ syncLoadedRuleEditors: true });
+  updateMappingEditorControls();
+
+  if (result.applied) {
+    const message = tf('mapping.status.publishApplied', { version: result.rulesVersion || rulesToSave.rulesVersion || '-' });
+    setActionStatus($('#mappingActionStatus'), message, 'success');
+    toast(message);
+    await loadDashboard();
+    return result;
+  }
+
+  const message = tf('mapping.status.publishReloadPending', {
+    message: result.reload?.error ?? 'rules_reload_failed'
+  });
+  setActionStatus($('#mappingActionStatus'), message, 'warning');
+  toast(message);
+  await loadDashboard();
+  return result;
+}
+
+async function retryMappingRulesReload() {
+  const result = await api('/api/rules/retry-reload', {
+    method: 'POST',
+    body: {}
+  });
+  state.mappingReloadPending = false;
+  await loadRules({ syncLoadedRuleEditors: true });
+  updateMappingEditorControls();
+  const message = tf('mapping.status.publishApplied', { version: result.rulesVersion || '-' });
+  setActionStatus($('#mappingActionStatus'), message, 'success');
+  toast(message);
+  await loadDashboard();
+  return result;
+}
+
+async function prepareMappingDraftForSave() {
+  if (!state.mappingDraftRules) {
+    return null;
+  }
+
+  const rulesToSave = rulesWithNextRulesVersionForSave(state.mappingDraftRules);
+  const validation = validateMappingDraftBeforeSave(rulesToSave, state.mappingCmdbuildCatalog);
+  const changes = mappingSessionChanges(initialMappingRules(), state.mappingDraftRules);
+  if (validation.issues.length > 0) {
+    setMappingEditorStatusForDraft(tf('mapping.status.saveIpDnsInconsistent', { count: sessionWebhookChangeCount(changes) }));
+    const confirmed = window.confirm([
+      t('mapping.confirm.saveIpDnsTitle'),
+      '',
+      ...validation.issues.slice(0, 12).map(issue => `- ${issue}`),
+      validation.issues.length > 12 ? `- ${tf('mapping.confirm.saveIpDnsMore', { count: validation.issues.length - 12 })}` : '',
+      '',
+      t('mapping.confirm.saveAnyway')
+    ].filter(Boolean).join('\n'));
+    if (!confirmed) {
+      setMappingEditorStatus(t('mapping.status.saveCancelledFixIpDns'));
+      return null;
+    }
+  }
+
+  return { rulesToSave, validation, changes };
 }
 
 async function saveTextAsFile(content, defaultName, description, accept) {
@@ -10617,7 +10724,7 @@ async function loadRulesMappingValidationContext() {
   setSessionIndicator(
     'gitRules',
     'read',
-    rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
+    rulesDocument.source === 'active' ? 'sessionTraffic.readActive' : rulesDocument.source === 'git' ? 'sessionTraffic.readGit' : 'sessionTraffic.readDisk',
     rulesVersionLabel(rulesDocument)
   );
   return { rulesDocument, zabbixCatalog, cmdbuildCatalog };
@@ -14362,6 +14469,8 @@ function applyHelpText() {
     '#mappingUndo': 'tooltip.mappingUndo',
     '#mappingRedo': 'tooltip.mappingRedo',
     '#mappingSaveAs': 'tooltip.mappingSaveAs',
+    '#mappingPublish': 'tooltip.mappingPublish',
+    '#mappingRetryReload': 'tooltip.mappingRetryReload',
     '#mappingResetForm': 'tooltip.mappingResetForm',
     '#mappingAddRule': 'tooltip.mappingAddRule',
     '#mappingEditStringTemplate': 'tooltip.mappingEditStringTemplate',

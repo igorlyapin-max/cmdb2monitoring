@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: cmdb2monitoring monitoring UI API
-  version: 0.4.0
+  version: 0.5.0
   description: >
     Backend-for-frontend API for dashboard, server-side sessions, Kafka event
     browsing, rules validation, dry-run, browser save-as, runtime settings, authorization settings,
@@ -272,7 +272,7 @@ paths:
                 $ref: "#/components/schemas/EventList"
   /api/rules/current:
     get:
-      summary: Read current conversion rules
+      summary: Read active conversion rules from the configured external file
       responses:
         "200":
           description: Current rules and validation result.
@@ -280,6 +280,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RulesDocument"
+  /api/rules/publish:
+    post:
+      summary: Atomically publish active conversion rules and reload the converter
+      description: >
+        Available to editor and admin roles only when Rules.ActiveWriteEnabled
+        is enabled. Writes only the active JSON rules file; webhook artifacts
+        and git working copies are not changed. A reload failure leaves the
+        new file in place and returns applied=false.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesPublishRequest"
+      responses:
+        "200":
+          description: Rules were saved; applied shows whether converter reload succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesPublishResponse"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+  /api/rules/retry-reload:
+    post:
+      summary: Retry converter reload for the already saved active rules file
+      responses:
+        "200":
+          description: Converter reloaded the active rules file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesPublishResponse"
+        "403":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
   /api/rules/validate:
     post:
       summary: Validate uploaded rules or current rules when body is empty
@@ -346,10 +387,9 @@ paths:
       deprecated: true
       summary: Validate conversion rules and return normalized JSON without backend save
       description: >
-        Kept for compatibility with older clients. monitoring-ui-api does not
-        write active rules files and does not commit or push to git; operators
-        save JSON through the browser and publish it to the rules repository
-        outside the application.
+        Kept for compatibility with older clients. This endpoint validates and
+        returns normalized JSON only; it does not write the active rules file
+        and does not commit or push to git.
       requestBody:
         required: true
         content:
@@ -758,9 +798,14 @@ components:
       type: object
       required:
         - authenticated
+        - applicationVersion
       properties:
         authenticated:
           type: boolean
+        applicationVersion:
+          type: string
+          description: Application version from the embedded root VERSION file, or 0.0.0.0 before the first versioned handoff.
+          example: 00.00.00.01
         user:
           type: object
           nullable: true
@@ -1001,7 +1046,13 @@ components:
           type: string
         source:
           type: string
-          enum: [disk, git]
+          enum: [active]
+        revision:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: SHA-256 of the exact active rules JSON read by the editor.
+        publishEnabled:
+          type: boolean
         fileName:
           type: string
         schemaVersion:
@@ -1034,6 +1085,42 @@ components:
           type: boolean
           deprecated: true
           description: Ignored. Rules are not saved on the backend by monitoring-ui-api.
+    RulesPublishRequest:
+      type: object
+      required:
+        - expectedRevision
+        - rules
+      properties:
+        expectedRevision:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Revision returned by GET /api/rules/current.
+        rules:
+          type: object
+          additionalProperties: true
+    RulesPublishResponse:
+      type: object
+      required:
+        - applied
+      properties:
+        saved:
+          type: boolean
+        applied:
+          type: boolean
+        path:
+          type: string
+        resolvedPath:
+          type: string
+        revision:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        rulesVersion:
+          type: string
+        validation:
+          $ref: "#/components/schemas/ValidationResult"
+        reload:
+          type: object
+          additionalProperties: true
     RulesDryRunRequest:
       type: object
       required:

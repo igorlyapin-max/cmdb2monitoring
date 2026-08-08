@@ -65,6 +65,21 @@ repository_validation:
     - ./scripts/validate-production-runtime.sh
     - ./scripts/validate-observability.sh
 
+monitoring_ui_container_smoke:
+  image: docker:27-cli
+  stage: test
+  services:
+    - name: docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  before_script:
+    - apk add --no-cache bash
+  script:
+    - ./scripts/smoke-monitoring-ui-image.sh
+
 secret_scan:
   image:
     name: zricethezav/gitleaks:v8.27.2

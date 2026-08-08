@@ -4,6 +4,9 @@
 
 ### Added
 
+- The About view now shows the application version from root `VERSION`; before the first versioned handoff it shows `0.0.0.0`.
+- Conversion Rules Management can now publish an active externally mounted rules JSON, reload `cmdbkafka2zabbix`, and explicitly retry reload while preserving a newly saved file after a reload error.
+- Production dashboard health endpoints now default to Compose service DNS and can be overridden through `MONITORING_UI_HEALTH_ENDPOINTS_JSON`; loopback URLs are rejected in Production.
 - Added configurable HTTP/HTTPS transport settings for all services, Kafka SSL fields, UI Redis session storage option, CSRF protection, webhook rate limiting, and non-root container runtime defaults.
 - Added Kafka `correlationId` propagation, DLQ topics for webhook conversion and Zabbix request application, `/ready` and `/metrics` runtime endpoints, single-active worker config guards, Docker `HEALTHCHECK`, and a CI workflow with build/config/secret-scan gates.
 - Added GitLab CI with Node config checks, .NET builds, repository validation, whitespace check, and gitleaks secret scan.
@@ -29,6 +32,10 @@
 
 ### Fixed
 
+- The monitoring UI image now includes its local runtime modules; CI verifies its embedded version, OCI label, `/health`, and `/ready` in Docker before delivery.
+- Active conversion-rules publication now uses an optimistic SHA-256 revision and a serialized writer, returning `409` without overwriting a newer mounted file.
+- Production health endpoint configuration now requires the complete Compose-DNS topology, including a separately configurable converter rules-status token.
+- Administrator deployment commands now create an active-rules mount writable by the UI container user and readable by the converter container user.
 - CMDBuild Catalog bulk lookup-change now uses CMDBuild `start` pagination and de-duplicates card ids before PUT, so ignored pagination cannot update the same cards until the 10000-card safety cap.
 - CMDBuild Catalog bulk lookup-change now defaults to filtering only cards with empty `zabbix_main_hostid`, with an explicit checkbox to include already monitored cards.
 - Rules dry run now writes JSON/API errors into the result panel and returns a `results` array with a summary.

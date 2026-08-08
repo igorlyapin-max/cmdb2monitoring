@@ -50,7 +50,7 @@ x-healthcheck-dotnet: &healthcheck_dotnet
 
 services:
   cmdbwebhooks2kafka:
-    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/cmdbwebhooks2kafka:${VERSION:-0.8.2}
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/cmdbwebhooks2kafka:${VERSION:?set VERSION from the release VERSION file}
     restart: unless-stopped
     logging: *syslog_logging
     environment:
@@ -71,7 +71,7 @@ services:
     healthcheck: *healthcheck_dotnet
 
   cmdbkafka2zabbix:
-    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/cmdbkafka2zabbix:${VERSION:-0.8.2}
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/cmdbkafka2zabbix:${VERSION:?set VERSION from the release VERSION file}
     restart: unless-stopped
     logging: *syslog_logging
     environment:
@@ -111,7 +111,7 @@ services:
     healthcheck: *healthcheck_dotnet
 
   zabbixrequests2api:
-    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/zabbixrequests2api:${VERSION:-0.8.2}
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/zabbixrequests2api:${VERSION:?set VERSION from the release VERSION file}
     restart: unless-stopped
     logging: *syslog_logging
     environment:
@@ -149,7 +149,7 @@ services:
     healthcheck: *healthcheck_dotnet
 
   zabbixbindings2cmdbuild:
-    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/zabbixbindings2cmdbuild:${VERSION:-0.8.2}
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/zabbixbindings2cmdbuild:${VERSION:?set VERSION from the release VERSION file}
     restart: unless-stopped
     logging: *syslog_logging
     environment:
@@ -175,7 +175,7 @@ services:
     healthcheck: *healthcheck_dotnet
 
   monitoring-ui-api:
-    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/monitoring-ui-api:${VERSION:-0.8.2}
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/monitoring-ui-api:${VERSION:?set VERSION from the release VERSION file}
     restart: unless-stopped
     logging: *syslog_logging
     environment:
@@ -197,7 +197,14 @@ services:
       CMDBUILD_API_VERSION: v4
       ZABBIX_API_ENDPOINT: ${ZABBIX_API_ENDPOINT:?set ZABBIX_API_ENDPOINT}
       ZABBIX_API_TOKEN: ${ZABBIX_API_TOKEN:-}
+      MONITORING_UI_HEALTH_ENDPOINTS_JSON: >-
+        ${MONITORING_UI_HEALTH_ENDPOINTS_JSON:-[{"Name":"cmdbwebhooks2kafka","Url":"http://cmdbwebhooks2kafka:8080/health"},{"Name":"cmdbkafka2zabbix","Url":"http://cmdbkafka2zabbix:8080/health","RulesReloadUrl":"http://cmdbkafka2zabbix:8080/admin/reload-rules","RulesReloadTokenEnv":"MONITORING_UI_RULES_RELOAD_TOKEN","RulesStatusUrl":"http://cmdbkafka2zabbix:8080/admin/rules-status","RulesStatusTokenEnv":"MONITORING_UI_RULES_STATUS_TOKEN"},{"Name":"zabbixrequests2api","Url":"http://zabbixrequests2api:8080/health"},{"Name":"zabbixbindings2cmdbuild","Url":"http://zabbixbindings2cmdbuild:8080/health"}]}
+      MONITORING_UI_RULES_RELOAD_TOKEN: ${RULES_RELOAD_TOKEN:?set RULES_RELOAD_TOKEN or secret reference}
+      MONITORING_UI_RULES_STATUS_TOKEN: ${RULES_STATUS_TOKEN:-}
       RULES_FILE_PATH: rules/cmdbuild-to-zabbix-host-create.json
+      RULES_ACTIVE_BASE_DIRECTORY: /app
+      RULES_ACTIVE_FILE_PATH: rules/cmdbuild-to-zabbix-host-create.json
+      RULES_ACTIVE_WRITE_ENABLED: "true"
       AUDIT_STORAGE_PROVIDER: ${AUDIT_STORAGE_PROVIDER:-postgresql}
       AUDIT_STORAGE_CONNECTION_STRING: ${AUDIT_STORAGE_CONNECTION_STRING:?set AUDIT_STORAGE_CONNECTION_STRING or secret reference}
       MONITORING_UI_EVENTS_ENABLED: "true"
@@ -220,7 +227,7 @@ services:
     volumes:
       - monitoring-ui-state:/app/state
       - monitoring-ui-data:/app/data
-      - ${RULES_HOST_PATH:?set RULES_HOST_PATH to a directory containing rules/}:/app/rules:ro
+      - ${RULES_HOST_PATH:?set RULES_HOST_PATH to a directory containing rules/}:/app/rules:rw
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5090/ready >/dev/null || exit 1"]
       interval: 30s

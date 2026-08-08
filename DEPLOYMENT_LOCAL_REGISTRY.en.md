@@ -35,34 +35,48 @@ If the registry is on another host and runs without TLS, Docker daemons on deplo
 Recommended command:
 
 ```bash
-REGISTRY=localhost:5000 VERSION=0.8.0 ./scripts/build-local-registry-images.sh
+REGISTRY=localhost:5000 ./scripts/build-local-registry-images.sh
 ```
+
+Image version is read only from root `VERSION`. Before the first versioned Git handoff,
+when that file does not exist, the script builds local images with the neutral `0.0.0.0` version.
+Do not provide an arbitrary `VERSION`: its value must match the root file.
 
 The script builds and pushes:
 
 ```text
-localhost:5000/cmdb2monitoring/cmdbwebhooks2kafka:0.8.0
-localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0
-localhost:5000/cmdb2monitoring/zabbixrequests2api:0.8.0
-localhost:5000/cmdb2monitoring/zabbixbindings2cmdbuild:0.8.0
-localhost:5000/cmdb2monitoring/monitoring-ui-api:0.8.0
+localhost:5000/cmdb2monitoring/cmdbwebhooks2kafka:<VERSION>
+localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:<VERSION>
+localhost:5000/cmdb2monitoring/zabbixrequests2api:<VERSION>
+localhost:5000/cmdb2monitoring/zabbixbindings2cmdbuild:<VERSION>
+localhost:5000/cmdb2monitoring/monitoring-ui-api:<VERSION>
 ```
 
 It also applies the `latest` tag. For a local build without push:
 
 ```bash
-PUSH=false VERSION=0.8.0 ./scripts/build-local-registry-images.sh
+PUSH=false ./scripts/build-local-registry-images.sh
 ```
 
 Manual build for one image:
 
 ```bash
+IMAGE_VERSION="$(tr -d '\r\n' < VERSION)"
+
 docker build \
-  -f deploy/dockerfiles/cmdbkafka2zabbix.Dockerfile \
-  -t localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0 \
+  --build-arg APPLICATION_VERSION="$IMAGE_VERSION" \
+  -f deploy/dockerfiles/monitoring-ui-api.Dockerfile \
+  -t "localhost:5000/cmdb2monitoring/monitoring-ui-api:$IMAGE_VERSION" \
   .
 
-docker push localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0
+docker push "localhost:5000/cmdb2monitoring/monitoring-ui-api:$IMAGE_VERSION"
+```
+
+Before handing off the UI image, verify that embedded `/app/VERSION`, the OCI label,
+runtime `/health`, and `/ready` match the root `VERSION`:
+
+```bash
+./scripts/smoke-monitoring-ui-image.sh
 ```
 
 The build needs access to `mcr.microsoft.com` for .NET runtime/sdk images, `docker.io` for the Node.js image, and NuGet/npm registries for dependency restore/install.
@@ -108,6 +122,7 @@ For production rollout, use `deploy/compose.production.yml` and prepare an env f
 
 ```bash
 cp deploy/production.env.example production.env
+# VERSION must match VERSION in the release bundle
 # fill real hostnames, topics, and secret:// references or deployment secrets
 docker compose --env-file production.env -f deploy/compose.production.yml config
 docker compose --env-file production.env -f deploy/compose.production.yml up -d

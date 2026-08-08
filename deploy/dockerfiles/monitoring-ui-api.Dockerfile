@@ -7,17 +7,25 @@ RUN npm ci --omit=dev
 FROM node:22-alpine AS runtime
 WORKDIR /app
 
+ARG APPLICATION_VERSION=0.0.0.0
 ENV NODE_ENV=Production
 ENV MONITORING_UI_HOST=0.0.0.0
 ENV PORT=5090
 
 EXPOSE 5090
 
-RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+RUN apk add --no-cache shadow \
+ && groupadd --system --gid 10001 appgroup \
+ && useradd --system --uid 10001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser \
+ && case "${APPLICATION_VERSION}" in 0.0.0.0|[0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9][0-9]) ;; *) echo "Invalid APPLICATION_VERSION: ${APPLICATION_VERSION}" >&2; exit 1 ;; esac \
+ && printf '%s\n' "${APPLICATION_VERSION}" > /app/VERSION
+
+LABEL org.opencontainers.image.version="${APPLICATION_VERSION}"
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY src/monitoring-ui-api/package*.json ./
 COPY src/monitoring-ui-api/server.mjs ./server.mjs
+COPY src/monitoring-ui-api/lib ./lib
 COPY src/monitoring-ui-api/config ./config
 COPY src/monitoring-ui-api/public ./public
 COPY src/monitoring-ui-api/scripts ./scripts

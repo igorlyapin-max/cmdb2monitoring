@@ -6,8 +6,11 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "NODE_ENV=Development node server.mjs",
-    "test": "npm run test:config && npm run test:mapping && npm run test:webhooks",
+    "test": "npm run test:config && npm run test:health-endpoints && npm run test:active-rules && npm run test:rules-publish-api && npm run test:mapping && npm run test:webhooks",
     "test:config": "node scripts/validate-config.mjs",
+    "test:health-endpoints": "node test/health-endpoints-config.test.mjs",
+    "test:active-rules": "node test/active-rules-publication.test.mjs",
+    "test:rules-publish-api": "node test/rules-publish-api.test.mjs",
     "test:mapping": "node test/mapping-logic.test.mjs",
     "test:webhooks": "node test/webhook-logic.test.mjs"
   },

@@ -584,6 +584,20 @@ h2 {
   white-space: pre-line;
 }
 
+.about-panel .about-version {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 14px;
+  white-space: normal;
+}
+
+.about-version strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 .split-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

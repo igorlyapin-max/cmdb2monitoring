@@ -251,7 +251,7 @@ Rules reload:
 - `GET /admin/rules-status` также показывает источник rules, git repository/path, runtime git flags, template engine/name и trusted artifact settings;
 - при смене места хранения правил нужно заменить/настроить provider, не меняя HTTP-контракт кнопки и BFF.
 
-Публикация rules выполняется вне `monitoring-ui-api`: оператор сохраняет JSON через браузер или через `Настройка git` записывает локальную копию, проверяет diff, кладет файл в выбранный git repository и после публикации нажимает `Перечитать правила конвертации`.
+Публикация active rules выполняется через `POST /api/rules/publish`: UI передает draft и revision, полученный из `GET /api/rules/current`. При изменении active файла другим редактором backend возвращает `409 rules_revision_conflict` без записи; локальный draft сохраняется для ручного объединения. Публикация атомарно заменяет только active JSON и затем вызывает reload. `Настройка git` по-прежнему записывает только local git working copy и не выполняет commit/push.
 В `Настройка git` UI отображаются `RulesFilePath`, галка `Использовать git как источник данных конвертации`, `RepositoryPath` локальной working copy и `Git repository URL` с примером URL. Для нашей dev/test системы режим по умолчанию - читать с диска, файл `rules/cmdbuild-to-zabbix-host-create.json`. При включении чтения из git внутри repository ожидается файл правил по тому же пути или по пути, явно указанному в `RulesFilePath`; рядом с ним UI может записать согласованный webhook artifact `*.webhooks.json`. Этот artifact строится из текущих rules и CMDBuild catalog/current webhooks, но все token/password/secret/API key/Authorization значения заменяются на `XXXXX`. Эти поля управляют настройками UI/BFF для чтения локального файла правил и проверки `schemaVersion`/`rulesVersion`; приложение не выполняет commit/push. Для converter-сервиса аналогичный переключатель находится в `src/cmdbkafka2zabbix/appsettings*.json` в секции `ConversionRules`; именно эта секция определяет, будет ли микросервис читать локальный файл как есть или перед reload/startup выполнять git pull из уже подготовленной working copy.
 `rulesVersion` должен включать дату и время изменения в человекочитаемом виде, например `2026.05.08-142503-serveri-webhook-fix`, чтобы в Панели и git diff было видно не только назначение редакции, но и момент выпуска файла. UI при `Save file as` и `Сохранить в git` формирует новый `rulesVersion`: обновляет префикс времени до секунд и сохраняет смысловой suffix старой версии, например `test15-profile-ip-leaf-fix`.
 
@@ -379,7 +379,7 @@ Runtime cache карточек CMDBuild и domain/reference relations дейст
 | `QueueMonitor` | Read-only мониторинг backlog/topic depth: topic, optional state file path, интервал опроса `5000..10000` ms, mode `Lag`/`TopicDepth` и пороги warning/critical |
 | `Logging` / `DebugLogging` | Structured logs и временный debug/diagnostic режим `Basic`/`Verbose`, выключенный по умолчанию |
 | `ElkLogging` | Kafka log sink `monitoring-ui-api.logs*` или будущий ELK endpoint |
-| `Services:HealthEndpoints` | Health endpoints микросервисов для dashboard; optional rules reload URL/token для converter |
+| `Services:HealthEndpoints` / `MONITORING_UI_HEALTH_ENDPOINTS_JSON` | Health endpoints микросервисов для dashboard; production Compose использует service DNS, а token references остаются в env |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Zabbix API token, Kafka Event Browser password, LDAP/OAuth2/Audit DB секреты и rules reload tokens |
 
 SAML2 endpoints:

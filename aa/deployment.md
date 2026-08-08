@@ -80,7 +80,7 @@
 - отдельная CMDBuild service account для `cmdbkafka2zabbix` lookup/reference/domain resolver и чтения `zabbix_main_hostid`/`ZabbixHostBinding`, если rules используют `source.fields[].cmdbPath` или stage 2 direct hostid lookup;
 - отдельная CMDBuild service account для `zabbixbindings2cmdbuild` с правом записи `zabbix_main_hostid` в участвующие карточки и create/update/read на `ZabbixHostBinding`;
 - для `monitoring-ui-api` операторы вводят CMDBuild credentials на сессию; для catalog sync достаточно read-only metadata/card/relation прав, а для применения `Настройка webhooks` нужны read и create/update/delete или эквивалентные modify-права на CMDBuild ETL/webhook records `/etl/webhook/`;
-- Bearer token для `cmdbkafka2zabbix` rules reload endpoint задается как secret/env и совпадает с `monitoring-ui-api` `Services:HealthEndpoints[].RulesReloadToken`;
+- Bearer token для `cmdbkafka2zabbix` rules reload endpoint задается как secret/env и совпадает с `monitoring-ui-api` `Services:HealthEndpoints[].RulesReloadToken`; при отдельном `RulesStatusToken` UI передает его через `Services:HealthEndpoints[].RulesStatusToken`;
 - для `monitoring-ui-api` не задаются постоянные CMDBuild/Zabbix login/password; при необходимости оператор вводит их на сессию, либо задается read-only `ZABBIX_API_TOKEN`;
 - публичный URL `monitoring-ui-api` должен совпадать с SAML2 `AcsUrl`/`SloCallbackUrl` и OAuth2 `RedirectUri`, если включены эти провайдеры;
 - IdP должен знать SP metadata из `/auth/saml2/metadata` для SAML2 или OAuth2 client redirect URI для OAuth2/OIDC;
@@ -96,8 +96,8 @@
 | monitoring-ui-api `:5090` | IdP/MS AD `:443/:80/:636/:389` | SAML2 Redirect/POST, OAuth2 Authorization Code, LDAP bind/search |
 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP |
 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC |
-| monitoring-ui-api `:5090` | .NET services health endpoints `:5080/:5081/:5082/:5083` | HTTP |
-| monitoring-ui-api `:5090` | cmdbkafka2zabbix `:5081` | HTTP POST `/admin/reload-rules` с Bearer token |
+| monitoring-ui-api `:5090` | .NET services health endpoints `http://<compose-service>:8080/health` | HTTP внутри Compose network; localhost ports только dev |
+| monitoring-ui-api `:5090` | cmdbkafka2zabbix `http://cmdbkafka2zabbix:8080/admin/reload-rules` | HTTP POST с Bearer token внутри Compose network |
 | monitoring-ui-api | Kafka `localhost:9092` / `kafka:29092` | Kafka protocol, read-only Events |
 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | Kafka protocol |
 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | Kafka protocol |

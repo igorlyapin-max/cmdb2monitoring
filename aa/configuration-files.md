@@ -337,7 +337,7 @@ Base config не содержит пароль; `Development` config может 
 | `Rules:AllowUpload` | Разрешить прием локального rules JSON для validate/dry-run | Для editor/admin UI |
 | `EventBrowser:*` | Read-only просмотр Kafka topics на вкладке Events | При смене Kafka, auth или списка topics |
 | `QueueMonitor:*` | Read-only мониторинг очередей: `Lag` по state-файлу или `TopicDepth` для DLQ topics | При смене Kafka topic namespace, state paths или порогов алерта |
-| `Services:HealthEndpoints` | Health endpoints микросервисов, включая `zabbixbindings2cmdbuild`; для `cmdbkafka2zabbix` дополнительно `RulesReloadUrl`, `RulesReloadToken`, `RulesStatusUrl`, `RulesStatusToken` | При добавлении сервисов, reload-действий или read-only статуса правил |
+| `Services:HealthEndpoints` / `MONITORING_UI_HEALTH_ENDPOINTS_JSON` | Health endpoints микросервисов, включая `zabbixbindings2cmdbuild`; для `cmdbkafka2zabbix` дополнительно `RulesReloadUrl`, `RulesReloadTokenEnv`, `RulesStatusUrl`, `RulesStatusTokenEnv` | При добавлении сервисов, reload-действий или read-only статуса правил |
 
 `QueueMonitor` используется не только UI dashboard: `monitoring-ui-api` публикует его результаты в `/metrics` как `cmdb2monitoring_queue_lag`, `cmdb2monitoring_queue_status`, `cmdb2monitoring_queue_threshold` и `cmdb2monitoring_queue_state_error`. Эти значения используются alert rules из `deploy/observability/prometheus/cmdb2monitoring-alerts.yml`.
 
@@ -425,6 +425,9 @@ Base config не содержит пароль; `Development` config может 
 | `MONITORING_UI_LOGS_KAFKA_USERNAME` | `ElkLogging:Kafka:Username` |
 | `MONITORING_UI_LOGS_KAFKA_PASSWORD` | `ElkLogging:Kafka:Password` |
 | `MONITORING_UI_LOGS_KAFKA_MINIMUM_LEVEL` | `ElkLogging:Kafka:MinimumLevel` |
+| `MONITORING_UI_HEALTH_ENDPOINTS_JSON` | Полностью заменяет `Services:HealthEndpoints` JSON-массивом до старта UI |
+
+В development overlay допустимы `http://localhost:5080..5083`. В Production JSON обязан содержать четыре текущих Compose-сервиса с `http://<service>:8080`: пустой список, loopback, IPv4-mapped IPv6, link-local и внешние URL отклоняются до старта UI. Токены не включаются в JSON и передаются через `RulesReloadTokenEnv`/`RulesStatusTokenEnv`.
 
 Production Compose:
 - `deploy/compose.production.yml` задает Docker healthcheck через `/ready`, syslog driver, Kafka log topics и persisted volumes;

@@ -88,18 +88,25 @@ Important separation:
 - the AAPM application token or application login/password is the application's bootstrap secret and must be provided through a Docker/Kubernetes secret, protected mount, another deployment-layer mechanism, or `PAMURL`/`PAMUSERNAME`/`PAMPASSWORD` env aliases.
 - Kafka SASL can use the corporate `SASLUSERNAME`/`SASLPASSWORD`/`SASLPASSWORDSECRET` format; `SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles` becomes `secret://AAA.LOCAL\PROD.contractorProfiles` and is read from PAM/AAPM.
 
-## Git Settings And Rules File
+## Active Rules File And Git Copies
 
-The `Git Settings` menu manages only local rules-file copies for the management UI. The `cmdbkafka2zabbix` microservice reads rules according to its own `ConversionRules` configuration.
+In production, `RULES_HOST_PATH` points to a host directory containing `rules/cmdbuild-to-zabbix-host-create.json`. It is mounted into `cmdbkafka2zabbix` as `/app/rules:ro` and into `monitoring-ui-api` as `/app/rules:rw`. After `docker compose up -d`, the UI reads this active file immediately.
 
-Recommended flow:
-1. The rule developer saves JSON from the browser or through a local git working copy.
-2. The administrator reviews the diff.
-3. The administrator publishes the file to the agreed git repository or local path used by the microservice.
-4. The administrator presses `Reload conversion rules` on the Dashboard.
-5. The administrator compares:
-   - the rules version loaded by the microservice;
-   - the rules version visible to the management UI.
+Prepare the directory before starting Compose:
+
+```bash
+install -d -m 0755 /opt/cmdb2monitoring/rules
+install -d -m 0755 -o 10001 -g 10001 /opt/cmdb2monitoring/rules/rules
+install -m 0644 -o 10001 -g 10001 rules/cmdbuild-to-zabbix-host-create.json /opt/cmdb2monitoring/rules/rules/cmdbuild-to-zabbix-host-create.json
+```
+
+On the `Conversion Rules Management` page, `Rules Editing` and `Administration` roles can select `Save and apply`. The UI validates JSON, atomically replaces only the active JSON, then calls `cmdbkafka2zabbix` reload. It does not change webhook artifacts or git. Publication requires the active-file revision read by the editor: if another editor saved changes first, the UI returns a conflict and retains the local draft without overwriting it. If reload is not confirmed, the new file remains on the mount; resolve the cause and select `Retry apply`.
+
+The `Git Settings` page manages only local git working copies. It does not change the active production rules file and does not commit or push.
+
+Compare both versions:
+- rules version loaded by the microservice;
+- active rules file version read by the UI.
 
 `rulesVersion` should include date and time, for example `2026.05.05-1530-change-name`, so revisions are visually distinguishable.
 

@@ -35,34 +35,48 @@ curl http://localhost:5000/v2/_catalog
 Основной вариант:
 
 ```bash
-REGISTRY=localhost:5000 VERSION=0.8.0 ./scripts/build-local-registry-images.sh
+REGISTRY=localhost:5000 ./scripts/build-local-registry-images.sh
 ```
+
+Версия образов берется только из корневого `VERSION`. До первого versioned Git handoff,
+когда файла еще нет, скрипт собирает локальные образы с нейтральной версией `0.0.0.0`.
+Не передавайте произвольный `VERSION`: значение должно совпадать с корневым файлом.
 
 Скрипт собирает и публикует:
 
 ```text
-localhost:5000/cmdb2monitoring/cmdbwebhooks2kafka:0.8.0
-localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0
-localhost:5000/cmdb2monitoring/zabbixrequests2api:0.8.0
-localhost:5000/cmdb2monitoring/zabbixbindings2cmdbuild:0.8.0
-localhost:5000/cmdb2monitoring/monitoring-ui-api:0.8.0
+localhost:5000/cmdb2monitoring/cmdbwebhooks2kafka:<VERSION>
+localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:<VERSION>
+localhost:5000/cmdb2monitoring/zabbixrequests2api:<VERSION>
+localhost:5000/cmdb2monitoring/zabbixbindings2cmdbuild:<VERSION>
+localhost:5000/cmdb2monitoring/monitoring-ui-api:<VERSION>
 ```
 
 Дополнительно ставится тег `latest`. Для локальной проверки без push:
 
 ```bash
-PUSH=false VERSION=0.8.0 ./scripts/build-local-registry-images.sh
+PUSH=false ./scripts/build-local-registry-images.sh
 ```
 
 Ручная сборка одного образа:
 
 ```bash
+IMAGE_VERSION="$(tr -d '\r\n' < VERSION)"
+
 docker build \
-  -f deploy/dockerfiles/cmdbkafka2zabbix.Dockerfile \
-  -t localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0 \
+  --build-arg APPLICATION_VERSION="$IMAGE_VERSION" \
+  -f deploy/dockerfiles/monitoring-ui-api.Dockerfile \
+  -t "localhost:5000/cmdb2monitoring/monitoring-ui-api:$IMAGE_VERSION" \
   .
 
-docker push localhost:5000/cmdb2monitoring/cmdbkafka2zabbix:0.8.0
+docker push "localhost:5000/cmdb2monitoring/monitoring-ui-api:$IMAGE_VERSION"
+```
+
+Перед передачей UI image проверьте, что embedded `/app/VERSION`, OCI label,
+runtime `/health` и `/ready` совпадают с корневым `VERSION`:
+
+```bash
+./scripts/smoke-monitoring-ui-image.sh
 ```
 
 Сборка требует доступа к `mcr.microsoft.com` для .NET runtime/sdk images, к `docker.io` для Node.js image и к NuGet/npm registry для restore/install зависимостей.
@@ -108,6 +122,7 @@ UI/BFF использует `config/appsettings.json`, затем `config/appset
 
 ```bash
 cp deploy/production.env.example production.env
+# VERSION должен совпадать с VERSION в release bundle
 # заполнить реальные hostnames, topics и secret:// ссылки или deployment secrets
 docker compose --env-file production.env -f deploy/compose.production.yml config
 docker compose --env-file production.env -f deploy/compose.production.yml up -d

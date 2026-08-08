@@ -1,20 +1,23 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { normalizeHealthEndpoints } from '../lib/health-endpoints-config.mjs';
 
 const serviceRoot = resolve(new URL('..', import.meta.url).pathname);
 const repoRoot = resolve(serviceRoot, '../..');
 const errors = [];
+const parsedConfigs = new Map();
 
 for (const relativePath of ['config/appsettings.json', 'config/appsettings.Development.json']) {
   const fullPath = join(serviceRoot, relativePath);
   try {
-    JSON.parse(readFileSync(fullPath, 'utf8'));
+    parsedConfigs.set(relativePath, JSON.parse(readFileSync(fullPath, 'utf8')));
   } catch (error) {
     errors.push(`${relativePath}: ${error.message}`);
   }
 }
 
-const config = JSON.parse(readFileSync(join(serviceRoot, 'config/appsettings.json'), 'utf8'));
+const config = parsedConfigs.get('config/appsettings.json') ?? {};
+const developmentConfig = parsedConfigs.get('config/appsettings.Development.json') ?? {};
 required(config, 'Service.Name');
 required(config, 'Service.HealthRoute');
 required(config, 'Transport.Mode');
@@ -67,6 +70,9 @@ required(config, 'Zabbix.ApiEndpoint');
 required(config, 'Rules.ReadFromGit');
 required(config, 'Rules.RepositoryPath');
 required(config, 'Rules.RulesFilePath');
+required(config, 'Rules.ActiveBaseDirectory');
+required(config, 'Rules.ActiveFilePath');
+required(config, 'Rules.ActiveWriteEnabled');
 required(config, 'AuditStorage.Provider');
 required(config, 'AuditStorage.CommandTimeoutSeconds');
 required(config, 'EventBrowser.BootstrapServers');
@@ -82,8 +88,20 @@ if (!existsSync(join(repoRoot, config.Rules.RulesFilePath))) {
   errors.push(`Rules file does not exist: ${config.Rules.RulesFilePath}`);
 }
 
+const activeRulesBaseDirectory = resolve(serviceRoot, config.Rules.ActiveBaseDirectory);
+const activeRulesFilePath = resolve(activeRulesBaseDirectory, config.Rules.ActiveFilePath);
+if (!activeRulesFilePath.startsWith(`${activeRulesBaseDirectory}/`) && activeRulesFilePath !== activeRulesBaseDirectory) {
+  errors.push('Rules.ActiveFilePath must stay inside Rules.ActiveBaseDirectory.');
+} else if (!existsSync(activeRulesFilePath)) {
+  errors.push(`Active rules file does not exist: ${config.Rules.ActiveFilePath}`);
+}
+
 if (typeof config.Rules.ReadFromGit !== 'boolean') {
   errors.push('Rules.ReadFromGit must be boolean.');
+}
+
+if (typeof config.Rules.ActiveWriteEnabled !== 'boolean') {
+  errors.push('Rules.ActiveWriteEnabled must be boolean.');
 }
 
 if (!['Http', 'Https'].includes(config.Transport?.Mode)) {
@@ -229,7 +247,22 @@ for (const expectedTopic of ['zabbix.host.bindings', 'cmdbuild.webhooks.dlq', 'z
   }
 }
 
-if (!config.Services.HealthEndpoints.some(endpoint => endpoint?.Name === 'zabbixbindings2cmdbuild')) {
+try {
+  normalizeHealthEndpoints(config.Services?.HealthEndpoints, { environment: 'Base' });
+} catch (error) {
+  errors.push(`Services.HealthEndpoints: ${error.message}`);
+}
+
+let developmentHealthEndpoints = [];
+try {
+  developmentHealthEndpoints = normalizeHealthEndpoints(developmentConfig.Services?.HealthEndpoints, {
+    environment: 'Development'
+  });
+} catch (error) {
+  errors.push(`Development Services.HealthEndpoints: ${error.message}`);
+}
+
+if (!developmentHealthEndpoints.some(endpoint => endpoint.Name === 'zabbixbindings2cmdbuild')) {
   errors.push('Services.HealthEndpoints must include zabbixbindings2cmdbuild.');
 }
 
