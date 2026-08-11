@@ -1,10 +1,12 @@
-FROM node:22-alpine AS deps
+ARG NODE_RUNTIME_IMAGE=node:22-alpine
+
+FROM ${NODE_RUNTIME_IMAGE} AS deps
 WORKDIR /app
 
 COPY src/monitoring-ui-api/package*.json ./
 RUN npm ci --omit=dev
 
-FROM node:22-alpine AS runtime
+FROM ${NODE_RUNTIME_IMAGE} AS runtime
 WORKDIR /app
 
 ARG APPLICATION_VERSION=0.0.0.0
@@ -34,3 +36,5 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- http://127.0.0.1:5090/ready >/dev/null || exit 1
 
 CMD ["npm", "start"]
+
+FROM runtime AS gkm-runtime

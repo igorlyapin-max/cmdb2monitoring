@@ -81,6 +81,65 @@ runtime `/health` и `/ready` совпадают с корневым `VERSION`:
 
 Сборка требует доступа к `mcr.microsoft.com` для .NET runtime/sdk images, к `docker.io` для Node.js image и к NuGet/npm registry для restore/install зависимостей.
 
+## GKM base images
+
+Обычная сборка использует public base images и не требует специального режима. Для customer CI
+можно явно выбрать финальный alias `gkm-runtime` и заранее подготовленные образы из customer registry:
+
+```bash
+docker build \
+  --target gkm-runtime \
+  --build-arg NODE_RUNTIME_IMAGE=registry.gkm.local/gkm/node:22-alpine-ca \
+  -f deploy/dockerfiles/monitoring-ui-api.Dockerfile \
+  -t registry.gkm.local/cmdb2monitoring/monitoring-ui-api:00.00.00.01 \
+  .
+```
+
+`gkm-runtime` не является второй веткой приложения: это тот же runtime stage. Его назначение -
+явно показать customer CI, что image строится из подготовленного base image. BuildKit, customer CA,
+registry URL и `debian.sources` в product repository не используются.
+
+Для всех образов helper поддерживает следующие аргументы:
+
+```bash
+REGISTRY=registry.gkm.local \
+BUILD_TARGET=gkm-runtime \
+NODE_RUNTIME_IMAGE=registry.gkm.local/gkm/node:22-alpine-ca \
+DOTNET_SDK_IMAGE=registry.gkm.local/gkm/dotnet-sdk:10.0-ca \
+DOTNET_RUNTIME_IMAGE=registry.gkm.local/gkm/dotnet-aspnet:10.0-ca \
+./scripts/build-local-registry-images.sh
+```
+
+Предположения для customer base images:
+
+- Node base image сохраняет Alpine family (`node:22-alpine`); `node:22-bookworm-slim` нельзя
+  подставлять в текущий Dockerfile, потому что он использует `apk`.
+- .NET требует раздельные совместимые SDK и ASP.NET runtime images.
+- В base image уже установлены root и intermediate CA без private key, обновлен OS trust store,
+  а Node image задает `NODE_EXTRA_CA_CERTS` на подготовленный CA bundle.
+- Если customer network требует package mirror, он уже настроен в base image до `apk`, `apt-get`,
+  `npm ci` или `dotnet restore`.
+- Customer CI runner отдельно доверяет registry, выполняет login и передает только immutable or
+  controlled base-image references через protected variables `GKM_*`; значения не коммитятся.
+- При ротации CA сначала пересобираются и публикуются base images, затем все application images.
+
+GitLab job `gkm_runtime_delivery` запускается только при
+`GKM_RUNTIME_DELIVERY_ENABLED=true`. Для него обязательны `GKM_REGISTRY`,
+`GKM_NODE_RUNTIME_IMAGE`, `GKM_DOTNET_SDK_IMAGE` и `GKM_DOTNET_RUNTIME_IMAGE`.
+
+### Откат deployment
+
+Откат используйте только как incident mitigation. До него зафиксируйте текущие image digest и
+production env. В Compose укажите известный рабочий пятничный immutable tag или digest, затем:
+
+```bash
+docker compose --env-file production.env -f deploy/compose.production.yml pull
+docker compose --env-file production.env -f deploy/compose.production.yml up -d --force-recreate
+```
+
+После отката проверьте `/health`, `/ready`, логи и исходный UI scenario. Откат не заменяет
+добавление customer CA в base image.
+
 ## Конфигурационные файлы
 
 Образы включают base config из репозитория. Для реального запуска не меняйте файлы внутри образа; используйте mounted config, env overrides или secret storage.

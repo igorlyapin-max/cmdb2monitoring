@@ -55,6 +55,36 @@ dotnet_build:
     - ./scripts/dotnet build src/zabbixbindings2cmdbuild/zabbixbindings2cmdbuild.csproj -v minimal
     - ./scripts/dotnet build tests/configvalidation/configvalidation.csproj -v minimal
 
+gkm_runtime_delivery:
+  image: docker:27-cli
+  stage: build
+  services:
+    - name: docker:27-dind
+  rules:
+    - if: '$GKM_RUNTIME_DELIVERY_ENABLED == "true"'
+    - when: never
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  before_script:
+    - apk add --no-cache bash
+  script:
+    - test -n "$GKM_REGISTRY"
+    - test -n "$GKM_NODE_RUNTIME_IMAGE"
+    - test -n "$GKM_DOTNET_SDK_IMAGE"
+    - test -n "$GKM_DOTNET_RUNTIME_IMAGE"
+    - >-
+      REGISTRY="$GKM_REGISTRY"
+      NAMESPACE="${GKM_NAMESPACE:-cmdb2monitoring}"
+      PUSH=true
+      BUILD_TARGET=gkm-runtime
+      NODE_RUNTIME_IMAGE="$GKM_NODE_RUNTIME_IMAGE"
+      DOTNET_SDK_IMAGE="$GKM_DOTNET_SDK_IMAGE"
+      DOTNET_RUNTIME_IMAGE="$GKM_DOTNET_RUNTIME_IMAGE"
+      ./scripts/build-local-registry-images.sh
+
 repository_validation:
   extends: .node_job
   stage: test

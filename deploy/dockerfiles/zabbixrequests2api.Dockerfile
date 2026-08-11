@@ -1,4 +1,7 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0
+ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
+
+FROM ${DOTNET_SDK_IMAGE} AS build
 WORKDIR /src
 
 COPY global.json Directory.Build.props cmdb2monitoring.slnx ./
@@ -12,7 +15,7 @@ RUN dotnet publish src/zabbixrequests2api/zabbixrequests2api.csproj \
     --output /app/publish \
     --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM ${DOTNET_RUNTIME_IMAGE} AS runtime
 WORKDIR /app
 
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
@@ -29,3 +32,5 @@ RUN apt-get update \
 USER appuser
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD curl -fsS http://127.0.0.1:8080/ready || exit 1
 ENTRYPOINT ["dotnet", "zabbixrequests2api.dll"]
+
+FROM runtime AS gkm-runtime

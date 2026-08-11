@@ -69,7 +69,17 @@ reject_pattern "(secret|aapm)://" "$ENV_EXAMPLE_FILE" "Production env example mu
 
 for dockerfile in deploy/dockerfiles/*.Dockerfile; do
   require_pattern "/ready" "$dockerfile" "$dockerfile healthcheck must call /ready."
+  require_pattern "^FROM runtime AS gkm-runtime$" "$dockerfile" "$dockerfile must expose gkm-runtime only as the runtime-stage alias."
+  reject_pattern "customer-ca|debian\.sources" "$dockerfile" "$dockerfile must not contain customer CA or package-source files."
 done
+
+require_pattern "ARG NODE_RUNTIME_IMAGE=node:22-alpine" "deploy/dockerfiles/monitoring-ui-api.Dockerfile" "Monitoring UI must keep a configurable Node base image."
+for dockerfile in deploy/dockerfiles/cmdbwebhooks2kafka.Dockerfile deploy/dockerfiles/cmdbkafka2zabbix.Dockerfile deploy/dockerfiles/zabbixrequests2api.Dockerfile deploy/dockerfiles/zabbixbindings2cmdbuild.Dockerfile; do
+  require_pattern "ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0" "$dockerfile" "$dockerfile must keep a configurable .NET SDK base image."
+  require_pattern "ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0" "$dockerfile" "$dockerfile must keep a configurable .NET runtime base image."
+done
+
+require_pattern "BUILD_TARGET" "scripts/build-local-registry-images.sh" "Image build helper must support an explicit target."
 
 require_pattern "npm --prefix src/monitoring-ui-api test" ".github/workflows/ci.yml" "GitHub CI must run full monitoring-ui-api tests."
 require_pattern "npm --prefix src/monitoring-ui-api test" ".gitlab-ci.yml" "GitLab CI must run full monitoring-ui-api tests."
