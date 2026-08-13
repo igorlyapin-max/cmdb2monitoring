@@ -37,8 +37,8 @@
    - `zabbixrequests2api`: Zabbix API URL/token, validation settings, dynamic host group creation.
    - `zabbixbindings2cmdbuild`: CMDBuild REST URL, service account для записи binding-ов.
    - `monitoring-ui-api`: endpoints, Kafka Event Browser, auth, runtime settings, git settings.
-   - Для временной диагностики backend-сервисов, включая `monitoring-ui-api`, включайте `DebugLogging:Enabled=true` и уровень `Basic` или `Verbose`; `Verbose` раскрывает payload/request/response или runtime config детали только с маскированием секретов и не должен оставаться включенным постоянно.
-   - Для production Docker/Compose используйте `deploy/compose.production.yml` и env-шаблон `deploy/production.env.example`; Docker healthcheck должен обращаться к `/ready`, state/cache должны быть вынесены в volumes, а логи должны идти в stdout/stderr, Kafka log topics и syslog driver.
+   - Для временной диагностики backend-сервисов, включая `monitoring-ui-api`, включайте `DebugLogging:Enabled=true` и уровень `Basic` или `Verbose`; `Verbose` пишет только размер, SHA-256 fingerprint и имена полей payload, без исходных CMDB/Zabbix значений, и не должен оставаться включенным постоянно.
+   - Для production Docker/Compose используйте `deploy/compose.production.yml` и env-шаблон `deploy/production.env.example`; Docker healthcheck должен обращаться к `/ready`, state/cache должны быть вынесены в volumes, а логи должны идти в stdout/stderr и Kafka log topics. Docker logging driver выбирает платформа; для syslog подключайте `deploy/compose.logging-syslog.yml` и явно задавайте `SYSLOG_ADDRESS`.
    - Для Prometheus/Grafana используйте `deploy/observability/prometheus/cmdb2monitoring-alerts.yml` и `deploy/observability/grafana/cmdb2monitoring-dashboard.json`; live create/update/delete smoke запускается через `node scripts/live-smoke.mjs --dry-run` и затем `--execute --confirm`.
    - Сборка Docker images, публикация в локальный registry, Kafka topics, секреты по сервисам и права внешних систем описаны в `DEPLOYMENT_LOCAL_REGISTRY.md`.
 
@@ -90,15 +90,25 @@ AuditStorage:
 
 ## Активный rules-файл и git-копии
 
-В production `RULES_HOST_PATH` указывает на каталог хоста, содержащий `rules/cmdbuild-to-zabbix-host-create.json`. Он монтируется в `cmdbkafka2zabbix` как `/app/rules:ro` и в `monitoring-ui-api` как `/app/rules:rw`. После `docker compose up -d` UI сразу читает этот активный файл.
+В production `RULES_HOST_PATH` указывает на каталог хоста с rules-файлами. Один `CONVERSION_RULES_FILE_PATH` задает одинаковый относительный путь для `cmdbkafka2zabbix` и `monitoring-ui-api`; каталог монтируется как `/app/rules:ro` в converter и как `/app/rules:rw` в UI.
+
+Значение по умолчанию - `rules/cmdbuild-to-zabbix-host-create.production-empty.json`. Это безопасный no-op starter без CMDBuild classes и без event routes с `publish=true`. Demo/e2e файл `rules/cmdbuild-to-zabbix-host-create.json` нельзя назначать active rules-файлом customer deployment.
 
 Подготовьте каталог до запуска Compose:
 
 ```bash
 install -d -m 0755 /opt/cmdb2monitoring/rules
 install -d -m 0755 -o 10001 -g 10001 /opt/cmdb2monitoring/rules/rules
-install -m 0644 -o 10001 -g 10001 rules/cmdbuild-to-zabbix-host-create.json /opt/cmdb2monitoring/rules/rules/cmdbuild-to-zabbix-host-create.json
+install -m 0644 -o 10001 -g 10001 rules/cmdbuild-to-zabbix-host-create.production-empty.json /opt/cmdb2monitoring/rules/rules/cmdbuild-to-zabbix-host-create.production-empty.json
 ```
+
+В `production.env` оставьте safe default либо укажите подготовленный customer rules-файл в том же mounted directory:
+
+```bash
+CONVERSION_RULES_FILE_PATH=rules/customer-cmdbuild-to-zabbix.json
+```
+
+Перед включением `publish=true` синхронизируйте customer CMDBuild/Zabbix catalogs и выполните `Проверить правила`. Если выбранный файл отсутствует или не читается, converter не получает fallback на demo/e2e rules и не должен применяться к customer events.
 
 В разделе `Управление правилами конвертации` роль `Редактирование правил` или `Администрирование` может нажать `Сохранить и применить`. UI валидирует JSON, атомарно заменяет только активный JSON и вызывает reload `cmdbkafka2zabbix`. Webhook-артефакты и git не меняются. Публикация требует revision активного файла, прочитанного редактором: если другой редактор уже сохранил изменения, UI вернет конфликт и сохранит локальный draft без перезаписи. Если reload не подтвержден, новый файл остается на mount; устраните причину и нажмите `Повторить применение`.
 

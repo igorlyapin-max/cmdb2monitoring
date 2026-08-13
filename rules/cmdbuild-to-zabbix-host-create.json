@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.1",
+  "schemaVersion": "0.2",
   "rulesVersion": "2026.05.18-084125-test15-profile-ip-leaf-fix",
   "name": "cmdbuild-c2mtest-to-zabbix-host-lifecycle",
   "description": "Demo/e2e conversion rules for the abstract C2MTestCI CMDBuild model plus current-dev dynamic class smoke additions. Related C2MTestAddress and C2MTestReferenceLevel* classes are reached only through reference/domain paths.",
@@ -848,12 +848,6 @@
         "groupid": "2"
       }
     ],
-    "templates": [
-      {
-        "name": "ICMP Ping",
-        "templateid": "10564"
-      }
-    ],
     "agentInterface": {
       "type": 1,
       "main": 1,
@@ -1034,12 +1028,11 @@
       "priority": 10,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^C2MTestCI$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^C2MTestCI$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1051,7 +1044,10 @@
           "mode": "ip",
           "valueField": "ipAddress",
           "when": {
-            "fieldExists": "ipAddress"
+            "expression": {
+              "operator": "exists",
+              "field": "ipAddress"
+            }
           }
         }
       ]
@@ -1061,12 +1057,11 @@
       "priority": 20,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Server$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^Server$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1078,7 +1073,10 @@
           "mode": "ip",
           "valueField": "ipAddress",
           "when": {
-            "fieldExists": "ipAddress"
+            "expression": {
+              "operator": "exists",
+              "field": "ipAddress"
+            }
           }
         }
       ]
@@ -1088,12 +1086,11 @@
       "priority": 30,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^serveri$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^serveri$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1105,7 +1102,10 @@
           "mode": "ip",
           "valueField": "ipaddressIpAddr",
           "when": {
-            "fieldExists": "ipaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "ipaddressIpAddr"
+            }
           }
         }
       ]
@@ -1115,12 +1115,11 @@
       "priority": 40,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ApplicG$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^ApplicG$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1132,7 +1131,10 @@
           "mode": "dns",
           "valueField": "applicGHostname",
           "when": {
-            "fieldExists": "applicGHostname"
+            "expression": {
+              "operator": "exists",
+              "field": "applicGHostname"
+            }
           }
         }
       ]
@@ -1142,12 +1144,11 @@
       "priority": 50,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ApplicGE$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^ApplicGE$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1159,7 +1160,10 @@
           "mode": "dns",
           "valueField": "applicGEHostname",
           "when": {
-            "fieldExists": "applicGEHostname"
+            "expression": {
+              "operator": "exists",
+              "field": "applicGEHostname"
+            }
           }
         }
       ]
@@ -1169,12 +1173,11 @@
       "priority": 60,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ARM$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^ARM$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1186,7 +1189,10 @@
           "mode": "ip",
           "valueField": "aRMIpaddressIpAddr",
           "when": {
-            "fieldExists": "aRMIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "aRMIpaddressIpAddr"
+            }
           }
         }
       ],
@@ -1197,12 +1203,11 @@
       "priority": 70,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^DBGKM$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^DBGKM$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1214,7 +1219,10 @@
           "mode": "dns",
           "valueField": "dBGKMHostname",
           "when": {
-            "fieldExists": "dBGKMHostname"
+            "expression": {
+              "operator": "exists",
+              "field": "dBGKMHostname"
+            }
           }
         }
       ]
@@ -1224,12 +1232,11 @@
       "priority": 80,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Netman$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^Netman$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1241,7 +1248,10 @@
           "mode": "ip",
           "valueField": "netmanIpaddressIpAddr",
           "when": {
-            "fieldExists": "netmanIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "netmanIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1251,12 +1261,11 @@
       "priority": 90,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^NGFW$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^NGFW$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1268,7 +1277,10 @@
           "mode": "ip",
           "valueField": "nGFWIpaddressIpAddr",
           "when": {
-            "fieldExists": "nGFWIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "nGFWIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1278,12 +1290,11 @@
       "priority": 110,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^PrinterDWH$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^PrinterDWH$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1295,7 +1306,10 @@
           "mode": "ip",
           "valueField": "domainIpAddressIpAddr",
           "when": {
-            "fieldExists": "domainIpAddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "domainIpAddressIpAddr"
+            }
           }
         }
       ]
@@ -1305,12 +1319,11 @@
       "priority": 120,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^routerCore$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^routerCore$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1322,7 +1335,10 @@
           "mode": "ip",
           "valueField": "routerCoreIpaddressIpAddr",
           "when": {
-            "fieldExists": "routerCoreIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "routerCoreIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1332,22 +1348,31 @@
       "priority": 130,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^routerCore$"
-          }
-        ],
-        "anyRegex": [
-          {
-            "field": "routerCoreMgmtIpAddr",
-            "pattern": ".+"
-          },
-          {
-            "field": "eventType",
-            "pattern": "(?i)^delete$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "regex",
+              "field": "className",
+              "pattern": "(?i)^routerCore$"
+            },
+            {
+              "operator": "any",
+              "items": [
+                {
+                  "operator": "regex",
+                  "field": "routerCoreMgmtIpAddr",
+                  "pattern": ".+"
+                },
+                {
+                  "operator": "regex",
+                  "field": "eventType",
+                  "pattern": "(?i)^delete$"
+                }
+              ]
+            }
+          ]
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-<#= Model.HostProfileName #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #> <#= Model.HostProfileName #>",
@@ -1359,7 +1384,10 @@
           "mode": "ip",
           "valueField": "routerCoreMgmtIpAddr",
           "when": {
-            "fieldExists": "routerCoreMgmtIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "routerCoreMgmtIpAddr"
+            }
           }
         }
       ]
@@ -1369,12 +1397,11 @@
       "priority": 140,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^routerG$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^routerG$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1386,7 +1413,10 @@
           "mode": "ip",
           "valueField": "routerGIpaddressIpAddr",
           "when": {
-            "fieldExists": "routerGIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "routerGIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1396,12 +1426,11 @@
       "priority": 150,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^SFR$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^SFR$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1413,7 +1442,10 @@
           "mode": "dns",
           "valueField": "sFRHostname",
           "when": {
-            "fieldExists": "sFRHostname"
+            "expression": {
+              "operator": "exists",
+              "field": "sFRHostname"
+            }
           }
         }
       ]
@@ -1423,12 +1455,11 @@
       "priority": 160,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^STORAGEP$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^STORAGEP$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1440,7 +1471,10 @@
           "mode": "ip",
           "valueField": "sTORAGEPIpaddressIpAddr",
           "when": {
-            "fieldExists": "sTORAGEPIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "sTORAGEPIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1450,12 +1484,11 @@
       "priority": 170,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^tdwifi$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^tdwifi$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1467,7 +1500,10 @@
           "mode": "ip",
           "valueField": "tdwifiIpaddressIpAddr",
           "when": {
-            "fieldExists": "tdwifiIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "tdwifiIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1477,12 +1513,11 @@
       "priority": 180,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^TKGK$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^TKGK$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1494,7 +1529,10 @@
           "mode": "ip",
           "valueField": "tKGKIpaddressIpAddr",
           "when": {
-            "fieldExists": "tKGKIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "tKGKIpaddressIpAddr"
+            }
           }
         }
       ],
@@ -1505,12 +1543,11 @@
       "priority": 190,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^VMware$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^VMware$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1522,7 +1559,10 @@
           "mode": "ip",
           "valueField": "vMwareMgmtIpAddr",
           "when": {
-            "fieldExists": "vMwareMgmtIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "vMwareMgmtIpAddr"
+            }
           }
         }
       ]
@@ -1532,12 +1572,11 @@
       "priority": 200,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^VPN_HUB$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^VPN_HUB$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1549,7 +1588,10 @@
           "mode": "ip",
           "valueField": "vPNHUBIpaddressIpAddr",
           "when": {
-            "fieldExists": "vPNHUBIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "vPNHUBIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1560,12 +1602,11 @@
       "isMainProfile": true,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^iiirouter$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^iiirouter$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1577,7 +1618,10 @@
           "mode": "ip",
           "valueField": "ipaddressip",
           "when": {
-            "fieldExists": "ipaddressip"
+            "expression": {
+              "operator": "exists",
+              "field": "ipaddressip"
+            }
           }
         }
       ]
@@ -1588,12 +1632,11 @@
       "isMainProfile": true,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^iiiphone$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^iiiphone$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1605,7 +1648,10 @@
           "mode": "ip",
           "valueField": "ipAddress",
           "when": {
-            "fieldExists": "ipAddress"
+            "expression": {
+              "operator": "exists",
+              "field": "ipAddress"
+            }
           }
         }
       ]
@@ -1616,12 +1662,11 @@
       "isMainProfile": true,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^iiipad$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^iiipad$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1633,7 +1678,10 @@
           "mode": "ip",
           "valueField": "ipAddress",
           "when": {
-            "fieldExists": "ipAddress"
+            "expression": {
+              "operator": "exists",
+              "field": "ipAddress"
+            }
           }
         }
       ]
@@ -1644,12 +1692,11 @@
       "isMainProfile": true,
       "createOnUpdateWhenMissing": true,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^NTbook$"
-          }
-        ]
+        "expression": {
+          "operator": "regex",
+          "field": "className",
+          "pattern": "(?i)^NTbook$"
+        }
       },
       "hostNameTemplate": "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
       "visibleNameTemplate": "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -1661,7 +1708,10 @@
           "mode": "ip",
           "valueField": "nTbookIpaddressIpAddr",
           "when": {
-            "fieldExists": "nTbookIpaddressIpAddr"
+            "expression": {
+              "operator": "exists",
+              "field": "nTbookIpaddressIpAddr"
+            }
           }
         }
       ]
@@ -1682,50 +1732,24 @@
   },
   "groupSelectionRules": [
     {
-      "name": "separate-profile-hosts",
-      "priority": 10,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^(separate-profile-1|separate-profile-2)$"
-          }
-        ]
-      },
-      "hostGroups": [
-        {
-          "name": "Discovered hosts",
-          "groupid": "5"
-        }
-      ]
-    },
-    {
-      "name": "default-linux",
-      "priority": 1000,
-      "fallback": true,
-      "when": {
-        "always": true
-      },
-      "hostGroupsRef": "defaults.hostGroups"
-    },
-    {
       "name": "hostgroups-applicg-mgmtostype-mgmtostype",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ApplicG$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^applicg-main$"
-          },
-          {
-            "field": "mgmtOStype",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicg-main"
+            },
+            {
+              "operator": "regex",
+              "field": "mgmtOStype",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "mgmtOStype",
@@ -1741,20 +1765,21 @@
       "name": "hostgroups-applicge-applicgemgmtostype-applicgemgmtostype",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ApplicGE$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^applicge-main$"
-          },
-          {
-            "field": "applicGEMgmtOStype",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicge-main"
+            },
+            {
+              "operator": "regex",
+              "field": "applicGEMgmtOStype",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "applicGEMgmtOStype",
@@ -1770,20 +1795,21 @@
       "name": "hostgroups-applicge-applicgemgmtostype-applicgemgmtostype",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ApplicGE$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^applicge-main$"
-          },
-          {
-            "field": "applicGEMgmtOStype",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicge-main"
+            },
+            {
+              "operator": "regex",
+              "field": "applicGEMgmtOStype",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "applicGEMgmtOStype",
@@ -1799,20 +1825,21 @@
       "name": "hostgroups-applicge-applicgemgmtostype-applicgemgmtostype",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ApplicGE$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^applicge-main$"
-          },
-          {
-            "field": "applicGEMgmtOStype",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicge-main"
+            },
+            {
+              "operator": "regex",
+              "field": "applicGEMgmtOStype",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "applicGEMgmtOStype",
@@ -1828,20 +1855,21 @@
       "name": "hostgroups-arm-ipaddressostype-ipaddressostype",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^ARM$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^arm-main$"
-          },
-          {
-            "field": "ipaddressOStype",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "arm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "ipaddressOStype",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "ipaddressOStype",
@@ -1857,20 +1885,21 @@
       "name": "hostgroups-netman-locationofficedescription-locationofficedescription",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^Netman$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^netman-main$"
-          },
-          {
-            "field": "locationOfficeDescription",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "netman-main"
+            },
+            {
+              "operator": "regex",
+              "field": "locationOfficeDescription",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "locationOfficeDescription",
@@ -1885,54 +1914,24 @@
   ],
   "templateSelectionRules": [
     {
-      "name": "separate-profile-snmp",
-      "priority": 20,
-      "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^(separate-profile-1|separate-profile-2)$"
-          }
-        ]
-      },
-      "templates": [
-        {
-          "name": "ICMP Ping",
-          "templateid": "10564"
-        },
-        {
-          "name": "Generic by SNMP",
-          "templateid": "10563"
-        }
-      ]
-    },
-    {
-      "name": "default-icmp-ping",
-      "priority": 1000,
-      "fallback": true,
-      "when": {
-        "always": true
-      },
-      "templatesRef": "defaults.templates"
-    },
-    {
       "name": "templates-printerdwh-type-zabbix-server-health-by-zabbix-agent",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^PrinterDWH$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^printerdwh-main$"
-          },
-          {
-            "field": "Type",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "printerdwh-main"
+            },
+            {
+              "operator": "regex",
+              "field": "Type",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -1945,20 +1944,21 @@
       "name": "templates-sfr-sfrostype-windows-by-zabbix-agent",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^SFR$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^sfr-main$"
-          },
-          {
-            "field": "sFROStype",
-            "pattern": "(?i).*indows.*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "sfr-main"
+            },
+            {
+              "operator": "regex",
+              "field": "sFROStype",
+              "pattern": "(?i).*indows.*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -1971,20 +1971,21 @@
       "name": "templates-storagep-storagepmgmtostype-linux-by-zabbix-agent",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^STORAGEP$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^storagep-main$"
-          },
-          {
-            "field": "sTORAGEPMgmtOStype",
-            "pattern": "(?i).*indows.*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "storagep-main"
+            },
+            {
+              "operator": "regex",
+              "field": "sTORAGEPMgmtOStype",
+              "pattern": "(?i).*indows.*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -1997,20 +1998,21 @@
       "name": "templates-tdwifi-ipaddresscritical-linux-by-zabbix-agent",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^tdwifi$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^tdwifi-main$"
-          },
-          {
-            "field": "ipaddressCritical",
-            "pattern": "(?i).*indows.*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tdwifi-main"
+            },
+            {
+              "operator": "regex",
+              "field": "ipaddressCritical",
+              "pattern": "(?i).*indows.*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2023,20 +2025,21 @@
       "name": "templates-tkgk-description-linux-by-zabbix-agent",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^TKGK$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^tkgk-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*indows.*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tkgk-main"
+            },
+            {
+              "operator": "regex",
+              "field": "description",
+              "pattern": "(?i).*indows.*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2049,20 +2052,21 @@
       "name": "templates-vmware-ipaddressisdisablemon-vmware",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^VMware$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^vmware-main$"
-          },
-          {
-            "field": "ipaddressIsDisableMon",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vmware-main"
+            },
+            {
+              "operator": "regex",
+              "field": "ipaddressIsDisableMon",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2075,20 +2079,21 @@
       "name": "templates-vpn_hub-entityid-rabbitmq-cluster-by-zabbix-agent",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^VPN_HUB$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^vpn_hub-main$"
-          },
-          {
-            "field": "entityId",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vpn_hub-main"
+            },
+            {
+              "operator": "regex",
+              "field": "entityId",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2101,20 +2106,21 @@
       "name": "templates-iiirouter-description-icmp-ping",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^iiirouter$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^iiirouter-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiirouter-main"
+            },
+            {
+              "operator": "regex",
+              "field": "description",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2127,20 +2133,21 @@
       "name": "templates-iiiphone-description-icmp-ping",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^iiiphone$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^iiiphone-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiiphone-main"
+            },
+            {
+              "operator": "regex",
+              "field": "description",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2153,20 +2160,21 @@
       "name": "templates-iiipad-description-icmp-ping",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^iiipad$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^iiipad-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiipad-main"
+            },
+            {
+              "operator": "regex",
+              "field": "description",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2179,12 +2187,16 @@
       "name": "templates-routerg-ostype-windows-by-zabbix-agent",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^routerG$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routerg-main"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2197,20 +2209,21 @@
       "name": "templates-routercore-description-icmp-ping",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^routerCore$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^routercore-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routercore-main"
+            },
+            {
+              "operator": "regex",
+              "field": "description",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2223,20 +2236,21 @@
       "name": "templates-ntbook-description-icmp-ping",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^NTbook$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^ntbook-main$"
-          },
-          {
-            "field": "description",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ntbook-main"
+            },
+            {
+              "operator": "regex",
+              "field": "description",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "templates": [
         {
@@ -2320,42 +2334,34 @@
       "mode": "ip",
       "valueField": "ipAddress",
       "when": {
-        "fieldExists": "ipAddress"
-      }
-    },
-    {
-      "name": "fallback-dns-name",
-      "priority": 20,
-      "fallback": true,
-      "mode": "dns",
-      "valueField": "dnsName",
-      "when": {
-        "fieldExists": "dnsName"
+        "expression": {
+          "operator": "exists",
+          "field": "ipAddress"
+        }
       }
     }
   ],
-  "interfaceSelectionRules": [
-    {
-      "name": "default-agent-interface",
-      "priority": 1000,
-      "fallback": true,
-      "when": {
-        "always": true
-      },
-      "interfaceRef": "agentInterface"
-    }
-  ],
+  "interfaceSelectionRules": [],
   "tagSelectionRules": [
     {
-      "name": "event-create",
+      "name": "event-create-c2mtestci-main",
       "priority": 10,
       "when": {
-        "anyRegex": [
-          {
-            "field": "eventType",
-            "pattern": "(?i)^create$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "c2mtestci-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
       },
       "tags": [
         {
@@ -2365,15 +2371,618 @@
       ]
     },
     {
-      "name": "event-update",
+      "name": "event-create-server-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "server-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-serveri-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "serveri-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-applicg-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicg-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-applicge-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicge-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-arm-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "arm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-dbgkm-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "dbgkm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-netman-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "netman-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-ngfw-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ngfw-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-printerdwh-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "printerdwh-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-routercore-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routercore-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-routercore-mgmt",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routercore-mgmt"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-routerg-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routerg-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-sfr-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "sfr-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-storagep-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "storagep-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-tdwifi-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tdwifi-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-tkgk-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tkgk-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-vmware-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vmware-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-vpn_hub-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vpn_hub-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-iiirouter-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiirouter-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-iiiphone-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiiphone-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-iiipad-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiipad-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-create-ntbook-main",
+      "priority": 10,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ntbook-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^create$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "create"
+        }
+      ]
+    },
+    {
+      "name": "event-update-c2mtestci-main",
       "priority": 20,
       "when": {
-        "anyRegex": [
-          {
-            "field": "eventType",
-            "pattern": "(?i)^update$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "c2mtestci-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
       },
       "tags": [
         {
@@ -2383,15 +2992,618 @@
       ]
     },
     {
-      "name": "event-delete",
+      "name": "event-update-server-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "server-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-serveri-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "serveri-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-applicg-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicg-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-applicge-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicge-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-arm-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "arm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-dbgkm-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "dbgkm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-netman-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "netman-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-ngfw-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ngfw-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-printerdwh-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "printerdwh-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-routercore-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routercore-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-routercore-mgmt",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routercore-mgmt"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-routerg-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routerg-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-sfr-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "sfr-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-storagep-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "storagep-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-tdwifi-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tdwifi-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-tkgk-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tkgk-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-vmware-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vmware-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-vpn_hub-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vpn_hub-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-iiirouter-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiirouter-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-iiiphone-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiiphone-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-iiipad-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiipad-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-update-ntbook-main",
+      "priority": 20,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ntbook-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^update$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "update"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-c2mtestci-main",
       "priority": 30,
       "when": {
-        "anyRegex": [
-          {
-            "field": "eventType",
-            "pattern": "(?i)^delete$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "c2mtestci-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
       },
       "tags": [
         {
@@ -2401,86 +3613,618 @@
       ]
     },
     {
-      "name": "host-profile-main",
-      "priority": 40,
+      "name": "event-delete-server-main",
+      "priority": 30,
       "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^main$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "server-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
       },
       "tags": [
         {
-          "tag": "cmdb.hostProfile",
-          "value": "main"
+          "tag": "cmdb.event",
+          "value": "delete"
         }
       ]
     },
     {
-      "name": "host-profile-separate-1",
-      "priority": 41,
+      "name": "event-delete-serveri-main",
+      "priority": 30,
       "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^separate-profile-1$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "serveri-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
       },
       "tags": [
         {
-          "tag": "cmdb.hostProfile",
-          "value": "separate-profile-1"
+          "tag": "cmdb.event",
+          "value": "delete"
         }
       ]
     },
     {
-      "name": "host-profile-separate-2",
-      "priority": 42,
+      "name": "event-delete-applicg-main",
+      "priority": 30,
       "when": {
-        "anyRegex": [
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^separate-profile-2$"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicg-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
       },
       "tags": [
         {
-          "tag": "cmdb.hostProfile",
-          "value": "separate-profile-2"
+          "tag": "cmdb.event",
+          "value": "delete"
         }
       ]
     },
     {
-      "name": "default-tags",
-      "priority": 1000,
-      "fallback": true,
+      "name": "event-delete-applicge-main",
+      "priority": 30,
       "when": {
-        "always": true
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "applicge-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
       },
-      "tagsRef": "defaults.tags"
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-arm-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "arm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-dbgkm-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "dbgkm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-netman-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "netman-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-ngfw-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ngfw-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-printerdwh-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "printerdwh-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-routercore-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routercore-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-routercore-mgmt",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routercore-mgmt"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-routerg-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "routerg-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-sfr-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "sfr-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-storagep-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "storagep-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-tdwifi-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tdwifi-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-tkgk-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "tkgk-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-vmware-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vmware-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-vpn_hub-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "vpn_hub-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-iiirouter-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiirouter-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-iiiphone-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiiphone-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-iiipad-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "iiipad-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
+    },
+    {
+      "name": "event-delete-ntbook-main",
+      "priority": 30,
+      "when": {
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ntbook-main"
+            },
+            {
+              "operator": "regex",
+              "field": "eventType",
+              "pattern": "(?i)^delete$"
+            }
+          ]
+        }
+      },
+      "tags": [
+        {
+          "tag": "cmdb.event",
+          "value": "delete"
+        }
+      ]
     },
     {
       "name": "tags-dbgkm-dbtype-cmdb.dbtype",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^DBGKM$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^dbgkm-main$"
-          },
-          {
-            "field": "DBtype",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "dbgkm-main"
+            },
+            {
+              "operator": "regex",
+              "field": "DBtype",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "DBtype",
@@ -2497,20 +4241,21 @@
       "name": "tags-ngfw-critical-cmdb.critical",
       "priority": 100,
       "when": {
-        "allRegex": [
-          {
-            "field": "className",
-            "pattern": "(?i)^NGFW$"
-          },
-          {
-            "field": "hostProfile",
-            "pattern": "(?i)^ngfw-main$"
-          },
-          {
-            "field": "Critical",
-            "pattern": "(?i).*"
-          }
-        ]
+        "expression": {
+          "operator": "all",
+          "items": [
+            {
+              "operator": "equals",
+              "field": "hostProfile",
+              "value": "ngfw-main"
+            },
+            {
+              "operator": "regex",
+              "field": "Critical",
+              "pattern": "(?i).*"
+            }
+          ]
+        }
       },
       "targetMode": "dynamicFromLeaf",
       "valueField": "Critical",
@@ -2892,5 +4637,6 @@
       "  \"id\": <#= Model.RequestId #>",
       "}"
     ]
-  }
+  },
+  "interfaceProfileSelectionRules": []
 }

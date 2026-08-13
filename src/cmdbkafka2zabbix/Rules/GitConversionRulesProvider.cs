@@ -86,9 +86,23 @@ public sealed class GitConversionRulesProvider(
                 return cachedRules;
             }
 
-            await using var stream = File.OpenRead(rulesFilePath);
-            var rules = await JsonSerializer.DeserializeAsync<ConversionRulesDocument>(stream, JsonOptions, cancellationToken)
+            var rulesJson = await File.ReadAllTextAsync(rulesFilePath, cancellationToken);
+            var rules = JsonSerializer.Deserialize<ConversionRulesDocument>(rulesJson, JsonOptions)
                 ?? throw new InvalidOperationException($"Conversion rules file '{rulesFilePath}' is empty.");
+            var validationErrors = ConversionRulesSchemaValidator.Validate(rulesJson, rules);
+            if (validationErrors.Count > 0)
+            {
+                throw new InvalidOperationException($"Conversion rules file '{rulesFilePath}' is invalid: {string.Join(" ", validationErrors)}");
+            }
+            foreach (var ignoredRule in ProfileScopedRulePolicy.FindIgnoredRules(rules))
+            {
+                logger.LogWarning(
+                    "Ignoring conversion rule {Collection}[{Index}] because {Reason}{ProfileSuffix}",
+                    ignoredRule.Collection,
+                    ignoredRule.Index,
+                    ignoredRule.Reason,
+                    string.IsNullOrWhiteSpace(ignoredRule.ProfileName) ? string.Empty : $":{ignoredRule.ProfileName}");
+            }
 
             cachedRules = rules;
             cachedLastWriteTime = lastWriteTime;

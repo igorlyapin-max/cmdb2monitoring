@@ -15,6 +15,7 @@ import {
   minimalHostProfileInterfaceMode,
   nextRulesVersion,
   replaceHostProfileAddressFieldForClass,
+  ruleClassConditions,
   sourceFieldTemplate,
   sourceFieldAddressKind,
   sourceFieldCanUseCatalogAttribute,
@@ -148,14 +149,16 @@ test('ensureMinimalHostProfileForClass creates an IP profile for a new class', (
   assert.equal(rules.hostProfiles.length, 1);
   assert.equal(rules.hostProfiles[0].isMainProfile, true);
   assert.equal(rules.hostProfiles[0].createOnUpdateWhenMissing, true);
-  assert.equal(rules.hostProfiles[0].when.allRegex[0].pattern, '(?i)^Server$');
+  assert.deepEqual(rules.hostProfiles[0].when, {
+    expression: { operator: 'equals', field: 'className', value: 'Server' }
+  });
   assert.deepEqual(rules.hostProfiles[0].interfaces[0], {
     name: 'server-main-agent-ip',
     priority: 10,
     interfaceProfileRef: 'agent',
     mode: 'ip',
     valueField: 'ipAddress',
-    when: { fieldExists: 'ipAddress' }
+    when: { expression: { operator: 'exists', field: 'ipAddress' } }
   });
 });
 
@@ -173,7 +176,7 @@ test('ensureMinimalHostProfileForClass does not create a profile when one alread
     hostProfiles: [
       {
         name: 'existing',
-        when: { allRegex: [{ field: 'className', pattern: '(?i)^Server$' }] }
+        when: { expression: { operator: 'equals', field: 'className', value: 'Server' } }
       }
     ]
   };
@@ -188,7 +191,7 @@ test('ensureMinimalHostProfileForClass can explicitly create an additional profi
     hostProfiles: [
       {
         name: 'serveri-main',
-        when: { allRegex: [{ field: 'className', pattern: '(?i)^serveri$' }] }
+        when: { expression: { operator: 'equals', field: 'className', value: 'serveri' } }
       }
     ]
   };
@@ -207,10 +210,19 @@ test('ensureMinimalHostProfileForClass can explicitly create an additional profi
   assert.equal(rules.hostProfiles.length, 2);
   assert.equal(rules.hostProfiles[1].isMainProfile, false);
   assert.equal(rules.hostProfiles[1].hostNameTemplate, 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-<#= Model.HostProfileName #>');
-  assert.deepEqual(rules.hostProfiles[1].when.anyRegex, [
-    { field: 'mgmtIpAddr', pattern: '.+' },
-    { field: 'eventType', pattern: '(?i)^delete$' }
-  ]);
+  assert.deepEqual(rules.hostProfiles[1].when.expression, {
+    operator: 'all',
+    items: [
+      { operator: 'equals', field: 'className', value: 'serveri' },
+      {
+        operator: 'any',
+        items: [
+          { operator: 'exists', field: 'mgmtIpAddr' },
+          { operator: 'equals', field: 'eventType', value: 'delete' }
+        ]
+      }
+    ]
+  });
   assert.equal(rules.hostProfiles[1].interfaces[0].valueField, 'mgmtIpAddr');
 });
 
@@ -225,25 +237,25 @@ test('replaceHostProfileAddressFieldForClass rewrites class-scoped invalid inter
     hostProfiles: [
       {
         name: 'serveri-main',
-        when: { allRegex: [{ field: 'className', pattern: '(?i)^serveri$' }] },
+        when: { expression: { operator: 'equals', field: 'className', value: 'serveri' } },
         interfaces: [
           {
             name: 'agent',
             mode: 'ip',
             valueField: 'ipAddress',
-            when: { fieldExists: 'ipAddress' }
+            when: { expression: { operator: 'exists', field: 'ipAddress' } }
           }
         ]
       },
       {
         name: 'server-main',
-        when: { allRegex: [{ field: 'className', pattern: '(?i)^Server$' }] },
+        when: { expression: { operator: 'equals', field: 'className', value: 'Server' } },
         interfaces: [
           {
             name: 'agent',
             mode: 'ip',
             valueField: 'ipAddress',
-            when: { fieldExists: 'ipAddress' }
+            when: { expression: { operator: 'exists', field: 'ipAddress' } }
           }
         ]
       }
@@ -260,7 +272,7 @@ test('replaceHostProfileAddressFieldForClass rewrites class-scoped invalid inter
 
   assert.deepEqual(result, { changed: true, count: 1, profiles: ['serveri-main'] });
   assert.equal(rules.hostProfiles[0].interfaces[0].valueField, 'ipaddressIpAddr');
-  assert.equal(rules.hostProfiles[0].interfaces[0].when.fieldExists, 'ipaddressIpAddr');
+  assert.equal(rules.hostProfiles[0].interfaces[0].when.expression.field, 'ipaddressIpAddr');
   assert.equal(rules.hostProfiles[1].interfaces[0].valueField, 'ipAddress');
 });
 
@@ -287,7 +299,7 @@ test('disabled profiles do not satisfy class matching and can be replaced', () =
       {
         name: 'disabled',
         enabled: false,
-        when: { allRegex: [{ field: 'className', pattern: '(?i)^Server$' }] }
+        when: { expression: { operator: 'equals', field: 'className', value: 'Server' } }
       }
     ]
   };
@@ -301,10 +313,28 @@ test('disabled profiles do not satisfy class matching and can be replaced', () =
 
 test('hostProfileAppliesToClass supports class regex alternatives and global profiles', () => {
   assert.equal(hostProfileAppliesToClass({
-    when: { allRegex: [{ field: 'className', pattern: '(?i)^(Server|NetworkDevice)$' }] }
+    when: { expression: { operator: 'regex', field: 'className', pattern: '(?i)^(Server|NetworkDevice)$' } }
   }, 'NetworkDevice'), true);
 
   assert.equal(hostProfileAppliesToClass({ name: 'global' }, 'AnyConcreteClass'), true);
+});
+
+test('ruleClassConditions derives concrete classes from anchored class regex conditions', () => {
+  assert.deepEqual(ruleClassConditions({
+    when: {
+      expression: {
+        operator: 'all',
+        items: [
+          { operator: 'regex', field: 'className', pattern: '(?i)^(ARM|Printer)$' },
+          { operator: 'exists', field: 'ipAddress' }
+        ]
+      }
+    }
+  }), ['ARM', 'Printer']);
+
+  assert.deepEqual(ruleClassConditions({
+    when: { expression: { operator: 'regex', field: 'className', pattern: '(?i)^ARM.*$' } }
+  }), []);
 });
 
 test('minimalHostProfileInterfaceMode returns empty mode for non-address leaves', () => {

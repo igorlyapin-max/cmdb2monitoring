@@ -1,3 +1,10 @@
+import {
+  allCondition,
+  conditionLeaf,
+  replaceConditionField,
+  ruleMayApplyToClass
+} from './condition-expression.js';
+
 export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fieldRule = {}, target = {}, options = {}) {
   const forceAdditional = Boolean(options.forceAdditional);
   if (!rules || !className || !fieldKey || (!forceAdditional && classHasHostProfile(rules, className))) {
@@ -20,32 +27,22 @@ export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fie
   const createOnUpdateWhenMissing = options.createOnUpdateWhenMissing === undefined
     ? true
     : Boolean(options.createOnUpdateWhenMissing);
-  const when = {
-    allRegex: [
-      {
-        field: 'className',
-        pattern: `(?i)^${escapeRegex(className)}$`
-      }
-    ]
-  };
+  const conditions = [conditionLeaf('className', 'equals', className)];
   if (forceAdditional) {
-    when.anyRegex = [
-      {
-        field: fieldKey,
-        pattern: '.+'
-      },
-      {
-        field: 'eventType',
-        pattern: '(?i)^delete$'
-      }
-    ];
+    conditions.push({
+      operator: 'any',
+      items: [
+        conditionLeaf(fieldKey, 'exists'),
+        conditionLeaf('eventType', 'equals', 'delete')
+      ]
+    });
   }
   const profile = {
     name: profileName,
     priority: nextPriority,
     isMainProfile: !forceAdditional,
     createOnUpdateWhenMissing,
-    when,
+    when: { expression: allCondition(conditions) },
     hostNameTemplate: forceAdditional
       ? 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-<#= Model.HostProfileName #>'
       : 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>',
@@ -59,9 +56,7 @@ export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fie
         interfaceProfileRef,
         mode,
         valueField: fieldKey,
-        when: {
-          fieldExists: fieldKey
-        }
+        when: { expression: conditionLeaf(fieldKey, 'exists') }
       }
     ]
   };
@@ -145,38 +140,7 @@ function defaultHostProfileAddressFieldNeedsReplacement(currentField, fieldRule 
 }
 
 function replaceFieldExistsCondition(when, oldField, newField, options = {}) {
-  if (!when || typeof when !== 'object') {
-    return false;
-  }
-
-  if (Array.isArray(when.fieldsExist)) {
-    let changed = false;
-    when.fieldsExist = when.fieldsExist.map(field => {
-      if (!sameNormalized(field, oldField)) {
-        return field;
-      }
-      changed = true;
-      return newField;
-    });
-    if (changed) {
-      return true;
-    }
-  }
-
-  if (when.fieldExists === undefined || when.fieldExists === '') {
-    if (options.setWhenMissing) {
-      when.fieldExists = newField;
-      return true;
-    }
-    return false;
-  }
-
-  if (sameNormalized(when.fieldExists, oldField)) {
-    when.fieldExists = newField;
-    return true;
-  }
-
-  return false;
+  return replaceConditionField(when, oldField, newField, options);
 }
 
 export function minimalHostProfileInterfaceMode(fieldKey, fieldRule = {}, target = {}) {
@@ -252,8 +216,7 @@ export function hostProfileAppliesToClass(profile, className) {
     return false;
   }
 
-  const classes = ruleClassConditions(profile);
-  return classes.length === 0 || classes.some(item => sameNormalized(item, className));
+  return ruleMayApplyToClass(profile, className, { normalize: normalizeToken });
 }
 
 export function interfaceAddressCompatibilityIssue(fieldKey, fieldRule = {}, targetType = '', target = {}) {
@@ -449,12 +412,36 @@ function pad2(value) {
 }
 
 export function ruleClassConditions(rule) {
-  const matchers = [
-    ...(rule?.when?.anyRegex ?? []),
-    ...(rule?.when?.allRegex ?? [])
-  ].filter(matcher => canonicalSourceField(matcher.field) === 'className');
+  return uniqueTokens(conditionClassValues(rule?.when?.expression));
+}
 
-  return uniqueTokens(matchers.flatMap(matcher => regexLiteralValues(matcher.pattern)));
+function conditionClassValues(expression, values = []) {
+  if (!expression || typeof expression !== 'object') {
+    return values;
+  }
+  if (Array.isArray(expression.items)) {
+    expression.items.forEach(item => conditionClassValues(item, values));
+    return values;
+  }
+  if (canonicalSourceField(expression.field) !== 'className') {
+    return values;
+  }
+  const operator = String(expression.operator ?? '').toLowerCase();
+  if (operator === 'equals' && String(expression.value ?? '').trim()) {
+    values.push(String(expression.value));
+  } else if (operator === 'regex') {
+    values.push(...exactRegexLiteralValues(expression.pattern));
+  }
+  return values;
+}
+
+function exactRegexLiteralValues(pattern) {
+  const normalized = String(pattern ?? '').replaceAll('(?i)', '').trim();
+  if (!normalized.startsWith('^') || !normalized.endsWith('$')) {
+    return [];
+  }
+  const body = normalized.slice(1, -1);
+  return /[\[\]{}.*+?\\]/.test(body) ? [] : regexLiteralValues(normalized);
 }
 
 export function escapeRegex(value) {

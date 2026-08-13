@@ -17,10 +17,21 @@ import {
   writeRulesAtomically
 } from './lib/active-rules-publication.mjs';
 import { applyHealthEndpointsConfig } from './lib/health-endpoints-config.mjs';
+import {
+  ignoredProfileScopedRules,
+  matchesConditionExpression,
+  validateRulesConditions
+} from './public/lib/condition-expression.js';
 
 const serviceRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const repositoryRoot = resolve(serviceRoot, '../..');
 const applicationVersion = readApplicationVersion();
+const buildIdentity = {
+  applicationVersion,
+  gitRevision: safeBuildIdentityValue(process.env.GIT_REVISION, 'unknown'),
+  buildProvenance: safeBuildIdentityValue(process.env.BUILD_PROVENANCE, 'unverified-local'),
+  sourceState: safeBuildIdentityValue(process.env.SOURCE_STATE, 'dirty-or-unverified')
+};
 const environment = process.env.NODE_ENV || 'Development';
 const resolvedSecretReferences = new Map();
 let logger = createBootstrapLogger();
@@ -160,7 +171,7 @@ async function route(request, response) {
     sendJson(response, 200, {
       service: config.Service.Name,
       status: 'ok',
-      applicationVersion,
+      ...buildIdentity,
       startedAt: startedAt.toISOString()
     });
     return;
@@ -1299,6 +1310,14 @@ async function loadConfig() {
 }
 
 function readApplicationVersion() {
+  const configured = String(process.env.APPLICATION_VERSION ?? '').trim();
+  if (configured) {
+    if (configured !== '0.0.0.0' && !/^\d{2}\.\d{2}\.\d{2}\.\d{2}$/.test(configured)) {
+      throw new Error(`APPLICATION_VERSION must have format XX.YY.ZZ.NN: ${configured}`);
+    }
+    return configured;
+  }
+
   const versionFile = [
     join(serviceRoot, 'VERSION'),
     join(repositoryRoot, 'VERSION')
@@ -1314,6 +1333,11 @@ function readApplicationVersion() {
   }
 
   return version;
+}
+
+function safeBuildIdentityValue(value, fallback) {
+  const normalized = String(value ?? '').trim();
+  return normalized && normalized.length <= 128 ? normalized : fallback;
 }
 
 async function resolveSecretReferences(target, serviceName) {
@@ -3428,11 +3452,17 @@ async function validateRulesObject(rules) {
   requireObject(rules, 'zabbix', errors);
   requireObject(rules, 'defaults', errors);
   requireArray(rules, 'eventRoutingRules', errors);
-  requireArray(rules, 'groupSelectionRules', errors);
-  requireArray(rules, 'templateSelectionRules', errors);
-  requireArray(rules, 'interfaceAddressRules', errors);
-  requireArray(rules, 'interfaceSelectionRules', errors);
-  requireArray(rules, 'tagSelectionRules', errors);
+  requireArrayProperty(rules, 'groupSelectionRules', errors);
+  requireArrayProperty(rules, 'templateSelectionRules', errors);
+  requireArrayProperty(rules, 'interfaceAddressRules', errors);
+  requireArrayProperty(rules, 'interfaceSelectionRules', errors);
+  requireArrayProperty(rules, 'tagSelectionRules', errors);
+  errors.push(...validateRulesConditions(rules));
+  errors.push(...ignoredProfileScopedRules(rules).map(item => {
+    const profile = item.profileName ? " '" + item.profileName + "'" : '';
+    return item.collection + '[' + item.index + '] must declare one known hostProfile with root all/equals scope: '
+      + item.reason + profile + '.';
+  }));
 
   for (const eventType of ['create', 'update', 'delete']) {
     if (!rules.eventRoutingRules?.some(route => equalsIgnoreCase(route.eventType, eventType))) {
@@ -5416,16 +5446,9 @@ function auditProfileInterfaces(rules = {}, profile = {}, source = {}) {
   }
 
   const matched = profileRules
-    .filter(rule => !rule.fallback)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
     .filter(rule => auditRuleMatches(rule, source, true));
-  const selected = matched.length > 0
-    ? matched
-    : profileRules
-      .filter(rule => rule.fallback)
-      .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
-      .filter(rule => auditRuleMatches(rule, source, true));
-  return selected
+  return matched
     .map(rule => auditInterfaceFromProfileRule(rules, rule, source))
     .filter(Boolean);
 }
@@ -5465,16 +5488,10 @@ function resolveAuditInterfaceProfile(rules = {}, profileRef = '') {
 
 function auditLookupItems(rulesList = [], rules = {}, source = {}, propertyName, refName, model = {}) {
   const matched = rulesList
-    .filter(rule => rule?.enabled !== false && !rule.fallback)
+    .filter(rule => rule?.enabled !== false)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
     .filter(rule => auditRuleMatches(rule, source, false));
-  const selected = matched.length > 0
-    ? matched
-    : rulesList
-      .filter(rule => rule?.enabled !== false && rule.fallback)
-      .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
-      .filter(rule => auditRuleMatches(rule, source, true));
-  const items = selected.flatMap(rule => {
+  const items = matched.flatMap(rule => {
     if (Array.isArray(rule[propertyName]) && rule[propertyName].length > 0) {
       return rule[propertyName];
     }
@@ -7445,13 +7462,9 @@ function normalizeHostName(rules, className, hostInput, source) {
 
 function selectLookupItems(rulesList = [], rules, source, propertyName, refName) {
   const matches = rulesList
-    .filter(rule => !rule.fallback)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
     .filter(rule => matchesCondition(rule.when, source));
-  const selected = matches.length > 0
-    ? matches
-    : rulesList.filter(rule => rule.fallback).filter(rule => matchesCondition(rule.when, source));
-  const items = selected.flatMap(rule => {
+  const items = matches.flatMap(rule => {
     if (Array.isArray(rule[propertyName]) && rule[propertyName].length > 0) {
       return rule[propertyName];
     }
@@ -7515,10 +7528,8 @@ function selectRenderedItems(rulesList = [], rules, source, propertyName, refNam
 
 function selectInterface(rules, source) {
   const profileRule = (rules.interfaceProfileSelectionRules ?? [])
-    .filter(item => !item.fallback)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
-    .find(item => matchesCondition(item.when, source))
-    ?? (rules.interfaceProfileSelectionRules ?? []).find(item => item.fallback && matchesCondition(item.when, source));
+    .find(item => matchesCondition(item.when, source));
   if (profileRule?.interfaceProfileRef && rules.defaults?.interfaceProfiles?.[profileRule.interfaceProfileRef]) {
     return applyInterfaceAddress(
       rules.defaults.interfaceProfiles[profileRule.interfaceProfileRef],
@@ -7527,10 +7538,8 @@ function selectInterface(rules, source) {
   }
 
   const rule = (rules.interfaceSelectionRules ?? [])
-    .filter(item => !item.fallback)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
-    .find(item => matchesCondition(item.when, source))
-    ?? (rules.interfaceSelectionRules ?? []).find(item => item.fallback && matchesCondition(item.when, source));
+    .find(item => matchesCondition(item.when, source));
   const profile = rule?.interfaceRef === 'snmpInterface'
     ? rules.defaults?.snmpInterface
     : rules.defaults?.agentInterface;
@@ -7552,13 +7561,8 @@ function selectInterfaceAddress(rules, source) {
   }
 
   const rule = rulesList
-    .filter(item => !item.fallback)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
-    .find(item => matchesCondition(item.when, source))
-    ?? rulesList
-      .filter(item => item.fallback)
-      .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
-      .find(item => matchesCondition(item.when, source));
+    .find(item => matchesCondition(item.when, source));
   if (!rule) {
     return null;
   }
@@ -7588,13 +7592,9 @@ function applyInterfaceAddress(profile = {}, address, source) {
 function selectTags(rules, source) {
   const defaults = rules.defaults?.tags ?? [];
   const matched = (rules.tagSelectionRules ?? [])
-    .filter(item => !item.fallback)
     .sort((left, right) => (left.priority ?? 1000) - (right.priority ?? 1000))
     .filter(item => matchesCondition(item.when, source));
-  const selected = matched.length > 0
-    ? matched
-    : (rules.tagSelectionRules ?? []).filter(item => item.fallback && matchesCondition(item.when, source));
-  const tags = [...defaults, ...selected.flatMap(item => item.tags ?? [])]
+  const tags = [...defaults, ...matched.flatMap(item => item.tags ?? [])]
     .map(tag => ({
       tag: tag.tag,
       value: tag.value || renderSimple(tag.valueTemplate, {
@@ -7612,46 +7612,7 @@ function selectTags(rules, source) {
 }
 
 function matchesCondition(condition = {}, source) {
-  if (condition.always) {
-    return true;
-  }
-
-  let hasConditions = false;
-  if (condition.fieldExists) {
-    hasConditions = true;
-    if (isBlank(readSourceField(source, condition.fieldExists))) {
-      return false;
-    }
-  }
-
-  if (Array.isArray(condition.fieldsExist)
-      && condition.fieldsExist.length > 0) {
-    hasConditions = true;
-    if (!condition.fieldsExist.every(field => !isBlank(readSourceField(source, field)))) {
-      return false;
-    }
-  }
-
-  if (Array.isArray(condition.allRegex) && condition.allRegex.length > 0) {
-    hasConditions = true;
-    if (!condition.allRegex.every(matcher => matchesRuleRegex(source, matcher))) {
-      return false;
-    }
-  }
-
-  if (Array.isArray(condition.anyRegex) && condition.anyRegex.length > 0) {
-    hasConditions = true;
-    if (!condition.anyRegex.some(matcher => matchesRuleRegex(source, matcher))) {
-      return false;
-    }
-  }
-
-  return hasConditions;
-}
-
-function matchesRuleRegex(source, matcher) {
-  const value = readSourceField(source, matcher.field);
-  return !isBlank(value) && compileRuleRegex(matcher.pattern).test(value);
+  return matchesConditionExpression(condition, field => readSourceField(source, field));
 }
 
 function normalizeSourcePayload(payload, rules = null) {
@@ -9455,6 +9416,12 @@ function requireObject(object, property, errors) {
 
 function requireArray(object, property, errors) {
   if (!Array.isArray(object?.[property]) || object[property].length === 0) {
+    errors.push(`${property} array is required.`);
+  }
+}
+
+function requireArrayProperty(object, property, errors) {
+  if (!Array.isArray(object?.[property])) {
     errors.push(`${property} array is required.`);
   }
 }

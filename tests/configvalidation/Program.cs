@@ -41,6 +41,9 @@ foreach (var service in services)
 ValidateTopicChain(configs, "base", errors);
 ValidateTopicChain(configs, "development", errors);
 ValidateRulesFile(repositoryRoot, errors);
+ValidateProfileScopedRuleContract(errors);
+ValidateProductionRulesStarter(repositoryRoot, errors);
+ValidateDevelopmentRulesStarter(repositoryRoot, errors);
 await ValidateRulesT4Rendering(repositoryRoot, errors);
 if (ActiveRulesHaveHostProfiles(repositoryRoot, "main", "separate-profile-1", "separate-profile-2"))
 {
@@ -587,6 +590,7 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
     RequireObject(rules, "source:fields:lifecycleState", "rules", errors);
     RequireObject(rules, "source:fields:monitoringPolicy", "rules", errors);
     RequireArray(rules, "templateConflictRules", "rules", errors);
+    ValidateRulesConditionSchema(rulesPath, errors);
     ValidateHostProfilesForEntityClasses(rules, errors);
     ValidateDemoSourceFieldMetadata(rules, errors);
     ValidateCmdbPathSourceFields(rules, errors);
@@ -664,6 +668,46 @@ static void ValidateRulesFile(string repositoryRoot, List<string> errors)
             errors.Add($"hostGetByHostJsonRpcRequestLines must include '{marker}' for update/delete fallback.");
         }
     }
+}
+
+static void ValidateProductionRulesStarter(string repositoryRoot, List<string> errors)
+{
+    var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.production-empty.json");
+    var rules = LoadJsonObject(rulesPath, errors);
+    if (rules is null)
+    {
+        return;
+    }
+
+    RequireNonEmpty(rules, "schemaVersion", "production rules starter", errors);
+    RequireNonEmpty(rules, "rulesVersion", "production rules starter", errors);
+    RequireNonEmpty(rules, "name", "production rules starter", errors);
+    ValidateRulesConditionSchema(rulesPath, errors);
+    if (GetArray(rules, "source:entityClasses").Count != 0)
+    {
+        errors.Add("Production rules starter must not declare CMDBuild classes.");
+    }
+
+    var routes = GetArray(rules, "eventRoutingRules").OfType<JsonObject>().ToArray();
+    if (routes.Length == 0 || routes.Any(route => GetBool(route, "publish") != false))
+    {
+        errors.Add("Production rules starter must disable every event route.");
+    }
+}
+
+static void ValidateDevelopmentRulesStarter(string repositoryRoot, List<string> errors)
+{
+    var rulesPath = Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.dev-empty.json");
+    var rules = LoadJsonObject(rulesPath, errors);
+    if (rules is null)
+    {
+        return;
+    }
+
+    RequireNonEmpty(rules, "schemaVersion", "development rules starter", errors);
+    RequireNonEmpty(rules, "rulesVersion", "development rules starter", errors);
+    RequireNonEmpty(rules, "name", "development rules starter", errors);
+    ValidateRulesConditionSchema(rulesPath, errors);
 }
 
 static void ValidateCmdbPathSourceFields(JsonObject rules, List<string> errors)
@@ -1389,11 +1433,11 @@ static bool ActiveRulesHaveServerWindowsFixture(string repositoryRoot)
     }
 
     return GetArray(rules, "templateSelectionRules").OfType<JsonObject>().Any(rule =>
-            RuleHasClassMatcher(rule, "Server") && RuleHasTemplate(rule, "10081"))
+            RuleTargetsClass(rule, rules, "Server") && RuleHasTemplate(rule, "10081"))
         || GetArray(rules, "groupSelectionRules").OfType<JsonObject>().Any(rule =>
-            RuleHasClassMatcher(rule, "Server") && RuleHasGroup(rule, "5"))
+            RuleTargetsClass(rule, rules, "Server") && RuleHasGroup(rule, "5"))
         || GetArray(rules, "tagSelectionRules").OfType<JsonObject>().Any(rule =>
-            RuleHasClassMatcher(rule, "Server") && RuleHasTag(rule, "cmdb.os"));
+            RuleTargetsClass(rule, rules, "Server") && RuleHasTag(rule, "cmdb.os"));
 }
 
 static bool ActiveRulesHaveMonitoringSuppressionFixture(string repositoryRoot)
@@ -1429,15 +1473,67 @@ static JsonObject? TryLoadActiveRulesObject(string repositoryRoot)
 
 static bool RuleHasClassMatcher(JsonObject rule, string className)
 {
-    return GetArray(rule, "when:allRegex")
-        .Concat(GetArray(rule, "when:anyRegex"))
+    var expression = rule["when"]?["expression"];
+    return ConditionReferencesField(expression, "className")
+        && ConditionCanMatchClass(expression, className);
+}
+
+static bool RuleTargetsClass(JsonObject rule, JsonObject rules, string className)
+{
+    if (RuleHasClassMatcher(rule, className))
+    {
+        return true;
+    }
+
+    var profileNames = ConditionExactValues(rule["when"]?["expression"], "hostProfile");
+    return profileNames.Any(profileName => GetArray(rules, "hostProfiles")
         .OfType<JsonObject>()
-        .Where(matcher => string.Equals(GetString(matcher, "field"), "className", StringComparison.OrdinalIgnoreCase))
-        .Select(matcher => GetString(matcher, "pattern"))
-        .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
-        .Any(pattern => RegexPatternCanMatchClass(pattern!, className)
-            || RegexLiteralValues(pattern!).Any(value =>
-                string.Equals(NormalizeRuleName(value), NormalizeRuleName(className), StringComparison.OrdinalIgnoreCase)));
+        .Any(profile => string.Equals(GetString(profile, "name"), profileName, StringComparison.OrdinalIgnoreCase)
+            && RuleHasClassMatcher(profile, className)));
+}
+
+static bool ConditionReferencesField(JsonNode? expressionNode, string fieldName)
+{
+    if (expressionNode is not JsonObject expression)
+    {
+        return false;
+    }
+
+    var operation = GetString(expression, "operator")?.ToLowerInvariant();
+    if (operation is "all" or "any" or "not")
+    {
+        return GetArray(expression, "items").Any(item => ConditionReferencesField(item, fieldName));
+    }
+
+    return string.Equals(GetString(expression, "field"), fieldName, StringComparison.OrdinalIgnoreCase);
+}
+
+static IEnumerable<string> ConditionExactValues(JsonNode? expressionNode, string fieldName)
+{
+    if (expressionNode is not JsonObject expression)
+    {
+        return [];
+    }
+
+    var operation = GetString(expression, "operator")?.ToLowerInvariant();
+    if (operation is "all" or "any" or "not")
+    {
+        return GetArray(expression, "items").SelectMany(item => ConditionExactValues(item, fieldName));
+    }
+    if (!string.Equals(GetString(expression, "field"), fieldName, StringComparison.OrdinalIgnoreCase))
+    {
+        return [];
+    }
+    if (operation == "equals" && !string.IsNullOrWhiteSpace(GetString(expression, "value")))
+    {
+        return [GetString(expression, "value")!];
+    }
+    if (operation == "regex" && !string.IsNullOrWhiteSpace(GetString(expression, "pattern")))
+    {
+        return RegexLiteralValues(GetString(expression, "pattern")!);
+    }
+
+    return [];
 }
 
 static bool RuleHasTemplate(JsonObject rule, string templateId)
@@ -1517,15 +1613,7 @@ static async Task ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(string 
                 Main = 1,
                 UseIp = 1,
                 Port = "10050"
-            },
-            Templates =
-            [
-                new LookupItem
-                {
-                    Name = "ICMP Ping",
-                    TemplateId = "10564"
-                }
-            ]
+            }
         },
         EventRoutingRules =
         [
@@ -1544,7 +1632,7 @@ static async Task ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(string 
             {
                 Name = "dynamic-main",
                 Priority = 10,
-                When = new RuleCondition { Always = true },
+                When = new RuleCondition { Expression = new ConditionExpression { Operator = "always" } },
                 HostNameTemplate = "cmdb-dynamic-<#= Model.Code ?? Model.EntityId #>",
                 VisibleNameTemplate = "Dynamic <#= Model.Code ?? Model.EntityId #>",
                 InterfaceProfileRef = "agent",
@@ -1561,10 +1649,7 @@ static async Task ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(string 
                 TargetMode = "dynamicFromLeaf",
                 ValueField = "dynamicHostGroups",
                 CreateIfMissing = true,
-                When = new RuleCondition
-                {
-                    FieldExists = "dynamicHostGroups"
-                }
+                When = ProfileCondition("dynamic-main", new ConditionExpression { Operator = "exists", Field = "dynamicHostGroups" })
             }
         ],
         TemplateSelectionRules =
@@ -1573,8 +1658,11 @@ static async Task ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(string 
             {
                 Name = "default-template",
                 Priority = 10,
-                TemplatesRef = "defaults.templates",
-                When = new RuleCondition { Always = true }
+                Templates =
+                [
+                    new LookupItem { Name = "ICMP Ping", TemplateId = "10564" }
+                ],
+                When = ProfileCondition("dynamic-main", new ConditionExpression { Operator = "always" })
             }
         ],
         TagSelectionRules =
@@ -1592,10 +1680,7 @@ static async Task ValidateDynamicLeafTargetsAttachToCurrentZabbixRequest(string 
                         Tag = "cmdb.dynamic"
                     }
                 ],
-                When = new RuleCondition
-                {
-                    FieldExists = "dynamicTags"
-                }
+                When = ProfileCondition("dynamic-main", new ConditionExpression { Operator = "exists", Field = "dynamicTags" })
             }
         ],
         T4Templates = activeRules.T4Templates
@@ -1735,21 +1820,193 @@ static bool HostProfileCanMatchClass(JsonObject profile, string className)
         return false;
     }
 
-    var patterns = GetArray(profile, "when:allRegex")
-        .Concat(GetArray(profile, "when:anyRegex"))
-        .OfType<JsonObject>()
-        .Where(matcher => string.Equals(GetString(matcher, "field"), "className", StringComparison.OrdinalIgnoreCase))
-        .Select(matcher => GetString(matcher, "pattern"))
-        .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
-        .ToArray();
-    if (patterns.Length == 0)
+    return ConditionCanMatchClass(profile["when"]?["expression"], className);
+}
+
+static RuleCondition ProfileCondition(string profileName, ConditionExpression condition)
+{
+    return new RuleCondition
+    {
+        Expression = new ConditionExpression
+        {
+            Operator = "all",
+            Items =
+            [
+                new ConditionExpression { Operator = "equals", Field = "hostProfile", Value = profileName },
+                condition
+            ]
+        }
+    };
+}
+
+static void ValidateRulesConditionSchema(string rulesPath, List<string> errors)
+{
+    try
+    {
+        var json = File.ReadAllText(rulesPath);
+        var rules = JsonSerializer.Deserialize<ConversionRulesDocument>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            PropertyNameCaseInsensitive = true
+        });
+        if (rules is null)
+        {
+            errors.Add("Rules condition validation cannot deserialize rules document.");
+            return;
+        }
+
+        errors.AddRange(ConversionRulesSchemaValidator.Validate(json, rules));
+        foreach (var ignored in ProfileScopedRulePolicy.FindIgnoredRules(rules))
+        {
+            var profile = string.IsNullOrWhiteSpace(ignored.ProfileName)
+                ? string.Empty
+                : $" '{ignored.ProfileName}'";
+            errors.Add($"{ignored.Collection}[{ignored.Index}] must declare one known hostProfile with root all/equals scope: {ignored.Reason}{profile}.");
+        }
+    }
+    catch (Exception ex)
+    {
+        errors.Add($"Rules condition validation cannot read rules document: {ex.Message}");
+    }
+}
+
+static void ValidateProfileScopedRuleContract(List<string> errors)
+{
+    const string validJson = """
+        {
+          "source": {
+            "fields": {
+              "criticality": { "cmdbPath": "ARM.Criticality" }
+            }
+          },
+          "hostProfiles": [{
+            "name": "arm-main",
+            "when": { "expression": { "operator": "regex", "field": "className", "pattern": "(?i)^ARM$" } }
+          }],
+          "templateSelectionRules": [{
+            "when": { "expression": { "operator": "all", "items": [
+              { "operator": "equals", "field": "hostProfile", "value": "arm-main" },
+              { "operator": "exists", "field": "criticality" }
+            ] } }
+          }]
+        }
+        """;
+    const string invalidJson = """
+        {
+          "source": {
+            "fields": {
+              "criticality": { "cmdbPath": "ARM.Criticality" },
+              "printerModel": { "cmdbPath": "Printer.Model" }
+            }
+          },
+          "hostProfiles": [{
+            "name": "arm-main",
+            "when": { "expression": { "operator": "equals", "field": "className", "value": "ARM" } }
+          }],
+          "templateSelectionRules": [{
+            "when": { "expression": { "operator": "all", "items": [
+              { "operator": "equals", "field": "hostProfile", "value": "arm-main" },
+              { "operator": "equals", "field": "className", "value": "ARM" },
+              { "operator": "exists", "field": "printerModel" }
+            ] } }
+          }]
+        }
+        """;
+    const string legacyJson = """
+        {
+          "hostProfiles": [{
+            "name": "arm-main",
+            "when": { "expression": { "operator": "equals", "field": "className", "value": "ARM" } }
+          }],
+          "templateSelectionRules": [{
+            "when": { "expression": { "operator": "always" } }
+          }]
+        }
+        """;
+    var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+    var validRules = JsonSerializer.Deserialize<ConversionRulesDocument>(validJson, options);
+    var invalidRules = JsonSerializer.Deserialize<ConversionRulesDocument>(invalidJson, options);
+    var legacyRules = JsonSerializer.Deserialize<ConversionRulesDocument>(legacyJson, options);
+    if (validRules is null || invalidRules is null || legacyRules is null)
+    {
+        errors.Add("Profile-scoped rule contract test cannot deserialize fixture.");
+        return;
+    }
+
+    var validErrors = ConversionRulesSchemaValidator.Validate(validJson, validRules);
+    if (validErrors.Count > 0)
+    {
+        errors.Add($"Profile-scoped rule contract rejected valid rule: {string.Join("; ", validErrors)}");
+    }
+
+    var invalidErrors = ConversionRulesSchemaValidator.Validate(invalidJson, invalidRules);
+    if (!invalidErrors.Any(error => error.Contains("cannot use 'className'", StringComparison.Ordinal))
+        || !invalidErrors.Any(error => error.Contains("field 'printerModel' belongs to CMDBuild class 'Printer'", StringComparison.Ordinal)))
+    {
+        errors.Add("Profile-scoped rule contract did not reject className or a foreign CMDBuild field.");
+    }
+
+    var legacyErrors = ConversionRulesSchemaValidator.Validate(legacyJson, legacyRules);
+    if (legacyErrors.Count > 0)
+    {
+        errors.Add($"Legacy unscoped rule must remain loadable for diagnostics: {string.Join("; ", legacyErrors)}");
+    }
+    if (ProfileScopedRulePolicy.FindIgnoredRules(legacyRules) is not [{ Collection: "templateSelectionRules", Index: 0, Reason: "host_profile_required" }])
+    {
+        errors.Add("Legacy unscoped rule was not marked as ignored.");
+    }
+}
+
+static bool ConditionCanMatchClass(JsonNode? expressionNode, string className)
+{
+    if (expressionNode is not JsonObject expression)
+    {
+        return false;
+    }
+
+    var operation = GetString(expression, "operator")?.ToLowerInvariant();
+    if (operation == "always")
     {
         return true;
     }
-
-    return patterns.Any(pattern => RegexPatternCanMatchClass(pattern!, className)
-        || RegexLiteralValues(pattern!).Any(value =>
-            string.Equals(NormalizeRuleName(value), NormalizeRuleName(className), StringComparison.OrdinalIgnoreCase)));
+    if (operation == "all")
+    {
+        return GetArray(expression, "items").All(item => ConditionCanMatchClass(item, className));
+    }
+    if (operation == "any")
+    {
+        return GetArray(expression, "items").Any(item => ConditionCanMatchClass(item, className));
+    }
+    if (operation == "not")
+    {
+        return true;
+    }
+    if (!string.Equals(GetString(expression, "field"), "className", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+    if (operation == "equals")
+    {
+        return string.Equals(NormalizeRuleName(GetString(expression, "value")), NormalizeRuleName(className), StringComparison.OrdinalIgnoreCase);
+    }
+    if (operation == "notequals")
+    {
+        return !string.Equals(NormalizeRuleName(GetString(expression, "value")), NormalizeRuleName(className), StringComparison.OrdinalIgnoreCase);
+    }
+    if (operation == "regex")
+    {
+        var pattern = GetString(expression, "pattern");
+        return !string.IsNullOrWhiteSpace(pattern) && (RegexPatternCanMatchClass(pattern, className)
+            || RegexLiteralValues(pattern).Any(value => string.Equals(NormalizeRuleName(value), NormalizeRuleName(className), StringComparison.OrdinalIgnoreCase)));
+    }
+    if (operation == "notregex")
+    {
+        var pattern = GetString(expression, "pattern");
+        return string.IsNullOrWhiteSpace(pattern) || !RegexPatternCanMatchClass(pattern, className);
+    }
+    return true;
 }
 
 static bool RegexPatternCanMatchClass(string pattern, string className)

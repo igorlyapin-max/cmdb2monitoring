@@ -84,7 +84,7 @@ test('webhook requirements derive reference leaf payload from the root reference
       hostProfiles: [
         {
           name: 'class-main',
-          when: { allRegex: [{ field: 'className', pattern: '(?i)^Class$' }] },
+          when: { expression: { operator: 'equals', field: 'className', value: 'Class' } },
           interfaces: [{ valueField: 'refIp' }]
         }
       ]
@@ -139,13 +139,13 @@ test('cmdbPath reference root payload shadows normalized generic ipAddress requi
     hostProfiles: [
       {
         name: 'vpn_hub-main',
-        when: { allRegex: [{ field: 'className', pattern: '(?i)^VPN_HUB$' }] },
+        when: { expression: { operator: 'equals', field: 'className', value: 'VPN_HUB' } },
         interfaces: [
           {
             name: 'vpn_hub-main-agent-ip',
             mode: 'ip',
             valueField: 'vPNHUBIpaddressIpAddr',
-            when: { fieldExists: 'vPNHUBIpaddressIpAddr' }
+            when: { expression: { operator: 'exists', field: 'vPNHUBIpaddressIpAddr' } }
           }
         ]
       }
@@ -155,7 +155,7 @@ test('cmdbPath reference root payload shadows normalized generic ipAddress requi
         name: 'prefer-ip-address',
         mode: 'ip',
         valueField: 'ipAddress',
-        when: { fieldExists: 'ipAddress' }
+        when: { expression: { operator: 'exists', field: 'ipAddress' } }
       }
     ]
   };
@@ -189,7 +189,7 @@ test('literal ipAddress payload keeps the generic ip_address key', () => {
           name: 'prefer-ip-address',
           mode: 'ip',
           valueField: 'ipAddress',
-          when: { fieldExists: 'ipAddress' }
+          when: { expression: { operator: 'exists', field: 'ipAddress' } }
         }
       ]
     }
@@ -227,7 +227,7 @@ test('webhook operations report missing payload requirements with rule context',
       hostProfiles: [
         {
           name: 'class-main',
-          when: { allRegex: [{ field: 'className', pattern: '(?i)^Class$' }] },
+          when: { expression: { operator: 'equals', field: 'className', value: 'Class' } },
           interfaces: [{ valueField: 'refIp' }]
         }
       ]
@@ -251,7 +251,7 @@ test('domain leaf requirements use the current card id as resolver payload', () 
       groupSelectionRules: [
         {
           name: 'domain state host group',
-          when: { allRegex: [{ field: 'className', pattern: '(?i)^Class$' }] },
+          when: { expression: { operator: 'equals', field: 'className', value: 'Class' } },
           targetMode: 'dynamicFromLeaf',
           valueField: 'domainState'
         }
@@ -279,7 +279,7 @@ test('foreign-root cmdbPath does not add payload to unrelated class webhook', ()
       tagSelectionRules: [
         {
           name: 'foreign tag',
-          when: { allRegex: [{ field: 'className', pattern: '(?i)^Class$' }] },
+          when: { expression: { operator: 'equals', field: 'className', value: 'Class' } },
           valueField: 'foreignName'
         }
       ]
@@ -301,7 +301,7 @@ test('virtual runtime fields are not serialized into CMDBuild webhook payload', 
       templateSelectionRules: [
         {
           name: 'profile template',
-          when: { allRegex: [{ field: 'hostProfile', pattern: '(?i)^class-main$' }] },
+          when: { expression: { operator: 'equals', field: 'hostProfile', value: 'class-main' } },
           template: 'Template OS'
         }
       ]

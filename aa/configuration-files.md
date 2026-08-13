@@ -430,7 +430,7 @@ Base config не содержит пароль; `Development` config может 
 В development overlay допустимы `http://localhost:5080..5083`. В Production JSON обязан содержать четыре текущих Compose-сервиса с `http://<service>:8080`: пустой список, loopback, IPv4-mapped IPv6, link-local и внешние URL отклоняются до старта UI. Токены не включаются в JSON и передаются через `RulesReloadTokenEnv`/`RulesStatusTokenEnv`.
 
 Production Compose:
-- `deploy/compose.production.yml` задает Docker healthcheck через `/ready`, syslog driver, Kafka log topics и persisted volumes;
+- `deploy/compose.production.yml` задает Docker healthcheck через `/ready`, Kafka log topics и persisted volumes; syslog driver подключается только явным overlay `deploy/compose.logging-syslog.yml`;
 - `deploy/production.env.example` содержит только placeholder и `secret://` значения, реальные секреты задаются deployment-слоем;
 - `./scripts/validate-production-runtime.sh` проверяет, что Compose/Dockerfiles/CI сохраняют production runtime contract.
 

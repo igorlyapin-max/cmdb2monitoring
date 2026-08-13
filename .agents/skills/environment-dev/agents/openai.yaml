@@ -1,0 +1,4 @@
+interface:
+  display_name: "Environment Dev"
+  short_description: "CMDBuild Kafka Zabbix dev environment"
+  default_prompt: "Use $environment-dev to inspect or work with the CMDBuild/Kafka/Zabbix development environment."

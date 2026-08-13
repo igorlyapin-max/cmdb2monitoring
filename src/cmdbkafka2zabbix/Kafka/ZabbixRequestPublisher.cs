@@ -27,14 +27,17 @@ public sealed class ZabbixRequestPublisher(
 
         var outputOptions = options.Value.Output;
         var key = result.Key ?? result.EntityId ?? result.Host ?? result.EventType;
+        var payloadSummary = SafePayloadDiagnostics.DescribeJson(result.Value);
         logger.LogVerbose(
             debugLoggingOptions,
-            "Publishing Zabbix request to Kafka topic {Topic}, key {KafkaKey}, method {Method}, profile {ProfileName}, payload {KafkaPayload}",
+            "Publishing Zabbix request to Kafka topic {Topic}, key {KafkaKey}, method {Method}, profile {ProfileName}, payload {PayloadBytes} byte(s), SHA-256 {PayloadSha256}, top-level fields {PayloadFields}",
             outputOptions.Topic,
             key,
             result.Method,
             result.ProfileName ?? "<default>",
-            result.Value);
+            payloadSummary.ByteCount,
+            payloadSummary.Sha256,
+            payloadSummary.FieldNames);
         var payload = EnrichCorrelationMetadata(result.Value, correlationId);
         var deliveryResult = await producer.ProduceAsync(outputOptions.Topic, new Message<string, string>
         {

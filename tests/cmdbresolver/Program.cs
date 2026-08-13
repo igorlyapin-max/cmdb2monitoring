@@ -17,7 +17,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("update resolves unrooted reference leaf cards", UpdateResolvesUnrootedReferenceLeafCards),
     ("reference leaf payload key resolves before interface validation", UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface),
     ("update rereads domain leaf cards", UpdateRereadsDomainLeafCards),
-    ("update maps reread domain leaf into dynamic host groups", UpdateMapsRereadDomainLeafIntoDynamicHostGroups)
+    ("update maps reread domain leaf into dynamic host groups", UpdateMapsRereadDomainLeafIntoDynamicHostGroups),
+    ("safe payload diagnostics do not expose values", SafePayloadDiagnosticsDoNotExposeValues),
+    ("safe payload diagnostics identify malformed payloads", SafePayloadDiagnosticsIdentifyMalformedPayloads),
+    ("converter applies profile-scoped template group and tag rules", ConverterAppliesProfileScopedSelections),
+    ("converter ignores legacy selection rule without hostProfile", ConverterSkipsProfileWithoutTemplateRule),
+    ("converter keeps delete cleanup without template rule", ConverterKeepsDeleteCleanupWithoutTemplateRule)
 };
 
 var failures = new List<string>();
@@ -314,10 +319,7 @@ static async Task UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface()
                 Enabled = true,
                 When = new RuleCondition
                 {
-                    AllRegex =
-                    [
-                        new RegexCondition { Field = "className", Pattern = "(?i)^Server$" }
-                    ]
+                    Expression = new ConditionExpression { Operator = "equals", Field = "className", Value = "Server" }
                 },
                 HostNameTemplate = "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
                 VisibleNameTemplate = "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>",
@@ -329,9 +331,19 @@ static async Task UpdateMapsReferenceLeafPayloadKeyIntoProfileInterface()
                         Priority = 10,
                         Mode = "ip",
                         ValueField = "referenceIp",
-                        When = new RuleCondition { FieldExists = "referenceIp" }
+                        When = new RuleCondition { Expression = new ConditionExpression { Operator = "exists", Field = "referenceIp" } }
                     }
                 ]
+            }
+        ],
+        TemplateSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "server-template",
+                Priority = 10,
+                When = ProfileCondition("server-main", new ConditionExpression { Operator = "always" }),
+                Templates = [new LookupItem { Name = "ICMP Ping", TemplateId = "10564" }]
             }
         ],
         T4Templates = new T4TemplateSet
@@ -469,7 +481,7 @@ static async Task UpdateMapsRereadDomainLeafIntoDynamicHostGroups()
                 Name = "main",
                 Priority = 10,
                 Enabled = true,
-                When = new RuleCondition { Always = true },
+                When = new RuleCondition { Expression = new ConditionExpression { Operator = "always" } },
                 HostNameTemplate = "cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>",
                 VisibleNameTemplate = "<#= Model.ClassName #> <#= Model.Code ?? Model.EntityId #>"
             }
@@ -483,10 +495,7 @@ static async Task UpdateMapsRereadDomainLeafIntoDynamicHostGroups()
                 TargetMode = "dynamicFromLeaf",
                 ValueField = "domainServiceName",
                 CreateIfMissing = true,
-                When = new RuleCondition
-                {
-                    FieldExists = "domainServiceName"
-                },
+                When = ProfileCondition("main", new ConditionExpression { Operator = "exists", Field = "domainServiceName" }),
                 HostGroups =
                 [
                     new LookupItem
@@ -495,6 +504,16 @@ static async Task UpdateMapsRereadDomainLeafIntoDynamicHostGroups()
                         CreateIfMissing = true
                     }
                 ]
+            }
+        ],
+        TemplateSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "server-template",
+                Priority = 10,
+                When = ProfileCondition("main", new ConditionExpression { Operator = "always" }),
+                Templates = [new LookupItem { Name = "ICMP Ping", TemplateId = "10564" }]
             }
         ],
         T4Templates = new T4TemplateSet
@@ -537,6 +556,226 @@ static async Task UpdateMapsRereadDomainLeafIntoDynamicHostGroups()
     }), rules, CancellationToken.None);
     var second = await converter.ConvertAsync(secondSource, rules, CancellationToken.None);
     AssertDynamicGroup(second, "Payments new");
+}
+
+static Task SafePayloadDiagnosticsDoNotExposeValues()
+{
+    const string payload = "{\"password\":\"never-log-me\",\"entityId\":\"asset-42\"}";
+    var summary = SafePayloadDiagnostics.DescribeJson(payload);
+
+    if (summary.ByteCount != Encoding.UTF8.GetByteCount(payload)
+        || summary.FieldNames != "entityId,password"
+        || summary.Sha256.Length != 64
+        || summary.FieldNames.Contains("never-log-me", StringComparison.Ordinal)
+        || summary.Sha256.Contains("never-log-me", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("Safe payload diagnostics exposed an input value or returned invalid metadata.");
+    }
+
+    return Task.CompletedTask;
+}
+
+static Task SafePayloadDiagnosticsIdentifyMalformedPayloads()
+{
+    const string payload = "{invalid";
+    var summary = SafePayloadDiagnostics.DescribeJson(payload);
+
+    if (summary.ByteCount != Encoding.UTF8.GetByteCount(payload)
+        || summary.FieldNames.Length != 0
+        || summary.Sha256.Length != 64)
+    {
+        throw new InvalidOperationException("Malformed payload diagnostics must retain only safe metadata.");
+    }
+
+    return Task.CompletedTask;
+}
+
+static async Task ConverterAppliesProfileScopedSelections()
+{
+    var converter = CreateConverter();
+    var rules = new ConversionRulesDocument
+    {
+        SchemaVersion = "test",
+        RulesVersion = "test",
+        Name = "profile-scoped-selections",
+        EventRoutingRules =
+        [
+            new EventRoutingRule
+            {
+                EventType = "create",
+                Method = "host.create",
+                TemplateName = "hostCreateJsonRpcRequestLines",
+                Publish = true
+            }
+        ],
+        HostProfiles =
+        [
+            new HostProfileRule
+            {
+                Name = "main",
+                When = new RuleCondition { Expression = new ConditionExpression { Operator = "always" } },
+                HostNameTemplate = "cmdb-<#= Model.EntityId #>",
+                VisibleNameTemplate = "CMDB <#= Model.EntityId #>"
+            }
+        ],
+        GroupSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "profile-group",
+                When = ProfileCondition("main", new ConditionExpression { Operator = "always" }),
+                HostGroups = [new LookupItem { Name = "Test Group", GroupId = "42" }]
+            }
+        ],
+        TemplateSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "profile-template",
+                When = ProfileCondition("main", new ConditionExpression { Operator = "always" }),
+                Templates = [new LookupItem { Name = "ICMP Ping", TemplateId = "10564" }]
+            }
+        ],
+        TagSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "profile-tag",
+                When = ProfileCondition("main", new ConditionExpression { Operator = "always" }),
+                Tags = [new TagDefinition { Tag = "cmdb.profile", Value = "main" }]
+            }
+        ],
+        T4Templates = new T4TemplateSet
+        {
+            HostCreateJsonRpcRequestLines =
+            [
+                "{",
+                "  \"jsonrpc\": \"2.0\",",
+                "  \"method\": \"<#= Model.CurrentMethod #>\",",
+                "  \"params\": {",
+                "    \"host\": \"<#= Model.Host #>\",",
+                "    \"groups\": [<# for (var i = 0; i < Model.Groups.Count; i++) { #>{ \"groupid\": \"<#= Model.Groups[i].GroupId #>\" }<#= i + 1 < Model.Groups.Count ? \",\" : \"\" #><# } #>],",
+                "    \"templates\": [<# for (var i = 0; i < Model.Templates.Count; i++) { #>{ \"templateid\": \"<#= Model.Templates[i].TemplateId #>\" }<#= i + 1 < Model.Templates.Count ? \",\" : \"\" #><# } #>],",
+                "    \"tags\": [<# for (var i = 0; i < Model.Tags.Count; i++) { #>{ \"tag\": \"<#= Model.Tags[i].Tag #>\", \"value\": \"<#= Model.Tags[i].Value #>\" }<#= i + 1 < Model.Tags.Count ? \",\" : \"\" #><# } #>]",
+                "  },",
+                "  \"id\": <#= Model.RequestId #>",
+                "}"
+            ]
+        }
+    };
+    var source = UpdateEvent(new()
+    {
+        ["id"] = "server-1",
+        ["className"] = "Server"
+    }) with { EventType = "create" };
+
+    var results = await converter.ConvertAsync(source, rules, CancellationToken.None);
+    if (results.Count != 1 || !results[0].ShouldPublish)
+    {
+        throw new InvalidOperationException("Expected profile-scoped selections to publish a host.create request.");
+    }
+
+    using var document = JsonDocument.Parse(results[0].Value ?? throw new InvalidOperationException("Expected a rendered Zabbix request payload."));
+    var parameters = document.RootElement.GetProperty("params");
+    if (parameters.GetProperty("groups")[0].GetProperty("groupid").GetString() != "42"
+        || parameters.GetProperty("templates")[0].GetProperty("templateid").GetString() != "10564"
+        || parameters.GetProperty("tags")[0].GetProperty("value").GetString() != "main")
+    {
+        throw new InvalidOperationException("Profile-scoped template, group, or tag selection was not rendered into host.create.");
+    }
+}
+
+static async Task ConverterSkipsProfileWithoutTemplateRule()
+{
+    var converter = CreateConverter();
+    var rules = new ConversionRulesDocument
+    {
+        SchemaVersion = "test",
+        RulesVersion = "test",
+        Name = "no-template-rule",
+        EventRoutingRules =
+        [
+            new EventRoutingRule
+            {
+                EventType = "create",
+                Method = "host.create",
+                TemplateName = "hostCreateJsonRpcRequestLines",
+                Publish = true
+            }
+        ],
+        HostProfiles =
+        [
+            new HostProfileRule
+            {
+                Name = "main",
+                When = new RuleCondition { Expression = new ConditionExpression { Operator = "always" } }
+            }
+        ],
+        TemplateSelectionRules =
+        [
+            new SelectionRule
+            {
+                Name = "legacy-template",
+                When = new RuleCondition { Expression = new ConditionExpression { Operator = "always" } },
+                Templates = [new LookupItem { Name = "ICMP Ping", TemplateId = "10564" }]
+            }
+        ]
+    };
+    var source = UpdateEvent(new()
+    {
+        ["id"] = "server-1",
+        ["className"] = "Server"
+    }) with { EventType = "create" };
+
+    var results = await converter.ConvertAsync(source, rules, CancellationToken.None);
+    if (results.Count != 1 || results[0].ShouldPublish || results[0].SkipReason != "no_template_rule_matched")
+    {
+        throw new InvalidOperationException("Expected no_template_rule_matched and no Zabbix request when no template rule matches.");
+    }
+}
+
+static async Task ConverterKeepsDeleteCleanupWithoutTemplateRule()
+{
+    var converter = CreateConverter();
+    var rules = new ConversionRulesDocument
+    {
+        SchemaVersion = "test",
+        RulesVersion = "test",
+        Name = "delete-without-template-rule",
+        EventRoutingRules =
+        [
+            new EventRoutingRule
+            {
+                EventType = "delete",
+                Method = "host.delete",
+                TemplateName = "hostDeleteJsonRpcRequestLines",
+                Publish = true
+            }
+        ],
+        HostProfiles =
+        [
+            new HostProfileRule
+            {
+                Name = "main",
+                When = new RuleCondition { Expression = new ConditionExpression { Operator = "always" } }
+            }
+        ],
+        T4Templates = new T4TemplateSet
+        {
+            HostDeleteJsonRpcRequestLines = ["{}"]
+        }
+    };
+    var source = UpdateEvent(new()
+    {
+        ["id"] = "server-1",
+        ["className"] = "Server"
+    }) with { EventType = "delete" };
+
+    var results = await converter.ConvertAsync(source, rules, CancellationToken.None);
+    if (results.Count != 1 || !results[0].ShouldPublish)
+    {
+        throw new InvalidOperationException("Expected delete cleanup to publish even when no template rule matches.");
+    }
 }
 
 static CmdbSourceFieldResolver CreateResolver(FakeCmdbuild cmdb, int lookupCacheTtlSeconds = 0)
@@ -584,6 +823,22 @@ static ConversionRulesDocument RulesWithFields(Dictionary<string, SourceFieldRul
         Source = new SourceRules
         {
             Fields = fields
+        }
+    };
+}
+
+static RuleCondition ProfileCondition(string profileName, ConditionExpression condition)
+{
+    return new RuleCondition
+    {
+        Expression = new ConditionExpression
+        {
+            Operator = "all",
+            Items =
+            [
+                new ConditionExpression { Operator = "equals", Field = "hostProfile", Value = profileName },
+                condition
+            ]
         }
     };
 }

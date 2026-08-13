@@ -42,7 +42,7 @@ test('publish rejects a stale active-rules revision without overwriting the file
     const current = await request(port, '/api/rules/current', {
       headers: { cookie }
     });
-    assert.equal(current.status, 200);
+    assert.equal(current.status, 200, JSON.stringify(current.body));
 
     const externalRules = JSON.parse(initialRules);
     externalRules.rulesVersion = 'external-change';
@@ -63,6 +63,71 @@ test('publish rejects a stale active-rules revision without overwriting the file
     assert.equal(publish.status, 409);
     assert.equal(publish.body.error, 'rules_revision_conflict');
     assert.equal(await readFile(activeRulesPath, 'utf8'), externalContent);
+  } finally {
+    process.kill('SIGTERM');
+    await onceExit(process);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('production rules starter validates as a safe no-op', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-production-starter-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const usersPath = join(directory, 'users.json');
+  const starter = JSON.parse(await readFile(
+    join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'),
+    'utf8'));
+  const password = 'test-local-admin-password';
+  await writeFile(activeRulesPath, `${JSON.stringify(starter, null, 2)}\n`, 'utf8');
+  await writeFile(usersPath, JSON.stringify({
+    version: 1,
+    users: [{
+      username: 'admin',
+      displayName: 'Test Admin',
+      role: 'admin',
+      password: passwordHash(password),
+      mustChangePassword: false
+    }]
+  }), 'utf8');
+
+  const process = startServer(port, directory, activeRulesPath, usersPath);
+  try {
+    await waitForReady(port, process);
+    const login = await request(port, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password }
+    });
+    assert.equal(login.status, 200);
+
+    const validation = await request(port, '/api/rules/validate', {
+      method: 'POST',
+      headers: {
+        cookie: login.headers.get('set-cookie'),
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: { rules: starter }
+    });
+    assert.equal(validation.status, 200);
+    assert.equal(validation.body.valid, true);
+    assert.deepEqual(validation.body.errors, []);
+
+    const legacyRules = structuredClone(starter);
+    legacyRules.templateSelectionRules.push({
+      when: { expression: { operator: 'always' } }
+    });
+    const legacyValidation = await request(port, '/api/rules/validate', {
+      method: 'POST',
+      headers: {
+        cookie: login.headers.get('set-cookie'),
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: { rules: legacyRules }
+    });
+    assert.equal(legacyValidation.status, 200);
+    assert.equal(legacyValidation.body.valid, false);
+    assert.ok(legacyValidation.body.errors.includes(
+      'templateSelectionRules[0] must declare one known hostProfile with root all/equals scope: host_profile_required.'));
   } finally {
     process.kill('SIGTERM');
     await onceExit(process);

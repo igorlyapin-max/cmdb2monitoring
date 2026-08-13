@@ -30,7 +30,7 @@ jobs:
         run: |
           node --check src/monitoring-ui-api/server.mjs
           node --check src/monitoring-ui-api/public/app.js
-          npm --prefix src/monitoring-ui-api test
+          BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome npm --prefix src/monitoring-ui-api test
 
       - name: Build .NET services
         run: |
@@ -45,6 +45,11 @@ jobs:
 
       - name: Validate production runtime contract
         run: ./scripts/validate-production-runtime.sh
+
+      - name: Validate production Compose contracts
+        run: |
+          docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config -q
+          SYSLOG_ADDRESS=udp://127.0.0.1:514 docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml -f deploy/compose.logging-syslog.yml config -q
 
       - name: Validate observability contract
         run: ./scripts/validate-observability.sh

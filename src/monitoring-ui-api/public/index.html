@@ -136,6 +136,7 @@
           <details class="nav-section" open>
             <summary class="nav-section-title" data-i18n="nav.group.rules">Правила мониторинга</summary>
             <div class="nav-section-items">
+              <button class="nav-item" data-view="profiles" data-i18n="nav.profiles">Профили</button>
               <button class="nav-item" data-view="mapping" data-i18n="nav.mapping">Управление правилами конвертации</button>
             </div>
           </details>
@@ -306,6 +307,55 @@
             </div>
           </section>
 
+          <section class="view" id="profiles">
+            <div class="view-header">
+              <h1 data-i18n="nav.profiles">Профили</h1>
+              <div class="actions">
+                <button id="loadProfiles" type="button" data-i18n="common.load">Загрузить</button>
+              </div>
+            </div>
+            <p id="profilesActionStatus" class="mapping-editor-status action-status" aria-live="polite"></p>
+            <p id="profilesRulesSourceStatus" class="mapping-editor-status rules-source-status" aria-live="polite"></p>
+            <div id="mappingProfilesPanel" class="mapping-profiles-panel">
+              <div class="mapping-profiles-header">
+                <div>
+                  <h3 data-i18n="mapping.profilesTitle">Профили мониторинга</h3>
+                  <p data-i18n="mapping.profilesHelp">Профиль создает отдельный Zabbix host lifecycle для выбранного CMDBuild-класса. Сначала создайте и выберите профиль, затем назначайте на него templates, groups и tags.</p>
+                </div>
+              </div>
+              <div class="mapping-profile-grid">
+                <label class="mapping-profile-class-field"><span data-i18n="mapping.profileClass">Класс CMDBuild</span><select id="mappingProfileClass" autocomplete="off"></select></label>
+                <label class="mapping-profile-kind-field"><span data-i18n="mapping.profileKind">Тип профиля</span><select id="mappingProfileKind">
+                  <option value="main" data-i18n="mapping.profileKindMain">Основной</option>
+                  <option value="additional" data-i18n="mapping.profileKindAdditional">Дополнительный</option>
+                </select></label>
+                <label class="mapping-profile-name-field"><span data-i18n="mapping.profileName">Имя hostProfile</span><input id="mappingProfileName" type="text" placeholder="class-main" data-i18n-placeholder="mapping.profileNamePlaceholder"></label>
+                <label class="mapping-profile-address-field"><span data-i18n="mapping.profileAddressField">Адресный leaf</span><select id="mappingProfileField"></select></label>
+                <label class="mapping-checkbox-row mapping-profile-recognized-only">
+                  <input id="mappingProfileRecognizedOnly" type="checkbox" checked>
+                  <span data-i18n="mapping.profileRecognizedOnly">Предлагать распознанные IP/DNS</span>
+                </label>
+                <label class="mapping-profile-mode-field"><span data-i18n="mapping.profileAddressMode">Режим адреса</span><select id="mappingProfileMode">
+                  <option value="ip" data-i18n="mapping.profileAddressModeIp">IP</option>
+                  <option value="dns" data-i18n="mapping.profileAddressModeDns">DNS</option>
+                </select></label>
+                <label class="mapping-profile-interface-field"><span data-i18n="mapping.profileInterfaceProfile">Профиль interfaces[]</span><select id="mappingProfileInterfaceProfile"></select></label>
+                <label class="mapping-checkbox-row mapping-profile-create-on-update">
+                  <input id="mappingProfileCreateOnUpdate" type="checkbox" checked>
+                  <span data-i18n="mapping.profileCreateOnUpdate">Создавать host при update, если он отсутствует</span>
+                </label>
+                <div class="mapping-profile-actions">
+                  <button id="mappingProfileCreate" type="button" data-i18n="mapping.profileCreate">Создать профиль</button>
+                  <button id="mappingProfileSave" class="secondary" type="button" disabled data-i18n="mapping.profileSave">Сохранить профиль</button>
+                  <button id="mappingProfileDelete" class="danger" type="button" disabled data-i18n="mapping.profileDelete">Удалить профиль</button>
+                  <button id="mappingProfileReset" class="secondary" type="button" data-i18n="mapping.profileReset">Очистить профиль</button>
+                </div>
+                <p id="mappingProfileStatus" class="mapping-editor-form-state wide-field"></p>
+              </div>
+              <div id="mappingProfilesList" class="mapping-profiles-list"></div>
+            </div>
+          </section>
+
           <section class="view" id="mapping">
             <div class="view-header">
               <div class="view-title-block">
@@ -364,50 +414,25 @@
                   </select>
                 </label>
               </div>
-              <div id="mappingProfilesPanel" class="mapping-editor-panel mapping-profiles-panel">
-                <div class="mapping-profiles-header">
-                  <div>
-                    <h3 data-i18n="mapping.profilesTitle">Профили мониторинга</h3>
-                    <p data-i18n="mapping.profilesHelp">Профиль создает отдельный Zabbix host lifecycle для выбранного CMDBuild-класса. Сначала создайте профиль, затем назначайте на него templates/groups/tags через виртуальное поле hostProfile или чекбокс ограничения выбранным profile.</p>
-                  </div>
-                </div>
-                <div class="mapping-profile-grid">
-                  <label class="mapping-profile-class-field"><span data-i18n="mapping.profileClass">Класс CMDBuild</span><select id="mappingProfileClass" autocomplete="off"></select></label>
-                  <label class="mapping-profile-kind-field"><span data-i18n="mapping.profileKind">Тип профиля</span><select id="mappingProfileKind">
-                    <option value="main" data-i18n="mapping.profileKindMain">Основной</option>
-                    <option value="additional" data-i18n="mapping.profileKindAdditional">Дополнительный</option>
-                  </select></label>
-                  <label class="mapping-profile-name-field"><span data-i18n="mapping.profileName">Имя hostProfile</span><input id="mappingProfileName" type="text" placeholder="class-main" data-i18n-placeholder="mapping.profileNamePlaceholder"></label>
-                  <label class="mapping-profile-address-field"><span data-i18n="mapping.profileAddressField">Адресный leaf</span><select id="mappingProfileField"></select></label>
-                  <label class="mapping-checkbox-row mapping-profile-recognized-only">
-                    <input id="mappingProfileRecognizedOnly" type="checkbox" checked>
-                    <span data-i18n="mapping.profileRecognizedOnly">Предлагать распознанные IP/DNS</span>
-                  </label>
-                  <label class="mapping-profile-mode-field"><span data-i18n="mapping.profileAddressMode">Режим адреса</span><select id="mappingProfileMode">
-                    <option value="ip" data-i18n="mapping.profileAddressModeIp">IP</option>
-                    <option value="dns" data-i18n="mapping.profileAddressModeDns">DNS</option>
-                  </select></label>
-                  <label class="mapping-profile-interface-field"><span data-i18n="mapping.profileInterfaceProfile">Профиль interfaces[]</span><select id="mappingProfileInterfaceProfile"></select></label>
-                  <label class="mapping-checkbox-row mapping-profile-create-on-update">
-                    <input id="mappingProfileCreateOnUpdate" type="checkbox" checked>
-                    <span data-i18n="mapping.profileCreateOnUpdate">Создавать host при update, если он отсутствует</span>
-                  </label>
-                  <div class="mapping-profile-actions">
-                    <button id="mappingProfileCreate" type="button" data-i18n="mapping.profileCreate">Создать профиль</button>
-                    <button id="mappingProfileSave" class="secondary" type="button" disabled data-i18n="mapping.profileSave">Сохранить профиль</button>
-                    <button id="mappingProfileDelete" class="danger" type="button" disabled data-i18n="mapping.profileDelete">Удалить профиль</button>
-                    <button id="mappingProfileReset" class="secondary" type="button" data-i18n="mapping.profileReset">Очистить профиль</button>
-                  </div>
-                  <p id="mappingProfileStatus" class="mapping-editor-form-state wide-field"></p>
-                </div>
-                <div id="mappingProfilesList" class="mapping-profiles-list"></div>
-              </div>
               <div id="mappingAddPanel" class="mapping-editor-panel">
                 <div class="mapping-editor-grid">
                   <label id="mappingModifyRuleField" class="wide-field hidden"><span data-i18n="mapping.modifyRule">Правило для изменения</span><select id="mappingModifyRule"></select></label>
                   <p id="mappingModifyRuleContext" class="mapping-modify-context wide-field hidden"></p>
-                  <label><span data-i18n="mapping.cmdbClass">Класс CMDBuild</span><select id="mappingEditClass" autocomplete="off"></select></label>
-                  <label><span data-i18n="mapping.classField">Атрибут класса</span><select id="mappingEditField"></select></label>
+                  <label id="mappingRuleProfileField" class="wide-field"><span data-i18n="mapping.ruleProfile">Профиль мониторинга</span><select id="mappingRuleProfile"></select></label>
+                  <p id="mappingRuleProfileContext" class="mapping-editor-form-state wide-field"></p>
+                  <div id="mappingConditionEditor" class="mapping-condition-builder wide-field">
+                    <div class="mapping-condition-header">
+                      <span data-i18n="mapping.conditions">Условия срабатывания</span>
+                      <button id="mappingResetCondition" class="secondary" type="button" data-i18n="mapping.conditionReset">Сбросить условие</button>
+                    </div>
+                    <p id="mappingConditionProfileConstraint" class="mapping-condition-profile-constraint"></p>
+                    <div class="mapping-condition-object">
+                      <span data-i18n="mapping.conditionObject">Условия объекта</span>
+                      <div id="mappingConditionBuilder" class="mapping-condition-tree"></div>
+                    </div>
+                  </div>
+                  <label id="mappingEditClassRow" class="hidden" aria-hidden="true"><span data-i18n="mapping.cmdbClass">Класс CMDBuild</span><select id="mappingEditClass" autocomplete="off" tabindex="-1"></select></label>
+                  <label id="mappingEditFieldRow" class="hidden"><span id="mappingEditFieldLabel" data-i18n="mapping.dynamicValueField">Поле для динамического значения</span><select id="mappingEditField"></select></label>
                   <label><span data-i18n="mapping.structure">Структура конвертации</span><select id="mappingEditTargetType"></select></label>
                   <label><span data-i18n="mapping.zabbixTarget">Объект/payload Zabbix</span><select id="mappingEditZabbixObject"></select></label>
                   <div id="mappingStringBuilder" class="mapping-string-builder wide-field hidden">
@@ -425,16 +450,10 @@
                       <button id="mappingInsertRegex" class="secondary" type="button" data-i18n="mapping.insertRegex">Вставить regex</button>
                     </div>
                   </div>
-                  <label id="mappingProfileScopeRow" class="mapping-checkbox-row wide-field">
-                    <input id="mappingProfileScope" type="checkbox">
-                    <span data-i18n="mapping.profileScope">Ограничить правило выбранным hostProfile</span>
-                  </label>
                   <label><span data-i18n="mapping.priority">Приоритет</span><input id="mappingEditPriority" type="number" min="1" step="1" value="100"></label>
-                  <label><span data-i18n="mapping.regex">Regex</span><input id="mappingEditRegex" type="text" value="(?i).*"></label>
                   <label class="wide-field"><span data-i18n="mapping.ruleName">Имя правила</span><input id="mappingEditRuleName" type="text" placeholder="автоматически" data-i18n-placeholder="mapping.ruleNameAuto"></label>
                   <button id="mappingResetForm" class="secondary" type="button" data-i18n="mapping.resetFields">Сбросить поля</button>
                   <button id="mappingAddRule" type="button" data-i18n="mapping.addRule">Добавить правило конвертации</button>
-                  <p id="mappingProfileScopeStatus" class="mapping-editor-form-state wide-field"></p>
                   <p id="mappingEditorFormState" class="mapping-editor-form-state wide-field"></p>
                   <p class="mapping-reference-warning wide-field" data-i18n="mapping.referenceWarning">Внимание: при пользовании итеративными запросами атрибутов через reference/domain типы, в случае отсутствия модификации самой карточки объекта, модификация атрибутов reference или связанных domain-карточек не приведет к изменениям на мониторинге.</p>
                 </div>
@@ -916,8 +935,8 @@
                   <li data-i18n="help.mapping.16">Domain path вида Класс.{domain:СвязанныйКласс}.Атрибут читает связанные карточки через CMDBuild relations; поля, которые могут вернуть несколько значений, недоступны для скалярных Zabbix structures.</li>
                   <li data-i18n="help.mapping.17">monitoringSuppressionRules используется, когда атрибуты экземпляра означают осознанный отказ от постановки на мониторинг; create/update пропускаются, delete не блокируется.</li>
                   <li data-i18n="help.mapping.18">Правило template проверяется по Метаданные Zabbix: конфликт item key, LLD rule key или inventory link подсвечивается красным и блокирует сохранение до исправления templateConflictRules или выбора совместимого template set.</li>
-                  <li data-i18n="help.mapping.19">В редакторе правил доступны виртуальные поля hostProfile и outputProfile. Их заполняет converter для каждого hostProfiles[]; через них можно ограничить template/group/tag rule конкретным fan-out profile.</li>
-                  <li data-i18n="help.mapping.20">Профили мониторинга создаются, изменяются и удаляются в отдельном блоке редактора. После создания дополнительного profile назначайте templates/groups/tags отдельными правилами через виртуальное поле hostProfile или через чекбокс ограничения выбранным hostProfile, если основное условие должно остаться по description/lookup/domain leaf.</li>
+                  <li data-i18n="help.mapping.19">Правило всегда связано с выбранным profile. Связь hostProfile показывается как системное условие и добавляется при сохранении; пользователь редактирует только условия объекта.</li>
+                  <li data-i18n="help.mapping.20">Профили мониторинга создаются, изменяются и удаляются в отдельном блоке редактора. После создания и выбора profile назначайте templates/groups/tags отдельными profile-bound правилами с условиями объекта по полям класса профиля.</li>
                 </ul>
               </div>
               <div class="surface">

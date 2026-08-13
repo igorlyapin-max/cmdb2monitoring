@@ -32,6 +32,12 @@
 
 ### Fixed
 
+- Active profile-bound selection rules now require one known `hostProfile` through root `all`/`equals`; stale global or unknown-profile selections are ignored by the converter and rejected by BFF validate/publish.
+- Converter `Verbose` diagnostics now emit only payload byte count, SHA-256 fingerprint, and field names instead of raw CMDB/Zabbix payload values.
+- Docker delivery now uses deterministic non-root `groupadd`/`useradd`, image provenance labels and runtime health identity, distinct manual `gkm-runtime` and canonical `gkm-runtime-canonical` targets, plus CI Compose and browser acceptance gates.
+- Mobile monitoring UI status/header layout no longer creates horizontal overflow while editing profile-bound nested conditions.
+- Monitoring profile administration is now the first `Monitoring Rules -> Profiles` menu item; Conversion Rules Management retains only the mandatory profile selector and rule-condition editor.
+- Conversion Rules Management now shows the required monitoring-profile selector and the disabled object-condition editor immediately; selecting a profile in the rule form, rather than the profile-administration list, activates profile-bound rule editing.
 - The monitoring UI image now includes its local runtime modules; CI verifies its embedded version, OCI label, `/health`, and `/ready` in Docker before delivery.
 - Active conversion-rules publication now uses an optimistic SHA-256 revision and a serialized writer, returning `409` without overwriting a newer mounted file.
 - Production health endpoint configuration now requires the complete Compose-DNS topology, including a separately configurable converter rules-status token.

@@ -4,6 +4,10 @@ import {
   normalizeToken,
   uniqueTokens
 } from './mapping-logic.js';
+import {
+  conditionFields,
+  ruleMayApplyToClass
+} from './condition-expression.js';
 
 const defaultManagedPrefix = 'cmdbwebhooks2kafka-';
 const defaultWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
@@ -516,12 +520,8 @@ function collectSourceFieldsForClassScopedNode(value, className, parentApplies, 
 }
 
 function sourceFieldsForRuleOwnScope(rule = {}) {
-  const when = rule.when ?? {};
   const fields = [
-    ...(when.anyRegex ?? []).map(matcher => matcher.field),
-    ...(when.allRegex ?? []).map(matcher => matcher.field),
-    when.fieldExists,
-    ...(Array.isArray(when.fieldsExist) ? when.fieldsExist : []),
+    ...conditionFields(rule.when),
     rule.field,
     rule.valueField,
     rule.sourceField,
@@ -570,30 +570,7 @@ function sourceFieldsFromTemplateText(text) {
 }
 
 function ruleAppliesToClass(rule, className) {
-  const matchers = {
-    all: asArray(rule?.when?.allRegex).filter(matcher => canonicalSourceField(matcher.field) === 'className'),
-    any: asArray(rule?.when?.anyRegex).filter(matcher => canonicalSourceField(matcher.field) === 'className'),
-    anyOther: asArray(rule?.when?.anyRegex).filter(matcher => canonicalSourceField(matcher.field) !== 'className')
-  };
-  if (matchers.all.length === 0 && matchers.any.length === 0) {
-    return true;
-  }
-
-  const matchesClass = matcher => {
-    try {
-      return compileRuleRegex(matcher.pattern).test(className);
-    } catch {
-      return false;
-    }
-  };
-
-  if (matchers.all.length > 0 && !matchers.all.every(matchesClass)) {
-    return false;
-  }
-
-  return matchers.any.length === 0
-    || matchers.anyOther.length > 0
-    || matchers.any.some(matchesClass);
+  return ruleMayApplyToClass(rule, className, { normalize: normalizeToken });
 }
 
 function allWebhookClasses(rules, cmdbuildCatalog) {

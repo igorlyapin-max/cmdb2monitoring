@@ -82,6 +82,12 @@ public sealed class CmdbToZabbixConverter(
             }
 
             var model = BuildModel(profiledSource, rules, methodName, fallbackForMethod, profile, zabbixHostId);
+            if (!string.Equals(profiledSource.EventType, "delete", StringComparison.OrdinalIgnoreCase)
+                && model.Templates.Count == 0)
+            {
+                results.Add(ZabbixConversionResult.Skipped(profiledSource, methodName, "no_template_rule_matched", profileName));
+                continue;
+            }
             var validationError = Validate(profiledSource, rules, route.RequiredFields, model.Interfaces, profile);
             if (!string.IsNullOrWhiteSpace(validationError))
             {
@@ -375,50 +381,10 @@ public sealed class CmdbToZabbixConverter(
         CmdbSourceEvent source,
         ConversionRulesDocument rules)
     {
-        if (rules.HostProfiles.Length == 0)
-        {
-            return [DefaultHostProfile()];
-        }
-
-        var matched = rules.HostProfiles
-            .Where(profile => profile.Enabled && !profile.Fallback && MatchesProfile(source, profile.When))
+        return rules.HostProfiles
+            .Where(profile => profile.Enabled && Matches(source, profile.When))
             .OrderBy(profile => profile.Priority)
             .ToArray();
-        if (matched.Length > 0)
-        {
-            return matched;
-        }
-
-        var fallback = rules.HostProfiles
-            .Where(profile => profile.Enabled && profile.Fallback && MatchesProfile(source, profile.When))
-            .OrderBy(profile => profile.Priority)
-            .ToArray();
-
-        return fallback.Length > 0 ? fallback : [];
-    }
-
-    private static HostProfileRule DefaultHostProfile()
-    {
-        return new HostProfileRule
-        {
-            Name = "default",
-            Enabled = true,
-            When = new RuleCondition { Always = true }
-        };
-    }
-
-    private static bool MatchesProfile(CmdbSourceEvent source, RuleCondition condition)
-    {
-        return IsEmptyCondition(condition) || Matches(source, condition);
-    }
-
-    private static bool IsEmptyCondition(RuleCondition condition)
-    {
-        return !condition.Always
-            && string.IsNullOrWhiteSpace(condition.FieldExists)
-            && condition.FieldsExist.Length == 0
-            && condition.AnyRegex.Length == 0
-            && condition.AllRegex.Length == 0;
     }
 
     private static string ProfileName(HostProfileRule profile)
@@ -615,22 +581,11 @@ public sealed class CmdbToZabbixConverter(
         ZabbixHostCreateModel model)
     {
         var matched = new List<ZabbixGroupModel>();
-        foreach (var rule in rules.GroupSelectionRules.Where(rule => !rule.Fallback).OrderBy(rule => rule.Priority))
+        foreach (var rule in rules.GroupSelectionRules.OrderBy(rule => rule.Priority))
         {
-            if (Matches(source, rule.When))
+            if (MatchesSelectionRule(source, rules, rule))
             {
                 matched.AddRange(ResolveGroups(rule, rules, source, model));
-            }
-        }
-
-        if (matched.Count == 0)
-        {
-            foreach (var rule in rules.GroupSelectionRules.Where(rule => rule.Fallback).OrderBy(rule => rule.Priority))
-            {
-                if (Matches(source, rule.When))
-                {
-                    matched.AddRange(ResolveGroups(rule, rules, source, model));
-                }
             }
         }
 
@@ -644,22 +599,11 @@ public sealed class CmdbToZabbixConverter(
     private TemplateSelectionResult SelectTemplateSelection(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
         var matched = new List<LookupItem>();
-        foreach (var rule in rules.TemplateSelectionRules.Where(rule => !rule.Fallback).OrderBy(rule => rule.Priority))
+        foreach (var rule in rules.TemplateSelectionRules.OrderBy(rule => rule.Priority))
         {
-            if (Matches(source, rule.When))
+            if (MatchesSelectionRule(source, rules, rule))
             {
                 matched.AddRange(ResolveTemplates(rule, rules));
-            }
-        }
-
-        if (matched.Count == 0)
-        {
-            foreach (var rule in rules.TemplateSelectionRules.Where(rule => rule.Fallback).OrderBy(rule => rule.Priority))
-            {
-                if (Matches(source, rule.When))
-                {
-                    matched.AddRange(ResolveTemplates(rule, rules));
-                }
             }
         }
 
@@ -714,8 +658,7 @@ public sealed class CmdbToZabbixConverter(
 
     private static string FindTemplateName(string templateId, ConversionRulesDocument rules)
     {
-        return rules.Defaults.Templates
-            .Concat(rules.TemplateSelectionRules.SelectMany(rule => rule.Templates))
+        return rules.TemplateSelectionRules.SelectMany(rule => rule.Templates)
             .FirstOrDefault(template => string.Equals(template.TemplateId, templateId, StringComparison.OrdinalIgnoreCase))
             ?.Name ?? string.Empty;
     }
@@ -731,14 +674,8 @@ public sealed class CmdbToZabbixConverter(
     private InterfaceSettings SelectInterface(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
         var matchedProfileRule = rules.InterfaceProfileSelectionRules
-            .Where(rule => !rule.Fallback)
             .OrderBy(rule => rule.Priority)
-            .FirstOrDefault(rule => Matches(source, rule.When));
-
-        matchedProfileRule ??= rules.InterfaceProfileSelectionRules
-            .Where(rule => rule.Fallback)
-            .OrderBy(rule => rule.Priority)
-            .FirstOrDefault(rule => Matches(source, rule.When));
+            .FirstOrDefault(rule => MatchesSelectionRule(source, rules, rule));
 
         if (!string.IsNullOrWhiteSpace(matchedProfileRule?.InterfaceProfileRef))
         {
@@ -746,14 +683,8 @@ public sealed class CmdbToZabbixConverter(
         }
 
         var matchedRule = rules.InterfaceSelectionRules
-            .Where(rule => !rule.Fallback)
             .OrderBy(rule => rule.Priority)
-            .FirstOrDefault(rule => Matches(source, rule.When));
-
-        matchedRule ??= rules.InterfaceSelectionRules
-            .Where(rule => rule.Fallback)
-            .OrderBy(rule => rule.Priority)
-            .FirstOrDefault(rule => Matches(source, rule.When));
+            .FirstOrDefault(rule => MatchesSelectionRule(source, rules, rule));
 
         return ResolveInterface(matchedRule?.InterfaceRef, rules);
     }
@@ -775,11 +706,6 @@ public sealed class CmdbToZabbixConverter(
                     SelectInterfaceAddress(source, rules, profile, rule),
                     source);
                 if (!HasAddress(mappedInterface))
-                {
-                    continue;
-                }
-
-                if (rule.Fallback && interfaces.Any(item => item.Type == mappedInterface.Type))
                 {
                     continue;
                 }
@@ -847,9 +773,8 @@ public sealed class CmdbToZabbixConverter(
         HostProfileRule profile)
     {
         return profile.Interfaces
-            .Where(rule => rule.Enabled && MatchesProfile(source, rule.When))
-            .OrderBy(rule => rule.Fallback ? 1 : 0)
-            .ThenBy(rule => rule.Priority)
+            .Where(rule => rule.Enabled && Matches(source, rule.When))
+            .OrderBy(rule => rule.Priority)
             .ToList();
     }
 
@@ -913,12 +838,6 @@ public sealed class CmdbToZabbixConverter(
         }
 
         var matchedRule = rules.InterfaceAddressRules
-            .Where(rule => !rule.Fallback)
-            .OrderBy(rule => rule.Priority)
-            .FirstOrDefault(rule => Matches(source, rule.When));
-
-        matchedRule ??= rules.InterfaceAddressRules
-            .Where(rule => rule.Fallback)
             .OrderBy(rule => rule.Priority)
             .FirstOrDefault(rule => Matches(source, rule.When));
 
@@ -988,23 +907,11 @@ public sealed class CmdbToZabbixConverter(
         tags.AddRange(rules.Defaults.Tags);
 
         var matched = rules.TagSelectionRules
-            .Where(rule => !rule.Fallback)
             .OrderBy(rule => rule.Priority)
-            .Where(rule => Matches(source, rule.When))
+            .Where(rule => MatchesSelectionRule(source, rules, rule))
             .SelectMany(rule => ResolveTags(rule, rules, source, model))
             .ToArray();
-        if (matched.Length > 0)
-        {
-            tags.AddRange(matched);
-        }
-        else
-        {
-            tags.AddRange(rules.TagSelectionRules
-                .Where(rule => rule.Fallback)
-                .OrderBy(rule => rule.Priority)
-                .Where(rule => Matches(source, rule.When))
-                .SelectMany(rule => ResolveTags(rule, rules, source, model)));
-        }
+        tags.AddRange(matched);
 
         return tags
             .Where(tag => !string.IsNullOrWhiteSpace(tag.Tag))
@@ -1031,6 +938,7 @@ public sealed class CmdbToZabbixConverter(
         macros.AddRange(rules.Defaults.HostMacros);
         macros.AddRange(SelectManyFromRules(
             source,
+            rules,
             rules.HostMacroSelectionRules,
             rule => ResolveHostMacros(rule, rules)));
 
@@ -1057,6 +965,7 @@ public sealed class CmdbToZabbixConverter(
         fields.AddRange(rules.Defaults.InventoryFields);
         fields.AddRange(SelectManyFromRules(
             source,
+            rules,
             rules.InventorySelectionRules,
             rule => ResolveInventoryFields(rule, rules)));
 
@@ -1077,31 +986,31 @@ public sealed class CmdbToZabbixConverter(
 
     private ProxyDefinition? SelectProxy(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
-        return SelectFirstFromRules(source, rules.ProxySelectionRules, rule => ResolveProxies(rule, rules))
+        return SelectFirstFromRules(source, rules, rules.ProxySelectionRules, rule => ResolveProxies(rule, rules))
             ?? (HasProxy(rules.Defaults.Proxy) ? rules.Defaults.Proxy : null);
     }
 
     private ProxyGroupDefinition? SelectProxyGroup(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
-        return SelectFirstFromRules(source, rules.ProxyGroupSelectionRules, rule => ResolveProxyGroups(rule, rules))
+        return SelectFirstFromRules(source, rules, rules.ProxyGroupSelectionRules, rule => ResolveProxyGroups(rule, rules))
             ?? (HasProxyGroup(rules.Defaults.ProxyGroup) ? rules.Defaults.ProxyGroup : null);
     }
 
     private int? SelectHostStatus(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
-        return SelectFirstFromRules(source, rules.HostStatusSelectionRules, rule => ResolveHostStatuses(rule, rules))?.Status
+        return SelectFirstFromRules(source, rules, rules.HostStatusSelectionRules, rule => ResolveHostStatuses(rule, rules))?.Status
             ?? rules.Defaults.HostStatus.Status;
     }
 
     private TlsPskDefinition? SelectTlsPsk(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
-        return SelectFirstFromRules(source, rules.TlsPskSelectionRules, rule => ResolveTlsPsk(rule, rules))
+        return SelectFirstFromRules(source, rules, rules.TlsPskSelectionRules, rule => ResolveTlsPsk(rule, rules))
             ?? (HasTlsPsk(rules.Defaults.TlsPsk) ? rules.Defaults.TlsPsk : null);
     }
 
     private List<ZabbixMaintenanceModel> SelectMaintenances(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
-        return SelectManyFromRules(source, rules.MaintenanceSelectionRules, rule => ResolveMaintenances(rule, rules))
+        return SelectManyFromRules(source, rules, rules.MaintenanceSelectionRules, rule => ResolveMaintenances(rule, rules))
             .Where(item => !string.IsNullOrWhiteSpace(item.MaintenanceId) || !string.IsNullOrWhiteSpace(item.Name))
             .GroupBy(item => !string.IsNullOrWhiteSpace(item.MaintenanceId) ? item.MaintenanceId : item.Name, StringComparer.OrdinalIgnoreCase)
             .Select(group => new ZabbixMaintenanceModel(group.Last().Name, group.Last().MaintenanceId))
@@ -1110,7 +1019,7 @@ public sealed class CmdbToZabbixConverter(
 
     private List<ZabbixValueMapModel> SelectValueMaps(CmdbSourceEvent source, ConversionRulesDocument rules)
     {
-        return SelectManyFromRules(source, rules.ValueMapSelectionRules, rule => ResolveValueMaps(rule, rules))
+        return SelectManyFromRules(source, rules, rules.ValueMapSelectionRules, rule => ResolveValueMaps(rule, rules))
             .Where(item => !string.IsNullOrWhiteSpace(item.ValueMapId) || !string.IsNullOrWhiteSpace(item.Name))
             .GroupBy(item => !string.IsNullOrWhiteSpace(item.ValueMapId) ? item.ValueMapId : item.Name, StringComparer.OrdinalIgnoreCase)
             .Select(group => new ZabbixValueMapModel(group.Last().Name, group.Last().ValueMapId))
@@ -1119,90 +1028,67 @@ public sealed class CmdbToZabbixConverter(
 
     private static List<T> SelectManyFromRules<T>(
         CmdbSourceEvent source,
+        ConversionRulesDocument document,
         IEnumerable<SelectionRule> rules,
         Func<SelectionRule, T[]> resolve)
     {
         var matched = rules
-            .Where(rule => !rule.Fallback)
             .OrderBy(rule => rule.Priority)
-            .Where(rule => Matches(source, rule.When))
+            .Where(rule => MatchesSelectionRule(source, document, rule))
             .SelectMany(resolve)
             .ToList();
-
-        if (matched.Count > 0)
-        {
-            return matched;
-        }
-
-        return rules
-            .Where(rule => rule.Fallback)
-            .OrderBy(rule => rule.Priority)
-            .Where(rule => Matches(source, rule.When))
-            .SelectMany(resolve)
-            .ToList();
+        return matched;
     }
 
     private static T? SelectFirstFromRules<T>(
         CmdbSourceEvent source,
+        ConversionRulesDocument document,
         IEnumerable<SelectionRule> rules,
         Func<SelectionRule, T[]> resolve)
     {
-        return SelectManyFromRules(source, rules, resolve).FirstOrDefault();
+        return SelectManyFromRules(source, document, rules, resolve).FirstOrDefault();
+    }
+
+    private static bool MatchesSelectionRule(
+        CmdbSourceEvent source,
+        ConversionRulesDocument rules,
+        SelectionRule rule)
+    {
+        return ProfileScopedRulePolicy.MatchesProfile(
+                rule,
+                rules,
+                ReadField(source, "hostProfile"))
+            && Matches(source, rule.When);
     }
 
     private static bool Matches(CmdbSourceEvent source, RuleCondition condition)
     {
-        if (condition.Always)
-        {
-            return true;
-        }
-
-        var hasConditions = false;
-        if (!string.IsNullOrWhiteSpace(condition.FieldExists))
-        {
-            hasConditions = true;
-            if (string.IsNullOrWhiteSpace(ReadField(source, condition.FieldExists)))
-            {
-                return false;
-            }
-        }
-
-        if (condition.FieldsExist.Length > 0)
-        {
-            hasConditions = true;
-            if (!condition.FieldsExist.All(field => !string.IsNullOrWhiteSpace(ReadField(source, field))))
-            {
-                return false;
-            }
-        }
-
-        if (condition.AllRegex.Length > 0)
-        {
-            hasConditions = true;
-            if (!condition.AllRegex.All(regex => MatchesRegex(source, regex)))
-            {
-                return false;
-            }
-        }
-
-        if (condition.AnyRegex.Length > 0)
-        {
-            hasConditions = true;
-            if (!condition.AnyRegex.Any(regex => MatchesRegex(source, regex)))
-            {
-                return false;
-            }
-        }
-
-        return hasConditions;
+        return MatchesExpression(source, condition.Expression);
     }
 
-    private static bool MatchesRegex(CmdbSourceEvent source, RegexCondition regex)
+    private static bool MatchesExpression(CmdbSourceEvent source, ConditionExpression expression)
     {
-        var value = ReadField(source, regex.Field);
-        return !string.IsNullOrWhiteSpace(value)
-            && !string.IsNullOrWhiteSpace(regex.Pattern)
-            && Regex.IsMatch(value, regex.Pattern, RegexOptions.CultureInvariant, RegexTimeout);
+        var operation = expression.Operator.Trim().ToLowerInvariant();
+        return operation switch
+        {
+            "always" => true,
+            "all" => expression.Items.Length > 0 && expression.Items.All(item => MatchesExpression(source, item)),
+            "any" => expression.Items.Length > 0 && expression.Items.Any(item => MatchesExpression(source, item)),
+            "not" => expression.Items.Length == 1 && !MatchesExpression(source, expression.Items[0]),
+            "exists" => !string.IsNullOrWhiteSpace(ReadField(source, expression.Field)),
+            "empty" => string.IsNullOrWhiteSpace(ReadField(source, expression.Field)),
+            "equals" => MatchesValue(source, expression, value => string.Equals(value, expression.Value, StringComparison.OrdinalIgnoreCase)),
+            "notequals" => MatchesValue(source, expression, value => !string.Equals(value, expression.Value, StringComparison.OrdinalIgnoreCase)),
+            "regex" => MatchesValue(source, expression, value => Regex.IsMatch(value, expression.Pattern, RegexOptions.CultureInvariant, RegexTimeout)),
+            "notregex" => MatchesValue(source, expression, value => !Regex.IsMatch(value, expression.Pattern, RegexOptions.CultureInvariant, RegexTimeout)),
+            _ => false
+        };
+    }
+
+    private static bool MatchesValue(CmdbSourceEvent source, ConditionExpression expression, Func<string, bool> predicate)
+    {
+        var value = ReadField(source, expression.Field);
+        return !string.IsNullOrWhiteSpace(value) && predicate(value);
     }
 
     private static string? ReadField(CmdbSourceEvent source, string field)
@@ -1339,9 +1225,7 @@ public sealed class CmdbToZabbixConverter(
             return rule.ValueField;
         }
 
-        return rule.When.AllRegex
-            .Concat(rule.When.AnyRegex)
-            .Select(regex => regex.Field)
+        return ConditionFields(rule.When.Expression)
             .FirstOrDefault(field => !string.IsNullOrWhiteSpace(field)
                 && !string.Equals(CanonicalFieldName(field), "className", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(CanonicalFieldName(field), "eventType", StringComparison.OrdinalIgnoreCase))
@@ -1366,14 +1250,19 @@ public sealed class CmdbToZabbixConverter(
 
     private static LookupItem[] ResolveTemplates(SelectionRule rule, ConversionRulesDocument rules)
     {
-        if (rule.Templates.Length > 0)
+        return rule.Templates;
+    }
+
+    private static IEnumerable<string> ConditionFields(ConditionExpression expression)
+    {
+        if (expression.Operator.Equals("all", StringComparison.OrdinalIgnoreCase)
+            || expression.Operator.Equals("any", StringComparison.OrdinalIgnoreCase)
+            || expression.Operator.Equals("not", StringComparison.OrdinalIgnoreCase))
         {
-            return rule.Templates;
+            return expression.Items.SelectMany(ConditionFields);
         }
 
-        return string.Equals(rule.TemplatesRef, "defaults.templates", StringComparison.OrdinalIgnoreCase)
-            ? rules.Defaults.Templates
-            : [];
+        return string.IsNullOrWhiteSpace(expression.Field) ? [] : [expression.Field];
     }
 
     private static InterfaceSettings ResolveInterface(string? interfaceRef, ConversionRulesDocument rules)

@@ -31,6 +31,17 @@ import {
   buildDesiredCmdbuildWebhooks as buildDesiredCmdbuildWebhooksFromRequirements,
   buildWebhookRequirements
 } from './lib/webhook-logic.js';
+import {
+  conditionExactValues,
+  conditionFields,
+  conditionLeaf,
+  conditionSummary,
+  isProfileScopedRule,
+  profileBoundCondition,
+  requiredHostProfileName,
+  ruleMayApplyToClass,
+  validateCondition
+} from './lib/condition-expression.js';
 
 const state = {
   currentRules: null,
@@ -48,9 +59,12 @@ const state = {
   mappingEditorFieldOptions: new Map(),
   mappingEditorFieldOptionStates: new Map(),
   mappingEditorTargetOptionStates: new Map(),
+  mappingEditorCondition: null,
+  mappingEditorConditionAuto: true,
   mappingProfileFieldOptions: new Map(),
   mappingProfileClassName: '',
   mappingProfileSelectedName: '',
+  mappingRuleProfileName: '',
   mappingLoaded: false,
   webhooksLoaded: false,
   webhooksCurrent: [],
@@ -113,9 +127,9 @@ const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
 const roleViews = {
   viewer: ['dashboard', 'events', 'about', 'help'],
-  editor: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'about', 'help'],
-  admin: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help'],
-  administrator: ['dashboard', 'events', 'systemAudit', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
+  editor: ['dashboard', 'events', 'systemAudit', 'profiles', 'mapping', 'webhooks', 'cmdbuild', 'about', 'help'],
+  admin: ['dashboard', 'events', 'systemAudit', 'profiles', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help'],
+  administrator: ['dashboard', 'events', 'systemAudit', 'profiles', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
 const defaultCmdbuildWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
@@ -131,12 +145,12 @@ let pendingHelpTarget = null;
 let queueMonitorTimer = null;
 const mappingEditorFormControlSelectors = [
   '#mappingModifyRule',
+  '#mappingRuleProfile',
   '#mappingEditClass',
   '#mappingEditField',
   '#mappingEditTargetType',
   '#mappingEditZabbixObject',
   '#mappingEditPriority',
-  '#mappingEditRegex',
   '#mappingEditStringTemplate',
   '#mappingEditRuleName'
 ];
@@ -489,6 +503,7 @@ const translations = {
     'nav.dashboard': 'Панель',
     'nav.events': 'События',
     'nav.systemAudit': 'Аудит',
+    'nav.profiles': 'Профили',
     'nav.mapping': 'Управление правилами конвертации',
     'nav.webhooks': 'Настройка webhooks',
     'nav.cmdbuildAdmin': 'Операции CMDBuild',
@@ -642,8 +657,10 @@ const translations = {
     'mapping.actionModify': 'Модификация правила',
     'mapping.actionDelete': 'Удаление правил',
     'mapping.modifyRule': 'Правило для изменения',
+    'mapping.ruleProfile': 'Профиль мониторинга',
     'mapping.cmdbClass': 'Класс CMDBuild',
     'mapping.classField': 'Атрибут класса',
+    'mapping.dynamicValueField': 'Поле для динамического значения',
     'mapping.structure': 'Структура конвертации',
     'mapping.zabbixTarget': 'Объект/payload Zabbix',
     'mapping.stringTemplate': 'Строка payload',
@@ -657,10 +674,33 @@ const translations = {
     'mapping.insertRegex': 'Вставить regex',
     'mapping.priority': 'Приоритет',
     'mapping.regex': 'Regex',
+    'mapping.conditions': 'Условия срабатывания',
+    'mapping.conditionReset': 'Сбросить условие',
+    'mapping.conditionWhen': 'Когда',
+    'mapping.conditionObject': 'Условия объекта',
+    'mapping.conditionGroup': 'Группа',
+    'mapping.conditionDelete': 'Удалить',
+    'mapping.conditionAddLeaf': '+ Условие',
+    'mapping.conditionAddGroup': '+ Группа',
+    'mapping.conditionAddNot': '+ НЕ',
+    'mapping.conditionValue': 'значение',
+    'mapping.conditionAlways': 'всегда',
+    'mapping.conditionOperator': 'Оператор условия',
+    'mapping.conditionField': 'Поле условия',
+    'mapping.conditionPattern': 'Регулярное выражение',
+    'mapping.conditionOperator.all': 'И',
+    'mapping.conditionOperator.any': 'ИЛИ',
+    'mapping.conditionOperator.not': 'НЕ',
+    'mapping.conditionOperator.equals': '=',
+    'mapping.conditionOperator.notEquals': '!=',
+    'mapping.conditionOperator.regex': 'регулярное выражение',
+    'mapping.conditionOperator.notRegex': 'не соответствует регулярному выражению',
+    'mapping.conditionOperator.exists': 'заполнено',
+    'mapping.conditionOperator.empty': 'пусто',
     'mapping.ruleName': 'Имя правила',
     'mapping.ruleNameAuto': 'автоматически',
     'mapping.profilesTitle': 'Профили мониторинга',
-    'mapping.profilesHelp': 'Профиль создает отдельный Zabbix host lifecycle для выбранного CMDBuild-класса. Сначала создайте профиль, затем назначайте на него templates/groups/tags через виртуальное поле hostProfile или чекбокс ограничения выбранным profile.',
+    'mapping.profilesHelp': 'Профиль создает отдельный Zabbix host lifecycle для выбранного CMDBuild-класса. Создайте профиль, затем выберите его в форме правила и назначайте templates/groups/tags условиями объекта.',
     'mapping.profileClass': 'Класс CMDBuild',
     'mapping.profileKind': 'Тип профиля',
     'mapping.profileKindMain': 'Основной',
@@ -681,7 +721,6 @@ const translations = {
     'mapping.profileReset': 'Очистить профиль',
     'mapping.profileSelect': 'Выбрать',
     'mapping.profileAssignments': 'Назначения',
-    'mapping.profileScope': 'Ограничить правило выбранным hostProfile',
     'mapping.additionalProfileCreate': 'Создать отдельный hostProfile для этого leaf',
     'mapping.additionalProfileName': 'Имя hostProfile',
     'mapping.additionalProfileNamePlaceholder': 'serveri-mgmt',
@@ -733,10 +772,11 @@ const translations = {
     'mapping.status.profileDeleted': 'Профиль "{profile}" удален. Связанных назначений удалено: {count}.',
     'mapping.status.profileReset': 'Поля профиля очищены.',
     'mapping.status.profileNotCreated': 'Профиль не создан: проверьте класс, leaf и имя.',
-    'mapping.status.profileScopeNone': 'Выберите hostProfile в блоке "Профили мониторинга", чтобы назначить rule только на этот profile.',
-    'mapping.status.profileScopeUnsupported': 'Для выбранной conversion structure ограничение по hostProfile не применяется.',
-    'mapping.status.profileScopeClassMismatch': 'Выбранный hostProfile "{profile}" не относится к классу текущего rule.',
-    'mapping.status.profileScopeSelected': 'Rule будет применяться только к hostProfile "{profile}".',
+    'mapping.status.profileRequired': 'Выберите профиль мониторинга в форме правила. Правило без профиля не создается.',
+    'mapping.status.profileClassInvalid': 'Выбранный hostProfile должен однозначно определять класс CMDBuild.',
+    'mapping.status.profileScopeContext': 'Контекст profile: {profile} / класс CMDBuild: {className}.',
+    'mapping.status.profileScopeConditionField': 'Поле условия "{field}" не относится к классу выбранного hostProfile.',
+    'mapping.status.profileScopeConditionRequired': 'Правило должно быть связано с выбранным hostProfile.',
     'mapping.status.autoSelected': 'Правило выбрано автоматически: {name}.',
     'mapping.status.resetModify': 'Поля модификации сброшены. Начните с правила, класса, атрибута или структуры конвертации.',
     'mapping.status.resetAdd': 'Поля формы очищены. Выберите leaf field и Zabbix target.',
@@ -757,19 +797,17 @@ const translations = {
     'mapping.status.chooseCompatibleFieldModify': 'Выберите совместимое CMDBuild field для изменения правила.',
     'mapping.status.classFieldMissing': 'В классе "{className}" нет атрибута для "{field}". Добавьте атрибут в CMDBuild или выберите существующий class attribute field.',
     'mapping.status.multiValueScalarNotAllowed': 'Поле "{field}" может вернуть несколько значений через CMDBuild domain path. Для скалярной Zabbix structure "{target}" выберите обычный scalar/reference leaf или настройте source field с resolve.collectionMode=first.',
-    'mapping.status.addedRule': 'Добавлено правило "{name}".',
     'mapping.status.addedRuleScopedProfile': 'Добавлено правило "{name}" для hostProfile "{profile}".',
     'mapping.status.addedRuleWithProfile': 'Добавлено правило "{name}". Автоматически создан host profile "{profile}" для класса "{className}".',
     'mapping.status.addedRuleWithAdditionalProfile': 'Добавлено правило "{name}". Создан дополнительный host profile "{profile}" для класса "{className}".',
-    'mapping.status.modifiedRule': 'Изменено правило "{name}".',
     'mapping.status.modifiedRuleScopedProfile': 'Изменено правило "{name}" для hostProfile "{profile}".',
     'mapping.status.modifiedRuleWithProfile': 'Изменено правило "{name}". Автоматически создан host profile "{profile}" для класса "{className}".',
     'mapping.status.modifyRuleMissing': 'Выбранное правило больше не найдено в draft JSON.',
     'mapping.status.readyButStale': 'Можно редактировать, но {details}',
     'mapping.status.ruleForModifySelected': 'Правило для модификации выбрано.',
-    'mapping.status.classSelected': 'Класс CMDBuild выбран.',
-    'mapping.status.noClassRestriction': 'Правило без ограничения по className.',
-    'mapping.status.leafSelected': 'Leaf/source field выбран.',
+    'mapping.status.classSelected': 'Класс CMDBuild получен из профиля.',
+    'mapping.status.noClassRestriction': 'Класс CMDBuild определяется выбранным профилем.',
+    'mapping.status.leafSelected': 'Поле для динамического значения выбрано.',
     'mapping.status.structureCompatible': 'Conversion structure совместима с выбранным field.',
     'mapping.status.targetSelected': 'Zabbix target выбран.',
     'mapping.status.dynamicTargetSelected': 'Dynamic target из CMDBuild leaf выбран.',
@@ -818,6 +856,7 @@ const translations = {
     'mapping.option.chooseClass': 'Выберите класс',
     'mapping.option.chooseClassFirst': 'Сначала выберите класс',
     'mapping.option.chooseRule': 'Выберите правило для модификации',
+    'mapping.option.chooseRuleProfile': 'Выберите профиль мониторинга',
     'mapping.option.noRulesToModify': 'Нет правил, доступных для модификации',
     'mapping.option.noRulesForModifyScope': 'Для выбранного класса/профиля нет правил для изменения',
     'mapping.option.chooseClassFilter': 'Выберите класс CMDBuild или оставьте фильтр пустым',
@@ -843,6 +882,7 @@ const translations = {
     'mapping.option.chooseLeafMeta': 'Сохранение доступно после выбора конечного leaf/source field.',
     'mapping.option.chooseStructureMeta': 'Сохранение доступно после выбора conversion structure.',
     'mapping.option.chooseTargetMeta': 'Сохранение доступно после выбора совместимого Zabbix target.',
+    'mapping.conditionProfileNotSelected': 'hostProfile = не выбран',
     'mapping.option.modifyStartsWithoutRuleMeta': 'Модификация начинается без выбранного rule.',
     'mapping.option.loadingZabbix': 'Загрузка Zabbix catalog...',
     'mapping.option.loadError': 'Ошибка загрузки: {message}',
@@ -928,8 +968,8 @@ const translations = {
     'help.mapping.16': 'Domain path вида Класс.{domain:СвязанныйКласс}.Атрибут читает связанные карточки через CMDBuild relations; поля, которые могут вернуть несколько значений, недоступны для скалярных Zabbix structures.',
     'help.mapping.17': 'monitoringSuppressionRules используется, когда атрибуты экземпляра означают осознанный отказ от постановки на мониторинг; create/update пропускаются, delete не блокируется.',
     'help.mapping.18': 'Правило template проверяется по Метаданные Zabbix: конфликт item key, LLD rule key или inventory link подсвечивается красным и блокирует сохранение до исправления templateConflictRules или выбора совместимого template set.',
-    'help.mapping.19': 'В редакторе правил доступны виртуальные поля hostProfile и outputProfile. Их заполняет converter для каждого hostProfiles[]; через них можно ограничить template/group/tag rule конкретным fan-out profile.',
-    'help.mapping.20': 'Профили мониторинга создаются, изменяются и удаляются в отдельном блоке редактора. После создания дополнительного profile назначайте templates/groups/tags отдельными правилами через виртуальное поле hostProfile или через чекбокс ограничения выбранным hostProfile, если основное условие должно остаться по description/lookup/domain leaf.',
+    'help.mapping.19': 'Правило всегда связано с выбранным profile. Связь hostProfile показывается как системное условие и добавляется при сохранении; пользователь редактирует только условия объекта.',
+    'help.mapping.20': 'Профили мониторинга создаются, изменяются и удаляются в Правила мониторинга -> Профили. После создания выберите профиль в форме правила и назначайте templates/groups/tags отдельными правилами с условиями объекта по полям класса профиля.',
     'help.webhooks.title': 'Настройка webhooks',
     'help.webhooks.1': 'Страница доступна ролям Редактирование правил и Администрирование.',
     'help.webhooks.2': 'Загрузить из CMDB читает текущие CMDBuild webhooks через backend; браузер не подключается к CMDBuild напрямую.',
@@ -993,7 +1033,7 @@ const translations = {
     'tooltip.mappingInsertRegex': 'Вставляет Model.Regex(...) по выбранному полю, pattern и replacement.',
     'tooltip.mappingProfileClass': 'Класс, события которого будут создавать или обновлять Zabbix host по этому hostProfile.',
     'tooltip.mappingProfileKind': 'Основной profile формирует базовый Zabbix host. Дополнительный profile добавляет suffix HostProfileName и используется для отдельного host lifecycle.',
-    'tooltip.mappingProfileName': 'Имя hostProfile. Это же значение доступно в виртуальном поле hostProfile для правил назначения templates/groups/tags.',
+    'tooltip.mappingProfileName': 'Имя hostProfile. Система использует его для обязательной связи rules назначения templates/groups/tags с выбранным profile.',
     'tooltip.mappingProfileField': 'IP/DNS leaf, который попадет в interfaces[].ip или interfaces[].dns выбранного profile.',
     'tooltip.mappingProfileRecognizedOnly': 'Когда включено, список адресного leaf показывает только поля, распознанные как IP или DNS. Когда выключено, доступны все совместимые leaf/source fields класса; выбранный режим IP/DNS применяется вручную.',
     'tooltip.mappingProfileMode': 'Определяет, будет ли leaf записан как IP с useip=1 или DNS с useip=0.',
@@ -1003,7 +1043,6 @@ const translations = {
     'tooltip.mappingProfileSave': 'Сохраняет изменения выбранного hostProfile и переименовывает точные условия hostProfile в связанных правилах.',
     'tooltip.mappingProfileDelete': 'Удаляет hostProfile из draft JSON вместе с правилами, которые явно ограничены этим hostProfile.',
     'tooltip.mappingProfileReset': 'Очищает выбор profile и форму создания.',
-    'tooltip.mappingProfileScope': 'Добавляет к создаваемому или изменяемому rule условие по виртуальному полю hostProfile, чтобы template/group/tag назначались только на выбранный дополнительный profile.',
     'tooltip.mappingProfileRow': 'hostProfile "{profile}". Связанных назначений: {count}.',
     'tooltip.mappingDeleteSelectAll': 'Отмечает все rules в режиме удаления.',
     'tooltip.mappingDeleteClear': 'Снимает отметки со всех rules в режиме удаления.',
@@ -1250,6 +1289,7 @@ const translations = {
     'nav.dashboard': 'Dashboard',
     'nav.events': 'Events',
     'nav.systemAudit': 'Audit',
+    'nav.profiles': 'Profiles',
     'nav.mapping': 'Conversion Rules Management',
     'nav.webhooks': 'Webhook Setup',
     'nav.cmdbuildAdmin': 'CMDBuild Operations',
@@ -1402,8 +1442,10 @@ const translations = {
     'mapping.actionModify': 'Modify rule',
     'mapping.actionDelete': 'Delete rules',
     'mapping.modifyRule': 'Rule to modify',
+    'mapping.ruleProfile': 'Monitoring profile',
     'mapping.cmdbClass': 'CMDBuild class',
     'mapping.classField': 'Class attribute field',
+    'mapping.dynamicValueField': 'Field for dynamic value',
     'mapping.structure': 'Conversion structure',
     'mapping.zabbixTarget': 'Zabbix object / payload',
     'mapping.stringTemplate': 'Payload string',
@@ -1417,10 +1459,33 @@ const translations = {
     'mapping.insertRegex': 'Insert regex',
     'mapping.priority': 'Priority',
     'mapping.regex': 'Regex',
+    'mapping.conditions': 'Match conditions',
+    'mapping.conditionReset': 'Reset condition',
+    'mapping.conditionWhen': 'When',
+    'mapping.conditionObject': 'Object conditions',
+    'mapping.conditionGroup': 'Group',
+    'mapping.conditionDelete': 'Remove',
+    'mapping.conditionAddLeaf': '+ Condition',
+    'mapping.conditionAddGroup': '+ Group',
+    'mapping.conditionAddNot': '+ NOT',
+    'mapping.conditionValue': 'value',
+    'mapping.conditionAlways': 'always',
+    'mapping.conditionOperator': 'Condition operator',
+    'mapping.conditionField': 'Condition field',
+    'mapping.conditionPattern': 'Regular expression',
+    'mapping.conditionOperator.all': 'AND',
+    'mapping.conditionOperator.any': 'OR',
+    'mapping.conditionOperator.not': 'NOT',
+    'mapping.conditionOperator.equals': '=',
+    'mapping.conditionOperator.notEquals': '!=',
+    'mapping.conditionOperator.regex': 'regular expression',
+    'mapping.conditionOperator.notRegex': 'does not match regular expression',
+    'mapping.conditionOperator.exists': 'has a value',
+    'mapping.conditionOperator.empty': 'is empty',
     'mapping.ruleName': 'Rule name',
     'mapping.ruleNameAuto': 'auto-generated',
     'mapping.profilesTitle': 'Monitoring profiles',
-    'mapping.profilesHelp': 'A profile creates a separate Zabbix host lifecycle for the selected CMDBuild class. Create the profile first, then assign templates/groups/tags to it through the virtual hostProfile field or the selected-profile scope checkbox.',
+    'mapping.profilesHelp': 'A profile creates a separate Zabbix host lifecycle for the selected CMDBuild class. Create it, then select it in the rule form before assigning templates, groups, or tags.',
     'mapping.profileClass': 'CMDBuild class',
     'mapping.profileKind': 'Profile type',
     'mapping.profileKindMain': 'Main',
@@ -1441,7 +1506,6 @@ const translations = {
     'mapping.profileReset': 'Clear profile',
     'mapping.profileSelect': 'Select',
     'mapping.profileAssignments': 'Assignments',
-    'mapping.profileScope': 'Limit rule to selected hostProfile',
     'mapping.additionalProfileCreate': 'Create a separate hostProfile for this leaf',
     'mapping.additionalProfileName': 'hostProfile name',
     'mapping.additionalProfileNamePlaceholder': 'serveri-mgmt',
@@ -1493,10 +1557,11 @@ const translations = {
     'mapping.status.profileDeleted': 'Profile "{profile}" deleted. Scoped assignments deleted: {count}.',
     'mapping.status.profileReset': 'Profile fields were cleared.',
     'mapping.status.profileNotCreated': 'Profile was not created: check class, leaf, and name.',
-    'mapping.status.profileScopeNone': 'Select a hostProfile in the Monitoring profiles block to assign this rule only to that profile.',
-    'mapping.status.profileScopeUnsupported': 'The selected conversion structure does not use hostProfile scoping.',
-    'mapping.status.profileScopeClassMismatch': 'Selected hostProfile "{profile}" does not apply to the current rule class.',
-    'mapping.status.profileScopeSelected': 'The rule will apply only to hostProfile "{profile}".',
+    'mapping.status.profileRequired': 'Select a monitoring profile in the rule form. A rule cannot be created without a profile.',
+    'mapping.status.profileClassInvalid': 'The selected hostProfile must determine exactly one CMDBuild class.',
+    'mapping.status.profileScopeContext': 'Profile context: {profile} / CMDBuild class: {className}.',
+    'mapping.status.profileScopeConditionField': 'Condition field "{field}" does not belong to the selected hostProfile class.',
+    'mapping.status.profileScopeConditionRequired': 'The rule must be linked to the selected hostProfile.',
     'mapping.status.autoSelected': 'Rule selected automatically: {name}.',
     'mapping.status.resetModify': 'Modification fields were reset. Start from a rule, class, attribute, or conversion structure.',
     'mapping.status.resetAdd': 'Form fields were cleared. Choose a leaf field and Zabbix target.',
@@ -1517,18 +1582,16 @@ const translations = {
     'mapping.status.chooseCompatibleFieldModify': 'Choose a compatible CMDBuild field for changing the rule.',
     'mapping.status.classFieldMissing': 'Class "{className}" has no attribute for "{field}". Add the attribute in CMDBuild or choose an existing class attribute field.',
     'mapping.status.multiValueScalarNotAllowed': 'Field "{field}" can return multiple values through a CMDBuild domain path. For scalar Zabbix structure "{target}", choose a regular scalar/reference leaf or configure the source field with resolve.collectionMode=first.',
-    'mapping.status.addedRule': 'Added rule "{name}".',
     'mapping.status.addedRuleScopedProfile': 'Added rule "{name}" for hostProfile "{profile}".',
     'mapping.status.addedRuleWithProfile': 'Added rule "{name}". Automatically created host profile "{profile}" for class "{className}".',
     'mapping.status.addedRuleWithAdditionalProfile': 'Added rule "{name}". Created additional host profile "{profile}" for class "{className}".',
-    'mapping.status.modifiedRule': 'Modified rule "{name}".',
     'mapping.status.modifiedRuleScopedProfile': 'Modified rule "{name}" for hostProfile "{profile}".',
     'mapping.status.modifiedRuleWithProfile': 'Modified rule "{name}". Automatically created host profile "{profile}" for class "{className}".',
     'mapping.status.modifyRuleMissing': 'The selected rule is no longer found in the draft JSON.',
     'mapping.status.readyButStale': 'Ready to edit, but {details}',
     'mapping.status.ruleForModifySelected': 'Rule to modify is selected.',
-    'mapping.status.classSelected': 'CMDBuild class is selected.',
-    'mapping.status.noClassRestriction': 'Rule without a className restriction.',
+    'mapping.status.classSelected': 'CMDBuild class is obtained from the profile.',
+    'mapping.status.noClassRestriction': 'CMDBuild class is determined by the selected profile.',
     'mapping.status.leafSelected': 'Leaf/source field is selected.',
     'mapping.status.structureCompatible': 'Conversion structure is compatible with the selected field.',
     'mapping.status.targetSelected': 'Zabbix target is selected.',
@@ -1578,6 +1641,7 @@ const translations = {
     'mapping.option.chooseClass': 'Choose class',
     'mapping.option.chooseClassFirst': 'Choose a class first',
     'mapping.option.chooseRule': 'Choose a rule to modify',
+    'mapping.option.chooseRuleProfile': 'Choose a monitoring profile',
     'mapping.option.noRulesToModify': 'No rules available for modification',
     'mapping.option.noRulesForModifyScope': 'No rules to modify for the selected class/profile',
     'mapping.option.chooseClassFilter': 'Choose CMDBuild class or leave the filter empty',
@@ -1603,6 +1667,7 @@ const translations = {
     'mapping.option.chooseLeafMeta': 'Saving is available after choosing the final leaf/source field.',
     'mapping.option.chooseStructureMeta': 'Saving is available after choosing a conversion structure.',
     'mapping.option.chooseTargetMeta': 'Saving is available after choosing a compatible Zabbix target.',
+    'mapping.conditionProfileNotSelected': 'hostProfile = not selected',
     'mapping.option.modifyStartsWithoutRuleMeta': 'Modification starts without a selected rule.',
     'mapping.option.loadingZabbix': 'Loading Zabbix catalog...',
     'mapping.option.loadError': 'Load error: {message}',
@@ -1688,8 +1753,8 @@ const translations = {
     'help.mapping.16': 'A domain path such as Class.{domain:RelatedClass}.Attribute reads related cards through CMDBuild relations; fields that may return multiple values are unavailable for scalar Zabbix structures.',
     'help.mapping.17': 'monitoringSuppressionRules is used when instance attributes intentionally block monitoring; create/update are skipped, while delete is not blocked.',
     'help.mapping.18': 'Template rules are checked against Zabbix Metadata: an item key, LLD rule key, or inventory link conflict is marked red and blocks saving until templateConflictRules are fixed or a compatible template set is selected.',
-    'help.mapping.19': 'The rule editor exposes virtual hostProfile and outputProfile fields. The converter fills them for each hostProfiles[] entry; they can restrict a template/group/tag rule to a specific fan-out profile.',
-    'help.mapping.20': 'Monitoring profiles are created, changed, and deleted in a dedicated editor block. After creating an additional profile, assign templates/groups/tags through separate rules using the virtual hostProfile field or the selected-hostProfile scope checkbox when the primary condition must remain on description/lookup/domain leaf.',
+    'help.mapping.19': 'Every rule is linked to the selected profile. The hostProfile link is displayed as a system condition and is added on save; the operator edits only object conditions.',
+    'help.mapping.20': 'Monitoring profiles are created, changed, and deleted in Monitoring rules -> Profiles. After creating a profile, select it in the rule form and assign templates, groups, and tags through separate rules with object conditions on fields of the profile class.',
     'help.webhooks.title': 'Webhook Setup',
     'help.webhooks.1': 'The page is available to the Editor and Administrator roles.',
     'help.webhooks.2': 'Load from CMDB reads current CMDBuild webhooks through the backend; the browser does not connect to CMDBuild directly.',
@@ -1753,7 +1818,7 @@ const translations = {
     'tooltip.mappingInsertRegex': 'Inserts Model.Regex(...) using the selected field, pattern, and replacement.',
     'tooltip.mappingProfileClass': 'Class whose events will create or update a Zabbix host through this hostProfile.',
     'tooltip.mappingProfileKind': 'The main profile builds the base Zabbix host. An additional profile adds the HostProfileName suffix and is used for a separate host lifecycle.',
-    'tooltip.mappingProfileName': 'hostProfile name. The same value is exposed as the virtual hostProfile field for template/group/tag assignment rules.',
+    'tooltip.mappingProfileName': 'hostProfile name. The system uses it for the mandatory link between template/group/tag assignment rules and the selected profile.',
     'tooltip.mappingProfileField': 'IP/DNS leaf that will be written to interfaces[].ip or interfaces[].dns for the selected profile.',
     'tooltip.mappingProfileRecognizedOnly': 'When enabled, the address leaf list shows only fields recognized as IP or DNS. When disabled, all compatible class leaf/source fields are available; the selected IP/DNS mode is applied manually.',
     'tooltip.mappingProfileMode': 'Defines whether the leaf is sent as IP with useip=1 or DNS with useip=0.',
@@ -1763,7 +1828,6 @@ const translations = {
     'tooltip.mappingProfileSave': 'Saves the selected hostProfile and renames exact hostProfile conditions in scoped rules.',
     'tooltip.mappingProfileDelete': 'Deletes the hostProfile from draft JSON together with rules explicitly scoped to that hostProfile.',
     'tooltip.mappingProfileReset': 'Clears the selected profile and creation form.',
-    'tooltip.mappingProfileScope': 'Adds a condition on the virtual hostProfile field to the new or modified rule, so templates/groups/tags apply only to the selected additional profile.',
     'tooltip.mappingProfileRow': 'hostProfile "{profile}". Scoped assignments: {count}.',
     'tooltip.mappingDeleteSelectAll': 'Checks all rules in delete mode.',
     'tooltip.mappingDeleteClear': 'Clears all rule checks in delete mode.',
@@ -1810,6 +1874,7 @@ const viewDescriptions = {
     dashboard: 'Показывает состояние доступности сервисов и быстрые проверки текущего окружения.',
     events: 'Показывает используемые Kafka-топики и последние сообщения выбранного топика.',
     systemAudit: 'Готовит CMDBuild model для аудита постановки на мониторинг и запускает быстрый read-only аудит расхождений CMDBuild/Zabbix.',
+    profiles: 'Создает, изменяет и удаляет monitoring profiles. Профиль задает CMDBuild-класс и адресный leaf для отдельного жизненного цикла Zabbix host.',
     mapping: 'Показывает цепочку CMDBuild -> conversion rules -> Zabbix. Host profiles показывают fan-out и набор interfaces; Template rules выбирают templates, Tag rules формируют tags. Template conflicts могут удалить template из результата при конфликте item key или inventory field.',
     webhooks: 'Пользоваться этим пунктом не обязательно: можно самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации. Здесь можно загрузить текущие CMDBuild webhooks, построить план create/update/delete по rules и явно загрузить выбранные операции в CMDBuild. Отсутствующие payload-поля, необходимые rules, показываются до применения плана. Undo/Redo не откатывают уже выполненную загрузку конфигурации в CMDBuild.',
     cmdbuild: 'Административные операции CMDBuild: массовое изменение lookup-атрибута карточек и просмотр загруженного cache при диагностике.',
@@ -1823,6 +1888,7 @@ const viewDescriptions = {
     dashboard: 'Shows service availability and quick checks for the current environment.',
     events: 'Shows configured Kafka topics and the latest messages from the selected topic.',
     systemAudit: 'Prepares the CMDBuild model for monitoring audit and runs read-only quick discrepancy checks between CMDBuild and Zabbix.',
+    profiles: 'Creates, edits, and deletes monitoring profiles. A profile defines the CMDBuild class and address leaf for a separate Zabbix host lifecycle.',
     mapping: 'Shows the CMDBuild -> conversion rules -> Zabbix chain. Host profiles show fan-out and interfaces; Template rules select templates; Tag rules create tags.',
     webhooks: 'Using this page is optional: webhooks can be configured manually in CMDBuild, or operators can use the webhook files saved with the conversion rules file. This page loads current CMDBuild webhooks, builds a create/update/delete plan from rules, and explicitly loads selected operations into CMDBuild. Missing payload fields required by rules are shown before applying the plan. Undo/Redo does not roll back configuration already loaded into CMDBuild.',
     cmdbuild: 'CMDBuild administration operations: bulk lookup changes for cards and loaded cache inspection for diagnostics.',
@@ -1872,7 +1938,7 @@ function bindNavigation() {
       }
 
       showView(button.dataset.view);
-      if (button.dataset.view === 'mapping' && !state.mappingLoaded) {
+      if (['profiles', 'mapping'].includes(button.dataset.view) && !state.mappingLoaded) {
         await loadMapping();
       }
       if (button.dataset.view === 'webhooks' && !state.webhooksLoaded) {
@@ -2426,6 +2492,7 @@ function bindForms() {
   bindAction('#refreshEvents', loadEvents);
   $('#eventsTopic').addEventListener('change', loadEvents);
   bindAction('#loadMapping', () => loadMapping({ throwOnError: true }));
+  bindAction('#loadProfiles', () => loadMapping({ throwOnError: true }), { statusSelector: '#profilesActionStatus' });
   $('#mappingClearSelection').addEventListener('click', () => clearMappingHighlight($('#mapping')));
   $('#mappingMode').addEventListener('change', updateMappingMode);
   $('#mappingEditAction').addEventListener('change', updateMappingEditorAction);
@@ -2446,10 +2513,14 @@ function bindForms() {
   bindAction('#mappingPublish', publishMappingDraft, { statusSelector: '#mappingActionStatus', success: false });
   bindAction('#mappingRetryReload', retryMappingRulesReload, { statusSelector: '#mappingActionStatus', success: false });
   $('#mappingEditTargetType').addEventListener('change', handleMappingEditorStructureChange);
+  $('#mappingRuleProfile')?.addEventListener('change', handleMappingRuleProfileChange);
   $('#mappingEditClass').addEventListener('change', handleMappingEditorClassChange);
   $('#mappingEditField').addEventListener('change', handleMappingEditorFieldChange);
   $('#mappingEditZabbixObject').addEventListener('change', handleMappingEditorTargetChange);
-  $('#mappingEditRegex').addEventListener('input', handleMappingEditorLeafChange);
+  $('#mappingConditionBuilder')?.addEventListener('click', handleMappingConditionBuilderClick);
+  $('#mappingConditionBuilder')?.addEventListener('change', handleMappingConditionBuilderChange);
+  $('#mappingConditionBuilder')?.addEventListener('input', handleMappingConditionBuilderInput);
+  $('#mappingResetCondition')?.addEventListener('click', resetMappingCondition);
   $('#mappingEditPriority').addEventListener('input', handleMappingEditorLeafChange);
   $('#mappingEditRuleName').addEventListener('input', handleMappingEditorLeafChange);
   $('#mappingEditStringTemplate')?.addEventListener('input', handleMappingEditorLeafChange);
@@ -2475,10 +2546,6 @@ function bindForms() {
   $('#mappingProfileDelete')?.addEventListener('click', deleteMappingHostProfile);
   $('#mappingProfileReset')?.addEventListener('click', resetMappingProfileForm);
   $('#mappingProfilesList')?.addEventListener('click', handleMappingProfileListClick);
-  $('#mappingProfileScope')?.addEventListener('change', () => {
-    $('#mappingProfileScope').dataset.userTouched = '1';
-    updateMappingEditorFormState();
-  });
   $('#mappingResetForm').addEventListener('click', resetMappingEditorForm);
   $('#mappingAddRule').addEventListener('click', applyMappingEditorRule);
   $('#mappingDeleteView')?.addEventListener('change', () => {
@@ -3084,7 +3151,8 @@ function formatEventValue(value) {
 async function loadRules(options = {}) {
   const rulesDocument = await api('/api/rules/current');
   state.currentRules = rulesDocument;
-  renderRulesSourceStatuses(rulesDocument);
+  renderRulesSourceStatus('#mappingRulesSourceStatus', rulesDocument);
+  renderRulesSourceStatus('#profilesRulesSourceStatus', rulesDocument);
   setSessionIndicator(
     'gitRules',
     'read',
@@ -3117,7 +3185,9 @@ async function loadSessionCaches() {
 }
 
 function renderRulesSourceStatuses(rulesDocument = state.currentRules) {
-  renderRulesSourceStatus('#mappingRulesSourceStatus', state.mappingLoaded ? rulesDocument : null);
+  const source = state.mappingLoaded ? rulesDocument : null;
+  renderRulesSourceStatus('#mappingRulesSourceStatus', source);
+  renderRulesSourceStatus('#profilesRulesSourceStatus', source);
 }
 
 function renderRulesSourceStatus(selector, rulesDocument) {
@@ -4031,7 +4101,7 @@ async function loadMapping(options = {}) {
   }
 
   state.currentRules = rulesDocument;
-  renderRulesSourceStatus('#mappingRulesSourceStatus', rulesDocument);
+  renderRulesSourceStatuses(rulesDocument);
   setSessionIndicator(
     'gitRules',
     'read',
@@ -4166,11 +4236,15 @@ function resetMappingEditorTransientState() {
   state.mappingEditAction = 'add';
   state.mappingProfileClassName = '';
   state.mappingProfileSelectedName = '';
+  state.mappingRuleProfileName = '';
   if ($('#mappingEditAction')) {
     $('#mappingEditAction').value = 'add';
   }
   if ($('#mappingModifyRule')) {
     $('#mappingModifyRule').value = '';
+  }
+  if ($('#mappingRuleProfile')) {
+    $('#mappingRuleProfile').value = '';
   }
   if ($('#mappingEditClass')) {
     $('#mappingEditClass').dataset.userTouched = '';
@@ -5157,30 +5231,7 @@ function webhookBodyHasField(body, fieldKey, field) {
 }
 
 function webhookRuleAppliesToClass(rule, className) {
-  const matchers = {
-    all: asArray(rule?.when?.allRegex).filter(matcher => canonicalSourceField(matcher.field) === 'className'),
-    any: asArray(rule?.when?.anyRegex).filter(matcher => canonicalSourceField(matcher.field) === 'className'),
-    anyOther: asArray(rule?.when?.anyRegex).filter(matcher => canonicalSourceField(matcher.field) !== 'className')
-  };
-  if (matchers.all.length === 0 && matchers.any.length === 0) {
-    return true;
-  }
-
-  const matchesClass = matcher => {
-    try {
-      return compileRuleRegex(matcher.pattern).test(className);
-    } catch {
-      return false;
-    }
-  };
-
-  if (matchers.all.length > 0 && !matchers.all.every(matchesClass)) {
-    return false;
-  }
-
-  return matchers.any.length === 0
-    || matchers.anyOther.length > 0
-    || matchers.any.some(matchesClass);
+  return ruleMayApplyToClass(rule, className, { normalize: normalizeToken });
 }
 
 function cmdbPathRootAppliesToClass(cmdbPath, className, cmdbuildCatalog, rules) {
@@ -5238,12 +5289,8 @@ function collectSourceFieldsForClassScopedNode(value, className, parentApplies, 
 }
 
 function sourceFieldsForRuleOwnScope(rule = {}) {
-  const when = rule.when ?? {};
   const fields = [
-    ...(when.anyRegex ?? []).map(matcher => matcher.field),
-    ...(when.allRegex ?? []).map(matcher => matcher.field),
-    when.fieldExists,
-    ...(Array.isArray(when.fieldsExist) ? when.fieldsExist : []),
+    ...conditionFields(rule.when),
     rule.field,
     rule.valueField,
     rule.sourceField,
@@ -5467,7 +5514,6 @@ function updateMappingEditorControls() {
   updateMappingClearSelectionButton();
   $('#mapping')?.classList.toggle('mapping-edit-mode', editMode);
   $('#mappingEditor')?.classList.toggle('hidden', !editMode);
-  $('#mappingProfilesPanel')?.classList.toggle('hidden', !editMode);
   $('#mappingAddPanel')?.classList.toggle('hidden', !editMode || !['add', 'modify'].includes(action));
   $('#mappingModifyRuleField')?.classList.toggle('hidden', !editMode || action !== 'modify');
   $('#mappingDeletePanel')?.classList.toggle('hidden', !editMode || action !== 'delete');
@@ -5491,6 +5537,7 @@ function updateMappingEditor(message = '') {
   }
 
   updateMappingProfilesPanel();
+  populateMappingRuleProfiles();
   populateMappingEditorClasses();
   populateMappingEditorStructures();
   if (state.mappingEditAction === 'modify') {
@@ -5542,6 +5589,7 @@ function refreshMappingEditorLocalizedControls() {
     populateMappingModifyRules({ selectedValue: selectedRule });
   }
 
+  populateMappingRuleProfiles();
   populateMappingEditorClasses();
   populateMappingEditorStructures({ selectedValue: selectedType, fieldValue: selectedField });
   populateMappingEditorFields({ selectedValue: selectedField });
@@ -5571,6 +5619,7 @@ function updateMappingEditorAction() {
   } else {
     updateMappingEditorSuggestedName();
   }
+  populateMappingRuleProfiles();
   updateMappingProfilesPanel();
   setMappingEditorStatusForDraft(mappingEditorActionStatus());
   updateMappingEditorFormState();
@@ -5591,6 +5640,7 @@ function handleMappingEditorClassChange() {
   state.mappingModifyFieldValue = '';
   state.mappingModifyTargetValue = '';
   refreshMappingEditorDependentControls({ selectedField: '', selectedTarget: '' });
+  resetMappingConditionIfAutomatic();
 }
 
 function handleMappingEditorFieldChange() {
@@ -5607,6 +5657,8 @@ function handleMappingEditorFieldChange() {
     : '';
   populateMappingEditorTargets({ selectedValue: targetValue });
   updateMappingStringTemplateControls();
+  updateMappingProfileScopePresentation();
+  resetMappingConditionIfAutomatic();
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
 }
@@ -5617,12 +5669,20 @@ function handleMappingEditorStructureChange() {
     return;
   }
 
+  if (mappingProfileScopeContext()) {
+    applyMappingProfileScopeContext();
+    resetMappingConditionIfAutomatic();
+    updateMappingEditorFormState();
+    return;
+  }
+
   $('#mappingEditZabbixObject').value = '';
   clearMappingAdditionalProfileControls();
   state.mappingModifyTargetValue = '';
   populateMappingEditorFields({ selectedValue: $('#mappingEditField').value });
   populateMappingEditorTargets({ selectedValue: '' });
   updateMappingStringTemplateControls({ reset: true });
+  resetMappingConditionIfAutomatic();
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
 }
@@ -5633,8 +5693,13 @@ function handleMappingEditorTargetChange() {
     return;
   }
 
+  const target = readMappingEditorTarget({ applyStringTemplate: false });
+  if (isDynamicFromLeafTarget(target) && !$('#mappingEditField').value) {
+    $('#mappingEditField').value = target.valueField || mappingEditorDefaultSourceField();
+  }
   clearMappingAdditionalProfileControls();
   updateMappingStringTemplateControls();
+  updateMappingProfileScopePresentation();
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
 }
@@ -5642,6 +5707,315 @@ function handleMappingEditorTargetChange() {
 function handleMappingEditorLeafChange() {
   updateMappingEditorSuggestedName();
   updateMappingEditorFormState();
+}
+
+function resetMappingCondition() {
+  state.mappingEditorConditionAuto = true;
+  state.mappingEditorCondition = defaultMappingCondition();
+  renderMappingConditionBuilder();
+  updateMappingEditorFormState();
+}
+
+function resetMappingConditionIfAutomatic() {
+  if (!state.mappingEditorConditionAuto) {
+    return;
+  }
+  state.mappingEditorCondition = defaultMappingCondition();
+  renderMappingConditionBuilder();
+}
+
+function defaultMappingCondition() {
+  return { operator: 'always' };
+}
+
+function mappingConditionExpression() {
+  if (!state.mappingEditorCondition) {
+    state.mappingEditorCondition = defaultMappingCondition();
+    state.mappingEditorConditionAuto = true;
+  }
+  return state.mappingEditorCondition;
+}
+
+function renderMappingConditionBuilder() {
+  const container = $('#mappingConditionBuilder');
+  if (!container) {
+    return;
+  }
+  clear(container);
+  container.append(renderMappingConditionNode(mappingConditionExpression(), 'root', true));
+}
+
+function renderMappingConditionNode(node, path, isRoot = false) {
+  const operator = String(node?.operator ?? 'always').toLowerCase();
+  const group = ['all', 'any', 'not'].includes(operator);
+  const wrapper = document.createElement('div');
+  wrapper.className = group ? 'mapping-condition-group' : 'mapping-condition-leaf';
+  wrapper.dataset.conditionPath = path;
+
+  if (group) {
+    const header = document.createElement('div');
+    header.className = 'mapping-condition-group-header';
+    const label = document.createElement('span');
+    label.textContent = isRoot ? t('mapping.conditionWhen') : t('mapping.conditionGroup');
+    const operatorSelect = conditionSelect(['all', 'any', 'not'], operator, path, 'operator');
+    header.append(label, operatorSelect);
+    if (!isRoot) {
+      header.append(conditionButton(t('mapping.conditionDelete'), 'remove', path));
+    }
+    wrapper.append(header);
+
+    const children = document.createElement('div');
+    children.className = 'mapping-condition-children';
+    (node.items ?? []).forEach((item, index) => children.append(renderMappingConditionNode(item, `${path}/${index}`)));
+    wrapper.append(children);
+
+    if (operator !== 'not') {
+      const actions = document.createElement('div');
+      actions.className = 'mapping-condition-actions';
+      actions.append(
+        conditionButton(t('mapping.conditionAddLeaf'), 'add-leaf', path),
+        conditionButton(t('mapping.conditionAddGroup'), 'add-group', path),
+        conditionButton(t('mapping.conditionAddNot'), 'add-not', path)
+      );
+      wrapper.append(actions);
+    }
+    return wrapper;
+  }
+
+  const line = document.createElement('div');
+  line.className = 'mapping-condition-leaf-row';
+  const operatorSelect = conditionSelect(['all', 'any', 'not', 'always', 'equals', 'notEquals', 'regex', 'notRegex', 'exists', 'empty'], node.operator, path, 'operator');
+  line.append(operatorSelect);
+  if (operator !== 'always') {
+    const field = document.createElement('select');
+    field.dataset.conditionPath = path;
+    field.dataset.conditionProperty = 'field';
+    field.setAttribute('aria-label', t('mapping.conditionField'));
+    const fields = mappingConditionFields(node.field);
+    for (const item of fields) {
+      const option = document.createElement('option');
+      option.value = item.value;
+      option.textContent = item.label;
+      option.selected = item.value === node.field;
+      field.append(option);
+    }
+    line.insertBefore(field, line.firstChild);
+  }
+  if (!['always', 'exists', 'empty'].includes(operator)) {
+    const value = document.createElement('input');
+    value.type = 'text';
+    value.dataset.conditionPath = path;
+    value.dataset.conditionProperty = operator.includes('regex') ? 'pattern' : 'value';
+    value.value = operator.includes('regex') ? node.pattern ?? '' : node.value ?? '';
+    value.placeholder = operator.includes('regex') ? 'regex' : t('mapping.conditionValue');
+    value.setAttribute('aria-label', operator.includes('regex')
+      ? t('mapping.conditionPattern')
+      : t('mapping.conditionValue'));
+    line.append(value);
+  }
+  line.append(conditionButton(t('mapping.conditionDelete'), 'remove', path));
+  wrapper.append(line);
+  return wrapper;
+}
+
+function conditionSelect(values, selected, path, property) {
+  const select = document.createElement('select');
+  select.dataset.conditionPath = path;
+  select.dataset.conditionProperty = property;
+  select.setAttribute('aria-label', t('mapping.conditionOperator'));
+  const labels = {
+    all: t('mapping.conditionOperator.all'),
+    any: t('mapping.conditionOperator.any'),
+    not: t('mapping.conditionOperator.not'),
+    always: t('mapping.conditionAlways'),
+    equals: t('mapping.conditionOperator.equals'),
+    notEquals: t('mapping.conditionOperator.notEquals'),
+    regex: t('mapping.conditionOperator.regex'),
+    notRegex: t('mapping.conditionOperator.notRegex'),
+    exists: t('mapping.conditionOperator.exists'),
+    empty: t('mapping.conditionOperator.empty')
+  };
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = labels[value] ?? value;
+    option.selected = value.toLowerCase() === String(selected ?? '').toLowerCase();
+    select.append(option);
+  }
+  return select;
+}
+
+function conditionButton(label, action, path) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = action === 'remove' ? 'danger secondary' : 'secondary';
+  button.textContent = label;
+  button.setAttribute('aria-label', label);
+  button.dataset.conditionAction = action;
+  button.dataset.conditionPath = path;
+  return button;
+}
+
+function mappingConditionFields(selected = '') {
+  const values = new Map();
+  for (const [field, option] of state.mappingEditorFieldOptions ?? []) {
+    values.set(field, option?.label ? `${field} - ${option.label}` : field);
+  }
+  for (const virtualField of mappingEditorVirtualSourceFields.filter(item => canonicalSourceField(item.value) !== 'hostProfile')) {
+    values.set(virtualField.value, t(virtualField.labelKey));
+  }
+  for (const field of conditionFields({ expression: mappingConditionExpression() })) {
+    values.set(field, values.get(field) ?? field);
+  }
+  if (selected) {
+    values.set(selected, values.get(selected) ?? selected);
+  }
+  return [...values.entries()]
+    .filter(([field]) => isMappingConditionFieldAllowedForCurrentContext(field))
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([value, label]) => ({ value, label }));
+}
+
+function mappingConditionDefaultField() {
+  const selected = $('#mappingEditField')?.value ?? '';
+  if (selected && isMappingConditionFieldAllowedForCurrentContext(selected)) {
+    return selected;
+  }
+  return mappingEditorDefaultSourceField() || 'eventType';
+}
+
+function mappingEditorDefaultSourceField() {
+  return [...(state.mappingEditorFieldOptions?.keys?.() ?? [])]
+    .find(field => canonicalSourceField(field) !== 'hostProfile'
+      && canonicalSourceField(field) !== 'outputProfile'
+      && isMappingConditionFieldAllowedForCurrentContext(field)) ?? '';
+}
+
+function isMappingConditionFieldAllowedForCurrentContext(field) {
+  const scope = mappingProfileScopeContext();
+  if (!scope) {
+    return false;
+  }
+
+  const canonical = canonicalSourceField(field);
+  if (canonical === 'eventType') {
+    return true;
+  }
+  if (canonical === 'className' || canonical === 'hostProfile' || canonical === 'outputProfile') {
+    return false;
+  }
+
+  const fieldRule = currentMappingRules().source?.fields?.[field]
+    ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule;
+  return Boolean(fieldRule)
+    && isMappingSourceFieldCompatibleWithClass(scope.className, field, fieldRule, currentMappingRules());
+}
+
+function conditionNodeByPath(path) {
+  let node = mappingConditionExpression();
+  for (const segment of String(path).split('/').slice(1)) {
+    node = node?.items?.[Number(segment)];
+  }
+  return node;
+}
+
+function conditionParentByPath(path) {
+  const parts = String(path).split('/');
+  if (parts.length <= 1) {
+    return null;
+  }
+  const index = Number(parts.pop());
+  return { parent: conditionNodeByPath(parts.join('/')), index };
+}
+
+function handleMappingConditionBuilderClick(event) {
+  const button = event.target.closest('[data-condition-action]');
+  if (!button) {
+    return;
+  }
+  const action = button.dataset.conditionAction;
+  const path = button.dataset.conditionPath;
+  const node = conditionNodeByPath(path);
+  if (action === 'remove') {
+    const parent = conditionParentByPath(path);
+    if (parent?.parent?.items) {
+      parent.parent.items.splice(parent.index, 1);
+      if (parent.parent.operator === 'not' && parent.parent.items.length === 0) {
+        parent.parent.items.push(conditionLeaf(mappingConditionDefaultField(), 'exists'));
+      }
+    }
+  } else if (node && ['all', 'any'].includes(String(node.operator).toLowerCase())) {
+    const field = mappingConditionDefaultField();
+    node.items ??= [];
+    if (action === 'add-leaf') {
+      node.items.push(conditionLeaf(field, 'exists'));
+    } else if (action === 'add-group') {
+      node.items.push({ operator: 'all', items: [conditionLeaf(field, 'exists')] });
+    } else if (action === 'add-not') {
+      node.items.push({ operator: 'not', items: [conditionLeaf(field, 'exists')] });
+    }
+  }
+  state.mappingEditorConditionAuto = false;
+  renderMappingConditionBuilder();
+  handleMappingEditorLeafChange();
+}
+
+function handleMappingConditionBuilderChange(event) {
+  const control = event.target;
+  const property = control.dataset.conditionProperty;
+  if (!property) {
+    return;
+  }
+  const node = conditionNodeByPath(control.dataset.conditionPath);
+  if (!node) {
+    return;
+  }
+  if (property === 'operator') {
+    const next = control.value;
+    if (['all', 'any', 'not'].includes(next)) {
+      const first = node.items?.[0] ?? conditionLeaf(mappingConditionDefaultField(), 'exists');
+      node.operator = next;
+      node.items = next === 'not' ? [first] : (node.items?.length ? node.items : [first]);
+      delete node.field;
+      delete node.value;
+      delete node.pattern;
+    } else if (next === 'always') {
+      node.operator = next;
+      node.items = undefined;
+      delete node.field;
+      delete node.value;
+      delete node.pattern;
+      renderMappingConditionBuilder();
+    } else {
+      node.operator = next;
+      node.items = undefined;
+      if (!node.field) {
+        node.field = mappingConditionDefaultField();
+      }
+      delete node.value;
+      delete node.pattern;
+    }
+    renderMappingConditionBuilder();
+  } else {
+    node[property] = control.value;
+  }
+  state.mappingEditorConditionAuto = false;
+  handleMappingEditorLeafChange();
+}
+
+function handleMappingConditionBuilderInput(event) {
+  const control = event.target;
+  const property = control.dataset.conditionProperty;
+  if (!property || property === 'operator') {
+    return;
+  }
+  const node = conditionNodeByPath(control.dataset.conditionPath);
+  if (!node) {
+    return;
+  }
+  node[property] = control.value;
+  state.mappingEditorConditionAuto = false;
+  handleMappingEditorLeafChange();
 }
 
 function isMappingModifyFilterMode() {
@@ -5668,18 +6042,16 @@ function clearMappingEditorRuleForm() {
   $('#mappingEditTargetType').value = '';
   $('#mappingEditZabbixObject').value = '';
   $('#mappingEditPriority').value = '100';
-  $('#mappingEditRegex').value = '(?i).*';
   if ($('#mappingEditStringTemplate')) {
     $('#mappingEditStringTemplate').value = '';
   }
   $('#mappingEditRuleName').value = '';
-  if ($('#mappingProfileScope')) {
-    $('#mappingProfileScope').checked = false;
-    $('#mappingProfileScope').dataset.userTouched = '';
-  }
   clearMappingAdditionalProfileControls();
   state.mappingModifyFieldValue = '';
   state.mappingModifyTargetValue = '';
+  state.mappingEditorCondition = null;
+  state.mappingEditorConditionAuto = true;
+  renderMappingConditionBuilder();
 }
 
 function resetMappingEditorForm() {
@@ -5696,19 +6068,17 @@ function resetMappingEditorForm() {
   $('#mappingEditField').value = '';
   $('#mappingEditZabbixObject').value = '';
   $('#mappingEditPriority').value = '100';
-  $('#mappingEditRegex').value = '(?i).*';
   if ($('#mappingEditStringTemplate')) {
     $('#mappingEditStringTemplate').value = '';
   }
   $('#mappingEditRuleName').value = '';
-  if ($('#mappingProfileScope')) {
-    $('#mappingProfileScope').checked = false;
-    $('#mappingProfileScope').dataset.userTouched = '';
-  }
   clearMappingAdditionalProfileControls();
   state.mappingModifyFieldValue = '';
   state.mappingModifyTargetValue = '';
   refreshMappingEditorDependentControls({ selectedField: '', selectedTarget: '' });
+  state.mappingEditorCondition = null;
+  state.mappingEditorConditionAuto = true;
+  renderMappingConditionBuilder();
   setMappingEditorStatus(t('mapping.status.resetAdd'));
 }
 
@@ -5802,6 +6172,13 @@ function mappingDeleteCmdbuildGroups(items, rules) {
 }
 
 function mappingDeleteClassesForItem(item, rules) {
+  const profileName = hostProfileScopeNameForRule(item.rule);
+  const profile = (rules.hostProfiles ?? []).find(candidate => sameNormalized(candidate.name, profileName));
+  const profileClasses = ruleClassConditions(profile ?? {});
+  if (profileClasses.length > 0) {
+    return profileClasses;
+  }
+
   const explicit = ruleClassConditions(item.rule);
   if (explicit.length > 0) {
     return explicit;
@@ -5846,12 +6223,7 @@ function collectMappingDeleteSourceFields(value, fields) {
 }
 
 function mappingDeleteConditionFields(condition = {}) {
-  return uniqueTokens([
-    ...(condition.anyRegex ?? []).map(matcher => matcher.field),
-    ...(condition.allRegex ?? []).map(matcher => matcher.field),
-    condition.fieldExists,
-    ...(Array.isArray(condition.fieldsExist) ? condition.fieldsExist : [])
-  ].filter(Boolean));
+  return conditionFields(condition);
 }
 
 function mappingDeleteSourceFieldLabel(rules, field) {
@@ -6077,7 +6449,9 @@ function mappingDeleteRuleItems(rules) {
       rule,
       index,
       operationKey: mappingDeleteOperationKey(collection.key, index, rule)
-    })));
+    }))
+    .filter(item => item.collection.key !== 'hostProfiles')
+    .filter(item => isProfileScopedRule(item.rule, rules)));
 }
 
 function mappingDeleteRuleNode(item, rules) {
@@ -6315,30 +6689,16 @@ function populateMappingEditorClasses() {
     { value: '', label: t('mapping.option.anyClass') },
     ...classes
   ], previous, state.mappingCmdbuildCatalog ?? {});
+  select.disabled = Boolean(profileClass);
+  select.closest('label')?.classList.toggle('mapping-editor-control-locked', Boolean(profileClass));
 }
 
 function mappingEditorProfileClassForCurrentContext() {
-  if (!mappingEditorShouldFollowProfileClass()) {
-    return '';
-  }
-
-  const profile = selectedMappingHostProfile();
-  const classes = profile ? ruleClassConditions(profile) : [];
-  if (classes.length !== 1) {
-    return selectedMappingProfileClassName();
-  }
-
-  return catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, classes[0]);
+  return mappingProfileEditorContext()?.className ?? '';
 }
 
 function mappingEditorShouldFollowProfileClass() {
-  if (state.mappingEditAction === 'delete') {
-    return false;
-  }
-  if (state.mappingEditAction === 'modify' && $('#mappingModifyRule')?.value) {
-    return false;
-  }
-  return true;
+  return Boolean(mappingProfileEditorContext());
 }
 
 function syncMappingEditorClassToProfileClass(className) {
@@ -6541,7 +6901,7 @@ function populateMappingEditorFields(options = {}) {
     .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
   const virtualOptions = allVirtualOptions
     .filter(option => isMappingFieldAllowedForTarget(option.value, option.fieldRule, targetType));
-  state.mappingEditorFieldOptions = new Map([...allCatalogOptions, ...allVirtualOptions]
+  state.mappingEditorFieldOptions = new Map([...configuredOptions, ...allCatalogOptions, ...allVirtualOptions]
     .filter(option => option.fieldRule)
     .map(option => [option.value, option]));
   let fieldOptions = selectedClass
@@ -6586,16 +6946,13 @@ function populateMappingEditorStructures(options = {}) {
   const fieldRule = field
     ? currentMappingRules().source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {}
     : null;
-  let structureOptions = [
-    { value: 'hostGroups', label: mappingTargetTypeLabel('hostGroups') },
-    { value: 'templates', label: mappingTargetTypeLabel('templates') },
-    { value: 'tags', label: mappingTargetTypeLabel('tags') },
-    { value: 'interfaceAddress', label: mappingTargetTypeLabel('interfaceAddress') },
-    { value: 'interface', label: mappingTargetTypeLabel('interface') },
-    { value: 'monitoringSuppression', label: mappingTargetTypeLabel('monitoringSuppression') },
-    ...mappingEditorEditableExtensionDefinitions()
-      .map(definition => ({ value: definition.rulesKey, label: zabbixExtensionRuleTitle(definition) }))
-  ];
+  let structureOptions = mappingEditorEditableTargetTypes()
+    .map(type => ({
+      value: type,
+      label: mappingEditorExtensionDefinition(type)
+        ? zabbixExtensionRuleTitle(mappingEditorExtensionDefinition(type))
+        : mappingTargetTypeLabel(type)
+    }));
   if (fieldRule) {
     structureOptions = structureOptions
       .filter(option => isMappingFieldAllowedForTarget(field, fieldRule, option.value));
@@ -6727,7 +7084,7 @@ function mappingEditorDynamicTargetOption(type) {
     return [];
   }
 
-  const field = $('#mappingEditField')?.value ?? '';
+  const field = $('#mappingEditField')?.value || mappingEditorDefaultSourceField();
   if (!field || !['hostGroups', 'tags'].includes(type)) {
     return [];
   }
@@ -7096,7 +7453,8 @@ function mappingEditorStringTemplateForRule(type, field, target = {}) {
   if (!mappingEditorStringTemplateSupported(type, target)) {
     return '';
   }
-  return mappingEditorTargetStringTemplate(type, target) || sourceFieldTemplate(field);
+  return mappingEditorTargetStringTemplate(type, target)
+    || (isDynamicFromLeafTarget(target) && field ? sourceFieldTemplate(field) : '');
 }
 
 function applyMappingEditorStringTemplateToTarget(type, field, target = {}) {
@@ -7104,7 +7462,11 @@ function applyMappingEditorStringTemplateToTarget(type, field, target = {}) {
     return target;
   }
 
-  const template = mappingEditorStringTemplateValue() || sourceFieldTemplate(field);
+  const template = mappingEditorStringTemplateValue()
+    || (isDynamicFromLeafTarget(target) && field ? sourceFieldTemplate(field) : '');
+  if (!template) {
+    return target;
+  }
   if (type === 'hostGroups') {
     target.nameTemplate = template;
     return target;
@@ -7625,6 +7987,70 @@ function selectedMappingHostProfile(rules = currentMappingRules()) {
   return (rules.hostProfiles ?? []).find(profile => normalizeToken(profile.name) === selectedName) ?? null;
 }
 
+function selectedMappingRuleProfile(rules = currentMappingRules()) {
+  const selectedName = normalizeToken($('#mappingRuleProfile')?.value || state.mappingRuleProfileName);
+  if (!selectedName) {
+    return null;
+  }
+  return (rules.hostProfiles ?? []).find(profile => normalizeToken(profile.name) === selectedName) ?? null;
+}
+
+function mappingProfileContext(profile) {
+  if (!profile) {
+    return null;
+  }
+
+  const classes = ruleClassConditions(profile)
+    .map(className => catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, className))
+    .filter(Boolean);
+  const uniqueClasses = [...new Map(classes.map(className => [normalizeClassName(className), className])).values()];
+  return uniqueClasses.length === 1 ? { profile, className: uniqueClasses[0] } : null;
+}
+
+function populateMappingRuleProfiles(options = {}) {
+  const select = $('#mappingRuleProfile');
+  if (!select) {
+    return;
+  }
+
+  const requested = options.selectedValue !== undefined
+    ? options.selectedValue
+    : state.mappingRuleProfileName || select.value;
+  const profiles = (currentMappingRules().hostProfiles ?? [])
+    .map(profile => mappingProfileContext(profile))
+    .filter(Boolean)
+    .sort((left, right) => compareText(left.profile.name, right.profile.name));
+  const profileOptions = profiles.map(({ profile, className }) => ({
+    value: profile.name,
+    label: `${profile.name} / ${className}`
+  }));
+  setSelectOptions(select, [
+    { value: '', label: t('mapping.option.chooseRuleProfile') },
+    ...profileOptions
+  ], requested);
+  select.disabled = !state.mappingDraftRules || profileOptions.length === 0;
+  state.mappingRuleProfileName = select.value;
+}
+
+function handleMappingRuleProfileChange() {
+  state.mappingRuleProfileName = $('#mappingRuleProfile')?.value ?? '';
+  if (state.mappingEditAction === 'modify') {
+    if ($('#mappingModifyRule')) {
+      $('#mappingModifyRule').value = '';
+    }
+    clearMappingEditorRuleForm();
+    populateMappingModifyFilterControls({ autoSelect: false });
+    setMappingEditorStatusForDraft(t('mapping.status.noModifyRule'));
+    return;
+  }
+
+  applyMappingProfileScopeContext();
+  resetMappingConditionIfAutomatic();
+  renderMappingConditionBuilder();
+  updateMappingEditorSuggestedName();
+  updateMappingEditorFormState();
+}
+
 function updateMappingProfileControls() {
   const hasDraft = Boolean(state.mappingDraftRules);
   const selected = Boolean(selectedMappingHostProfile());
@@ -7656,8 +8082,6 @@ function handleMappingProfileClassChange() {
   populateMappingProfileFields({ selectedValue: '' });
   syncMappingProfileKindDefault();
   updateMappingProfilesPanel();
-  populateMappingEditorClasses();
-  syncMappingEditorClassToProfileClass(selectedMappingProfileClassName());
 }
 
 function handleMappingProfileKindChange() {
@@ -7744,11 +8168,7 @@ function loadMappingHostProfileIntoForm(profileName) {
     $('#mappingProfileCreateOnUpdate').checked = profile.createOnUpdateWhenMissing !== false;
   }
   state.mappingProfileSelectedName = profile.name || '';
-  if ($('#mappingProfileScope')) {
-    $('#mappingProfileScope').dataset.userTouched = '';
-  }
   renderMappingProfilesList();
-  syncMappingEditorClassToProfileClass(className);
   updateMappingProfileControls();
   updateMappingEditorFormState();
   setMappingProfileStatus(tf('mapping.status.profileLoaded', { profile: profile.name || 'default' }), 'success');
@@ -7815,6 +8235,9 @@ function saveMappingHostProfile() {
     : 0;
   pushMappingHistory(rules);
   state.mappingProfileSelectedName = values.profileName;
+  if (sameNormalized(state.mappingRuleProfileName, oldName)) {
+    state.mappingRuleProfileName = values.profileName;
+  }
   rerenderMappingDraft(tf('mapping.status.profileUpdated', {
     profile: values.profileName,
     refs: String(renamedRefs)
@@ -7839,6 +8262,9 @@ function deleteMappingHostProfile() {
   pushMappingHistory(rules);
   const profileName = profile.name || 'default';
   state.mappingProfileSelectedName = '';
+  if (sameNormalized(state.mappingRuleProfileName, profileName)) {
+    state.mappingRuleProfileName = '';
+  }
   resetMappingProfileForm({ silent: true });
   rerenderMappingDraft(tf('mapping.status.profileDeleted', { profile: profileName, count: String(removedRules) }));
 }
@@ -7866,10 +8292,6 @@ function resetMappingProfileForm(options = {}) {
   }
   if ($('#mappingProfileCreateOnUpdate')) {
     $('#mappingProfileCreateOnUpdate').checked = true;
-  }
-  if ($('#mappingProfileScope')) {
-    $('#mappingProfileScope').checked = false;
-    $('#mappingProfileScope').dataset.userTouched = '';
   }
   syncMappingProfileKindDefault();
   updateMappingProfilesPanel();
@@ -7905,17 +8327,14 @@ function buildUpdatedHostProfile(existing, values) {
   profile.name = values.profileName;
   profile.isMainProfile = values.kind !== 'additional';
   profile.createOnUpdateWhenMissing = values.createOnUpdateWhenMissing;
-  profile.when = {
-    allRegex: [
-      { field: 'className', pattern: `(?i)^${escapeRegex(values.className)}$` }
-    ]
-  };
+  const conditions = [conditionLeaf('className', 'equals', values.className)];
   if (values.kind === 'additional') {
-    profile.when.anyRegex = [
-      { field: values.field, pattern: '.+' },
-      { field: 'eventType', pattern: '(?i)^delete$' }
-    ];
+    conditions.push({
+      operator: 'any',
+      items: [conditionLeaf(values.field, 'exists'), conditionLeaf('eventType', 'equals', 'delete')]
+    });
   }
+  profile.when = { expression: { operator: 'all', items: conditions } };
   profile.hostNameTemplate = values.kind === 'additional'
     ? 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>-<#= Model.HostProfileName #>'
     : 'cmdb-<#= Model.ClassName #>-<#= Model.Code ?? Model.EntityId #>';
@@ -7930,7 +8349,7 @@ function buildUpdatedHostProfile(existing, values) {
   first.interfaceProfileRef = values.interfaceProfileRef;
   first.mode = values.mode;
   first.valueField = values.field;
-  first.when = { fieldExists: values.field };
+  first.when = { expression: conditionLeaf(values.field, 'exists') };
   profile.interfaces = [first, ...currentInterfaces.slice(1)];
   return profile;
 }
@@ -7939,13 +8358,7 @@ function renameHostProfileReferences(rules, oldName, newName) {
   let changed = 0;
   for (const collection of mappingRuleCollections().filter(item => item.key !== 'hostProfiles')) {
     for (const rule of asArray(rules[collection.key])) {
-      for (const matcher of hostProfileMatchers(rule)) {
-        const values = regexLiteralValues(matcher.pattern);
-        if (values.length === 1 && values.some(value => sameNormalized(value, oldName))) {
-          matcher.pattern = `(?i)^${escapeRegex(newName)}$`;
-          changed++;
-        }
-      }
+      changed += replaceConditionExactValue(rule.when?.expression, 'hostProfile', oldName, newName);
     }
   }
   return changed;
@@ -7974,15 +8387,12 @@ function countHostProfileScopedRules(rules, profileName) {
 }
 
 function ruleMatchesHostProfile(rule, profileName) {
-  return hostProfileMatchers(rule)
-    .some(matcher => regexLiteralValues(matcher.pattern).some(value => sameNormalized(value, profileName)));
+  return hostProfileConditionValues(rule)
+    .some(value => sameNormalized(value, profileName));
 }
 
-function hostProfileMatchers(rule) {
-  return [
-    ...(rule?.when?.allRegex ?? []),
-    ...(rule?.when?.anyRegex ?? [])
-  ].filter(matcher => canonicalSourceField(matcher.field) === 'hostProfile');
+function hostProfileConditionValues(rule) {
+  return conditionExactValues(rule?.when, 'hostProfile');
 }
 
 function setMappingProfileStatus(message, level = '') {
@@ -7995,78 +8405,92 @@ function setMappingProfileStatus(message, level = '') {
   status.classList.toggle('is-invalid', level === 'warning' || level === 'error');
 }
 
-function mappingRuleSupportsHostProfileScope(type) {
-  if (!type || ['interfaceAddress', 'interface', 'monitoringSuppression'].includes(type)) {
-    return false;
-  }
-  return mappingEditorEditableTargetTypes().includes(type);
+function mappingProfileSelectionContext() {
+  return mappingProfileContext(selectedMappingHostProfile());
+}
+
+function mappingProfileEditorContext() {
+  return mappingProfileContext(selectedMappingRuleProfile());
+}
+
+function mappingProfileScopeContext() {
+  return mappingProfileEditorContext();
 }
 
 function selectedMappingProfileScopeName() {
-  const checkbox = $('#mappingProfileScope');
-  const profile = selectedMappingHostProfile();
-  const type = $('#mappingEditTargetType')?.value ?? '';
-  const field = $('#mappingEditField')?.value ?? '';
-  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass')?.value ?? '');
-  if (!checkbox?.checked || !profile || !mappingRuleSupportsHostProfileScope(type) || canonicalSourceField(field) === 'hostProfile') {
-    return '';
-  }
-  if (className && !hostProfileAppliesToClass(profile, className)) {
-    return '';
-  }
-  return profile.name || '';
+  const scope = mappingProfileScopeContext();
+  return scope?.profile.name || '';
 }
 
 function updateMappingProfileScopeControls() {
-  const checkbox = $('#mappingProfileScope');
-  const status = $('#mappingProfileScopeStatus');
-  if (!checkbox) {
+  updateMappingProfileScopePresentation();
+}
+
+function updateMappingProfileScopePresentation() {
+  const scope = mappingProfileEditorContext();
+  const classRow = $('#mappingEditClassRow');
+  const fieldRow = $('#mappingEditFieldRow');
+  const fieldLabel = $('#mappingEditFieldLabel');
+  const context = $('#mappingRuleProfileContext');
+  const conditionEditor = $('#mappingConditionEditor');
+  const conditionProfileConstraint = $('#mappingConditionProfileConstraint');
+  const target = readMappingEditorTarget({ applyStringTemplate: false });
+  const dynamicValueField = isDynamicFromLeafTarget(target);
+  classRow?.classList.add('hidden');
+  fieldRow?.classList.toggle('hidden', !scope || !dynamicValueField);
+  conditionEditor?.classList.toggle('is-disabled', !scope);
+  conditionEditor?.setAttribute('aria-disabled', String(!scope));
+  conditionEditor?.querySelectorAll('button, select, input').forEach(control => {
+    control.disabled = !scope;
+  });
+  if (fieldLabel) {
+    fieldLabel.textContent = t('mapping.dynamicValueField');
+  }
+  if (context) {
+    context.classList.toggle('is-valid', Boolean(scope));
+    context.classList.toggle('is-invalid', !scope && Boolean(state.mappingDraftRules));
+    context.textContent = scope
+      ? tf('mapping.status.profileScopeContext', {
+        profile: scope.profile.name || 'default',
+        className: scope.className
+      })
+      : selectedMappingRuleProfile()
+        ? t('mapping.status.profileClassInvalid')
+        : t('mapping.status.profileRequired');
+  }
+  if (conditionProfileConstraint) {
+    conditionProfileConstraint.textContent = scope
+      ? `hostProfile = ${scope.profile.name || 'default'}`
+      : t('mapping.conditionProfileNotSelected');
+  }
+}
+
+function isMappingEditorDynamicValueTarget() {
+  return isDynamicFromLeafTarget(readMappingEditorTarget({ applyStringTemplate: false }));
+}
+
+function applyMappingProfileScopeContext() {
+  const classSelect = $('#mappingEditClass');
+  const fieldSelect = $('#mappingEditField');
+  const targetSelect = $('#mappingEditZabbixObject');
+  if (!classSelect || !fieldSelect || !targetSelect) {
     return;
   }
 
-  const type = $('#mappingEditTargetType')?.value ?? '';
-  const field = $('#mappingEditField')?.value ?? '';
-  const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass')?.value ?? '');
-  const profile = selectedMappingHostProfile();
-  const supported = mappingRuleSupportsHostProfileScope(type) && canonicalSourceField(field) !== 'hostProfile';
-  const profileCompatible = Boolean(profile && (!className || hostProfileAppliesToClass(profile, className)));
-  checkbox.disabled = !state.mappingDraftRules || !supported || !profile;
-  checkbox.closest('label')?.classList.toggle('mapping-editor-control-invalid', Boolean(profile && supported && !profileCompatible));
-
-  if (checkbox.disabled) {
-    checkbox.checked = false;
-  } else if (state.mappingEditAction === 'add' && checkbox.dataset.userTouched !== '1') {
-    checkbox.checked = true;
-  }
-
-  if (!status) {
-    return;
-  }
-
-  if (!supported) {
-    status.textContent = t('mapping.status.profileScopeUnsupported');
-    status.classList.toggle('is-valid', false);
-    status.classList.toggle('is-invalid', false);
-    return;
-  }
-  if (!profile) {
-    status.textContent = t('mapping.status.profileScopeNone');
-    status.classList.toggle('is-valid', false);
-    status.classList.toggle('is-invalid', false);
-    return;
-  }
-  if (!profileCompatible) {
-    status.textContent = tf('mapping.status.profileScopeClassMismatch', { profile: profile.name || 'default' });
-    status.classList.toggle('is-valid', false);
-    status.classList.toggle('is-invalid', true);
-    return;
-  }
-
-  status.textContent = checkbox.checked
-    ? tf('mapping.status.profileScopeSelected', { profile: profile.name || 'default' })
-    : t('mapping.status.profileScopeNone');
-  status.classList.toggle('is-valid', checkbox.checked);
-  status.classList.toggle('is-invalid', false);
+  const scope = mappingProfileScopeContext();
+  const previousField = fieldSelect.value;
+  const previousTarget = targetSelect.value;
+  populateMappingEditorClasses();
+  const fieldRule = previousField
+    ? currentMappingRules().source?.fields?.[previousField] ?? state.mappingEditorFieldOptions?.get(previousField)?.fieldRule
+    : null;
+  const fieldCompatible = !scope || !previousField
+    || (fieldRule && isMappingSourceFieldCompatibleWithClass(scope.className, previousField, fieldRule, currentMappingRules()));
+  const selectedField = fieldCompatible ? previousField : '';
+  refreshMappingEditorDependentControls({
+    selectedField,
+    selectedTarget: selectedField ? previousTarget : ''
+  });
 }
 
 function updateMappingModifyRuleContext() {
@@ -8166,16 +8590,17 @@ function mappingEditorFormValidation() {
     ? currentMappingRules().source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {}
     : {};
   const target = targetValue ? readMappingEditorTarget() : {};
+  const requiresValueField = isDynamicFromLeafTarget(target);
   const classOption = [...($('#mappingEditClass')?.options ?? [])]
     .find(option => normalizeClassName(option.value) === normalizeClassName(className));
   const controls = {
     '#mappingModifyRule': { level: 'valid', message: t('mapping.status.ruleForModifySelected') },
+    '#mappingRuleProfile': { level: 'valid', message: t('mapping.status.profileScopeConditionRequired') },
     '#mappingEditClass': { level: 'valid', message: className ? t('mapping.status.classSelected') : t('mapping.status.noClassRestriction') },
     '#mappingEditField': { level: 'valid', message: t('mapping.status.leafSelected') },
     '#mappingEditTargetType': { level: 'valid', message: t('mapping.status.structureCompatible') },
     '#mappingEditZabbixObject': { level: 'valid', message: t('mapping.status.targetSelected') },
     '#mappingEditPriority': { level: 'valid', message: t('mapping.status.prioritySet') },
-    '#mappingEditRegex': { level: 'valid', message: t('mapping.status.regexSaved') },
     '#mappingEditRuleName': { level: 'valid', message: t('mapping.status.ruleNameSetOrAuto') }
   };
   const messages = [];
@@ -8197,26 +8622,42 @@ function mappingEditorFormValidation() {
     messages.push(t('mapping.status.selectConcreteClass'));
   }
 
-  const profileScopeRequested = Boolean($('#mappingProfileScope')?.checked);
-  const scopedProfile = selectedMappingHostProfile();
-  if (profileScopeRequested && scopedProfile && className && !hostProfileAppliesToClass(scopedProfile, className)) {
-    const message = tf('mapping.status.profileScopeClassMismatch', { profile: scopedProfile.name || 'default' });
+  const profileScope = mappingProfileScopeContext();
+  if (!profileScope) {
+    const message = selectedMappingRuleProfile()
+      ? t('mapping.status.profileClassInvalid')
+      : t('mapping.status.profileRequired');
+    controls['#mappingRuleProfile'] = { level: 'invalid', message };
+    controls['#mappingEditClass'] = { level: 'invalid', message };
+    messages.push(message);
+  } else if (profileScope && normalizeClassName(className) !== normalizeClassName(profileScope.className)) {
+    const message = t('mapping.status.profileClassInvalid');
     controls['#mappingEditClass'] = { level: 'invalid', message };
     messages.push(message);
   }
 
-  if (!field) {
+  if (profileScope) {
+    const foreignConditionField = conditionFields({ expression: mappingConditionExpression() })
+      .find(conditionField => !isMappingConditionFieldAllowedForCurrentContext(conditionField));
+    if (foreignConditionField) {
+      const message = tf('mapping.status.profileScopeConditionField', { field: foreignConditionField });
+      controls['#mappingEditField'] = { level: 'invalid', message };
+      messages.push(message);
+    }
+  }
+
+  if (requiresValueField && !field) {
     controls['#mappingEditField'] = { level: 'invalid', message: t('mapping.status.chooseLeafField') };
     messages.push(t('mapping.status.chooseLeafField'));
-  } else if (!isMappingEditorFieldValidForClass(className, field)) {
+  } else if (requiresValueField && !isMappingEditorFieldValidForClass(className, field)) {
     const message = tf('mapping.status.fieldMissingInClass', { field });
     controls['#mappingEditField'] = { level: 'invalid', message };
     messages.push(message);
-  } else if (!isMappingFieldAllowedForTarget(field, fieldRule, type)) {
+  } else if (requiresValueField && !isMappingFieldAllowedForTarget(field, fieldRule, type)) {
     controls['#mappingEditField'] = { level: 'invalid', message: tf('mapping.status.fieldMultiValueIncompatible', { field, target: mappingTargetTypeLabel(type) }) };
     controls['#mappingEditTargetType'] = { level: 'invalid', message: t('mapping.status.chooseStructureForField') };
     messages.push(tf('mapping.status.fieldIncompatible', { field, target: mappingTargetTypeLabel(type) }));
-  } else {
+  } else if (requiresValueField) {
     const compatibilityMessage = mappingFieldTargetCompatibilityMessage(field, fieldRule, type, target);
     if (compatibilityMessage) {
       controls['#mappingEditField'] = { level: 'invalid', message: compatibilityMessage };
@@ -8256,6 +8697,11 @@ function mappingEditorFormValidation() {
   if (!Number.isFinite(priority) || priority < 1) {
     controls['#mappingEditPriority'] = { level: 'invalid', message: t('mapping.status.priorityPositive') };
     messages.push(t('mapping.status.priorityPositive'));
+  }
+
+  const conditionErrors = validateCondition({ expression: mappingConditionExpression() });
+  if (conditionErrors.length > 0) {
+    messages.push(conditionErrors[0]);
   }
 
   const changed = state.mappingEditAction === 'add' || mappingEditorFormHasChanges();
@@ -8309,19 +8755,18 @@ function mappingEditorRuleCandidate() {
   const type = $('#mappingEditTargetType')?.value ?? '';
   const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass')?.value ?? '');
   const field = $('#mappingEditField')?.value ?? '';
-  const regex = $('#mappingEditRegex')?.value.trim() ?? '';
   const priority = Number($('#mappingEditPriority')?.value || 100);
   const targetValue = $('#mappingEditZabbixObject')?.value ?? '';
-  if (!type || !field || !targetValue) {
+  const target = readMappingEditorTarget();
+  if (!type || !targetValue || (isDynamicFromLeafTarget(target) && !field)) {
     return null;
   }
 
-  const target = readMappingEditorTarget();
   const ruleName = ($('#mappingEditRuleName')?.value.trim() || buildMappingRuleName(type, className, field, target)).trim();
   const profileName = selectedMappingProfileScopeName();
   return {
     rulesKey: mappingRulesKey(type, target),
-    rule: buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName, profileName })
+    rule: buildMappingEditorRule({ type, className, field, priority, target, ruleName, profileName })
   };
 }
 
@@ -8351,22 +8796,21 @@ function addMappingConversionRule() {
   const type = $('#mappingEditTargetType').value;
   const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass').value);
   const field = $('#mappingEditField').value;
-  const regex = $('#mappingEditRegex').value.trim();
   const priority = Number($('#mappingEditPriority').value || 100);
   const target = readMappingEditorTarget();
   const profileName = selectedMappingProfileScopeName();
-  if (!field) {
+  if (isDynamicFromLeafTarget(target) && !field) {
     setMappingEditorStatus(t('mapping.status.chooseCompatibleFieldAdd'), 'warning');
     return;
   }
 
-  if (!isMappingEditorFieldValidForClass(className, field)) {
+  if (isDynamicFromLeafTarget(target) && !isMappingEditorFieldValidForClass(className, field)) {
     setMappingEditorStatus(tf('mapping.status.classFieldMissing', { className, field }));
     return;
   }
 
   const selectedFieldRule = rules.source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {};
-  if (!isMappingFieldAllowedForTarget(field, selectedFieldRule, type)) {
+  if (isDynamicFromLeafTarget(target) && !isMappingFieldAllowedForTarget(field, selectedFieldRule, type)) {
     setMappingEditorStatus(
       tf('mapping.status.multiValueScalarNotAllowed', { field, target: mappingTargetTypeLabel(type) }),
       'warning');
@@ -8374,10 +8818,12 @@ function addMappingConversionRule() {
   }
 
   const ruleName = ($('#mappingEditRuleName').value.trim() || buildMappingRuleName(type, className, field, target)).trim();
-  const rule = buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName, profileName });
+  const rule = buildMappingEditorRule({ type, className, field, priority, target, ruleName, profileName });
 
   ensureMappingEditorClass(rules, className);
-  ensureMappingEditorSourceField(rules, field);
+  if (isDynamicFromLeafTarget(target)) {
+    ensureMappingEditorSourceField(rules, field);
+  }
   ensureMappingEditorTemplateSourceFields(rules, mappingEditorStringTemplateForRule(type, field, target));
   const rulesKey = mappingRulesKey(type, target);
   rules[rulesKey] = Array.isArray(rules[rulesKey]) ? rules[rulesKey] : [];
@@ -8385,9 +8831,7 @@ function addMappingConversionRule() {
   pushMappingHistory(rules);
   $('#mappingEditRuleName').value = '';
   clearMappingAdditionalProfileControls();
-  rerenderMappingDraft(profileName
-    ? tf('mapping.status.addedRuleScopedProfile', { name: ruleName, profile: profileName })
-    : tf('mapping.status.addedRule', { name: ruleName }));
+  rerenderMappingDraft(tf('mapping.status.addedRuleScopedProfile', { name: ruleName, profile: profileName }));
 }
 
 function populateMappingModifyRules(options = {}) {
@@ -8507,27 +8951,22 @@ function mappingModifyRuleItemsMatching(items, filters, rules) {
 }
 
 function mappingModifyScopedRuleItems(items, scope, rules) {
+  if (!scope.profileName) {
+    return [];
+  }
   return items.filter(item => mappingModifyRuleItemMatchesScope(item, scope, rules));
 }
 
 function mappingModifyRuleScopeFilters() {
-  const profile = selectedMappingHostProfile();
+  const profile = selectedMappingRuleProfile();
   return {
     className: mappingModifyScopeClassName(profile),
     profileName: profile?.name ?? ''
   };
 }
 
-function mappingModifyScopeClassName(profile = selectedMappingHostProfile()) {
-  const selectedClass = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass')?.value ?? '');
-  if (selectedClass) {
-    return selectedClass;
-  }
-
-  const profileClasses = profile ? ruleClassConditions(profile) : [];
-  return profileClasses.length === 1
-    ? catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, profileClasses[0])
-    : '';
+function mappingModifyScopeClassName(profile = selectedMappingRuleProfile()) {
+  return mappingProfileContext(profile)?.className ?? '';
 }
 
 function mappingModifyScopeIsActive(scope = {}) {
@@ -8536,8 +8975,7 @@ function mappingModifyScopeIsActive(scope = {}) {
 
 function mappingModifyRuleItemMatchesScope(item, scope = {}, rules) {
   if (scope.profileName) {
-    const profileScoped = hostProfileMatchers(item.rule).length > 0;
-    if (profileScoped && !ruleMatchesHostProfile(item.rule, scope.profileName)) {
+    if (!ruleMatchesHostProfile(item.rule, scope.profileName)) {
       return false;
     }
   }
@@ -8742,7 +9180,14 @@ function populateMappingModifyTargetFilter(items, selectedValue, rules) {
 function mappingModifyRuleItems(rules) {
   const editableTypes = new Set(mappingEditorEditableTargetTypes());
   return mappingDeleteRuleItems(rules)
-    .filter(item => editableTypes.has(item.collection.type));
+    .filter(item => editableTypes.has(item.collection.type))
+    .filter(item => isProfileScopedRule(item.rule, rules))
+    .filter(item => {
+      const profileName = requiredHostProfileName(item.rule);
+      const profile = (rules.hostProfiles ?? [])
+        .find(candidate => sameNormalized(candidate.name, profileName));
+      return Boolean(mappingProfileContext(profile));
+    });
 }
 
 function mappingEditorEditableTargetTypes() {
@@ -8750,9 +9195,6 @@ function mappingEditorEditableTargetTypes() {
     'hostGroups',
     'templates',
     'tags',
-    'interfaceAddress',
-    'interface',
-    'monitoringSuppression',
     ...mappingEditorEditableExtensionDefinitions().map(definition => definition.rulesKey)
   ];
 }
@@ -8776,6 +9218,8 @@ function loadSelectedMappingRuleIntoEditor(options = {}) {
 
   const form = mappingRuleFormValues(item, currentMappingRules());
   $('#mappingEditTargetType').value = form.type;
+  state.mappingRuleProfileName = form.profileName;
+  populateMappingRuleProfiles({ selectedValue: form.profileName });
   populateMappingEditorClasses();
   const classSelect = $('#mappingEditClass');
   const classOptions = [...classSelect.options].map(option => ({
@@ -8795,7 +9239,9 @@ function loadSelectedMappingRuleIntoEditor(options = {}) {
   }
   classSelect.dataset.userTouched = '1';
   $('#mappingEditPriority').value = String(form.priority);
-  $('#mappingEditRegex').value = form.regex;
+  state.mappingEditorCondition = mappingEditorUserCondition(item.rule.when?.expression);
+  state.mappingEditorConditionAuto = false;
+  renderMappingConditionBuilder();
   if ($('#mappingEditStringTemplate')) {
     $('#mappingEditStringTemplate').value = form.stringTemplate;
   }
@@ -8804,20 +9250,16 @@ function loadSelectedMappingRuleIntoEditor(options = {}) {
   if (form.field) {
     state.mappingModifyFieldValue = form.field;
   }
-  state.mappingProfileSelectedName = form.profileName || state.mappingProfileSelectedName;
-  if (form.profileName) {
-    const scopedProfile = selectedMappingHostProfile();
-    setMappingProfileClassName(ruleClassConditions(scopedProfile ?? {})[0] ?? form.className);
-  }
-  if ($('#mappingProfileScope')) {
-    $('#mappingProfileScope').checked = Boolean(form.profileName);
-    $('#mappingProfileScope').dataset.userTouched = form.profileName ? '1' : '';
-  }
   renderMappingProfilesList();
 }
 
 function mappingRuleFormValues(item, rules) {
-  const className = ruleClassConditions(item.rule)[0] ?? '';
+  const profileName = hostProfileScopeNameForRule(item.rule);
+  const scopedProfile = (rules.hostProfiles ?? [])
+    .find(profile => sameNormalized(profile.name, profileName));
+  const className = ruleClassConditions(scopedProfile ?? {})[0]
+    ?? ruleClassConditions(item.rule)[0]
+    ?? '';
   const fields = mappingDeleteSourceFieldsForItem(item.rule)
     .filter(field => !['className', 'eventType', 'zabbixHostId'].includes(canonicalSourceField(field)));
   const primaryFields = fields.filter(field => !['hostProfile', 'outputProfile'].includes(canonicalSourceField(field)));
@@ -8826,31 +9268,16 @@ function mappingRuleFormValues(item, rules) {
     type: item.collection.type,
     className,
     field,
-    regex: mappingRuleRegexForField(item.rule, field),
     priority: Number.isFinite(Number(item.rule.priority)) ? Number(item.rule.priority) : 100,
     ruleName: ruleDisplayName(item.rule),
     targetValue: JSON.stringify(mappingRuleTargetForForm(item)),
     stringTemplate: mappingRuleStringTemplateForForm(item),
-    profileName: hostProfileScopeNameForRule(item.rule)
+    profileName
   };
 }
 
 function hostProfileScopeNameForRule(rule) {
-  const matcher = hostProfileMatchers(rule)[0];
-  if (!matcher) {
-    return '';
-  }
-  return regexLiteralValues(matcher.pattern)[0] ?? '';
-}
-
-function mappingRuleRegexForField(rule, field) {
-  const matchers = [
-    ...(rule.when?.allRegex ?? []),
-    ...(rule.when?.anyRegex ?? [])
-  ];
-  const selected = matchers.find(matcher => canonicalSourceField(matcher.field) === canonicalSourceField(field))
-    ?? matchers.find(matcher => !['className', 'eventType', 'zabbixHostId'].includes(canonicalSourceField(matcher.field)));
-  return selected?.pattern ?? '(?i).*';
+  return requiredHostProfileName(rule);
 }
 
 function mappingRuleTargetForForm(item) {
@@ -8956,22 +9383,21 @@ function modifyMappingConversionRule() {
   const type = $('#mappingEditTargetType').value;
   const className = catalogClassRuleName(state.mappingCmdbuildCatalog ?? {}, $('#mappingEditClass').value);
   const field = $('#mappingEditField').value;
-  const regex = $('#mappingEditRegex').value.trim();
   const priority = Number($('#mappingEditPriority').value || 100);
   const target = readMappingEditorTarget();
   const profileName = selectedMappingProfileScopeName();
-  if (!field) {
+  if (isDynamicFromLeafTarget(target) && !field) {
     setMappingEditorStatus(t('mapping.status.chooseCompatibleFieldModify'), 'warning');
     return;
   }
 
-  if (!isMappingEditorFieldValidForClass(className, field)) {
+  if (isDynamicFromLeafTarget(target) && !isMappingEditorFieldValidForClass(className, field)) {
     setMappingEditorStatus(tf('mapping.status.classFieldMissing', { className, field }));
     return;
   }
 
   const selectedFieldRule = rules.source?.fields?.[field] ?? state.mappingEditorFieldOptions?.get(field)?.fieldRule ?? {};
-  if (!isMappingFieldAllowedForTarget(field, selectedFieldRule, type)) {
+  if (isDynamicFromLeafTarget(target) && !isMappingFieldAllowedForTarget(field, selectedFieldRule, type)) {
     setMappingEditorStatus(
       tf('mapping.status.multiValueScalarNotAllowed', { field, target: mappingTargetTypeLabel(type) }),
       'warning');
@@ -8979,9 +9405,11 @@ function modifyMappingConversionRule() {
   }
 
   const ruleName = ($('#mappingEditRuleName').value.trim() || buildMappingRuleName(type, className, field, target)).trim();
-  const rule = buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName, profileName });
+  const rule = buildMappingEditorRule({ type, className, field, priority, target, ruleName, profileName });
   ensureMappingEditorClass(rules, className);
-  ensureMappingEditorSourceField(rules, field);
+  if (isDynamicFromLeafTarget(target)) {
+    ensureMappingEditorSourceField(rules, field);
+  }
   ensureMappingEditorTemplateSourceFields(rules, mappingEditorStringTemplateForRule(type, field, target));
 
   const newRulesKey = mappingRulesKey(type, target);
@@ -9001,9 +9429,7 @@ function modifyMappingConversionRule() {
   rules[newRulesKey] = Array.isArray(rules[newRulesKey]) ? rules[newRulesKey] : [];
   rules[newRulesKey].push(rule);
   pushMappingHistory(rules);
-  rerenderMappingDraft(profileName
-    ? tf('mapping.status.modifiedRuleScopedProfile', { name: ruleName, profile: profileName })
-    : tf('mapping.status.modifiedRule', { name: ruleName }));
+  rerenderMappingDraft(tf('mapping.status.modifiedRuleScopedProfile', { name: ruleName, profile: profileName }));
 }
 
 function readMappingEditorTarget(options = {}) {
@@ -9021,11 +9447,11 @@ function readMappingEditorTarget(options = {}) {
   }
 }
 
-function buildMappingEditorRule({ type, className, field, regex, priority, target, ruleName, profileName = '' }) {
+function buildMappingEditorRule({ type, className, field, priority, target, ruleName, profileName = '' }) {
   const rule = {
     name: ruleName,
     priority,
-    when: buildMappingEditorCondition(type, className, field, regex, target, profileName)
+    when: buildMappingEditorCondition(type, className, field, target, profileName)
   };
 
   if (type === 'hostGroups') {
@@ -9699,7 +10125,7 @@ function applyMappingEditorExtensionTarget(rule, type, target, field) {
     rule.hostMacro = {
       macro: target.macro ?? '{$CMDB.VALUE}',
       value: override ? '' : target.value ?? '',
-      valueTemplate: override ? target.valueTemplate : target.value ? '' : target.valueTemplate || sourceFieldTemplate(field),
+      valueTemplate: override ? target.valueTemplate : target.value ? '' : target.valueTemplate,
       description: target.description ?? '',
       type: Number(target.type ?? 0)
     };
@@ -9709,7 +10135,7 @@ function applyMappingEditorExtensionTarget(rule, type, target, field) {
       field: target.field ?? target.name ?? field,
       name: target.name ?? target.field ?? field,
       value: override ? '' : target.value ?? '',
-      valueTemplate: override ? target.valueTemplate : target.value ? '' : target.valueTemplate || sourceFieldTemplate(field)
+      valueTemplate: override ? target.valueTemplate : target.value ? '' : target.valueTemplate
     };
   } else if (type === 'interfaceProfiles') {
     rule.interfaceProfileRef = target.interfaceProfileRef ?? target.name ?? '';
@@ -9730,35 +10156,58 @@ function applyMappingEditorExtensionTarget(rule, type, target, field) {
   }
 }
 
-function buildMappingEditorCondition(type, className, field, regex, target, profileName = '') {
-  const allRegex = [];
-  if (className) {
-    allRegex.push({ field: 'className', pattern: `(?i)^${escapeRegex(className)}$` });
-  }
-  if (profileName && canonicalSourceField(field) !== 'hostProfile') {
-    allRegex.push({ field: 'hostProfile', pattern: `(?i)^${escapeRegex(profileName)}$` });
-  }
+function buildMappingEditorCondition(_type, _className, _field, _target, _profileName = '') {
+  const profileName = String(_profileName ?? '').trim();
+  const userCondition = mappingEditorUserCondition(mappingConditionExpression());
+  return profileBoundCondition(profileName, userCondition);
+}
 
-  if (type === 'monitoringSuppression') {
-    allRegex.push({ field: 'eventType', pattern: '(?i)^(create|update)$' });
-    allRegex.push({
-      field,
-      pattern: regex || '(?i)^(do_not_monitor|dont_monitor|do not monitor|not_monitored|false|0)$'
-    });
-  } else if (regex) {
-    allRegex.push({ field, pattern: regex });
-  }
+function mappingEditorUserCondition(expression) {
+  return removeMappingConditionField(cloneJson(expression), 'hostProfile')
+    ?? defaultMappingCondition();
+}
 
-  const condition = {};
-  if (allRegex.length > 0) {
-    condition.allRegex = allRegex;
+function removeMappingConditionField(expression, fieldName) {
+  if (!expression || typeof expression !== 'object') {
+    return null;
   }
-
-  if (type === 'interfaceAddress') {
-    condition.fieldExists = field || target.valueField || 'ipAddress';
+  const operator = String(expression.operator ?? '').toLowerCase();
+  if (['all', 'any', 'not'].includes(operator)) {
+    const items = (expression.items ?? [])
+      .map(item => removeMappingConditionField(item, fieldName))
+      .filter(Boolean);
+    if (operator === 'not') {
+      return items.length === 1 ? { ...expression, items } : null;
+    }
+    return items.length > 0 ? { ...expression, items } : null;
   }
+  return canonicalSourceField(expression.field) === canonicalSourceField(fieldName)
+    ? null
+    : expression;
+}
 
-  return Object.keys(condition).length > 0 ? condition : { always: true };
+function replaceConditionExactValue(expression, field, oldValue, newValue) {
+  if (!expression || typeof expression !== 'object') {
+    return 0;
+  }
+  if (Array.isArray(expression.items)) {
+    return expression.items.reduce((count, item) => count + replaceConditionExactValue(item, field, oldValue, newValue), 0);
+  }
+  if (!sameNormalized(expression.field, field)) {
+    return 0;
+  }
+  if (String(expression.operator).toLowerCase() === 'equals' && sameNormalized(expression.value, oldValue)) {
+    expression.value = newValue;
+    return 1;
+  }
+  if (String(expression.operator).toLowerCase() === 'regex') {
+    const values = regexLiteralValues(expression.pattern);
+    if (values.length === 1 && sameNormalized(values[0], oldValue)) {
+      expression.pattern = `(?i)^${escapeRegex(newValue)}$`;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 function mappingRulesKey(type, target = {}) {
@@ -10461,7 +10910,7 @@ function classesForRuleChange(change, rules, cmdbuildCatalog) {
     return explicitClasses;
   }
 
-  if (change.collection === 'eventRoutingRules' || change.rule?.when?.always) {
+  if (change.collection === 'eventRoutingRules' || change.rule?.when?.expression?.operator === 'always') {
     return allWebhookClasses(rules, cmdbuildCatalog);
   }
 
@@ -10478,12 +10927,8 @@ function allWebhookClasses(rules, cmdbuildCatalog) {
 }
 
 function sourceFieldsForRule(rule = {}) {
-  const when = rule.when ?? {};
   const fields = [
-    ...(when.anyRegex ?? []).map(matcher => matcher.field),
-    ...(when.allRegex ?? []).map(matcher => matcher.field),
-    when.fieldExists,
-    ...(Array.isArray(when.fieldsExist) ? when.fieldsExist : []),
+    ...conditionFields(rule.when),
     rule.valueField
   ].filter(Boolean);
 
@@ -11932,11 +12377,11 @@ function mappingSectionHelp(title) {
     'Class attribute fields': 'Conversion fields: поле слева является нормализованным Model-полем конвертера, source справа указывает атрибут или ключ webhook CMDBuild. Без правки микросервиса безопасно менять source, required и validationRegex для уже поддержанных Model-полей и реально существующих CMDBuild attributes.',
     'Event routing': 'Маршрутизация create/update/delete в JSON-RPC методы Zabbix и T4-шаблоны. Без правки микросервисов можно менять метод, templateName и fallbackTemplateName только в рамках уже поддержанных сценариев и существующих T4 templates.',
     'Host profiles': 'Host profiles описывают fan-out: один CMDB object может дать один или несколько Zabbix hosts. Внутри profile задаются hostName/visibleName templates и interfaces. Для нескольких IP можно оставить их interfaces одного основного host или создать отдельные profiles для отдельных Zabbix hosts. Переименование profile меняет suffix нового Zabbix host, старые hosts не переименовываются автоматически.',
-    'Group rules': 'Правила выбора host groups по regex над class attribute fields. Обычно редактируются в JSON правил: priority, when.anyRegex/when.allRegex и ссылки на существующие Zabbix host groups. CMDBuild менять не нужно, если поля уже приходят в webhook.',
-    'Template rules': 'Правила выбора Zabbix templates по regex над class attribute fields. В условии можно использовать lookup/class attribute field zabbixTag, если tag из CMDBuild должен влиять на выбор шаблона. Результатом Template rules должны оставаться только templates/templateRef; выбирать или назначать Zabbix tags в этом блоке нецелесообразно, для этого есть Tag rules. После выбора применяется templateConflictRules: на create конфликтующие templates не попадают в payload, на update fallback они также попадают в templates_clear.',
+    'Group rules': 'Правила выбора host groups по дереву when.expression над class attribute fields. Условие собирается из И/ИЛИ/НЕ и операторов сравнения, regex и проверки пустоты. CMDBuild менять не нужно, если поля уже приходят в webhook.',
+    'Template rules': 'Правила выбора Zabbix templates по дереву when.expression над class attribute fields. Условие может читать lookup/class attribute field zabbixTag. Каждый template должен быть задан явным template rule: при отсутствии совпадения объект не отправляется в мониторинг. После выбора применяется templateConflictRules.',
     [t('mapping.rules.interfaceAddress')]: 'Правила выбора адреса интерфейса. Можно выбирать IP или DNS через mode и valueField; valueField ссылается на нормализованное class attribute field, например ipAddress или dnsName.',
-    [t('mapping.rules.interface')]: 'Fallback-правила интерфейса. Они выбирают старую default-структуру интерфейса, если host profile не задал конкретные hostProfiles[].interfaces.',
-    'Tag rules': 'Правила формирования Zabbix tags. Они читают class attribute fields через regex, например zabbixTag, и добавляют tag/value в payload. Связь с блоком Tags прямая: Tag rules создают элементы, которые видны как Tags. Tag rules не выбирают templates; если tag должен влиять на template, используйте тот же class attribute field как условие в Template rules.',
+    [t('mapping.rules.interface')]: 'Правила выбора интерфейса. Они применяются только при совпадении собственного дерева условий; неявного fallback-правила нет.',
+    'Tag rules': 'Правила формирования Zabbix tags. Они читают class attribute fields через дерево when.expression и добавляют tag/value в payload. Tag rules не выбирают templates; если tag должен влиять на template, используйте то же поле в условии Template rules.',
     'T4 templates': 'T4-шаблоны JSON-RPC payload. Можно менять структуру payload для уже поддержанных Zabbix methods и Model-полей. Новые Model-поля, новые методы или новая логика выполнения требуют правки микросервисов.'
   };
 
@@ -12004,15 +12449,15 @@ function conversionRuleHelp(rule, type) {
   }
 
   if (type === 'templates') {
-    return `Template rule "${rule.name}" выбирает Zabbix templates. Условия when.anyRegex/when.allRegex могут читать любой class attribute field, включая lookup zabbixTag, если значение tag должно влиять на выбор шаблона. Результатом должны быть templates/templateRef; назначать tags здесь не нужно и обычно вредно для читаемости правил. После объединения Template rules применяются templateConflictRules.`;
+    return `Template rule "${rule.name}" выбирает Zabbix templates. Дерево when.expression может читать любой class attribute field, включая lookup zabbixTag. У правила должны быть явные templates; при отсутствии совпадения объект не отправляется в мониторинг.`;
   }
 
   if (type === 'tags') {
-    return `Tag rule "${rule.name}" формирует Zabbix tags. Условия when.anyRegex/when.allRegex читают class attribute fields, результатом являются tag/value или tag/valueTemplate. Эти элементы затем видны в блоке Tags и попадают в tags[] payload. Template этот блок не выбирает.`;
+    return `Tag rule "${rule.name}" формирует Zabbix tags. Дерево when.expression читает class attribute fields, результатом являются tag/value или tag/valueTemplate. Template этот блок не выбирает.`;
   }
 
   if (type === 'interfaceAddress') {
-    return `Interface address rule "${rule.name}" выбирает, чем заполнить Zabbix interfaces[]: mode=ip пишет valueField в ip и useip=1, mode=dns пишет valueField в dns и useip=0. Обычно меняются priority, fieldExists/regex, mode и valueField.`;
+    return `Interface address rule "${rule.name}" выбирает, чем заполнить Zabbix interfaces[]: mode=ip пишет valueField в ip и useip=1, mode=dns пишет valueField в dns и useip=0. Обычно меняются priority, when.expression, mode и valueField.`;
   }
 
   const targetText = {
@@ -12020,7 +12465,7 @@ function conversionRuleHelp(rule, type) {
     templateGroups: 'Zabbix template groups',
     interface: 'monitoring interface'
   }[type] ?? type;
-  return `Правило "${rule.name}" выбирает ${targetText}. Условия when.anyRegex/when.allRegex читают class attribute fields, результат берется из этого правила или ref/defaults. Обычно можно менять priority, regex и ссылки на существующие Zabbix objects. Новые поля или новая логика обработки требуют изменения микросервиса.`;
+  return `Правило "${rule.name}" выбирает ${targetText}. Дерево when.expression читает class attribute fields. Обычно можно менять priority, условие и ссылки на существующие Zabbix objects. Новые поля или новая логика обработки требуют изменения микросервиса.`;
 }
 
 function t4TemplateHelp(name) {
@@ -12763,7 +13208,7 @@ function ruleMappingNodes(rule, type, meta = null, validation = null, rules = nu
 }
 
 function ruleMeta(rule) {
-  const parts = [rule.fallback ? 'fallback' : `priority ${rule.priority}`];
+  const parts = [`priority ${rule.priority}`];
   if (rule.mode) {
     parts.push(`mode ${rule.mode}`);
   }
@@ -12774,47 +13219,21 @@ function ruleMeta(rule) {
 }
 
 function conditionMappingNodes(rule, type, validation = null) {
-  const regexNodes = [
-    ...(rule.when?.anyRegex ?? []).map(matcher => ({ matcher, mode: 'anyRegex' })),
-    ...(rule.when?.allRegex ?? []).map(matcher => ({ matcher, mode: 'allRegex' }))
-  ].map(({ matcher, mode }) => {
-    const tokens = [
-      `rule:${normalizeToken(rule.name)}`,
-      ...targetTokensForRuleType(type),
-      ...sourceFieldTokens(matcher.field),
-      ...regexLiteralTokens(matcher.field, matcher.pattern)
-    ];
-    return mappingNode({
-      label: matcher.field,
-      meta: `${mode}: ${matcher.pattern}`,
-      tokens,
-      level: 2,
-      kind: 'regex',
-      status: validationStatus(tokens, validation),
-      help: `Regex condition правила "${rule.name}". ${mode} читает class attribute field "${matcher.field}" и сравнивает значение с pattern "${matcher.pattern}". allRegex требует совпадения всех условий, anyRegex требует совпадения одного из условий.`
-    });
-  });
-  const existsFields = [
-    rule.when?.fieldExists,
-    ...(Array.isArray(rule.when?.fieldsExist) ? rule.when.fieldsExist : [])
-  ].filter(Boolean);
-  const existsNodes = existsFields.map(field => {
-    const tokens = [
-      `rule:${normalizeToken(rule.name)}`,
-      ...targetTokensForRuleType(type),
-      ...sourceFieldTokens(field)
-    ];
-    return mappingNode({
-      label: field,
-      meta: 'field exists',
-      tokens,
-      level: 2,
-      kind: 'regex',
-      status: validationStatus(tokens, validation),
-      help: `Condition правила "${rule.name}" проверяет, что class attribute field "${field}" присутствует и не пустой.`
-    });
-  });
-  return [...regexNodes, ...existsNodes];
+  const fields = conditionFields(rule.when);
+  const tokens = [
+    `rule:${normalizeToken(rule.name)}`,
+    ...targetTokensForRuleType(type),
+    ...fields.flatMap(sourceFieldTokens)
+  ];
+  return [mappingNode({
+    label: conditionSummary(rule.when),
+    meta: fields.join(', ') || 'always',
+    tokens,
+    level: 2,
+    kind: 'condition',
+    status: validationStatus(tokens, validation),
+    help: `Условие правила "${rule.name}". Группы И/ИЛИ/НЕ исполняются как одно дерево условий.`
+  })];
 }
 
 function ruleTokens(rule, type, rules = null) {
@@ -12863,10 +13282,6 @@ function ruleTokens(rule, type, rules = null) {
   }
   if (type === 'hostProfiles') {
     tokens.push(...hostProfileTokens(rule));
-  }
-
-  if (rule.fallback) {
-    tokens.push(`fallback:${type}`);
   }
 
   return uniqueTokens(tokens);
@@ -12934,7 +13349,7 @@ function hostProfileMappingNodes(profile, validation = null) {
   return [
     mappingNode({
       label: profileName,
-      meta: `priority ${profile.priority ?? 1000}${profile.fallback ? ' | fallback' : ''}`,
+      meta: `priority ${profile.priority ?? 1000}`,
       tokens,
       level: 1,
       kind: 'rule',
@@ -13159,25 +13574,30 @@ function itemsFromRulesRef(rules, ref) {
 }
 
 function conditionTokens(condition = {}) {
-  if (condition.always) {
+  if (condition?.expression?.operator === 'always') {
     return ['condition:always'];
   }
 
-  return uniqueTokens([
-    ...(condition.anyRegex ?? []).flatMap(matcher => sourceFieldTokens(matcher.field)),
-    ...(condition.allRegex ?? []).flatMap(matcher => sourceFieldTokens(matcher.field)),
-    ...[
-      condition.fieldExists,
-      ...(Array.isArray(condition.fieldsExist) ? condition.fieldsExist : [])
-    ].filter(Boolean).flatMap(field => sourceFieldTokens(field))
-  ]);
+  return uniqueTokens(conditionFields(condition).flatMap(field => sourceFieldTokens(field)));
 }
 
 function conditionMatchTokens(condition = {}) {
-  return [
-    ...(condition.anyRegex ?? []),
-    ...(condition.allRegex ?? [])
-  ].flatMap(matcher => regexLiteralTokens(matcher.field, matcher.pattern));
+  return conditionExpressionLeaves(condition.expression)
+    .flatMap(expression => expression.operator?.toLowerCase() === 'regex'
+      ? regexLiteralTokens(expression.field, expression.pattern)
+      : expression.operator?.toLowerCase() === 'equals'
+        ? [`match:${canonicalSourceField(expression.field)}:${normalizeToken(expression.value)}`]
+        : []);
+}
+
+function conditionExpressionLeaves(expression) {
+  if (!expression || typeof expression !== 'object') {
+    return [];
+  }
+  if (Array.isArray(expression.items)) {
+    return expression.items.flatMap(conditionExpressionLeaves);
+  }
+  return [expression];
 }
 
 function regexLiteralTokens(field, pattern) {
@@ -13374,15 +13794,16 @@ function lookupValuesFromRules(rules, lookupName) {
     ...(rules.templateSelectionRules ?? []),
     ...(rules.tagSelectionRules ?? [])
   ]) {
-    for (const matcher of [
-      ...(rule.when?.anyRegex ?? []),
-      ...(rule.when?.allRegex ?? [])
-    ]) {
-      if (!equalsIgnoreCase(canonicalSourceField(matcher.field), field)) {
+    for (const condition of conditionExpressionLeaves(rule.when?.expression)) {
+      if (!equalsIgnoreCase(canonicalSourceField(condition.field), field)) {
         continue;
       }
-
-      for (const value of pairLookupLiterals(regexLiteralValues(matcher.pattern))) {
+      const valuesForCondition = String(condition.operator).toLowerCase() === 'equals'
+        ? [condition.value]
+        : String(condition.operator).toLowerCase() === 'regex'
+          ? regexLiteralValues(condition.pattern)
+          : [];
+      for (const value of pairLookupLiterals(valuesForCondition)) {
         const key = normalizeToken(value.id || value.label);
         if (key && !values.has(key)) {
           values.set(key, value);
@@ -14493,7 +14914,6 @@ function applyHelpText() {
     '#mappingProfileSave': 'tooltip.mappingProfileSave',
     '#mappingProfileDelete': 'tooltip.mappingProfileDelete',
     '#mappingProfileReset': 'tooltip.mappingProfileReset',
-    '#mappingProfileScope': 'tooltip.mappingProfileScope',
     '#mappingDeleteView': 'tooltip.mappingDeleteView',
     '#mappingDeleteSelectAll': 'tooltip.mappingDeleteSelectAll',
     '#mappingDeleteClear': 'tooltip.mappingDeleteClear',

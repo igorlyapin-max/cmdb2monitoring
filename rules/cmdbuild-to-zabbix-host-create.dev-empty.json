@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.1",
+  "schemaVersion": "0.2",
   "rulesVersion": "2026.05.02-dev-empty",
   "name": "cmdbuild-to-zabbix-host-create-dev-empty",
   "description": "Clean dev starter generated from the empty installation profile. Safe no-op until an operator fills dev source fields, Zabbix catalog IDs, host profiles, selection rules, T4 templates and sets publish=true for required event routes. Use the demo/e2e rules file for populated test scenarios.",
@@ -108,7 +108,6 @@
       "inventory_mode": 0
     },
     "hostGroups": [],
-    "templates": [],
     "agentInterface": {
       "type": 1,
       "main": 1,
@@ -249,43 +248,12 @@
       "tags": "tag"
     }
   },
-  "groupSelectionRules": [
-    {
-      "name": "fallback-empty-host-groups",
-      "fallback": true,
-      "hostGroups": []
-    }
-  ],
-  "templateSelectionRules": [
-    {
-      "name": "fallback-empty-templates",
-      "fallback": true,
-      "templates": []
-    }
-  ],
+  "groupSelectionRules": [],
+  "templateSelectionRules": [],
   "templateConflictRules": [],
-  "interfaceAddressRules": [
-    {
-      "name": "fallback-ip-address",
-      "fallback": true,
-      "mode": "ip",
-      "valueField": "ipAddress"
-    }
-  ],
-  "interfaceSelectionRules": [
-    {
-      "name": "fallback-agent-interface",
-      "fallback": true,
-      "interfaceRef": "agentInterface"
-    }
-  ],
-  "tagSelectionRules": [
-    {
-      "name": "fallback-empty-tags",
-      "fallback": true,
-      "tags": []
-    }
-  ],
+  "interfaceAddressRules": [],
+  "interfaceSelectionRules": [],
+  "tagSelectionRules": [],
   "hostMacroSelectionRules": [],
   "inventorySelectionRules": [],
   "hostStatusSelectionRules": [],

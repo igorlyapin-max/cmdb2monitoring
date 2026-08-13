@@ -6,13 +6,15 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "NODE_ENV=Development node server.mjs",
-    "test": "npm run test:config && npm run test:health-endpoints && npm run test:active-rules && npm run test:rules-publish-api && npm run test:mapping && npm run test:webhooks",
+    "test": "npm run test:config && npm run test:health-endpoints && npm run test:active-rules && npm run test:rules-publish-api && npm run test:conditions && npm run test:mapping && npm run test:webhooks && npm run test:browser",
     "test:config": "node scripts/validate-config.mjs",
     "test:health-endpoints": "node test/health-endpoints-config.test.mjs",
     "test:active-rules": "node test/active-rules-publication.test.mjs",
     "test:rules-publish-api": "node test/rules-publish-api.test.mjs",
+    "test:conditions": "node test/condition-expression.test.mjs",
     "test:mapping": "node test/mapping-logic.test.mjs",
-    "test:webhooks": "node test/webhook-logic.test.mjs"
+    "test:webhooks": "node test/webhook-logic.test.mjs",
+    "test:browser": "node test/mapping-editor-browser.test.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -22,5 +24,8 @@
     "kafkajs": "^2.2.4",
     "ldapts": "^8.1.7",
     "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.1"
   }
 }

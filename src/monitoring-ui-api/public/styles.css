@@ -1079,6 +1079,100 @@ h2 {
   grid-column: span 2;
 }
 
+.mapping-condition-builder {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.mapping-condition-builder.is-disabled {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
+
+.mapping-condition-builder.is-disabled .mapping-condition-object {
+  opacity: 0.62;
+}
+
+.mapping-condition-header,
+.mapping-condition-group-header,
+.mapping-condition-leaf-row,
+.mapping-condition-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mapping-condition-header {
+  justify-content: space-between;
+  font-weight: 700;
+}
+
+.mapping-condition-tree {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mapping-condition-profile-constraint {
+  margin: 0;
+  padding: 7px 8px;
+  border-left: 3px solid #0f766e;
+  background: #ecfdf5;
+  color: #065f46;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.mapping-condition-object {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mapping-condition-object > span {
+  font-weight: 700;
+}
+
+.mapping-condition-group {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-left: 3px solid #0f766e;
+  background: #ffffff;
+  min-width: 0;
+}
+
+.mapping-condition-children {
+  display: grid;
+  gap: 6px;
+  margin-left: 10px;
+  min-width: 0;
+}
+
+.mapping-condition-leaf {
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #ffffff;
+  min-width: 0;
+}
+
+.mapping-condition-leaf-row select:first-child,
+.mapping-condition-leaf-row input {
+  min-width: 150px;
+  flex: 1 1 180px;
+}
+
+.mapping-condition-leaf-row select:not(:first-child) {
+  min-width: 120px;
+}
+
 #mappingModifyRuleField,
 .mapping-modify-context {
   grid-column: 1 / -1;
@@ -2015,9 +2109,49 @@ th {
     justify-content: flex-start;
   }
 
+  .mapping-condition-children {
+    margin-left: 0;
+  }
+
+  .mapping-condition-leaf-row select:first-child,
+  .mapping-condition-leaf-row select:not(:first-child),
+  .mapping-condition-leaf-row input {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
   .login-heading-row {
     align-items: start;
     flex-direction: column;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .brand,
+  .session,
+  .session-traffic-row,
+  .session-traffic {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .session,
+  .session-traffic,
+  .session-traffic-row {
+    justify-content: flex-start;
+  }
+
+  .session-traffic-row {
+    flex-wrap: wrap;
+  }
+
+  .session-light {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .language-field {

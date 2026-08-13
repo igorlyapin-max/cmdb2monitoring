@@ -1,0 +1,21 @@
+x-syslog-logging: &syslog_logging
+  driver: syslog
+  options:
+    syslog-address: ${SYSLOG_ADDRESS:?set SYSLOG_ADDRESS for the syslog logging overlay}
+    tag: "cmdb2monitoring.{{.Name}}"
+
+services:
+  cmdbwebhooks2kafka:
+    logging: *syslog_logging
+
+  cmdbkafka2zabbix:
+    logging: *syslog_logging
+
+  zabbixrequests2api:
+    logging: *syslog_logging
+
+  zabbixbindings2cmdbuild:
+    logging: *syslog_logging
+
+  monitoring-ui-api:
+    logging: *syslog_logging

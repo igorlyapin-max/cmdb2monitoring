@@ -95,8 +95,6 @@ public sealed class HostProfileRule
 
     public int Priority { get; init; } = 1000;
 
-    public bool Fallback { get; init; }
-
     public bool Enabled { get; init; } = true;
 
     public bool? IsMainProfile { get; init; }
@@ -127,8 +125,6 @@ public sealed class HostProfileInterfaceRule
     public string Name { get; init; } = string.Empty;
 
     public int Priority { get; init; } = 1000;
-
-    public bool Fallback { get; init; }
 
     public bool Enabled { get; init; } = true;
 
@@ -202,8 +198,6 @@ public sealed class ConversionDefaults
     public HostDefaults Host { get; init; } = new();
 
     public LookupItem[] HostGroups { get; init; } = [];
-
-    public LookupItem[] Templates { get; init; } = [];
 
     public InterfaceSettings AgentInterface { get; init; } = new();
 
@@ -293,8 +287,6 @@ public sealed class InterfaceAddressRule
     public string Name { get; init; } = string.Empty;
 
     public int Priority { get; init; } = 1000;
-
-    public bool Fallback { get; init; }
 
     public RuleCondition When { get; init; } = new();
 
@@ -429,8 +421,6 @@ public sealed class SelectionRule
 
     public int Priority { get; init; } = 1000;
 
-    public bool Fallback { get; init; }
-
     public string TargetMode { get; init; } = string.Empty;
 
     public string ValueField { get; init; } = string.Empty;
@@ -518,20 +508,18 @@ public sealed class SelectionRule
 
 public sealed class RuleCondition
 {
-    public bool Always { get; init; }
-
-    public string FieldExists { get; init; } = string.Empty;
-
-    public string[] FieldsExist { get; init; } = [];
-
-    public RegexCondition[] AnyRegex { get; init; } = [];
-
-    public RegexCondition[] AllRegex { get; init; } = [];
+    public ConditionExpression Expression { get; init; } = new();
 }
 
-public sealed class RegexCondition
+public sealed class ConditionExpression
 {
+    public string Operator { get; init; } = string.Empty;
+
+    public ConditionExpression[] Items { get; init; } = [];
+
     public string Field { get; init; } = string.Empty;
+
+    public string Value { get; init; } = string.Empty;
 
     public string Pattern { get; init; } = string.Empty;
 }

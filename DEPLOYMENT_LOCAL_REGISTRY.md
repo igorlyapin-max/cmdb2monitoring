@@ -83,32 +83,40 @@ runtime `/health` и `/ready` совпадают с корневым `VERSION`:
 
 ## GKM base images
 
-Обычная сборка использует public base images и не требует специального режима. Для customer CI
-можно явно выбрать финальный alias `gkm-runtime` и заранее подготовленные образы из customer registry:
+Обычная ручная сборка использует public base images и финальный target `gkm-runtime`.
+Это запускаемый образ с identity `BUILD_PROVENANCE=unverified-local`; он годится для локальной
+проверки и не является customer delivery artifact. Для заранее подготовленного Node base image:
 
 ```bash
 docker build \
   --target gkm-runtime \
+  --build-arg APPLICATION_VERSION=00.00.00.01 \
   --build-arg NODE_RUNTIME_IMAGE=registry.gkm.local/gkm/node:22-alpine-ca \
   -f deploy/dockerfiles/monitoring-ui-api.Dockerfile \
   -t registry.gkm.local/cmdb2monitoring/monitoring-ui-api:00.00.00.01 \
   .
 ```
 
-`gkm-runtime` не является второй веткой приложения: это тот же runtime stage. Его назначение -
-явно показать customer CI, что image строится из подготовленного base image. BuildKit, customer CA,
-registry URL и `debian.sources` в product repository не используются.
+`gkm-runtime-canonical` используется только canonical CI/helper path. Он принимает version,
+полный Git revision и `BUILD_PROVENANCE=verified`, проверяет embedded `/app/VERSION`, OCI labels,
+non-root runtime user, `/health` и `/ready` для всех пяти образов до push. Canonical path принимает
+только чистое дерево, versioned `VERSION`, immutable version tag и registry digest; `latest` в нём
+не публикуется. BuildKit, customer CA, registry URL и `debian.sources` в product repository не используются.
 
-Для всех образов helper поддерживает следующие аргументы:
+Ручная сборка всех образов из подготовленных base images:
 
 ```bash
 REGISTRY=registry.gkm.local \
-BUILD_TARGET=gkm-runtime \
+DELIVERY_MODE=manual \
 NODE_RUNTIME_IMAGE=registry.gkm.local/gkm/node:22-alpine-ca \
 DOTNET_SDK_IMAGE=registry.gkm.local/gkm/dotnet-sdk:10.0-ca \
 DOTNET_RUNTIME_IMAGE=registry.gkm.local/gkm/dotnet-aspnet:10.0-ca \
 ./scripts/build-local-registry-images.sh
 ```
+
+Canonical CI использует тот же helper с `DELIVERY_MODE=canonical`; `BUILD_TARGET` вручную не
+задаётся и становится `gkm-runtime-canonical`. Перед push helper делает Docker-only runtime smoke
+и извлекает identity из уже собранного image, поэтому на runner не требуется `dotnet publish` или `npm run build`.
 
 Предположения для customer base images:
 
@@ -121,6 +129,9 @@ DOTNET_RUNTIME_IMAGE=registry.gkm.local/gkm/dotnet-aspnet:10.0-ca \
   `npm ci` или `dotnet restore`.
 - Customer CI runner отдельно доверяет registry, выполняет login и передает только immutable or
   controlled base-image references через protected variables `GKM_*`; значения не коммитятся.
+- При `GKM_CA_PROFILE_ENABLED=true` CI обязан передать `GKM_TLS_SMOKE_ENDPOINT`: Node base image
+  должен иметь читаемый `NODE_EXTRA_CA_CERTS`, а .NET runtime base image - штатный `openssl`.
+  Проверка TLS выполняется без `--insecure`; без CA profile этот gate `not-applicable`.
 - При ротации CA сначала пересобираются и публикуются base images, затем все application images.
 
 GitLab job `gkm_runtime_delivery` запускается только при
@@ -171,7 +182,7 @@ DebugLogging__Enabled=false
 DebugLogging__Level=Basic
 ```
 
-Поддержаны уровни `Basic` и `Verbose`. События пишутся через обычный `ILogger` на `Information`, поэтому попадают в Docker stdout/stderr, Kafka log topic при `ElkLogging:Mode=Kafka`, ELK при включенном ELK sink и syslog при соответствующем Docker logging driver. `Verbose` раскрывает payload/request/response JSON и должен включаться только временно для диагностики.
+Поддержаны уровни `Basic` и `Verbose`. События пишутся через обычный `ILogger` на `Information`, поэтому попадают в Docker stdout/stderr, Kafka log topic при `ElkLogging:Mode=Kafka`, ELK при включенном ELK sink и syslog при соответствующем Docker logging driver. `Verbose` пишет только безопасные metadata payload: размер, SHA-256 fingerprint и имена полей, без исходных CMDB/Zabbix значений; включать его нужно только временно для диагностики.
 
 UI/BFF использует `config/appsettings.json`, затем `config/appsettings.${NODE_ENV}.json`, затем `state/ui-settings.json`, затем env overrides. В Dockerfile для UI задано `NODE_ENV=Production`; если нужен файл override, монтируйте его как `/app/config/appsettings.Production.json`.
 
@@ -187,7 +198,16 @@ docker compose --env-file production.env -f deploy/compose.production.yml config
 docker compose --env-file production.env -f deploy/compose.production.yml up -d
 ```
 
-Compose публикует наружу только webhook/UI bind-порты из env, запускает Docker healthcheck через `/ready`, сохраняет worker state в Docker volumes и по умолчанию отправляет stdout/stderr в Docker syslog driver. Kafka log topics остаются включенными как основной structured logging sink проекта.
+Compose публикует наружу только webhook/UI bind-порты из env, запускает Docker healthcheck через `/ready` и сохраняет worker state в Docker volumes. Structured JSON logs всегда пишутся в stdout/stderr; Docker logging driver выбирается daemon или платформой заказчика. Kafka log topics остаются включенными как основной structured logging sink проекта.
+
+Для отправки container stdout/stderr в syslog подключите явный overlay. `SYSLOG_ADDRESS` не имеет loopback default и должен указывать на доступный endpoint инфраструктуры:
+
+```bash
+SYSLOG_ADDRESS=udp://syslog.example.local:514 \
+  docker compose --env-file production.env \
+  -f deploy/compose.production.yml \
+  -f deploy/compose.logging-syslog.yml up -d
+```
 
 Для диагностики production runtime без старта контейнеров:
 
@@ -447,11 +467,11 @@ MS AD/LDAP/IdP:
 | `zabbixbindings2cmdbuild` | `/app/state` |
 | `monitoring-ui-api` | `/app/state`, `/app/data`, rules working copy при использовании `Настройка git` |
 
-Для converter в контейнере типовой rules override:
+Для converter в production-контейнере типовой safe rules override:
 
 ```bash
 ConversionRules__RepositoryPath=/app
-ConversionRules__RulesFilePath=rules/cmdbuild-to-zabbix-host-create.json
+ConversionRules__RulesFilePath=rules/cmdbuild-to-zabbix-host-create.production-empty.json
 ConversionRules__ReadFromGit=false
 ```
 
@@ -461,12 +481,12 @@ ConversionRules__ReadFromGit=false
 ConversionRules__ReadFromGit=true
 ConversionRules__RepositoryPath=/app/rules-git-working-copy
 ConversionRules__RepositoryUrl=https://git.example.org/cmdb2monitoring/conversion-rules.git
-ConversionRules__RulesFilePath=rules/cmdbuild-to-zabbix-host-create.json
+ConversionRules__RulesFilePath=rules/customer-cmdbuild-to-zabbix.json
 ConversionRules__PullOnStartup=true
 ConversionRules__PullOnReload=true
 ```
 
-Внутри repository ожидается файл `rules/cmdbuild-to-zabbix-host-create.json`, если `RulesFilePath`/`ConversionRules:RulesFilePath` не переопределен.
+В production Compose путь задается единой `CONVERSION_RULES_FILE_PATH`: по умолчанию это `rules/cmdbuild-to-zabbix-host-create.production-empty.json`, а после проверки customer catalog - подготовленный customer rules-файл. Demo/e2e файл `rules/cmdbuild-to-zabbix-host-create.json` предназначен только для dev/E2E.
 
 ## Учетные записи по умолчанию
 
@@ -491,7 +511,7 @@ docker run --rm \
   -e Kafka__Input__BootstrapServers=kafka:29092 \
   -e Kafka__Output__BootstrapServers=kafka:29092 \
   -e ConversionRules__RepositoryPath=/app \
-  -e ConversionRules__RulesFilePath=rules/cmdbuild-to-zabbix-host-create.json \
+  -e ConversionRules__RulesFilePath=rules/cmdbuild-to-zabbix-host-create.production-empty.json \
   -e Cmdbuild__ApiVersion=v4 \
   -e Cmdbuild__BaseUrl=http://cmdbuild:8080/cmdbuild/services/rest/v4 \
   -e Cmdbuild__Username='<secret>' \

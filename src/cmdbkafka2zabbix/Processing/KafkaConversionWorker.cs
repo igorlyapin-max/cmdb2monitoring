@@ -119,10 +119,13 @@ public sealed class KafkaConversionWorker(
                         consumed.Partition.Value,
                         consumed.Offset.Value,
                         consumed.Message.Key ?? "<empty>");
+                    var inputPayload = SafePayloadDiagnostics.DescribeJson(consumed.Message.Value);
                     logger.LogVerbose(
                         debugLoggingOptions,
-                        "Consumed CMDBuild Kafka payload {KafkaPayload}",
-                        consumed.Message.Value);
+                        "Consumed CMDBuild Kafka payload with {PayloadBytes} byte(s), SHA-256 {PayloadSha256}, top-level fields {PayloadFields}",
+                        inputPayload.ByteCount,
+                        inputPayload.Sha256,
+                        inputPayload.FieldNames);
 
                     var processingTask = ProcessMessageAsync(consumed, consumer, stoppingToken);
                     TrackInFlightTask(processingTask);
@@ -255,10 +258,10 @@ public sealed class KafkaConversionWorker(
                 correlationId);
             logger.LogVerbose(
                 debugLoggingOptions,
-                "Resolved CMDBuild source fields for {ClassName}/{EntityId}: {SourceFields}",
+                "Resolved CMDBuild source fields for {ClassName}/{EntityId}: {SourceFieldNames}",
                 source.ClassName ?? source.EntityType ?? "<unknown>",
                 source.EntityId ?? "<unknown>",
-                JsonSerializer.Serialize(source.SourceFields));
+                SafePayloadDiagnostics.DescribeFieldNames(source.SourceFields.Keys));
         }
         catch (JsonException ex)
         {
@@ -356,12 +359,15 @@ public sealed class KafkaConversionWorker(
         foreach (var result in publishableResults)
         {
             lastDeliveryResult = await publisher.PublishAsync(result, correlationId, cancellationToken);
+            var resultPayload = SafePayloadDiagnostics.DescribeJson(result.Value);
             logger.LogVerbose(
                 debugLoggingOptions,
-                "Published conversion result for profile {ProfileName}, method {Method}, payload {ZabbixPayload}",
+                "Published conversion result for profile {ProfileName}, method {Method}, payload {PayloadBytes} byte(s), SHA-256 {PayloadSha256}, top-level fields {PayloadFields}",
                 result.ProfileName ?? "<default>",
                 result.Method,
-                result.Value);
+                resultPayload.ByteCount,
+                resultPayload.Sha256,
+                resultPayload.FieldNames);
         }
         publishMs = stageStopwatch.ElapsedMilliseconds;
 

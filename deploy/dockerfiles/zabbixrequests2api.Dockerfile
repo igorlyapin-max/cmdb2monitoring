@@ -25,12 +25,51 @@ COPY --from=build /app/publish .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && addgroup --system appgroup \
-    && adduser --system --ingroup appgroup appuser \
+    && groupadd --system appgroup \
+    && useradd --system --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /app/state /app/data \
     && chown -R appuser:appgroup /app
 USER appuser
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD curl -fsS http://127.0.0.1:8080/ready || exit 1
 ENTRYPOINT ["dotnet", "zabbixrequests2api.dll"]
 
+FROM runtime AS gkm-runtime-canonical
+ARG APPLICATION_VERSION=0.0.0.0
+ARG GIT_REVISION=unknown
+ARG BUILD_PROVENANCE=verified
+ARG SOURCE_STATE=clean
+USER root
+RUN test "$BUILD_PROVENANCE" = "verified" \
+    && test "$GIT_REVISION" != "unknown" \
+    && test "$SOURCE_STATE" = "clean" \
+    && printf '%s\n' "$APPLICATION_VERSION" > /app/VERSION \
+    && chown appuser:appgroup /app/VERSION
+ENV APPLICATION_VERSION=$APPLICATION_VERSION \
+    GIT_REVISION=$GIT_REVISION \
+    BUILD_PROVENANCE=$BUILD_PROVENANCE \
+    SOURCE_STATE=$SOURCE_STATE
+LABEL org.opencontainers.image.version="$APPLICATION_VERSION" \
+    org.opencontainers.image.revision="$GIT_REVISION" \
+    org.opencontainers.image.provenance="$BUILD_PROVENANCE" \
+    org.opencontainers.image.source-state="$SOURCE_STATE"
+USER appuser
+
 FROM runtime AS gkm-runtime
+ARG APPLICATION_VERSION=0.0.0.0
+ARG GIT_REVISION=unknown
+ARG BUILD_PROVENANCE=unverified-local
+ARG SOURCE_STATE=dirty-or-unverified
+USER root
+RUN test "$BUILD_PROVENANCE" = "unverified-local" \
+    && test "$SOURCE_STATE" = "dirty-or-unverified" \
+    && printf '%s\n' "$APPLICATION_VERSION" > /app/VERSION \
+    && chown appuser:appgroup /app/VERSION
+ENV APPLICATION_VERSION=$APPLICATION_VERSION \
+    GIT_REVISION=$GIT_REVISION \
+    BUILD_PROVENANCE=$BUILD_PROVENANCE \
+    SOURCE_STATE=$SOURCE_STATE
+LABEL org.opencontainers.image.version="$APPLICATION_VERSION" \
+    org.opencontainers.image.revision="$GIT_REVISION" \
+    org.opencontainers.image.provenance="$BUILD_PROVENANCE" \
+    org.opencontainers.image.source-state="$SOURCE_STATE"
+USER appuser

@@ -32,11 +32,28 @@ cache:
 node_config:
   extends: .node_job
   stage: validate
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends chromium
   script:
     - npm ci --prefix src/monitoring-ui-api
     - node --check src/monitoring-ui-api/server.mjs
     - node --check src/monitoring-ui-api/public/app.js
-    - npm --prefix src/monitoring-ui-api test
+    - BROWSER_EXECUTABLE_PATH=/usr/bin/chromium npm --prefix src/monitoring-ui-api test
+
+production_compose_contract:
+  image: docker:27-cli
+  stage: validate
+  services:
+    - name: docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  script:
+    - docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml config -q
+    - SYSLOG_ADDRESS=udp://127.0.0.1:514 docker compose --env-file deploy/production.env.example -f deploy/compose.production.yml -f deploy/compose.logging-syslog.yml config -q
 
 whitespace:
   extends: .node_job
@@ -79,7 +96,7 @@ gkm_runtime_delivery:
       REGISTRY="$GKM_REGISTRY"
       NAMESPACE="${GKM_NAMESPACE:-cmdb2monitoring}"
       PUSH=true
-      BUILD_TARGET=gkm-runtime
+      DELIVERY_MODE=canonical
       NODE_RUNTIME_IMAGE="$GKM_NODE_RUNTIME_IMAGE"
       DOTNET_SDK_IMAGE="$GKM_DOTNET_SDK_IMAGE"
       DOTNET_RUNTIME_IMAGE="$GKM_DOTNET_RUNTIME_IMAGE"

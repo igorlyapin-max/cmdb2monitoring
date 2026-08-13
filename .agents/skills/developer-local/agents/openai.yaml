@@ -1,0 +1,4 @@
+interface:
+  display_name: "Developer Local"
+  short_description: "Local repo workflow and quality gates"
+  default_prompt: "Use $developer-local to follow this repository's local development workflow."

@@ -10,10 +10,15 @@ public static class ServiceRuntimeEndpointMappings
         string serviceName,
         string healthRoute)
     {
+        var identity = RuntimeIdentity();
         app.MapGet(healthRoute, (IServiceMetrics metrics) => Results.Ok(new
         {
             service = serviceName,
             status = "ok",
+            identity.ApplicationVersion,
+            identity.GitRevision,
+            identity.BuildProvenance,
+            identity.SourceState,
             startedAt = metrics.StartedAt
         }));
 
@@ -27,6 +32,10 @@ public static class ServiceRuntimeEndpointMappings
             {
                 service = serviceName,
                 status = readiness.Ready ? "ready" : "not_ready",
+                identity.ApplicationVersion,
+                identity.GitRevision,
+                identity.BuildProvenance,
+                identity.SourceState,
                 startedAt = metrics.StartedAt,
                 checkedAt = readiness.CheckedAt,
                 checks = readiness.Checks.Select(check => new
@@ -46,4 +55,27 @@ public static class ServiceRuntimeEndpointMappings
             metrics.ToPrometheusText(serviceName),
             "text/plain; version=0.0.4; charset=utf-8"));
     }
+
+    private static RuntimeBuildIdentity RuntimeIdentity()
+    {
+        return new RuntimeBuildIdentity(
+            SafeEnvironmentValue("APPLICATION_VERSION", "0.0.0.0"),
+            SafeEnvironmentValue("GIT_REVISION", "unknown"),
+            SafeEnvironmentValue("BUILD_PROVENANCE", "unverified-local"),
+            SafeEnvironmentValue("SOURCE_STATE", "dirty-or-unverified"));
+    }
+
+    private static string SafeEnvironmentValue(string variable, string fallback)
+    {
+        var value = Environment.GetEnvironmentVariable(variable)?.Trim();
+        return string.IsNullOrWhiteSpace(value) || value.Length > 128
+            ? fallback
+            : value;
+    }
+
+    private sealed record RuntimeBuildIdentity(
+        string ApplicationVersion,
+        string GitRevision,
+        string BuildProvenance,
+        string SourceState);
 }
