@@ -60,6 +60,7 @@ require_pattern "ConversionRules__RulesFilePath: .*CONVERSION_RULES_FILE_PATH.*p
 require_pattern "RULES_FILE_PATH: .*CONVERSION_RULES_FILE_PATH.*production-empty" "$COMPOSE_FILE" "Production UI must use the centralized safe rules-file default."
 require_pattern "RULES_ACTIVE_FILE_PATH: .*CONVERSION_RULES_FILE_PATH.*production-empty" "$COMPOSE_FILE" "Production UI active rules must use the centralized safe rules-file default."
 require_pattern "MONITORING_UI_HEALTH_ENDPOINTS_JSON:" "$COMPOSE_FILE" "Production compose must configure health endpoints through one JSON environment variable."
+require_pattern "MONITORING_UI_OUTBOUND_ALLOWED_HOSTS:" "$COMPOSE_FILE" "Production compose must require an outbound host allowlist."
 require_pattern "http://cmdbwebhooks2kafka:8080/health" "$COMPOSE_FILE" "Production health endpoints must use Compose service DNS."
 require_pattern "http://cmdbkafka2zabbix:8080/health" "$COMPOSE_FILE" "Production converter health endpoint must use Compose service DNS."
 require_pattern "http://zabbixrequests2api:8080/health" "$COMPOSE_FILE" "Production Zabbix request health endpoint must use Compose service DNS."
@@ -79,6 +80,8 @@ require_pattern "^PAMPASSWORD=$" "$ENV_EXAMPLE_FILE" "Production env example mus
 require_pattern "^SASLPASSWORDSECRET=$" "$ENV_EXAMPLE_FILE" "Production env example must leave SASLPASSWORDSECRET empty in no-PAM mode."
 require_pattern "^CMDB_WEBHOOK_BEARER_TOKEN=REPLACE_" "$ENV_EXAMPLE_FILE" "Production env example must use a safe webhook-token placeholder."
 require_pattern "^ZABBIX_API_TOKEN=REPLACE_" "$ENV_EXAMPLE_FILE" "Production env example must use a safe Zabbix-token placeholder."
+require_pattern "^MONITORING_UI_OUTBOUND_ALLOWED_HOSTS=cmdbuild\.example\.local,zabbix\.example\.local,idp\.example\.local$" "$ENV_EXAMPLE_FILE" "Production env example must document the outbound host allowlist."
+require_pattern "^MONITORING_UI_REDIS_URL=$" "$ENV_EXAMPLE_FILE" "Production env example must not configure an unencrypted Redis URL."
 reject_pattern "(secret|aapm)://" "$ENV_EXAMPLE_FILE" "Production env example must not contain PAM/AAPM secret references in no-PAM mode."
 
 node - "$PRODUCTION_RULES_STARTER" <<'NODE'
@@ -108,6 +111,9 @@ for dockerfile in deploy/dockerfiles/*.Dockerfile; do
   require_pattern "useradd --system.*--gid appgroup.*--no-create-home.*--shell /usr/sbin/nologin appuser" "$dockerfile" "$dockerfile must create a non-login system appuser without a home directory."
   reject_pattern "customer-ca|debian\.sources" "$dockerfile" "$dockerfile must not contain customer CA or package-source files."
 done
+
+require_pattern "wget -qO- http://127\.0\.0\.1:5090/ready" "deploy/dockerfiles/monitoring-ui-api.Dockerfile" "Monitoring UI image healthcheck must remain a loopback-only self-check."
+require_pattern "wget -qO- http://127\.0\.0\.1:5090/ready" "$COMPOSE_FILE" "Monitoring UI Compose healthcheck must remain a loopback-only self-check."
 
 require_pattern "ARG NODE_RUNTIME_IMAGE=node:22-alpine" "deploy/dockerfiles/monitoring-ui-api.Dockerfile" "Monitoring UI must keep a configurable Node base image."
 for dockerfile in deploy/dockerfiles/cmdbwebhooks2kafka.Dockerfile deploy/dockerfiles/cmdbkafka2zabbix.Dockerfile deploy/dockerfiles/zabbixrequests2api.Dockerfile deploy/dockerfiles/zabbixbindings2cmdbuild.Dockerfile; do

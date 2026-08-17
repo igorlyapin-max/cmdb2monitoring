@@ -54,11 +54,13 @@ Frontend/BFF: monitoring-ui-api.
 - принимать login/password для CMDBuild и Zabbix на server-side session; для Zabbix предварительно использовать постоянный API key, если он задан;
 - выполнять внешний login flow через MS AD LDAP/LDAPS или IdP SAML2/OAuth2/OIDC;
 - хранить credentials только в server-side session;
+- считать CMDBuild, Zabbix, IdP SAML/OAuth2 и включенный PAM/AAPM внешними BFF destination: в production использовать HTTPS и точный hostname allowlist deployment-конфигурации; пользовательские credentials не могут менять endpoint;
 - предоставлять admin-подменю `Авторизация` с выбором режима `Локальная`/`MS AD`/`IdP`, настройками SAML2/OAuth2/LDAP и таблицей соответствия ролей группам;
 - загружать и валидировать JSON rules-файл;
 - выполнять dry-run правил конвертации;
 - визуализировать управление правилами конвертации CMDBuild -> rules -> Zabbix;
 - предоставлять раздел `Настройка webhooks` для ролей `editor` и `admin`: читать текущие CMDBuild webhooks, анализировать rules, предлагать create/update/delete и применять выбранные операции в CMDBuild;
+- ограничивать один batch применения CMDBuild webhooks 100 операциями и отклонять превышение до обращения к CMDBuild;
 - посылать авторизованный сигнал `cmdbkafka2zabbix` на перечитывание правил конвертации;
 - поддерживать session draft редактирование правил конвертации: добавление/удаление rules, undo/redo и save-as;
 - синхронизировать catalog из Zabbix: templates, host groups, template groups, known tags;
@@ -636,7 +638,7 @@ Zabbix API принимает groupid/templateid, поэтому человек�
 - URL UI: http://localhost:8081;
 - API endpoint: http://localhost:8081/api_jsonrpc.php;
 - версия: 7.0.25;
-- dev user/password: Admin/zabbix.
+- dev credentials задаются только через локальный ignored env или явные CLI parameters.
 
 Используемые локальные справочники:
 - group Linux servers: groupid=2;

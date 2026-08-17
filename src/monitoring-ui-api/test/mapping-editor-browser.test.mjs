@@ -70,6 +70,28 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     await page.getByLabel('Condition operator').first().selectOption('any');
     assert.equal(await page.locator('[data-condition-path="root"][data-condition-property="operator"] option:checked').textContent(), 'OR');
     assert.ok(await page.getByLabel('Condition field').count() > 0);
+
+    const credentialsScenario = {};
+    await page.unroute('**/api/**');
+    await mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, {
+      requireCmdbuildCredentials: true,
+      credentialsScenario
+    });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.locator('#credentialsDialog').waitFor({ state: 'visible' });
+    await assertVisible(page, '#credentialsBaseUrl');
+    assert.equal(await page.locator('#credentialsBaseUrl').textContent(), 'http://localhost:8090/cmdbuild/services/rest/v4');
+    assert.equal(await page.locator('input[name="baseUrl"]').count(), 0);
+    assert.equal(await page.locator('input[name="apiEndpoint"]').count(), 0);
+    await page.locator('#credentialsForm input[name="username"]').fill('operator');
+    await page.locator('#credentialsForm input[name="password"]').fill('test-value');
+    await page.locator('#credentialsForm button[type="submit"]').click();
+    await page.locator('#credentialsDialog').waitFor({ state: 'hidden' });
+    assert.deepEqual(credentialsScenario.body, {
+      service: 'cmdbuild',
+      username: 'operator',
+      password: 'test-value'
+    });
   } finally {
     await browser.close();
     server.kill('SIGTERM');
@@ -78,9 +100,33 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
   }
 });
 
-async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog) {
+async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}) {
+  let cmdbuildCredentialsRequested = false;
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/cmdbuild/catalog'
+      && options.requireCmdbuildCredentials
+      && !cmdbuildCredentialsRequested) {
+      cmdbuildCredentialsRequested = true;
+      await route.fulfill({
+        status: 428,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'credentials_required',
+          service: 'cmdbuild',
+          baseUrl: 'http://localhost:8090/cmdbuild/services/rest/v4'
+        })
+      });
+      return;
+    }
+    if (path === '/api/auth/session-credentials') {
+      options.credentialsScenario.body = JSON.parse(route.request().postData() ?? '{}');
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: { role: 'editor', roleLabel: 'Editor' } })
+      });
+      return;
+    }
     const payload = path === '/api/auth/status'
       ? {
         authenticated: true,

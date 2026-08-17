@@ -1,0 +1,21 @@
+schemaVersion: 1
+owner: cmdb2monitoring
+review: each ASPM scan and before production release
+status: pending-platform-acceptance
+limitations: Repository evidence only. This file does not suppress a scanner finding or change its ASPM platform status.
+exceptions:
+  - findingIds: [93491, 103602, 103603, 103604, 103605, 103613, 103614, 106355]
+    scope: aa/openapi/*.openapi.yaml
+    platformStatus: pending
+    rationale: Public health, login, and federation callback operations must be reachable before a session exists. Protected operations inherit or declare their security scheme.
+    verification: OpenAPI contract review confirms every non-public operation has a security requirement.
+  - findingIds: [93506]
+    scope: aa/openapi/health.openapi.yaml
+    platformStatus: pending
+    rationale: HTTP server entries document local development endpoints only; production ingress terminates TLS outside the service containers.
+    verification: deploy/compose.production.yml exposes only configured host bindings and production integration URLs require HTTPS.
+  - findingIds: [93585, 93586]
+    scope: deploy/compose.production.yml and deploy/dockerfiles/monitoring-ui-api.Dockerfile
+    platformStatus: pending
+    rationale: The wget request is a same-container readiness self-check to 127.0.0.1 and does not cross a network boundary.
+    verification: Healthcheck target remains loopback-only and external service probes use Compose DNS through Services.HealthEndpoints.

@@ -18,6 +18,11 @@ import {
 } from './lib/active-rules-publication.mjs';
 import { applyHealthEndpointsConfig } from './lib/health-endpoints-config.mjs';
 import {
+  assertConfiguredEndpointOverride,
+  assertOutboundEndpoint,
+  normalizeAllowedOutboundHosts
+} from './lib/outbound-endpoints.mjs';
+import {
   ignoredProfileScopedRules,
   matchesConditionExpression,
   validateRulesConditions
@@ -72,6 +77,7 @@ const roles = {
 };
 
 const managedCmdbuildWebhookPrefix = 'cmdbwebhooks2kafka-';
+const cmdbuildWebhookOperationsLimit = 100;
 const ownedCmdbuildWebhookIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 const cmdbuildWebhookAuthorizationHeaderName = 'Authorization';
 const auditMainHostIdAttributeName = 'zabbix_main_hostid';
@@ -1446,7 +1452,12 @@ async function readIndeedPamAapmSecret(target, serviceName, secretId) {
     }
   }
 
-  const response = await fetch(url, {
+  const endpoint = assertOutboundEndpoint(url, {
+    name: 'PAM',
+    environment,
+    allowedHosts: target.Security?.OutboundAllowedHosts ?? []
+  });
+  const response = await fetch(endpoint, {
     method: 'GET',
     headers,
     signal: AbortSignal.timeout(timeoutMs)
@@ -1590,6 +1601,8 @@ function applyEnvOverrides(target) {
     MONITORING_UI_REDIS_URL: ['Auth', 'SessionStore', 'Redis', 'Url'],
     MONITORING_UI_REDIS_USERNAME: ['Auth', 'SessionStore', 'Redis', 'Username'],
     MONITORING_UI_REDIS_PASSWORD: ['Auth', 'SessionStore', 'Redis', 'Password'],
+    MONITORING_UI_REDIS_TLS: ['Auth', 'SessionStore', 'Redis', 'Tls'],
+    MONITORING_UI_REDIS_REJECT_UNAUTHORIZED: ['Auth', 'SessionStore', 'Redis', 'RejectUnauthorized'],
     IDP_PROVIDER: ['Idp', 'Provider'],
     SAML2_METADATA_URL: ['Idp', 'MetadataUrl'],
     SAML2_ENTITY_ID: ['Idp', 'EntityId'],
@@ -1707,6 +1720,11 @@ function applyEnvOverrides(target) {
     target.EventBrowser.Topics = normalizeStringArray(process.env.MONITORING_UI_EVENTS_TOPICS)
       .map(name => ({ Name: name, Service: '', Direction: '', Description: '' }));
   }
+
+  if (process.env.MONITORING_UI_OUTBOUND_ALLOWED_HOSTS !== undefined) {
+    target.Security ??= {};
+    target.Security.OutboundAllowedHosts = normalizeAllowedOutboundHosts(process.env.MONITORING_UI_OUTBOUND_ALLOWED_HOSTS);
+  }
 }
 
 function applyPamCompatibilityEnvironment(target) {
@@ -1800,6 +1818,22 @@ function isCmdbuildRestV4BaseUrl(value) {
 }
 
 function validateRuntimeSecurityConfig(target) {
+  const outboundAllowedHosts = target.Security?.OutboundAllowedHosts ?? [];
+  for (const [name, url, tls] of [
+    ['CMDBuild', target.Cmdbuild?.BaseUrl, target.Cmdbuild?.Tls],
+    ['Zabbix', target.Zabbix?.ApiEndpoint, target.Zabbix?.Tls],
+    ['OAuth2 authorization', target.Idp?.OAuth2?.AuthorizationUrl],
+    ['OAuth2 token', target.Idp?.OAuth2?.TokenUrl],
+    ['OAuth2 userinfo', target.Idp?.OAuth2?.UserInfoUrl],
+    ['SAML metadata', target.Idp?.MetadataUrl],
+    ['PAM', target.Secrets?.IndeedPamAapm?.BaseUrl]
+  ]) {
+    assertOutboundEndpoint(url, { name, environment, allowedHosts: outboundAllowedHosts });
+    if (environment === 'Production' && tls?.RejectUnauthorized === false) {
+      throw new Error(`Production ${name} TLS must reject unauthorized certificates.`);
+    }
+  }
+
   if (environment !== 'Production') {
     return;
   }
@@ -1809,19 +1843,17 @@ function validateRuntimeSecurityConfig(target) {
     throw new Error('Production monitoring-ui-api requires Transport.Mode=Https unless Transport.AllowPlainHttp=true.');
   }
 
-  for (const [name, url, tls] of [
-    ['CMDBuild', target.Cmdbuild?.BaseUrl, target.Cmdbuild?.Tls],
-    ['Zabbix', target.Zabbix?.ApiEndpoint, target.Zabbix?.Tls],
-    ['PAM', target.Secrets?.IndeedPamAapm?.BaseUrl, target.Secrets?.IndeedPamAapm?.Tls]
-  ]) {
-    if (isBlank(url) || tls?.AllowInsecureHttp === true) {
-      continue;
+  const redis = target.Auth?.SessionStore?.Redis ?? {};
+  if (String(target.Auth?.SessionStore?.Mode ?? 'Memory').toLowerCase() === 'redis') {
+    const redisUrl = String(redis.Url ?? redis.url ?? '').trim();
+    if (!redisUrl) {
+      throw new Error('Production Redis session store requires Auth.SessionStore.Redis.Url.');
     }
-    if (URL.canParse(url) && new URL(url).protocol === 'http:') {
-      throw new Error(`Production ${name} endpoint requires https unless ${name}.Tls.AllowInsecureHttp=true.`);
+    if (!URL.canParse(redisUrl) || new URL(redisUrl).protocol !== 'rediss:') {
+      throw new Error('Production Redis session store requires a rediss:// URL.');
     }
-    if (tls?.RejectUnauthorized === false) {
-      throw new Error(`Production ${name} TLS must reject unauthorized certificates.`);
+    if (redis.RejectUnauthorized === false || redis.rejectUnauthorized === false) {
+      throw new Error('Production Redis session store must reject unauthorized TLS certificates.');
     }
   }
 
@@ -2022,7 +2054,11 @@ function redisStore(prefix, options, encryptionKey) {
 }
 
 function normalizeRedisOptions(options) {
-  const url = new URL(options.Url ?? options.url ?? 'redis://127.0.0.1:6379/0');
+  const rawUrl = options.Url ?? options.url ?? '';
+  if (isBlank(rawUrl)) {
+    throw new Error('Auth.SessionStore.Redis.Url is required when Auth.SessionStore.Mode=Redis.');
+  }
+  const url = new URL(rawUrl);
   return {
     host: url.hostname,
     port: Number(url.port || (url.protocol === 'rediss:' ? 6380 : 6379)),
@@ -2541,14 +2577,26 @@ async function saveSessionCredentials(session, payload) {
   }
 
   if (service === 'cmdbuild') {
+    const baseUrl = configuredCmdbuildEndpoint();
+    try {
+      assertConfiguredEndpointOverride(payload?.baseUrl, baseUrl, 'CMDBuild');
+    } catch (error) {
+      throw httpError(400, 'integration_endpoint_override_not_allowed', error.message);
+    }
     session.cmdbuild = {
-      baseUrl: String(payload?.baseUrl || session.cmdbuild?.baseUrl || config.Cmdbuild.BaseUrl || '').trim(),
+      baseUrl,
       username,
       password
     };
   } else {
+    const apiEndpoint = configuredZabbixEndpoint();
+    try {
+      assertConfiguredEndpointOverride(payload?.apiEndpoint, apiEndpoint, 'Zabbix');
+    } catch (error) {
+      throw httpError(400, 'integration_endpoint_override_not_allowed', error.message);
+    }
     session.zabbix = {
-      apiEndpoint: String(payload?.apiEndpoint || session.zabbix?.apiEndpoint || config.Zabbix.ApiEndpoint || '').trim(),
+      apiEndpoint,
       username,
       password,
       apiToken: session.zabbix?.apiToken ?? ''
@@ -4555,9 +4603,16 @@ async function readCmdbuildWebhooks(session) {
 }
 
 async function applyCmdbuildWebhookOperations(session, payload) {
-  const operations = Array.isArray(payload?.operations)
-    ? payload.operations.filter(operation => operation?.selected !== false)
-    : [];
+  const requestedOperations = Array.isArray(payload?.operations) ? payload.operations : [];
+  if (requestedOperations.length > cmdbuildWebhookOperationsLimit) {
+    throw httpError(
+      400,
+      'too_many_webhook_operations',
+      `At most ${cmdbuildWebhookOperationsLimit} CMDBuild webhook operations can be applied in one request.`,
+      { limit: cmdbuildWebhookOperationsLimit }
+    );
+  }
+  const operations = requestedOperations.filter(operation => operation?.selected !== false);
   if (operations.length === 0) {
     throw httpError(400, 'empty_webhook_operations', 'No selected CMDBuild webhook operations were provided.');
   }
@@ -5967,7 +6022,7 @@ async function resolveZabbixToken(apiEndpoint, credentials) {
       throw httpError(
         428,
         'credentials_required',
-        'Zabbix credentials were rejected. Re-enter Zabbix login/password; the default dev login is case-sensitive: Admin/zabbix.',
+        'Zabbix credentials were rejected. Re-enter Zabbix login/password or configure an API token through the deployment environment.',
         {
           service: 'zabbix',
           apiEndpoint
@@ -5992,7 +6047,7 @@ function isZabbixAuthenticationError(error) {
 function requireZabbixSessionCredentials(session) {
   session.zabbix = {
     ...(session.zabbix ?? {}),
-    apiEndpoint: session.zabbix?.apiEndpoint || config.Zabbix.ApiEndpoint || ''
+    apiEndpoint: configuredZabbixEndpoint()
   };
 
   const configuredToken = currentZabbixApiToken(session);
@@ -6014,7 +6069,7 @@ function requireZabbixSessionCredentials(session) {
 function requireCmdbuildSessionCredentials(session) {
   session.cmdbuild = {
     ...(session.cmdbuild ?? {}),
-    baseUrl: normalizeCmdbuildRestV4BaseUrl(session.cmdbuild?.baseUrl || config.Cmdbuild.BaseUrl || '')
+    baseUrl: configuredCmdbuildEndpoint()
   };
 
   if (!isBlank(session.cmdbuild.baseUrl) && !isCmdbuildRestV4BaseUrl(session.cmdbuild.baseUrl)) {
@@ -6032,6 +6087,22 @@ function requireCmdbuildSessionCredentials(session) {
     service: 'cmdbuild',
     baseUrl: session.cmdbuild.baseUrl || config.Cmdbuild.BaseUrl
   });
+}
+
+function configuredCmdbuildEndpoint() {
+  const baseUrl = normalizeCmdbuildRestV4BaseUrl(config.Cmdbuild?.BaseUrl ?? '');
+  if (!isCmdbuildRestV4BaseUrl(baseUrl)) {
+    throw httpError(500, 'cmdbuild_endpoint_not_configured', 'CMDBuild BaseUrl must point to REST API v4.');
+  }
+  return baseUrl;
+}
+
+function configuredZabbixEndpoint() {
+  const endpoint = String(config.Zabbix?.ApiEndpoint ?? '').trim();
+  if (!URL.canParse(endpoint)) {
+    throw httpError(500, 'zabbix_endpoint_not_configured', 'Zabbix ApiEndpoint must be an absolute URL.');
+  }
+  return endpoint;
 }
 
 function currentZabbixApiToken(session) {
@@ -6068,7 +6139,12 @@ async function zabbixCallOptional(apiEndpoint, token, method, params) {
 }
 
 async function zabbixRawCall(apiEndpoint, token, body) {
-  const response = await fetch(apiEndpoint, {
+  const endpoint = assertOutboundEndpoint(apiEndpoint, {
+    name: 'Zabbix',
+    environment,
+    allowedHosts: config.Security?.OutboundAllowedHosts ?? []
+  });
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -6098,13 +6174,19 @@ async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
     });
   }
 
+  const endpoint = assertOutboundEndpoint(normalizedBaseUrl, {
+    name: 'CMDBuild',
+    environment,
+    allowedHosts: config.Security?.OutboundAllowedHosts ?? []
+  });
+
   const requestPath = options.pathScope
     ? cmdbuildRestPath(path, options.pathScope)
     : path;
   const authorization = !isBlank(credentials.accessToken)
     ? `Bearer ${credentials.accessToken}`
     : `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`;
-  const response = await fetch(`${withoutTrailingSlash(normalizedBaseUrl)}${requestPath}`, {
+  const response = await fetch(`${withoutTrailingSlash(endpoint)}${requestPath}`, {
     method: options.method ?? 'GET',
     headers: {
       accept: 'application/json',
@@ -6166,6 +6248,10 @@ async function saveIdpSettings(payload) {
       savedAt: new Date().toISOString()
     }
   };
+
+  const nextConfig = structuredClone(config);
+  applyIdpSettings(nextConfig, safePayload.idp);
+  validateRuntimeSecurityConfig(nextConfig);
 
   Object.assign(persisted, safePayload);
   await writePersistedUiSettings(persisted);
@@ -6296,6 +6382,11 @@ function normalizeLdapSettingsPayload(payload = {}, existingSettings = null) {
 async function saveRuntimeSettings(payload) {
   const persisted = await readPersistedUiSettings();
   const runtime = normalizeRuntimeSettingsPayload(payload);
+
+  const nextConfig = structuredClone(config);
+  applyRuntimeSettings(nextConfig, runtime);
+  validateCmdbuildApiConfig(nextConfig);
+  validateRuntimeSecurityConfig(nextConfig);
 
   delete persisted.auth;
   Object.assign(persisted, runtime);
@@ -6894,6 +6985,11 @@ function rolesFromSamlGroups(groups) {
 
 async function exchangeOauth2Code(code) {
   const settings = resolveOauth2Settings();
+  const tokenUrl = assertOutboundEndpoint(settings.tokenUrl, {
+    name: 'OAuth2 token',
+    environment,
+    allowedHosts: config.Security?.OutboundAllowedHosts ?? []
+  });
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
@@ -6904,7 +7000,7 @@ async function exchangeOauth2Code(code) {
     body.set('client_secret', settings.clientSecret);
   }
 
-  const response = await fetch(settings.tokenUrl, {
+  const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
@@ -6927,7 +7023,13 @@ async function readOauth2UserInfo(tokenSet) {
     return decodeJwtPayload(tokenSet.id_token) ?? {};
   }
 
-  const response = await fetch(settings.userInfoUrl, {
+  const userInfoUrl = assertOutboundEndpoint(settings.userInfoUrl, {
+    name: 'OAuth2 userinfo',
+    environment,
+    allowedHosts: config.Security?.OutboundAllowedHosts ?? []
+  });
+
+  const response = await fetch(userInfoUrl, {
     headers: {
       accept: 'application/json',
       authorization: `Bearer ${tokenSet.access_token}`
@@ -7167,13 +7269,18 @@ async function resolveSamlSettings(options = {}) {
 }
 
 async function readIdpMetadata(metadataUrl) {
+  const endpoint = assertOutboundEndpoint(metadataUrl, {
+    name: 'SAML metadata',
+    environment,
+    allowedHosts: config.Security?.OutboundAllowedHosts ?? []
+  });
   const now = Date.now();
   const ttlMs = Number(config.Idp.MetadataCacheTtlSeconds ?? config.Idp.metadataCacheTtlSeconds ?? 300) * 1000;
-  if (samlMetadataCache?.url === metadataUrl && now - samlMetadataCache.loadedAt < ttlMs) {
+  if (samlMetadataCache?.url === endpoint && now - samlMetadataCache.loadedAt < ttlMs) {
     return samlMetadataCache.value;
   }
 
-  const response = await fetch(metadataUrl, {
+  const response = await fetch(endpoint, {
     headers: { accept: 'application/samlmetadata+xml, application/xml, text/xml' },
     signal: AbortSignal.timeout(10000)
   });
@@ -7183,7 +7290,7 @@ async function readIdpMetadata(metadataUrl) {
 
   const value = await extractIdpMetadata(await response.text());
   samlMetadataCache = {
-    url: metadataUrl,
+    url: endpoint,
     loadedAt: now,
     value
   };

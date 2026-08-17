@@ -198,6 +198,8 @@ docker compose --env-file production.env -f deploy/compose.production.yml config
 docker compose --env-file production.env -f deploy/compose.production.yml up -d
 ```
 
+Для `monitoring-ui-api` укажите `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` как список hostname CMDBuild, Zabbix и IdP через запятую; добавьте hostname PAM/AAPM, только если этот provider включен. В production все эти BFF destinations используют HTTPS. При `MONITORING_UI_SESSION_STORE_MODE=Redis` обязательно задайте `MONITORING_UI_REDIS_URL=rediss://...`; `redis://` в production отклоняется.
+
 Compose публикует наружу только webhook/UI bind-порты из env, запускает Docker healthcheck через `/ready` и сохраняет worker state в Docker volumes. Structured JSON logs всегда пишутся в stdout/stderr; Docker logging driver выбирается daemon или платформой заказчика. Kafka log topics остаются включенными как основной structured logging sink проекта.
 
 Для отправки container stdout/stderr в syslog подключите явный overlay. `SYSLOG_ADDRESS` не имеет loopback default и должен указывать на доступный endpoint инфраструктуры:
@@ -298,7 +300,7 @@ deploy/production.env.example использует no-PAM профиль по у
 ```json
 "Cmdbuild": {
   "Username": "cmdbuild-resolver",
-  "Password": "secret://cmdbuild-resolver-password"
+  "Password": "${CMDBUILD_RESOLVER_PASSWORD_REFERENCE}"
 }
 ```
 
@@ -493,11 +495,11 @@ ConversionRules__PullOnReload=true
 | Система | Login/password | Назначение |
 | --- | --- | --- |
 | UI local users | `viewer/viewer`, `editor/editor`, `admin/admin` | Создаются при первом старте, если отсутствует `state/users.json`; пароли хранятся как PBKDF2-SHA256 hash/salt |
-| CMDBuild dev стенд | `admin/admin` | Только тестовая среда |
-| Zabbix dev стенд | `Admin/zabbix` | Только тестовая среда |
+| CMDBuild dev стенд | через локальный ignored `.env` или CLI | Только тестовая среда |
+| Zabbix dev стенд | через локальный ignored `.env` или CLI | Только тестовая среда |
 | Kafka dev стенд | без логина/пароля | PLAINTEXT Kafka в локальном Docker |
 
-В production начальные UI-пароли нужно сменить после первого входа или заранее смонтировать подготовленный `state/users.json`. CMDBuild/Zabbix login/password не хранятся в UI runtime state: UI спрашивает их на server-side session при первой операции, а для Zabbix может использовать `Zabbix:ApiToken`. Сервисные учетные записи `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild` задаются через env/secret, а не через стартовые UI-пользователи.
+В production начальные UI-пароли нужно сменить после первого входа или заранее смонтировать подготовленный `state/users.json`. CMDBuild/Zabbix login/password не хранятся в UI runtime state: UI спрашивает их на server-side session при первой операции, а для Zabbix может использовать `Zabbix:ApiToken`. Dev/demo scripts не содержат credentials: задавайте их только через env или CLI. Сервисные учетные записи `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild` задаются через env/secret, а не через стартовые UI-пользователи.
 
 ## Пример запуска одного сервиса
 

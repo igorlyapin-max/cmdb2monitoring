@@ -63,7 +63,7 @@ Production/base конфиги не должны содержать реальн
 ```json
 "Cmdbuild": {
   "Username": "cmdbuild-writer",
-  "Password": "secret://cmdbuild-writer-password"
+  "Password": "${CMDBUILD_WRITER_PASSWORD_REFERENCE}"
 }
 ```
 
@@ -393,6 +393,7 @@ Base config не содержит пароль; `Development` config может 
 | `CMDBUILD_BASE_URL` | `Cmdbuild:BaseUrl` |
 | `ZABBIX_API_ENDPOINT` | `Zabbix:ApiEndpoint` |
 | `ZABBIX_API_TOKEN` | `Zabbix:ApiToken` |
+| `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` | Exact comma-separated hostname allowlist for BFF CMDBuild, Zabbix, IdP SAML metadata/OAuth2, and enabled PAM/AAPM destinations. Production requires HTTPS for every configured destination. |
 | `RULES_READ_FROM_GIT` | `Rules:ReadFromGit` |
 | `RULES_REPOSITORY_URL` | `Rules:RepositoryUrl` |
 | `RULES_REPOSITORY_PATH` | `Rules:RepositoryPath` |
@@ -509,6 +510,7 @@ Rules UI:
 
 Webhook Setup UI:
 - раздел `Настройка webhooks` использует те же session-scoped CMDBuild credentials, что и catalog sync;
+- один apply batch ограничен 100 operations; превышение отклоняется BFF до REST-вызова CMDBuild;
 - `Загрузить из CMDB` читает `/etl/webhook/?detailed=true`;
 - `Сохранить файл как` сохраняет только JSON-план через браузер;
 - `Загрузить в CMDB` применяет выбранные create/update/delete операции к CMDBuild `/etl/webhook/` и требует у пользователя CMDBuild create/update/delete или эквивалентные modify-права на ETL/webhook records;

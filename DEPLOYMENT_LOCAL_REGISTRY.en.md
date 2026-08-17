@@ -301,7 +301,7 @@ Sensitive fields contain a reference instead of the value:
 ```json
 "Cmdbuild": {
   "Username": "cmdbuild-resolver",
-  "Password": "secret://cmdbuild-resolver-password"
+  "Password": "${CMDBUILD_RESOLVER_PASSWORD_REFERENCE}"
 }
 ```
 
@@ -491,16 +491,18 @@ ConversionRules__PullOnReload=true
 
 Production Compose uses one `CONVERSION_RULES_FILE_PATH`: it defaults to `rules/cmdbuild-to-zabbix-host-create.production-empty.json`, then points to a prepared customer rules file after customer catalog validation. The demo/e2e file `rules/cmdbuild-to-zabbix-host-create.json` is for dev/E2E only.
 
+For `monitoring-ui-api`, set `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` to a comma-separated list of CMDBuild, Zabbix, and IdP hostnames; add the PAM/AAPM hostname only when that provider is enabled. In production all of these BFF destinations use HTTPS. When `MONITORING_UI_SESSION_STORE_MODE=Redis`, `MONITORING_UI_REDIS_URL=rediss://...` is required; `redis://` is rejected in production.
+
 ## Default Credentials
 
 | System | Login/password | Purpose |
 | --- | --- | --- |
 | UI local users | `viewer/viewer`, `editor/editor`, `admin/admin` | Created on first startup when `state/users.json` does not exist; passwords are stored as PBKDF2-SHA256 hash/salt |
-| CMDBuild dev stand | `admin/admin` | Test environment only |
-| Zabbix dev stand | `Admin/zabbix` | Test environment only |
+| CMDBuild dev stand | local ignored `.env` or CLI | Test environment only |
+| Zabbix dev stand | local ignored `.env` or CLI | Test environment only |
 | Kafka dev stand | no login/password | Local Docker PLAINTEXT Kafka |
 
-In production, change initial UI passwords after first login or mount a prepared `state/users.json`. CMDBuild/Zabbix login/password values are not stored in UI runtime state: the UI asks for them for the server-side session on first use, and Zabbix can use `Zabbix:ApiToken`. Service accounts for `cmdbkafka2zabbix`, `zabbixrequests2api`, and `zabbixbindings2cmdbuild` are configured through env/secret values, not through startup UI users.
+In production, change initial UI passwords after first login or mount a prepared `state/users.json`. CMDBuild/Zabbix login/password values are not stored in UI runtime state: the UI asks for them for the server-side session on first use, and Zabbix can use `Zabbix:ApiToken`. Dev/demo scripts contain no credentials; provide them only through env or CLI. Service accounts for `cmdbkafka2zabbix`, `zabbixrequests2api`, and `zabbixbindings2cmdbuild` are configured through env/secret values, not through startup UI users.
 
 ## Single-Service Run Example
 

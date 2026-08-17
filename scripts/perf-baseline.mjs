@@ -9,20 +9,26 @@ const args = parseArgs(process.argv.slice(2));
 const config = {
   samples: readInt(args.samples ?? process.env.PERF_SAMPLES, 10),
   cmdbBaseUrl: trimTrailingSlash(args.cmdbUrl ?? process.env.CMDBUILD_BASE_URL ?? 'http://localhost:8090/cmdbuild/services/rest/v4'),
-  cmdbUser: args.cmdbUser ?? process.env.CMDBUILD_USERNAME ?? 'admin',
-  cmdbPassword: args.cmdbPassword ?? process.env.CMDBUILD_PASSWORD ?? 'admin',
+  cmdbUser: args.cmdbUser ?? process.env.CMDBUILD_USERNAME ?? '',
+  cmdbPassword: args.cmdbPassword ?? process.env.CMDBUILD_PASSWORD ?? '',
   cmdbClass: args.cmdbClass ?? process.env.PERF_CMDB_CLASS ?? 'NTbook',
   cmdbCardId: args.cmdbCardId ?? process.env.PERF_CMDB_CARD_ID ?? '',
   cmdbLookupType: args.cmdbLookupType ?? process.env.PERF_CMDB_LOOKUP_TYPE ?? 'GKMOS',
   zabbixEndpoint: args.zabbixEndpoint ?? process.env.ZABBIX_API_ENDPOINT ?? 'http://localhost:8081/api_jsonrpc.php',
-  zabbixUser: args.zabbixUser ?? process.env.ZABBIX_USER ?? 'Admin',
-  zabbixPassword: args.zabbixPassword ?? process.env.ZABBIX_PASSWORD ?? 'zabbix',
+  zabbixUser: args.zabbixUser ?? process.env.ZABBIX_USER ?? '',
+  zabbixPassword: args.zabbixPassword ?? process.env.ZABBIX_PASSWORD ?? '',
   zabbixHostId: args.zabbixHostId ?? process.env.PERF_ZABBIX_HOST_ID ?? '',
   reportDir: args.reportDir ?? process.env.PERF_REPORT_DIR ?? 'reports'
 };
 
 if (config.samples <= 0) {
   throw new Error('--samples must be greater than zero.');
+}
+if (!config.cmdbUser || !config.cmdbPassword) {
+  throw new Error('Set CMDBUILD_USERNAME and CMDBUILD_PASSWORD, or pass --cmdb-user and --cmdb-password.');
+}
+if (!config.zabbixUser || !config.zabbixPassword) {
+  throw new Error('Set ZABBIX_USER and ZABBIX_PASSWORD, or pass --zabbix-user and --zabbix-password.');
 }
 
 const context = {

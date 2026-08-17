@@ -39,6 +39,36 @@ test('publish rejects a stale active-rules revision without overwriting the file
     const cookie = login.headers.get('set-cookie');
     assert.ok(cookie);
 
+    const endpointOverride = await request(port, '/api/auth/session-credentials', {
+      method: 'POST',
+      headers: {
+        cookie,
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: {
+        service: 'cmdbuild',
+        username: 'operator',
+        password: 'test-value',
+        baseUrl: 'http://untrusted.example.local/cmdbuild/services/rest/v4'
+      }
+    });
+    assert.equal(endpointOverride.status, 400);
+    assert.equal(endpointOverride.body.error, 'integration_endpoint_override_not_allowed');
+
+    const tooManyWebhookOperations = await request(port, '/api/cmdbuild/webhooks/apply', {
+      method: 'POST',
+      headers: {
+        cookie,
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: {
+        operations: Array.from({ length: 101 }, () => ({ selected: false }))
+      }
+    });
+    assert.equal(tooManyWebhookOperations.status, 400);
+    assert.equal(tooManyWebhookOperations.body.error, 'too_many_webhook_operations');
+    assert.equal(tooManyWebhookOperations.body.limit, 100);
+
     const current = await request(port, '/api/rules/current', {
       headers: { cookie }
     });
@@ -135,6 +165,83 @@ test('production rules starter validates as a safe no-op', async () => {
   }
 });
 
+test('production rejects an insecure SAML metadata endpoint before settings are saved', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-production-saml-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const usersPath = join(directory, 'users.json');
+  const rules = await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8');
+  const password = 'test-local-admin-password';
+  await writeFile(activeRulesPath, rules, 'utf8');
+  await writeFile(usersPath, JSON.stringify({
+    version: 1,
+    users: [{
+      username: 'admin',
+      displayName: 'Test Admin',
+      role: 'admin',
+      password: passwordHash(password),
+      mustChangePassword: false
+    }]
+  }), 'utf8');
+
+  const process = startServer(port, directory, activeRulesPath, usersPath, {
+    NODE_ENV: 'Production',
+    MONITORING_UI_TRANSPORT_ALLOW_PLAIN_HTTP: 'true',
+    MONITORING_UI_EVENTS_ENABLED: 'false',
+    MONITORING_UI_KAFKA_ALLOW_PLAINTEXT: 'true',
+    MONITORING_UI_LOGS_ENABLED: 'false',
+    CMDBUILD_BASE_URL: 'https://cmdbuild.example.local/cmdbuild/services/rest/v4',
+    ZABBIX_API_ENDPOINT: 'https://zabbix.example.local/api_jsonrpc.php',
+    MONITORING_UI_OUTBOUND_ALLOWED_HOSTS: 'cmdbuild.example.local,zabbix.example.local,idp.example.local',
+    MONITORING_UI_HEALTH_ENDPOINTS_JSON: JSON.stringify([
+      { Name: 'cmdbwebhooks2kafka', Url: 'http://cmdbwebhooks2kafka:8080/health' },
+      {
+        Name: 'cmdbkafka2zabbix',
+        Url: 'http://cmdbkafka2zabbix:8080/health',
+        RulesReloadUrl: 'http://cmdbkafka2zabbix:8080/admin/reload-rules',
+        RulesReloadToken: 'test-rules-token',
+        RulesStatusUrl: 'http://cmdbkafka2zabbix:8080/admin/rules-status'
+      },
+      { Name: 'zabbixrequests2api', Url: 'http://zabbixrequests2api:8080/health' },
+      { Name: 'zabbixbindings2cmdbuild', Url: 'http://zabbixbindings2cmdbuild:8080/health' }
+    ])
+  });
+  try {
+    await waitForReady(port, process);
+    const login = await request(port, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password }
+    });
+    assert.equal(login.status, 200);
+
+    const update = await request(port, '/api/settings/idp', {
+      method: 'PUT',
+      headers: {
+        cookie: login.headers.get('set-cookie'),
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: {
+        provider: 'SAML2',
+        enabled: true,
+        metadataUrl: 'http://idp.example.local/saml/metadata'
+      }
+    });
+    assert.equal(update.status, 500);
+    assert.equal(update.body.error, 'internal_error');
+    assert.match(update.body.message, /Production SAML metadata endpoint requires HTTPS/);
+
+    const settings = await request(port, '/api/settings/idp', {
+      headers: { cookie: login.headers.get('set-cookie') }
+    });
+    assert.equal(settings.status, 200);
+    assert.equal(settings.body.metadataUrl, '');
+  } finally {
+    process.kill('SIGTERM');
+    await onceExit(process);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function passwordHash(password) {
   const salt = randomBytes(16).toString('hex');
   return {
@@ -147,7 +254,7 @@ function passwordHash(password) {
   };
 }
 
-function startServer(port, directory, activeRulesPath, usersPath) {
+function startServer(port, directory, activeRulesPath, usersPath, overrides = {}) {
   return spawn(process.execPath, ['server.mjs'], {
     cwd: serviceRoot,
     env: {
@@ -161,7 +268,8 @@ function startServer(port, directory, activeRulesPath, usersPath) {
       MONITORING_UI_LOGS_ENABLED: 'false',
       RULES_ACTIVE_BASE_DIRECTORY: directory,
       RULES_ACTIVE_FILE_PATH: activeRulesPath,
-      RULES_ACTIVE_WRITE_ENABLED: 'true'
+      RULES_ACTIVE_WRITE_ENABLED: 'true',
+      ...overrides
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

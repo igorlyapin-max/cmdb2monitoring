@@ -31,6 +31,7 @@ This file records mandatory project development rules. If a rule conflicts with 
 - On startup, a consumer must read the state file and resume from `lastInputOffset + 1` for the relevant topic/partition. The state file must not be only diagnostic output.
 - If a service runs on the dev host and the source system runs in Docker, the HTTP endpoint must listen on more than loopback. The current webhook dev bind is `0.0.0.0:5080`, and CMDBuild calls `http://192.168.202.35:5080/webhooks/cmdbuild`.
 - HTTP/TLS transport is configuration-driven. Dev may use HTTP; production must use HTTPS/TLS or an explicit insecure override (`AllowPlainHttp`, `AllowPlaintextKafka`, `AllowInsecureHttp`).
+- For `monitoring-ui-api`, external CMDBuild, Zabbix, IdP SAML/OAuth2, and enabled PAM/AAPM endpoints do not use an insecure override in production: HTTPS and an exact deployment-configured hostname allowlist are required, and a browser session cannot change an endpoint.
 - `AllowedHosts="*"` is forbidden in production unless `HostSecurity:AllowWildcardAllowedHosts=true` is set explicitly.
 - Runtime state files must be written atomically and must not escape the configured base directory.
 - Kafka workers with local state run as `Worker:ReplicaMode=SingleActive`; multiple active replicas require an explicit override or an external state/lock design. On shutdown, a worker must drain the current message up to `Worker:ShutdownTimeoutSeconds`.

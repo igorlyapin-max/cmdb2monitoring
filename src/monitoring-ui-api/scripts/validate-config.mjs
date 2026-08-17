@@ -29,6 +29,7 @@ required(config, 'Auth.SessionCookieName');
 required(config, 'Auth.SessionTimeoutMinutes');
 required(config, 'Auth.SessionAbsoluteLifetimeMinutes');
 required(config, 'Auth.SessionStore.Mode');
+required(config, 'Security.OutboundAllowedHosts');
 required(config, 'Auth.MaxSamlPostBytes');
 required(config, 'RateLimit.Enabled');
 required(config, 'RateLimit.WindowSeconds');
@@ -129,6 +130,10 @@ if (!['Memory', 'Redis'].includes(config.Auth?.SessionStore?.Mode)) {
   errors.push(`Auth.SessionStore.Mode has unsupported value: ${config.Auth?.SessionStore?.Mode}`);
 }
 
+if (!Array.isArray(config.Security?.OutboundAllowedHosts)) {
+  errors.push('Security.OutboundAllowedHosts must be an array.');
+}
+
 if (typeof config.RateLimit?.Enabled !== 'boolean') {
   errors.push('RateLimit.Enabled must be boolean.');
 }
@@ -194,6 +199,10 @@ if (!intInRange(config.RateLimit?.ApiPermitLimit, 1, 1000000)) {
 if (config.Auth?.SessionStore?.Mode === 'Redis') {
   required(config, 'Auth.SessionStore.Redis.Url');
   required(config, 'Auth.SessionEncryptionKey');
+  const redisUrl = String(config.Auth?.SessionStore?.Redis?.Url ?? '');
+  if (!URL.canParse(redisUrl) || !['redis:', 'rediss:'].includes(new URL(redisUrl).protocol)) {
+    errors.push('Auth.SessionStore.Redis.Url must use redis:// or rediss://.');
+  }
 }
 
 const secretsProvider = String(config.Secrets?.Provider ?? '').toLowerCase();

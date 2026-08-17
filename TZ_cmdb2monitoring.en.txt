@@ -436,10 +436,12 @@ monitoring-ui-api provides:
 - Events read-only Kafka browser;
 - rules JSON load, validate, dry-run, browser save-as;
 - Zabbix and CMDBuild catalog sync;
+- server-side CMDBuild/Zabbix credentials without browser endpoint overrides; production BFF destinations for CMDBuild, Zabbix, IdP SAML/OAuth2, and enabled PAM/AAPM use HTTPS and an exact deployment hostname allowlist;
 - Zabbix Metadata with templates, item keys, LLD rule keys, inventory bindings, existing host templates, and the template conflict index;
 - Conversion Rules Management;
 - Logical Control of Conversion Rules;
 - Webhook Setup for CMDBuild webhook planning and apply;
+- a maximum of 100 CMDBuild webhook operations per apply batch, rejected before CMDBuild is called when exceeded;
 - Runtime Settings, Git Settings, and Authorization settings.
 
 18.2. Authorization

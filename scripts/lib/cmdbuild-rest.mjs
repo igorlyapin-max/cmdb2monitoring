@@ -5,8 +5,8 @@ export function parseCommonArgs(argv) {
     apply: false,
     updateExisting: true,
     baseUrl: process.env.CMDBUILD_BASE_URL || 'http://localhost:8090/cmdbuild/services/rest/v4',
-    username: process.env.CMDBUILD_USERNAME || 'admin',
-    password: process.env.CMDBUILD_PASSWORD || 'admin',
+    username: process.env.CMDBUILD_USERNAME || '',
+    password: process.env.CMDBUILD_PASSWORD || '',
     prefix: process.env.C2M_DEMO_PREFIX || 'C2MTest'
   };
 
@@ -43,6 +43,9 @@ export class CmdbuildClient {
   }
 
   async request(method, path, body = undefined, { allowNotFound = false } = {}) {
+    if (!this.options.username || !this.options.password) {
+      throw new Error('CMDBuild credentials are required. Set CMDBUILD_USERNAME/CMDBUILD_PASSWORD or pass --username/--password.');
+    }
     const response = await fetch(`${this.options.baseUrl}${path}`, {
       method,
       headers: {

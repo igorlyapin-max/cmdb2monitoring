@@ -295,6 +295,17 @@ h2 {
   margin-top: 18px;
 }
 
+.form-grid output {
+  display: block;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .idp-login {
   display: flex;
   margin-top: 18px;

@@ -71,6 +71,10 @@ if (!args.apply) {
   process.exit(0);
 }
 
+if (!args.zabbixUser || !args.zabbixPassword) {
+  throw new Error('Zabbix credentials are required. Set ZABBIX_USER/ZABBIX_PASSWORD or pass --zabbix-user/--zabbix-password.');
+}
+
 await assertServiceHealth(args.webhookHealthUrl, 'cmdbwebhooks2kafka');
 await assertServiceHealth(args.converterHealthUrl, 'cmdbkafka2zabbix');
 await assertServiceHealth(args.zabbixWorkerHealthUrl, 'zabbixrequests2api');
@@ -115,8 +119,8 @@ function parseArgs(argv) {
     converterReloadToken: value('--converter-reload-token', 'dev-rules-reload-token'),
     zabbixWorkerHealthUrl: value('--zabbix-worker-health-url', 'http://localhost:5082/health'),
     zabbixUrl: value('--zabbix-url', 'http://localhost:8081/api_jsonrpc.php'),
-    zabbixUser: value('--zabbix-user', 'Admin'),
-    zabbixPassword: value('--zabbix-password', 'zabbix'),
+    zabbixUser: value('--zabbix-user', process.env.ZABBIX_USER ?? ''),
+    zabbixPassword: value('--zabbix-password', process.env.ZABBIX_PASSWORD ?? ''),
     reportDir: value('--report-dir', 'reports'),
     timeoutMs: Number(value('--timeout-ms', '120000')),
     pollMs: Number(value('--poll-ms', '3000')),

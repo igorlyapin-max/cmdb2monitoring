@@ -80,7 +80,7 @@ http://192.168.202.35:5080/webhooks/cmdbuild
 
 Kafka clients поддерживают `Plaintext`, `Ssl`, `SaslPlaintext`, `SaslSsl`. Для TLS/SASL доступны поля `SslCaLocation`, `SslCertificateLocation`, `SslKeyLocation`, `SslKeyPassword`, `SslEndpointIdentificationAlgorithm` в Kafka-секциях сервисов; production-запуск с `Plaintext`/`SaslPlaintext` требует явного `AllowPlaintextKafka=true`.
 
-CMDBuild, Zabbix и PAM/AAPM HTTP clients могут использовать `https://` endpoints. В production `http://` и `RejectUnauthorized=false` считаются insecure и требуют явного override в соответствующем `Tls` блоке.
+Для `monitoring-ui-api` внешние CMDBuild, Zabbix, IdP SAML metadata/OAuth2 и активный PAM/AAPM endpoint в production используют только `https://`. `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` задает точный allowlist hostname для этих направлений; `http://`, встроенные в URL credentials, неразрешенный hostname и отключение проверки TLS отклоняются. В development допускается локальная HTTP topology.
 
 Для ASP.NET actor-ов `AllowedHosts="*"` в production блокируется, если не задан явный override `HostSecurity:AllowWildcardAllowedHosts=true`.
 
@@ -89,11 +89,11 @@ CMDBuild, Zabbix и PAM/AAPM HTTP clients могут использовать `h
 - `/ready` - readiness после успешной runtime-конфигурации; у Kafka worker-ов дополнительно проверяется доступность state volume на запись, у `monitoring-ui-api` - runtime/cache/state paths и Redis session store, если он включен;
 - `/metrics` - Prometheus text format с базовыми счетчиками обработки.
 
-`monitoring-ui-api` хранит session id в cookie `SameSite=Strict`; при HTTPS/Production добавляется `Secure`. Для HA можно включить `Auth:SessionStore:Mode=Redis`; sensitive session payload шифруется ключом `Auth:SessionEncryptionKey`/`MONITORING_UI_SESSION_ENCRYPTION_KEY`.
+`monitoring-ui-api` хранит session id в cookie `SameSite=Strict`; при HTTPS/Production добавляется `Secure`. Для HA можно включить `Auth:SessionStore:Mode=Redis`; sensitive session payload шифруется ключом `Auth:SessionEncryptionKey`/`MONITORING_UI_SESSION_ENCRYPTION_KEY`. В production Redis задается только через `MONITORING_UI_REDIS_URL=rediss://...` с проверкой TLS-сертификата. Внешние destination URL CMDBuild, Zabbix, IdP SAML metadata/OAuth2 и активного PAM принадлежат deployment-конфигурации: `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` содержит точный список допустимых hostname, а session credentials не могут их переопределять.
 
 ## Production Docker Compose
 
-Production Compose contract хранится в `deploy/compose.production.yml`, пример переменных - в `deploy/production.env.example`. Контур рассчитан на TLS termination/reverse proxy перед контейнерами: внутри Docker network сервисы слушают HTTP с явным `Transport__AllowPlainHttp=true`, а CMDBuild/Zabbix/Kafka/PAM endpoints должны быть HTTPS/TLS/SASL либо иметь явный insecure override.
+Production Compose contract хранится в `deploy/compose.production.yml`, пример переменных - в `deploy/production.env.example`. Контур рассчитан на TLS termination/reverse proxy перед контейнерами: внутри Docker network сервисы слушают HTTP с явным `Transport__AllowPlainHttp=true`. Для BFF CMDBuild/Zabbix/IdP/PAM внешние endpoints должны быть HTTPS и состоять в `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS`; Kafka использует TLS/SASL, кроме явного development override.
 
 Compose закрепляет:
 - Docker healthcheck через `/ready`, а не только `/health`;
@@ -101,6 +101,8 @@ Compose закрепляет:
 - persisted `/app/state` и `/app/data` для `monitoring-ui-api`;
 - structured JSON logs в stdout/stderr и Kafka log topics; Docker logging driver выбирается платформой, а syslog подключается отдельным overlay;
 - обязательные production env/secret inputs для webhook token, rules reload token, Kafka, CMDBuild, Zabbix и audit storage.
+
+При запросе CMDBuild или Zabbix credentials BFF показывает deployment-configured endpoint справочно. Пользователь вводит только login/password; endpoint в browser request не передается и не может сменить deployment topology.
 
 Статическая проверка production runtime:
 
@@ -517,6 +519,7 @@ Events:
 
 Настройка webhooks:
 - доступна ролям `editor` и `admin`;
+- один запрос `Загрузить в CMDB` принимает не более 100 операций; при превышении BFF отклоняет весь batch до обращения к CMDBuild;
 - пользоваться этим разделом не обязательно: оператор может самостоятельно настроить webhooks в CMDBuild или использовать webhook-файлы, которые сохраняются при сохранении файла конвертации;
 - `Загрузить из CMDB` читает текущие CMDBuild ETL webhooks через BFF и session-scoped CMDBuild credentials;
 - после одной только загрузки из CMDB текущие webhooks показываются справочно; план create/update/delete строится отдельной командой `Проанализировать rules`;
@@ -706,7 +709,7 @@ node scripts/live-smoke.mjs --dry-run
 node scripts/live-smoke.mjs --execute --code C2M-SMOKE-001 --confirm C2M-SMOKE-001
 ```
 
-По умолчанию скрипт рассчитан на dev-контур: `C2MTestCI`, webhook `http://localhost:5080/webhooks/cmdbuild`, Zabbix `http://localhost:8081/api_jsonrpc.php`, `Admin/zabbix`. Production-like запуск требует явный `--environment prod`, тестовый `--code` с префиксом `C2M-SMOKE-`, `--confirm` с тем же значением и реальные сервисные credentials/token через CLI или `C2M_SMOKE_*` env. Скрипт проверяет `/ready`, reload rules, cleanup старого тестового host, `create`, `update`, `delete` webhook и подтверждает итоговое состояние через Zabbix API.
+По умолчанию скрипт рассчитан на dev-контур: `C2MTestCI`, webhook `http://localhost:5080/webhooks/cmdbuild` и Zabbix `http://localhost:8081/api_jsonrpc.php`. Credentials не имеют встроенных значений: передайте API token или login/password через CLI либо `C2M_SMOKE_*` env. Production-like запуск требует явный `--environment prod`, тестовый `--code` с префиксом `C2M-SMOKE-` и `--confirm` с тем же значением. Скрипт проверяет `/ready`, reload rules, cleanup старого тестового host, `create`, `update`, `delete` webhook и подтверждает итоговое состояние через Zabbix API.
 
 ## Extended debug logging
 

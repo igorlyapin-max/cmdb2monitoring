@@ -14774,8 +14774,8 @@ function promptSessionCredentials(details) {
   const form = $('#credentialsForm');
   form.reset();
   form.elements.service.value = details.service ?? '';
-  form.elements.baseUrl.value = details.baseUrl ?? state.user?.cmdbuild?.baseUrl ?? '';
-  form.elements.apiEndpoint.value = details.apiEndpoint ?? state.user?.zabbix?.apiEndpoint ?? '';
+  $('#credentialsBaseUrl').textContent = details.baseUrl ?? state.user?.cmdbuild?.baseUrl ?? '';
+  $('#credentialsApiEndpoint').textContent = details.apiEndpoint ?? state.user?.zabbix?.apiEndpoint ?? '';
   $('#credentialsBaseUrlRow').classList.toggle('hidden', details.service !== 'cmdbuild');
   $('#credentialsApiEndpointRow').classList.toggle('hidden', details.service !== 'zabbix');
   $('#credentialsDialogTitle').textContent = details.service === 'zabbix'
@@ -14817,8 +14817,6 @@ async function submitSessionCredentials(event) {
       method: 'POST',
       body: {
         service: form.get('service'),
-        baseUrl: form.get('baseUrl'),
-        apiEndpoint: form.get('apiEndpoint'),
         username: form.get('username'),
         password: form.get('password')
       },

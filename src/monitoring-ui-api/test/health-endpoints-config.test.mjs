@@ -25,8 +25,8 @@ function productionEndpoints(converter = {}) {
 }
 
 const productionEnvironment = {
-  MONITORING_UI_RULES_RELOAD_TOKEN: 'reload-secret',
-  MONITORING_UI_RULES_STATUS_TOKEN: 'status-secret'
+  MONITORING_UI_RULES_RELOAD_TOKEN: 'test-reload-token',
+  MONITORING_UI_RULES_STATUS_TOKEN: 'test-status-token'
 };
 
 test('development accepts localhost endpoint defaults and direct reload token', () => {
@@ -57,8 +57,8 @@ test('production JSON override uses all Compose services and separate token envi
 
   const converter = target.Services.HealthEndpoints.find(endpoint => endpoint.Name === 'cmdbkafka2zabbix');
   assert.equal(target.Services.HealthEndpoints.length, 4);
-  assert.equal(converter.RulesReloadToken, 'reload-secret');
-  assert.equal(converter.RulesStatusToken, 'status-secret');
+  assert.equal(converter.RulesReloadToken, 'test-reload-token');
+  assert.equal(converter.RulesStatusToken, 'test-status-token');
 });
 
 test('production rejects incomplete or non-Compose endpoint topology', () => {

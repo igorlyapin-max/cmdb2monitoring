@@ -43,6 +43,7 @@
 - При старте consumer должен читать state-файл и начинать чтение с `lastInputOffset + 1` для соответствующего topic/partition. State-файл не должен быть только диагностическим логом.
 - Если сервис запускается на dev host, а источник работает в Docker, HTTP endpoint должен слушать не только loopback. Для текущего webhook-сервиса dev bind: `0.0.0.0:5080`, CMDBuild вызывает `http://192.168.202.35:5080/webhooks/cmdbuild`.
 - HTTP/TLS transport выбирается конфигурацией. Dev может использовать HTTP, production должен использовать HTTPS/TLS или явный insecure override (`AllowPlainHttp`, `AllowPlaintextKafka`, `AllowInsecureHttp`).
+- Для `monitoring-ui-api` внешние CMDBuild, Zabbix, IdP SAML/OAuth2 и включенный PAM/AAPM endpoint в production не используют insecure override: требуется HTTPS и точный hostname allowlist deployment-конфигурации; browser session не может изменить endpoint.
 - `AllowedHosts="*"` в production запрещен без явного `HostSecurity:AllowWildcardAllowedHosts=true`.
 - Runtime state-файлы должны писаться атомарно и не должны выходить за разрешенный base directory.
 - Kafka workers с локальным state работают в режиме `Worker:ReplicaMode=SingleActive`; несколько active replicas допустимы только с явным override или внешним state/lock дизайном. При остановке worker должен дожидаться текущей обработки до `Worker:ShutdownTimeoutSeconds`.

@@ -15,11 +15,14 @@ servers:
     description: zabbixbindings2cmdbuild dev
   - url: http://localhost:5090
     description: monitoring-ui-api dev
+security:
+  - reloadBearer: []
 paths:
   /health:
     get:
       summary: Service health check
       operationId: getServiceHealth
+      security: []
       responses:
         '200':
           description: Service is healthy
@@ -38,6 +41,7 @@ paths:
     get:
       summary: Service readiness check
       operationId: getServiceReadiness
+      security: []
       responses:
         '200':
           description: Service is ready.
@@ -55,6 +59,7 @@ paths:
     get:
       summary: Service Prometheus metrics
       operationId: getServiceMetrics
+      security: []
       responses:
         '200':
           description: Prometheus text exposition format.
@@ -97,8 +102,16 @@ paths:
                     additionalProperties: true
         '401':
           description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           description: Reload token is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ReadinessResponse:
@@ -120,6 +133,7 @@ components:
           format: date-time
         checks:
           type: array
+          maxItems: 32
           items:
             type: object
             required: [name, status, message]
@@ -131,6 +145,15 @@ components:
                 enum: [ready, not_ready]
               message:
                 type: string
+                pattern: '^[\s\S]*$'
+                maxLength: 1024
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
   securitySchemes:
     reloadBearer:
       type: http

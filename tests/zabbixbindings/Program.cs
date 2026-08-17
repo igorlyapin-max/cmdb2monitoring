@@ -419,7 +419,7 @@ static async Task HostBindingResolverDisabledMakesNoCall()
     {
         BaseUrl = "http://cmdb.example",
         Username = "svc",
-        Password = "secret",
+        Password = "test-value",
         HostBindingLookupEnabled = false
     });
 
@@ -656,7 +656,7 @@ static CmdbuildBindingClient CreateBindingClient(FakeHttpMessageHandler handler)
         {
             BaseUrl = "http://cmdb.example",
             Username = "svc",
-            Password = "secret",
+            Password = "test-value",
             MainHostIdAttributeName = "zabbix_main_hostid",
             BindingClassName = "ZabbixHostBinding",
             BindingLookupLimit = 1000
@@ -736,7 +736,7 @@ static CmdbZabbixHostBindingResolver CreateHostBindingResolver(
         {
             BaseUrl = "http://cmdb.example",
             Username = "svc",
-            Password = "secret",
+            Password = "test-value",
             HostBindingLookupEnabled = true,
             MainHostIdAttributeName = "zabbix_main_hostid",
             BindingClassName = "ZabbixHostBinding",
@@ -908,7 +908,7 @@ static void AssertCmdbHeaders(HttpRequestMessage request)
 {
     AssertEqual("Basic", request.Headers.Authorization?.Scheme, "Authorization scheme");
     AssertEqual(
-        Convert.ToBase64String(Encoding.UTF8.GetBytes("svc:secret")),
+        Convert.ToBase64String(Encoding.UTF8.GetBytes("svc:test-value")),
         request.Headers.Authorization?.Parameter,
         "Authorization parameter");
     AssertTrue(!request.Headers.Contains("CMDBuild-View"), "CMDBuild-View header must not be sent for CMDBuild REST API v4");

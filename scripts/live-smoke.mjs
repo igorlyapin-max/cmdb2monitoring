@@ -50,8 +50,8 @@ function parseArgs(argv) {
     skipRulesReload: argv.includes('--skip-rules-reload') || process.env.C2M_SMOKE_SKIP_RULES_RELOAD === 'true',
     zabbixUrl: value(argv, '--zabbix-url', process.env.C2M_SMOKE_ZABBIX_URL ?? 'http://localhost:8081/api_jsonrpc.php'),
     zabbixApiToken: value(argv, '--zabbix-api-token', process.env.C2M_SMOKE_ZABBIX_API_TOKEN ?? ''),
-    zabbixUser: value(argv, '--zabbix-user', process.env.C2M_SMOKE_ZABBIX_USER ?? (isDev ? 'Admin' : '')),
-    zabbixPassword: value(argv, '--zabbix-password', process.env.C2M_SMOKE_ZABBIX_PASSWORD ?? (isDev ? 'zabbix' : '')),
+    zabbixUser: value(argv, '--zabbix-user', process.env.C2M_SMOKE_ZABBIX_USER ?? ''),
+    zabbixPassword: value(argv, '--zabbix-password', process.env.C2M_SMOKE_ZABBIX_PASSWORD ?? ''),
     timeoutMs: numberValue(argv, '--timeout-ms', process.env.C2M_SMOKE_TIMEOUT_MS ?? '120000'),
     pollMs: numberValue(argv, '--poll-ms', process.env.C2M_SMOKE_POLL_MS ?? '3000'),
     reportDir: value(argv, '--report-dir', process.env.C2M_SMOKE_REPORT_DIR ?? 'reports')

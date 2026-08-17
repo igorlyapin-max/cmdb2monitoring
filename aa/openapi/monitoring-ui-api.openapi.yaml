@@ -64,6 +64,10 @@ paths:
       responses:
         "200":
           description: Session destroyed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationSuccessResponse"
   /api/auth/session-credentials:
     post:
       summary: Store CMDBuild/Zabbix credentials in the current server-side session
@@ -76,6 +80,10 @@ paths:
       responses:
         "200":
           description: Session credentials accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationSuccessResponse"
         "428":
           $ref: "#/components/responses/Error"
   /api/auth/change-password:
@@ -90,6 +98,10 @@ paths:
       responses:
         "200":
           description: Password changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationSuccessResponse"
         "400":
           $ref: "#/components/responses/Error"
   /auth/saml2/metadata:
@@ -865,6 +877,7 @@ components:
       properties:
         items:
           type: array
+          maxItems: 32
           description: Health probes for configured microservices. Items can include rulesStatus for services that expose rules status.
           items:
             type: object
@@ -882,11 +895,13 @@ components:
       properties:
         items:
           type: array
+          maxItems: 500
           items:
             type: object
             additionalProperties: true
         topics:
           type: array
+          maxItems: 100
           items:
             type: object
             additionalProperties: true
@@ -964,6 +979,7 @@ components:
           example: cmdbwebhooks2kafka-
         items:
           type: array
+          maxItems: 1000
           items:
             $ref: "#/components/schemas/CmdbuildWebhook"
     CmdbuildWebhook:
@@ -982,12 +998,14 @@ components:
           type: string
         method:
           type: string
+          pattern: '^(post|POST)$'
           example: post
         url:
           type: string
         headers:
           type: object
-          additionalProperties: true
+          additionalProperties:
+            type: string
         body:
           type: object
           additionalProperties: true
@@ -1002,6 +1020,7 @@ components:
       properties:
         operations:
           type: array
+          maxItems: 100
           items:
             type: object
             required:
@@ -1034,6 +1053,7 @@ components:
           type: integer
         results:
           type: array
+          maxItems: 100
           items:
             type: object
             additionalProperties: true
@@ -1076,6 +1096,8 @@ components:
         content:
           oneOf:
             - type: string
+              pattern: '^[\s\S]*$'
+              maxLength: 1048576
             - type: object
               additionalProperties: true
         rules:
@@ -1143,10 +1165,12 @@ components:
           type: boolean
         errors:
           type: array
+          maxItems: 100
           items:
             type: string
         warnings:
           type: array
+          maxItems: 100
           items:
             type: string
     ErrorResponse:
@@ -1159,3 +1183,12 @@ components:
           type: string
         message:
           type: string
+    OperationSuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        user:
+          type: object
+          additionalProperties: true
