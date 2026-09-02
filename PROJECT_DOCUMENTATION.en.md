@@ -105,7 +105,11 @@ Compose pins:
 - structured JSON logs to stdout/stderr and Kafka log topics; the platform selects the Docker logging driver, with syslog available through a separate overlay;
 - required production env/secret inputs for webhook token, rules reload token, Kafka, CMDBuild, Zabbix, and audit storage.
 
+Before `monitoring-ui-api` starts, `monitoring-ui-data-init` prepares the shared `/app/data` volume for non-root runtime UID/GID `10001:10001`. It completes before the BFF starts; if `chown` fails, the BFF intentionally does not start. This prevents `EACCES` while writing `data/zabbix-catalog-cache.json` and `data/cmdbuild-catalog-cache.json`. For a bind mount, the operator must permit ownership changes to UID/GID `10001:10001`; a filesystem with root squash is a deployment blocker, not a reason to run the BFF as root. Diagnose with `docker compose -f deploy/compose.production.yml logs monitoring-ui-data-init`; then BFF `GET /ready` must report writable checks for both catalog caches. When `deploy/compose.logging-syslog.yml` is attached, init-service stderr goes to the same syslog sink as runtime services.
+
 When CMDBuild or Zabbix credentials are requested, the BFF displays the deployment-configured endpoint as reference. The user enters only login/password; the endpoint is neither sent by the browser nor allowed to change deployment topology.
+
+For CMDBuild, the BFF uses only Basic login/password from the current server-side session. Before saving credentials it checks REST v4 `GET /classes`: `401` means invalid or revoked credentials and opens the login/password prompt again; `403` means the credentials were accepted but the account has not been granted the required REST permission. Catalog synchronization requires at least read access to `/classes` and to attributes of available classes.
 
 Static production runtime validation:
 

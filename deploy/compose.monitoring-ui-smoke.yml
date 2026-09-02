@@ -1,0 +1,39 @@
+services:
+  monitoring-ui-data-root-owner:
+    image: ${MONITORING_UI_SMOKE_IMAGE:?set MONITORING_UI_SMOKE_IMAGE}
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-ec", "mkdir -p /app/data && touch /app/data/.ownership-probe && chown -R 0:0 /app/data && chmod 0755 /app/data"]
+    volumes:
+      - monitoring-ui-data:/app/data
+
+  monitoring-ui-data-init:
+    image: ${MONITORING_UI_SMOKE_IMAGE:?set MONITORING_UI_SMOKE_IMAGE}
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-ec", "mkdir -p /app/data && chown -R 10001:10001 /app/data"]
+    depends_on:
+      monitoring-ui-data-root-owner:
+        condition: service_completed_successfully
+    volumes:
+      - monitoring-ui-data:/app/data
+
+  monitoring-ui-api:
+    image: ${MONITORING_UI_SMOKE_IMAGE:?set MONITORING_UI_SMOKE_IMAGE}
+    environment:
+      NODE_ENV: Development
+      MONITORING_UI_HOST: 127.0.0.1
+      PORT: "5090"
+      RULES_ACTIVE_BASE_DIRECTORY: /app
+      RULES_ACTIVE_FILE_PATH: rules/cmdbuild-to-zabbix-host-create.json
+      RULES_ACTIVE_WRITE_ENABLED: "false"
+      MONITORING_UI_LOGS_ENABLED: "false"
+    depends_on:
+      monitoring-ui-data-init:
+        condition: service_completed_successfully
+    volumes:
+      - monitoring-ui-data:/app/data
+      - ${MONITORING_UI_SMOKE_RULES_HOST_PATH:?set MONITORING_UI_SMOKE_RULES_HOST_PATH}:/app/rules:ro
+
+volumes:
+  monitoring-ui-data: {}

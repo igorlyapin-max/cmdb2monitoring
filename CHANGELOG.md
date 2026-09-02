@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Production Compose now initializes `monitoring-ui-data` for the non-root UI runtime user before starting `monitoring-ui-api`, preventing catalog-cache `EACCES` failures on externally created volumes.
+- CMDBuild catalog credentials are validated against REST v4 before saving; rejected credentials and missing CMDBuild permissions now return distinct UI diagnostics.
+
 ### Added
 
 - The About view now shows the application version from root `VERSION`; before the first versioned handoff it shows `0.0.0.0`.

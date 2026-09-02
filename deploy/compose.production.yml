@@ -164,6 +164,14 @@ services:
       - zabbixbindings2cmdbuild-state:/app/state
     healthcheck: *healthcheck_dotnet
 
+  monitoring-ui-data-init:
+    image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/monitoring-ui-api:${VERSION:?set VERSION from the release VERSION file}
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-ec", "mkdir -p /app/data && chown -R 10001:10001 /app/data"]
+    volumes:
+      - monitoring-ui-data:/app/data
+
   monitoring-ui-api:
     image: ${REGISTRY:-localhost:5000}/cmdb2monitoring/monitoring-ui-api:${VERSION:?set VERSION from the release VERSION file}
     restart: unless-stopped
@@ -219,6 +227,9 @@ services:
       SASLPASSWORDSECRET: ${SASLPASSWORDSECRET:-}
     ports:
       - "${MONITORING_UI_BIND:-127.0.0.1}:${MONITORING_UI_PORT:-5090}:5090"
+    depends_on:
+      monitoring-ui-data-init:
+        condition: service_completed_successfully
     volumes:
       - monitoring-ui-state:/app/state
       - monitoring-ui-data:/app/data

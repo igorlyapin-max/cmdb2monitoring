@@ -201,7 +201,7 @@ docker compose --env-file production.env -f deploy/compose.production.yml config
 docker compose --env-file production.env -f deploy/compose.production.yml up -d
 ```
 
-The Compose file publishes only webhook/UI bind ports from env, runs Docker healthchecks against `/ready`, and persists worker state in Docker volumes. Structured JSON logs always go to stdout/stderr; the customer platform or Docker daemon selects the Docker logging driver. Kafka log topics stay enabled as the project's primary structured logging sink.
+The Compose file publishes only webhook/UI bind ports from env, runs Docker healthchecks against `/ready`, and persists worker state in Docker volumes. Structured JSON logs always go to stdout/stderr; the customer platform or Docker daemon selects the Docker logging driver. Kafka log topics stay enabled as the project's primary structured logging sink. With the syslog overlay, `monitoring-ui-data-init` stderr reaches the same sink, making `/app/data` preparation failures observable before the BFF starts.
 
 To send container stdout/stderr to syslog, attach the explicit overlay. `SYSLOG_ADDRESS` has no loopback default and must point to a reachable infrastructure endpoint:
 
@@ -468,7 +468,7 @@ At minimum, keep these paths on volumes:
 | `cmdbkafka2zabbix` | `/app/state`, rules file or rules git working copy |
 | `zabbixrequests2api` | `/app/state` |
 | `zabbixbindings2cmdbuild` | `/app/state` |
-| `monitoring-ui-api` | `/app/state`, `/app/data`, rules working copy when `Git Settings` is used |
+| `monitoring-ui-api` | `/app/state`, `/app/data`, rules working copy when `Git Settings` is used; `monitoring-ui-data-init` assigns `/app/data` to UID/GID `10001:10001` before the BFF starts |
 
 Typical safe rules override for a production converter container:
 
@@ -502,7 +502,7 @@ For `monitoring-ui-api`, set `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` to a comma-s
 | Zabbix dev stand | local ignored `.env` or CLI | Test environment only |
 | Kafka dev stand | no login/password | Local Docker PLAINTEXT Kafka |
 
-In production, change initial UI passwords after first login or mount a prepared `state/users.json`. CMDBuild/Zabbix login/password values are not stored in UI runtime state: the UI asks for them for the server-side session on first use, and Zabbix can use `Zabbix:ApiToken`. Dev/demo scripts contain no credentials; provide them only through env or CLI. Service accounts for `cmdbkafka2zabbix`, `zabbixrequests2api`, and `zabbixbindings2cmdbuild` are configured through env/secret values, not through startup UI users.
+In production, change initial UI passwords after first login or mount a prepared `state/users.json`. CMDBuild/Zabbix login/password values are not stored in UI runtime state: the UI asks for them for the server-side session on first use, and Zabbix can use `Zabbix:ApiToken`. Before saving CMDBuild Basic login/password, the BFF checks REST v4 `GET /classes`; `401` leaves credentials unsaved, while `403` requires CMDBuild catalog access for the account. Dev/demo scripts contain no credentials; provide them only through env or CLI. Service accounts for `cmdbkafka2zabbix`, `zabbixrequests2api`, and `zabbixbindings2cmdbuild` are configured through env/secret values, not through startup UI users.
 
 ## Single-Service Run Example
 

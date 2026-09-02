@@ -2583,11 +2583,13 @@ async function saveSessionCredentials(session, payload) {
     } catch (error) {
       throw httpError(400, 'integration_endpoint_override_not_allowed', error.message);
     }
-    session.cmdbuild = {
+    const credentials = {
       baseUrl,
       username,
       password
     };
+    await validateCmdbuildSessionCredentials(credentials);
+    session.cmdbuild = credentials;
   } else {
     const apiEndpoint = configuredZabbixEndpoint();
     try {
@@ -6105,6 +6107,14 @@ function configuredZabbixEndpoint() {
   return endpoint;
 }
 
+async function validateCmdbuildSessionCredentials(credentials) {
+  const catalogScope = config.Cmdbuild.Catalog.IncludeInactiveClasses ? 'administration' : 'management';
+  await cmdbuildGet(
+    credentials.baseUrl,
+    cmdbuildRestPath('/classes', catalogScope),
+    credentials);
+}
+
 function currentZabbixApiToken(session) {
   const serviceAccount = config.Zabbix.ServiceAccount ?? {};
   return [config.Zabbix.ApiToken, config.Zabbix.apiToken, serviceAccount.ApiToken, serviceAccount.apiToken]
@@ -6197,6 +6207,37 @@ async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
     signal: AbortSignal.timeout(10000)
   });
+
+  if (response.status === 401) {
+    logger.warn('CMDBuild credentials were rejected', {
+      path: requestPath,
+      statusCode: response.status
+    });
+    throw httpError(
+      428,
+      'credentials_required',
+      'CMDBuild credentials were rejected. Re-enter CMDBuild login/password.',
+      {
+        service: 'cmdbuild',
+        baseUrl: normalizedBaseUrl
+      });
+  }
+
+  if (response.status === 403) {
+    logger.warn('CMDBuild access was denied', {
+      path: requestPath,
+      statusCode: response.status
+    });
+    throw httpError(
+      403,
+      'cmdbuild_access_denied',
+      `CMDBuild denied access to ${requestPath}. Grant the configured CMDBuild account the required REST permission.`,
+      {
+        service: 'cmdbuild',
+        baseUrl: normalizedBaseUrl,
+        path: requestPath
+      });
+  }
 
   if (!response.ok) {
     throw httpError(502, 'cmdbuild_api_error', `CMDBuild returned HTTP ${response.status} for ${requestPath}.`);

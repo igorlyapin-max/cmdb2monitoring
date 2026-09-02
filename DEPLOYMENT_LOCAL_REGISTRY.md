@@ -200,7 +200,7 @@ docker compose --env-file production.env -f deploy/compose.production.yml up -d
 
 Для `monitoring-ui-api` укажите `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` как список hostname CMDBuild, Zabbix и IdP через запятую; добавьте hostname PAM/AAPM, только если этот provider включен. В production все эти BFF destinations используют HTTPS. При `MONITORING_UI_SESSION_STORE_MODE=Redis` обязательно задайте `MONITORING_UI_REDIS_URL=rediss://...`; `redis://` в production отклоняется.
 
-Compose публикует наружу только webhook/UI bind-порты из env, запускает Docker healthcheck через `/ready` и сохраняет worker state в Docker volumes. Structured JSON logs всегда пишутся в stdout/stderr; Docker logging driver выбирается daemon или платформой заказчика. Kafka log topics остаются включенными как основной structured logging sink проекта.
+Compose публикует наружу только webhook/UI bind-порты из env, запускает Docker healthcheck через `/ready` и сохраняет worker state в Docker volumes. Structured JSON logs всегда пишутся в stdout/stderr; Docker logging driver выбирается daemon или платформой заказчика. Kafka log topics остаются включенными как основной structured logging sink проекта. При syslog overlay stderr `monitoring-ui-data-init` доставляется в тот же sink, поэтому ошибка подготовки `/app/data` наблюдаема до старта BFF.
 
 Для отправки container stdout/stderr в syslog подключите явный overlay. `SYSLOG_ADDRESS` не имеет loopback default и должен указывать на доступный endpoint инфраструктуры:
 
@@ -467,7 +467,7 @@ MS AD/LDAP/IdP:
 | `cmdbkafka2zabbix` | `/app/state`, rules-файл или git working copy с rules |
 | `zabbixrequests2api` | `/app/state` |
 | `zabbixbindings2cmdbuild` | `/app/state` |
-| `monitoring-ui-api` | `/app/state`, `/app/data`, rules working copy при использовании `Настройка git` |
+| `monitoring-ui-api` | `/app/state`, `/app/data`, rules working copy при использовании `Настройка git`; `monitoring-ui-data-init` перед BFF назначает `/app/data` владельцу UID/GID `10001:10001` |
 
 Для converter в production-контейнере типовой safe rules override:
 
@@ -499,7 +499,7 @@ ConversionRules__PullOnReload=true
 | Zabbix dev стенд | через локальный ignored `.env` или CLI | Только тестовая среда |
 | Kafka dev стенд | без логина/пароля | PLAINTEXT Kafka в локальном Docker |
 
-В production начальные UI-пароли нужно сменить после первого входа или заранее смонтировать подготовленный `state/users.json`. CMDBuild/Zabbix login/password не хранятся в UI runtime state: UI спрашивает их на server-side session при первой операции, а для Zabbix может использовать `Zabbix:ApiToken`. Dev/demo scripts не содержат credentials: задавайте их только через env или CLI. Сервисные учетные записи `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild` задаются через env/secret, а не через стартовые UI-пользователи.
+В production начальные UI-пароли нужно сменить после первого входа или заранее смонтировать подготовленный `state/users.json`. CMDBuild/Zabbix login/password не хранятся в UI runtime state: UI спрашивает их на server-side session при первой операции, а для Zabbix может использовать `Zabbix:ApiToken`. Перед сохранением CMDBuild Basic login/password BFF проверяет REST v4 `GET /classes`; `401` оставляет credentials несохраненными, `403` требует выдать учётной записи доступ к CMDBuild catalog. Dev/demo scripts не содержат credentials: задавайте их только через env или CLI. Сервисные учетные записи `cmdbkafka2zabbix`, `zabbixrequests2api`, `zabbixbindings2cmdbuild` задаются через env/secret, а не через стартовые UI-пользователи.
 
 ## Пример запуска одного сервиса
 

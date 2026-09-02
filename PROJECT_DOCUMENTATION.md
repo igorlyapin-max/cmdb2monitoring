@@ -102,7 +102,11 @@ Compose закрепляет:
 - structured JSON logs в stdout/stderr и Kafka log topics; Docker logging driver выбирается платформой, а syslog подключается отдельным overlay;
 - обязательные production env/secret inputs для webhook token, rules reload token, Kafka, CMDBuild, Zabbix и audit storage.
 
+Перед запуском `monitoring-ui-api` сервис `monitoring-ui-data-init` подготавливает shared volume `/app/data` для non-root runtime UID/GID `10001:10001`. Он завершается до запуска BFF; при ошибке `chown` BFF намеренно не стартует. Это устраняет `EACCES` при записи `data/zabbix-catalog-cache.json` и `data/cmdbuild-catalog-cache.json`. Для bind mount оператор должен разрешить изменение владельца UID/GID `10001:10001`; на filesystem с root squash это является deployment blocker, а не причиной запускать BFF от root. Диагностика: `docker compose -f deploy/compose.production.yml logs monitoring-ui-data-init`, затем `GET /ready` у BFF должен показать writable checks для обоих catalog cache. При подключении `deploy/compose.logging-syslog.yml` stderr init-сервиса направляется в тот же syslog sink, что и runtime сервисы.
+
 При запросе CMDBuild или Zabbix credentials BFF показывает deployment-configured endpoint справочно. Пользователь вводит только login/password; endpoint в browser request не передается и не может сменить deployment topology.
+
+Для CMDBuild BFF использует только Basic login/password из текущей server-side session. Перед сохранением credentials он проверяет REST v4 `GET /classes`: `401` означает неверные или отозванные credentials и снова открывает ввод login/password; `403` означает, что credentials приняты, но учётной записи не выдано необходимое REST permission. Для синхронизации catalog необходим как минимум read-доступ к `/classes` и к атрибутам доступных классов.
 
 Статическая проверка production runtime:
 
