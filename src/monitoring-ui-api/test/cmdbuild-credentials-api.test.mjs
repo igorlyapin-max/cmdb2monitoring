@@ -43,6 +43,24 @@ test('CMDBuild credentials are validated before they are saved and distinguish 4
       'x-csrf-token': login.body.csrfToken
     };
 
+    const initialRuntime = await request(port, '/api/settings/runtime', { headers: { cookie: headers.cookie } });
+    assert.equal(initialRuntime.status, 200);
+    assert.equal(initialRuntime.body.cmdbuild.catalogSyncTimeoutSeconds, 300);
+
+    const savedRuntime = await request(port, '/api/settings/runtime', {
+      method: 'PUT',
+      headers,
+      body: {
+        cmdbuild: {
+          baseUrl: `${cmdbuild.baseUrl}/cmdbuild/services/rest/v4`,
+          maxTraversalDepth: 2,
+          catalogSyncTimeoutSeconds: 1
+        }
+      }
+    });
+    assert.equal(savedRuntime.status, 200);
+    assert.equal(savedRuntime.body.cmdbuild.catalogSyncTimeoutSeconds, 60);
+
     const rejected = await saveCmdbuildCredentials(port, headers, 'rejected', 'password');
     assert.equal(rejected.status, 428);
     assert.equal(rejected.body.error, 'credentials_required');
@@ -53,29 +71,44 @@ test('CMDBuild credentials are validated before they are saved and distinguish 4
     assert.equal(denied.body.error, 'cmdbuild_access_denied');
     assert.equal((await authStatus(port, headers.cookie)).body.user.cmdbuild.credentialsConfigured, false);
 
+    const html = await saveCmdbuildCredentials(port, headers, 'html', 'password');
+    assert.equal(html.status, 502);
+    assert.equal(html.body.error, 'cmdbuild_invalid_response');
+    assert.equal((await authStatus(port, headers.cookie)).body.user.cmdbuild.credentialsConfigured, false);
+
     const accepted = await saveCmdbuildCredentials(port, headers, 'reader', 'password');
     assert.equal(accepted.status, 200);
     assert.equal(accepted.body.user.cmdbuild.credentialsConfigured, true);
 
+    cmdbuild.setResponseDelay(75);
+    const started = await syncCmdbuildCatalog(port, headers);
+    assert.equal(started.status, 202);
+    assert.equal(started.body.status, 'running');
+    assert.equal(started.body.timeoutSeconds, 60);
+    const sameJob = await syncCmdbuildCatalog(port, headers);
+    assert.equal(sameJob.status, 202);
+    assert.equal(sameJob.body.operationId, started.body.operationId);
+    const succeeded = await waitForCatalogSync(port, headers);
+    assert.equal(succeeded.status, 'succeeded');
+    assert.equal((await request(port, '/api/cmdbuild/catalog', { headers: { cookie: headers.cookie } })).status, 200);
+
     cmdbuild.setReaderStatus(401);
-    const staleCredentials = await request(port, '/api/cmdbuild/catalog/sync', {
-      method: 'POST',
-      headers
-    });
-    assert.equal(staleCredentials.status, 428);
-    assert.equal(staleCredentials.body.error, 'credentials_required');
+    const staleCredentials = await syncCmdbuildCatalog(port, headers);
+    assert.equal(staleCredentials.status, 202);
+    const staleFailure = await waitForCatalogSync(port, headers);
+    assert.equal(staleFailure.status, 'failed');
+    assert.equal(staleFailure.error.code, 'credentials_required');
 
     cmdbuild.setReaderStatus(200);
     const refreshed = await saveCmdbuildCredentials(port, headers, 'reader', 'password');
     assert.equal(refreshed.status, 200);
 
     cmdbuild.setReaderStatus(403);
-    const accessDenied = await request(port, '/api/cmdbuild/catalog/sync', {
-      method: 'POST',
-      headers
-    });
-    assert.equal(accessDenied.status, 403);
-    assert.equal(accessDenied.body.error, 'cmdbuild_access_denied');
+    const accessDenied = await syncCmdbuildCatalog(port, headers);
+    assert.equal(accessDenied.status, 202);
+    const deniedFailure = await waitForCatalogSync(port, headers);
+    assert.equal(deniedFailure.status, 'failed');
+    assert.equal(deniedFailure.error.code, 'cmdbuild_access_denied');
   } finally {
     process.kill('SIGTERM');
     await onceExit(process);
@@ -96,9 +129,30 @@ async function authStatus(port, cookie) {
   return request(port, '/api/auth/status', { headers: { cookie } });
 }
 
+async function syncCmdbuildCatalog(port, headers) {
+  return request(port, '/api/cmdbuild/catalog/sync', {
+    method: 'POST',
+    headers
+  });
+}
+
+async function waitForCatalogSync(port, headers) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await request(port, '/api/cmdbuild/catalog/sync/status', {
+      headers: { cookie: headers.cookie }
+    });
+    if (response.status === 200 && response.body.status !== 'running') {
+      return response.body;
+    }
+    await delay(25);
+  }
+  throw new Error('CMDBuild catalog synchronization did not finish.');
+}
+
 async function startCmdbuildStub() {
   let readerStatus = 200;
-  const server = createServer((request, response) => {
+  let responseDelayMs = 0;
+  const server = createServer(async (request, response) => {
     if (request.url !== '/cmdbuild/services/rest/v4/classes') {
       response.writeHead(404).end();
       return;
@@ -114,9 +168,16 @@ async function startCmdbuildStub() {
       response.writeHead(403, { 'content-type': 'application/json' }).end('{}');
       return;
     }
+    if (username === 'html') {
+      response.writeHead(200, { 'content-type': 'text/html' }).end('<html>proxy response</html>');
+      return;
+    }
     if (username === 'reader' && readerStatus !== 200) {
       response.writeHead(readerStatus, { 'content-type': 'application/json' }).end('{}');
       return;
+    }
+    if (responseDelayMs > 0) {
+      await delay(responseDelayMs);
     }
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [] }));
   });
@@ -127,7 +188,8 @@ async function startCmdbuildStub() {
   return {
     server,
     baseUrl: `http://127.0.0.1:${server.address().port}`,
-    setReaderStatus: status => { readerStatus = status; }
+    setReaderStatus: status => { readerStatus = status; },
+    setResponseDelay: delayMs => { responseDelayMs = delayMs; }
   };
 }
 
@@ -217,4 +279,8 @@ async function onceExit(child) {
     return;
   }
   await new Promise(resolvePromise => child.once('exit', resolvePromise));
+}
+
+function delay(ms) {
+  return new Promise(resolvePromise => setTimeout(resolvePromise, ms));
 }

@@ -18,8 +18,8 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
   const port = await reservePort();
   const activeRulesPath = join(directory, 'rules.json');
   const rules = JSON.parse(await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.json'), 'utf8'));
-  const cmdbuildCatalog = JSON.parse(await readFile(join(serviceRoot, 'data/cmdbuild-catalog-cache.json'), 'utf8'));
-  const zabbixCatalog = JSON.parse(await readFile(join(serviceRoot, 'data/zabbix-catalog-cache.json'), 'utf8'));
+  const cmdbuildCatalog = browserTestCmdbuildCatalog();
+  const zabbixCatalog = browserTestZabbixCatalog();
   await writeFile(activeRulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
 
   const server = startServer(port, directory, activeRulesPath);
@@ -155,6 +155,36 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
                     : {};
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) });
   });
+}
+
+function browserTestCmdbuildCatalog() {
+  return {
+    classes: [{ name: 'ARM', description: 'ARM', active: true }],
+    attributes: [{
+      className: 'ARM',
+      items: [{ name: 'aRMCritical', type: 'lookup', active: true, readable: true }]
+    }],
+    lookups: [],
+    domains: []
+  };
+}
+
+function browserTestZabbixCatalog() {
+  return {
+    hostGroups: [],
+    templates: [],
+    templateGroups: [],
+    proxies: [],
+    proxyGroups: [],
+    globalMacros: [],
+    hostMacros: [],
+    inventoryFields: [],
+    interfaceProfiles: [],
+    hostStatuses: [],
+    tlsPskModes: [],
+    maintenances: [],
+    valueMaps: []
+  };
 }
 
 async function setLeaf(page, path, field, operator, value) {

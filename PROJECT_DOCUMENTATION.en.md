@@ -111,6 +111,25 @@ When CMDBuild or Zabbix credentials are requested, the BFF displays the deployme
 
 For CMDBuild, the BFF uses only Basic login/password from the current server-side session. Before saving credentials it checks REST v4 `GET /classes`: `401` means invalid or revoked credentials and opens the login/password prompt again; `403` means the credentials were accepted but the account has not been granted the required REST permission. Catalog synchronization requires at least read access to `/classes` and to attributes of available classes.
 
+`CMDBuild Catalog` synchronization is one background job: `POST /api/cmdbuild/catalog/sync` returns `202`, the UI polls `GET /api/cmdbuild/catalog/sync/status`, and reads the cache only after `succeeded`. The Runtime setting `CMDBuild catalog sync timeout, sec` is saved in `state/ui-settings.json`, applies to the next job, defaults to `300`, and is constrained to `60..1800`. It is the total operation deadline; an individual CMDBuild REST request remains limited to `10` seconds. A timeout or BFF restart does not publish a partial catalog, and credentials are not stored in job status. Job status is process-local: it returns to `idle` after a BFF restart and the synchronization must be started again.
+
+When the UI is published through a reverse proxy on the same hostname, `/api/cmdbuild/catalog/sync` must go to `monitoring-ui-api`, preserve the `/api/...` path, and use a timeout of at least `300` seconds. For Nginx on the Docker host use `proxy_pass http://127.0.0.1:5090;`; for Nginx in the same Docker network use `proxy_pass http://monitoring-ui-api:5090;`:
+
+```nginx
+location = /api/cmdbuild/catalog/sync {
+    proxy_pass http://127.0.0.1:5090;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+}
+
+location ^~ /api/ {
+    proxy_pass http://127.0.0.1:5090;
+}
+```
+
+The UI API expects JSON. HTML from a gateway/SSO/WAF is reported by HTTP status and `Content-Type`, without attempting to parse HTML as JSON. A `504` after about 60 seconds is a proxy timeout, not a CMDBuild login/password error.
+
 Static production runtime validation:
 
 ```bash
@@ -415,7 +434,7 @@ Minimum permissions by operation:
 
 For dynamic host groups, the writer runs `hostgroup.get` by name before `host.create/host.update`. If the group exists, `groupid` is substituted into the payload. If it is missing and `Zabbix:AllowDynamicHostGroupCreate=true`, the writer calls `hostgroup.create` and then substitutes the new `groupid` into the same request, so the host is immediately linked to the newly created group. If it is missing and creation is disabled, no Zabbix write is executed and the response contains `auto_expand_disabled`. Tags have no separate Zabbix catalog object in this flow: a dynamic tag is sent directly in `params.tags[]` of the current host payload.
 
-Runtime Settings can edit CMDBuild/Zabbix endpoints, Zabbix API key, audit storage, Kafka Event Browser settings, and health/reload endpoints. `AuditStorage` selects `postgresql` for medium and large production installations or `sqlite` for development and small installations. SQLite is intended as an estimate for up to 1000 monitored objects, and can be acceptable up to 2000 objects with moderate event flow and short audit retention; larger scale, high user concurrency, or long audit retention should use PostgreSQL. The setting stores provider, connection string, PostgreSQL schema, `AutoMigrate`, and `CommandTimeoutSeconds`. Audit code must use the shared storage layer and be validated against both DB engines, without SQL tied only to SQLite or only to PostgreSQL. Git Settings edits only rules-file storage/read settings and can write rules JSON plus a neighboring `*.webhooks.json` into a local working copy without commit/push. CMDBuild/Zabbix `Use IdP` flags are not supported and must not be displayed.
+Runtime Settings can edit CMDBuild/Zabbix endpoints, Zabbix API key, audit storage, Kafka Event Browser settings, and health/reload endpoints. In development, Event Browser topics come from `EventBrowser:Topics`; `MONITORING_UI_EVENTS_TOPICS` and `MONITORING_UI_EVENTS_TOPICS_JSON` cannot be used together. In Production, Compose owns the topic list through `MONITORING_UI_EVENTS_TOPICS_JSON`, built from pipeline, DLQ, and structured-log topic variables; Runtime Settings displays but cannot replace that list, and CSV `MONITORING_UI_EVENTS_TOPICS` is rejected. For `SaslSsl` and `SaslPlaintext`, `SecurityProtocol`, `SaslMechanism`, `Username`, and `Password` are required; supported mechanisms are `Plain`, `ScramSha256`, and `ScramSha512`. Validation occurs when Runtime Settings is saved and before Kafka reads, so a disabled Event Browser does not block BFF startup. `AuditStorage` selects `postgresql` for medium and large production installations or `sqlite` for development and small installations. SQLite is intended as an estimate for up to 1000 monitored objects, and can be acceptable up to 2000 objects with moderate event flow and short audit retention; larger scale, high user concurrency, or long audit retention should use PostgreSQL. The setting stores provider, connection string, PostgreSQL schema, `AutoMigrate`, and `CommandTimeoutSeconds`. Audit code must use the shared storage layer and be validated against both DB engines, without SQL tied only to SQLite or only to PostgreSQL. Git Settings edits only rules-file storage/read settings and can write rules JSON plus a neighboring `*.webhooks.json` into a local working copy without commit/push. CMDBuild/Zabbix `Use IdP` flags are not supported and must not be displayed.
 
 Audit model:
 

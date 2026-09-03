@@ -108,6 +108,25 @@ Compose закрепляет:
 
 Для CMDBuild BFF использует только Basic login/password из текущей server-side session. Перед сохранением credentials он проверяет REST v4 `GET /classes`: `401` означает неверные или отозванные credentials и снова открывает ввод login/password; `403` означает, что credentials приняты, но учётной записи не выдано необходимое REST permission. Для синхронизации catalog необходим как минимум read-доступ к `/classes` и к атрибутам доступных классов.
 
+Синхронизация `CMDBuild Catalog` запускается как одна фоновая job: `POST /api/cmdbuild/catalog/sync` возвращает `202`, UI опрашивает `GET /api/cmdbuild/catalog/sync/status` и читает cache только после `succeeded`. Настройка Runtime `Таймаут синхронизации CMDBuild catalog, сек.` сохраняется в `state/ui-settings.json`, действует на следующую job, по умолчанию равна `300` и ограничена диапазоном `60..1800`. Это общий deadline операции; timeout одного REST-запроса CMDBuild остается `10` секунд. При timeout или рестарте BFF частичный catalog не публикуется, credentials не сохраняются в status. Status job хранится только в процессе BFF: после рестарта он возвращается в `idle`, синхронизацию необходимо запустить повторно.
+
+Если UI опубликован через reverse proxy на том же hostname, route `/api/cmdbuild/catalog/sync` должен идти в `monitoring-ui-api`, сохранять исходный `/api/...` path и иметь timeout не менее `300` секунд. Для Nginx на Docker host используйте `proxy_pass http://127.0.0.1:5090;`; для Nginx в той же Docker network используйте `proxy_pass http://monitoring-ui-api:5090;`:
+
+```nginx
+location = /api/cmdbuild/catalog/sync {
+    proxy_pass http://127.0.0.1:5090;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+}
+
+location ^~ /api/ {
+    proxy_pass http://127.0.0.1:5090;
+}
+```
+
+UI API ожидает JSON. HTML от gateway/SSO/WAF показывается как HTTP status и `Content-Type`, без попытки разобрать HTML как JSON. `504` примерно через 60 секунд означает timeout proxy, а не ошибку CMDBuild login/password.
+
 Статическая проверка production runtime:
 
 ```bash
@@ -463,8 +482,9 @@ CMDBuild/Zabbix credentials:
 Events:
 - вкладка Events читает Kafka topics только через BFF;
 - браузер не имеет прямого доступа к Kafka;
-- список topics берется из `EventBrowser:Topics` и может быть изменен через `Runtime-настройки`;
-- для SASL/TLS заполняются `EventBrowser:SecurityProtocol`, `SaslMechanism`, `Username`, `Password`.
+- в development список topics берется из `EventBrowser:Topics`; одновременная передача `MONITORING_UI_EVENTS_TOPICS` и `MONITORING_UI_EVENTS_TOPICS_JSON` запрещена;
+- в Production список принадлежит deployment: Compose строит `MONITORING_UI_EVENTS_TOPICS_JSON` из переменных pipeline, DLQ и structured-log topics. Runtime-настройки показывают этот список, но не могут заменить его; CSV `MONITORING_UI_EVENTS_TOPICS` в Production запрещен;
+- для `SaslSsl` и `SaslPlaintext` обязательны `EventBrowser:SecurityProtocol`, `SaslMechanism`, `Username`, `Password`; допустимые `SaslMechanism`: `Plain`, `ScramSha256`, `ScramSha512`. Проверка выполняется при сохранении Runtime-настроек и перед чтением Kafka, поэтому отключенный Event Browser не блокирует запуск BFF.
 - вывод по умолчанию показывает последние сообщения выбранного topic, сортировка выполняется от более новых сообщений к более старым;
 - раскрытие topic показывает timestamp, сводку service/partition/offset/key и value.
 
@@ -593,6 +613,7 @@ MONITORING_UI_KAFKA_PASSWORD=<secret>
 MONITORING_UI_DEBUG_LOGGING_ENABLED=false
 MONITORING_UI_DEBUG_LOGGING_LEVEL=Basic
 MONITORING_UI_LOGS_KAFKA_TOPIC=monitoring-ui-api.logs
+# Development-only CSV override; do not use together with MONITORING_UI_EVENTS_TOPICS_JSON.
 MONITORING_UI_EVENTS_TOPICS=cmdbuild.webhooks,zabbix.host.requests,zabbix.host.responses,zabbix.host.bindings
 ```
 

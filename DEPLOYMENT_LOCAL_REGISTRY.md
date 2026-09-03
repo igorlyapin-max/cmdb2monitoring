@@ -200,6 +200,8 @@ docker compose --env-file production.env -f deploy/compose.production.yml up -d
 
 Для `monitoring-ui-api` укажите `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS` как список hostname CMDBuild, Zabbix и IdP через запятую; добавьте hostname PAM/AAPM, только если этот provider включен. В production все эти BFF destinations используют HTTPS. При `MONITORING_UI_SESSION_STORE_MODE=Redis` обязательно задайте `MONITORING_UI_REDIS_URL=rediss://...`; `redis://` в production отклоняется.
 
+Для большого CMDBuild catalog оператор может задать общий timeout следующей catalog sync job через Runtime Settings: `Cmdbuild.Catalog.SyncTimeoutSeconds`, UI-поле `Таймаут синхронизации CMDBuild catalog, сек.`; default `300`, диапазон `60..1800`. Это не настраивает Nginx: gateway route `/api/cmdbuild/catalog/sync` должен иметь `proxy_read_timeout`/`proxy_send_timeout` не менее `300s` и передавать `/api/...` в BFF без удаления префикса.
+
 Compose публикует наружу только webhook/UI bind-порты из env, запускает Docker healthcheck через `/ready` и сохраняет worker state в Docker volumes. Structured JSON logs всегда пишутся в stdout/stderr; Docker logging driver выбирается daemon или платформой заказчика. Kafka log topics остаются включенными как основной structured logging sink проекта. При syslog overlay stderr `monitoring-ui-data-init` доставляется в тот же sink, поэтому ошибка подготовки `/app/data` наблюдаема до старта BFF.
 
 Для отправки container stdout/stderr в syslog подключите явный overlay. `SYSLOG_ADDRESS` не имеет loopback default и должен указывать на доступный endpoint инфраструктуры:
@@ -399,6 +401,8 @@ Log topics нужны, если `ElkLogging:Enabled=true`, `ElkLogging:Mode=Kafk
 | `zabbixrequests2api` | `READ`, `DESCRIBE` на `zabbix.host.requests`; `WRITE`, `DESCRIBE` на `zabbix.host.responses` и `zabbix.host.bindings`; `WRITE`, `DESCRIBE` на log topic | `READ` на group `zabbixrequests2api` |
 | `zabbixbindings2cmdbuild` | `READ`, `DESCRIBE` на `zabbix.host.bindings`; `WRITE`, `DESCRIBE` на log topic | `READ` на group `zabbixbindings2cmdbuild` |
 | `monitoring-ui-api` | При `EventBrowser:Enabled=true`: `READ`, `DESCRIBE` на просматриваемые topics | `READ` на ephemeral groups с prefix `monitoring-ui-api-events-` или на настроенный `EventBrowser:ClientId` prefix |
+
+Production Compose передает в `monitoring-ui-api` `MONITORING_UI_KAFKA_SASL_MECHANISM=${KAFKA_SASL_MECHANISM:-Plain}` и строит `MONITORING_UI_EVENTS_TOPICS_JSON` из фактических env-переменных topics. В список входят четыре pipeline topics, `CMDB_WEBHOOKS_DLQ_TOPIC`, `ZABBIX_REQUESTS_DLQ_TOPIC` и пять structured-log topics, включая `MONITORING_UI_LOG_TOPIC`. Поэтому Kafka principal BFF должен иметь `READ` и `DESCRIBE` на все 11 выбранных имен; topics не обнаруживаются автоматически, чтобы не требовать list/cluster-wide ACL. `MONITORING_UI_EVENTS_TOPICS` допускается только в development и не может использоваться вместе с JSON override.
 
 ## Секреты и учетные записи по сервисам
 

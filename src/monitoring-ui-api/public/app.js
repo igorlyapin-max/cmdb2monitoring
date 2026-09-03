@@ -121,8 +121,6 @@ const defaultQueueMonitorRefreshMs = 5000;
 const defaultConversionRulesFilePath = 'rules/cmdbuild-to-zabbix-host-create.json';
 const cmdbuildLookupBulkBatchSize = 10;
 const cmdbuildLookupBulkNetworkRetryAttempts = 6;
-const cmdbuildCatalogSyncRecoveryAttempts = 18;
-const cmdbuildCatalogSyncRecoveryDelayMs = 5000;
 const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
 const roleViews = {
@@ -519,6 +517,7 @@ const translations = {
     'settings.usersFile': 'Файл пользователей',
     'settings.cmdbuildUrl': 'CMDBuild URL',
     'settings.maxTraversalDepth': 'Максимальная глубина рекурсии domains&reference&lookups',
+    'settings.catalogSyncTimeout': 'Таймаут синхронизации CMDBuild catalog, сек.',
     'settings.maxTraversalDepthNote': 'Изменение заработает только после logout и пересинхронизации CMDBuild catalog.',
     'settings.zabbixApi': 'Zabbix API',
     'settings.zabbixApiKey': 'Zabbix API key',
@@ -1305,6 +1304,7 @@ const translations = {
     'settings.usersFile': 'Users file',
     'settings.cmdbuildUrl': 'CMDBuild URL',
     'settings.maxTraversalDepth': 'Max recursion depth for domains&reference&lookups',
+    'settings.catalogSyncTimeout': 'CMDBuild catalog sync timeout, sec',
     'settings.maxTraversalDepthNote': 'The change takes effect only after logout and CMDBuild catalog resync.',
     'settings.zabbixApi': 'Zabbix API',
     'settings.zabbixApiKey': 'Zabbix API key',
@@ -3327,61 +3327,46 @@ function hostMacroHost(item) {
   return host?.name ?? host?.host ?? item.hostid ?? '';
 }
 
-async function syncCmdbuild() {
-  const beforeStatus = await readCmdbuildCatalogStatusOrNull();
-  let result;
-  try {
-    result = await api('/api/cmdbuild/catalog/sync', { method: 'POST', body: {} });
-  } catch (error) {
-    if (!isFetchNetworkError(error)) {
-      throw error;
-    }
-
-    result = await recoverCmdbuildCatalogSync(beforeStatus);
-    if (!result) {
-      throw error;
-    }
+async function syncCmdbuild(options = {}) {
+  let job = await api('/api/cmdbuild/catalog/sync', { method: 'POST', body: {} });
+  const statusNode = $('#cmdbuildActionStatus');
+  while (job.status === 'running') {
+    setActionStatus(statusNode, cmdbuildCatalogSyncProgressText(job), 'info');
+    await delay(1000);
+    job = await api('/api/cmdbuild/catalog/sync/status', { retryCredentials: false });
   }
+  if (job.status !== 'succeeded') {
+    if (job.error?.code === 'credentials_required' && !options.credentialsPrompted) {
+      await promptSessionCredentials({
+        service: 'cmdbuild',
+        baseUrl: state.user?.cmdbuild?.baseUrl ?? ''
+      });
+      return syncCmdbuild({ credentialsPrompted: true });
+    }
+    const error = new Error(job.error?.message ?? 'CMDBuild catalog synchronization failed.');
+    error.status = job.error?.statusCode ?? 500;
+    error.payload = job;
+    throw error;
+  }
+
+  const result = await api('/api/cmdbuild/catalog');
   renderCmdbuild(result);
   setSessionIndicator('cmdbuildCatalog', 'synced', 'sessionTraffic.synced');
   toast('CMDBuild catalog synced');
   return result;
 }
 
-async function readCmdbuildCatalogStatusOrNull() {
-  try {
-    return await api('/api/cmdbuild/catalog/status', { retryCredentials: false });
-  } catch {
-    return null;
-  }
-}
-
-async function recoverCmdbuildCatalogSync(beforeStatus) {
-  for (let attempt = 0; attempt < cmdbuildCatalogSyncRecoveryAttempts; attempt += 1) {
-    await delay(attempt === 0 ? 1000 : cmdbuildCatalogSyncRecoveryDelayMs);
-    const status = await readCmdbuildCatalogStatusOrNull();
-    if (!isCmdbuildCatalogStatusNewer(status, beforeStatus)) {
-      continue;
-    }
-
-    return await api('/api/cmdbuild/catalog');
-  }
-
-  return null;
-}
-
-function isCmdbuildCatalogStatusNewer(status, beforeStatus) {
-  if (!status?.exists) {
-    return false;
-  }
-
-  const syncedAt = Date.parse(status.syncedAt ?? status.modifiedAt ?? '');
-  const beforeSyncedAt = Date.parse(beforeStatus?.syncedAt ?? beforeStatus?.modifiedAt ?? '');
-  if (Number.isFinite(syncedAt) && Number.isFinite(beforeSyncedAt)) {
-    return syncedAt > beforeSyncedAt;
-  }
-
-  return Boolean(status.syncedAt || status.modifiedAt) && !beforeStatus?.exists;
+function cmdbuildCatalogSyncProgressText(job) {
+  const progress = job.progress ?? {};
+  const phase = job.phase ?? 'starting';
+  const [completed, total] = phase === 'lookup-values'
+    ? [progress.lookupTypesCompleted ?? 0, progress.lookupTypesTotal ?? 0]
+    : phase === 'domains'
+      ? [progress.domainsCompleted ?? 0, progress.domainsTotal ?? 0]
+      : [progress.classesCompleted ?? 0, progress.classesTotal ?? 0];
+  return total > 0
+    ? `CMDBuild catalog sync: ${phase} (${completed}/${total})`
+    : `CMDBuild catalog sync: ${phase}`;
 }
 
 function isFetchNetworkError(error) {
@@ -14012,6 +13997,7 @@ function fillRuntimeSettingsForm(settings, options = {}) {
   form.elements.usersFilePath.value = settings.usersFilePath ?? '';
   form.elements.cmdbuildBaseUrl.value = cmdbuild.baseUrl ?? '';
   form.elements.cmdbuildMaxTraversalDepth.value = clampNumber(cmdbuild.maxTraversalDepth, 2, 2, 5);
+  form.elements.cmdbuildCatalogSyncTimeoutSeconds.value = clampNumber(cmdbuild.catalogSyncTimeoutSeconds, 300, 60, 1800);
   form.elements.zabbixApiEndpoint.value = zabbix.apiEndpoint ?? '';
   form.elements.zabbixApiToken.value = zabbix.apiToken ?? '';
   form.elements.allowDynamicTagsFromCmdbLeaf.checked = Boolean(zabbix.allowDynamicTagsFromCmdbLeaf);
@@ -14035,6 +14021,10 @@ function fillRuntimeSettingsForm(settings, options = {}) {
   form.elements.eventsMaxMessages.value = eventBrowser.maxMessages ?? 50;
   form.elements.eventsReadTimeoutMs.value = eventBrowser.readTimeoutMs ?? 2500;
   form.elements.eventsTopics.value = JSON.stringify(eventBrowser.topics ?? [], null, 2);
+  form.elements.eventsTopics.readOnly = Boolean(eventBrowser.topicsManagedByDeployment);
+  form.elements.eventsTopics.title = eventBrowser.topicsManagedByDeployment
+    ? 'Configured by deployment.'
+    : '';
   resetRuntimeSettingsDirtyState(
     options.statusKey ?? 'settings.runtimeStatusLoaded',
     options.statusLevel ?? 'info'
@@ -14441,7 +14431,8 @@ function readRuntimeSettingsForm() {
   return {
     cmdbuild: {
       baseUrl: cmdbuildBaseUrl,
-      maxTraversalDepth: Number(form.get('cmdbuildMaxTraversalDepth') || 2)
+      maxTraversalDepth: Number(form.get('cmdbuildMaxTraversalDepth') || 2),
+      catalogSyncTimeoutSeconds: Number(form.get('cmdbuildCatalogSyncTimeoutSeconds') || 300)
     },
     zabbix: {
       apiEndpoint: zabbixApiEndpoint,
@@ -15058,7 +15049,20 @@ async function api(path, options = {}) {
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined
   });
-  const payload = await response.json();
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    const error = new Error(`HTTP ${response.status}: expected application/json, got ${contentType || 'missing Content-Type'}.`);
+    error.status = response.status;
+    throw error;
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    const error = new Error(`HTTP ${response.status}: invalid JSON response from API.`);
+    error.status = response.status;
+    throw error;
+  }
   if (!response.ok) {
     if (response.status === 428 && payload.error === 'credentials_required' && options.retryCredentials !== false) {
       const prompted = new Set(options.credentialServices ?? []);

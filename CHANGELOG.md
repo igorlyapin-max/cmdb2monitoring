@@ -4,8 +4,10 @@
 
 ### Fixed
 
+- Production Event Browser now inherits `KAFKA_SASL_MECHANISM` and receives the complete deployment-owned pipeline, DLQ, and structured-log topic list; stale Runtime Settings can no longer replace deployed topic names.
 - Production Compose now initializes `monitoring-ui-data` for the non-root UI runtime user before starting `monitoring-ui-api`, preventing catalog-cache `EACCES` failures on externally created volumes.
 - CMDBuild catalog credentials are validated against REST v4 before saving; rejected credentials and missing CMDBuild permissions now return distinct UI diagnostics.
+- CMDBuild catalog synchronization now runs as a single background job with polling and a configurable `60..1800` second Runtime deadline, preventing reverse-proxy `504` errors on large catalogs; gateway HTML diagnostics no longer surface as JSON parse errors.
 
 ### Added
 

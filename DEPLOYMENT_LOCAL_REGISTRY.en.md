@@ -203,6 +203,8 @@ docker compose --env-file production.env -f deploy/compose.production.yml up -d
 
 The Compose file publishes only webhook/UI bind ports from env, runs Docker healthchecks against `/ready`, and persists worker state in Docker volumes. Structured JSON logs always go to stdout/stderr; the customer platform or Docker daemon selects the Docker logging driver. Kafka log topics stay enabled as the project's primary structured logging sink. With the syslog overlay, `monitoring-ui-data-init` stderr reaches the same sink, making `/app/data` preparation failures observable before the BFF starts.
 
+For a large CMDBuild catalog, the operator can set the total deadline of the next catalog-sync job in Runtime Settings: `Cmdbuild.Catalog.SyncTimeoutSeconds`, UI field `CMDBuild catalog sync timeout, sec`; default `300`, range `60..1800`. This does not configure Nginx: gateway route `/api/cmdbuild/catalog/sync` needs `proxy_read_timeout`/`proxy_send_timeout` of at least `300s` and must pass `/api/...` to the BFF without stripping the prefix.
+
 To send container stdout/stderr to syslog, attach the explicit overlay. `SYSLOG_ADDRESS` has no loopback default and must point to a reachable infrastructure endpoint:
 
 ```bash
@@ -400,6 +402,8 @@ Minimum Kafka ACLs when authentication is enabled:
 | `zabbixrequests2api` | `READ`, `DESCRIBE` on `zabbix.host.requests`; `WRITE`, `DESCRIBE` on `zabbix.host.responses` and `zabbix.host.bindings`; `WRITE`, `DESCRIBE` on the log topic | `READ` on group `zabbixrequests2api` |
 | `zabbixbindings2cmdbuild` | `READ`, `DESCRIBE` on `zabbix.host.bindings`; `WRITE`, `DESCRIBE` on the log topic | `READ` on group `zabbixbindings2cmdbuild` |
 | `monitoring-ui-api` | When `EventBrowser:Enabled=true`: `READ`, `DESCRIBE` on browsed topics | `READ` on ephemeral groups with prefix `monitoring-ui-api-events-` or the configured `EventBrowser:ClientId` prefix |
+
+Production Compose passes `MONITORING_UI_KAFKA_SASL_MECHANISM=${KAFKA_SASL_MECHANISM:-Plain}` to `monitoring-ui-api` and builds `MONITORING_UI_EVENTS_TOPICS_JSON` from the actual topic environment variables. The list contains four pipeline topics, `CMDB_WEBHOOKS_DLQ_TOPIC`, `ZABBIX_REQUESTS_DLQ_TOPIC`, and five structured-log topics including `MONITORING_UI_LOG_TOPIC`. The BFF Kafka principal therefore needs `READ` and `DESCRIBE` on all 11 selected names; topics are not discovered automatically so no list or cluster-wide ACL is required. `MONITORING_UI_EVENTS_TOPICS` is development-only and cannot be combined with the JSON override.
 
 ## Secrets And Accounts By Service
 

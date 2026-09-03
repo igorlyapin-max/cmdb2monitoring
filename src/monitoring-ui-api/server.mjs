@@ -4,7 +4,7 @@ import { connect as connectNet } from 'node:net';
 import { connect as connectTls } from 'node:tls';
 import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile, stat, unlink } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, unlink, rename } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Kafka, logLevel } from 'kafkajs';
@@ -17,6 +17,12 @@ import {
   writeRulesAtomically
 } from './lib/active-rules-publication.mjs';
 import { applyHealthEndpointsConfig } from './lib/health-endpoints-config.mjs';
+import {
+  applyEventBrowserTopicsEnvironmentOverride,
+  hasDeploymentEventTopicsOverride,
+  kafkaSaslMechanism,
+  validateEventBrowserConfiguration
+} from './lib/event-browser-config.mjs';
 import {
   assertConfiguredEndpointOverride,
   assertOutboundEndpoint,
@@ -53,6 +59,7 @@ const serviceCounters = new Map();
 const sessionStore = await createSessionStore('session');
 const oauthStateStore = await createSessionStore('oauth');
 const runActiveRulesOperation = createSerialExecutor();
+let cmdbuildCatalogSyncJob = createCmdbuildCatalogSyncJob();
 let samlMetadataCache = null;
 
 const roles = {
@@ -956,6 +963,16 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'GET' && path === '/api/cmdbuild/catalog/sync/status') {
+    requireRole(session, response, ['editor', 'admin']);
+    if (response.writableEnded) {
+      return;
+    }
+
+    sendJson(response, 200, publicCmdbuildCatalogSyncJob());
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/cmdbuild/catalog') {
     requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
@@ -983,7 +1000,7 @@ async function routeApi(request, response, url, path) {
       return;
     }
 
-    sendJson(response, 200, await syncCmdbuildCatalog(session));
+    sendJson(response, 202, startCmdbuildCatalogSync(session));
     return;
   }
 
@@ -1308,6 +1325,7 @@ async function loadConfig() {
 
   await applyPersistedUiSettings(merged);
   applyEnvOverrides(merged);
+  applyEventBrowserTopicsEnvironmentOverride(merged, { environment });
   applyHealthEndpointsConfig(merged, { environment });
   applyPamCompatibilityEnvironment(merged);
   applySecretCompanionReferences(merged);
@@ -1714,11 +1732,6 @@ function applyEnvOverrides(target) {
     }
 
     setPath(target, path, parseEnvValue(process.env[envName]));
-  }
-
-  if (process.env.MONITORING_UI_EVENTS_TOPICS !== undefined) {
-    target.EventBrowser.Topics = normalizeStringArray(process.env.MONITORING_UI_EVENTS_TOPICS)
-      .map(name => ({ Name: name, Service: '', Direction: '', Description: '' }));
   }
 
   if (process.env.MONITORING_UI_OUTBOUND_ALLOWED_HOSTS !== undefined) {
@@ -3147,6 +3160,12 @@ async function readKafkaEvents(url) {
     };
   }
 
+  try {
+    validateEventBrowserConfiguration(eventBrowser);
+  } catch (error) {
+    throw httpError(500, 'kafka_event_browser_config_invalid', error.message);
+  }
+
   if (topics.length === 0) {
     return {
       items: [],
@@ -3339,7 +3358,7 @@ function kafkaSaslOptions(eventBrowser) {
 
   const mechanism = kafkaSaslMechanism(eventBrowser.SaslMechanism);
   if (!mechanism) {
-    throw httpError(500, 'kafka_event_browser_config_invalid', 'EventBrowser.SaslMechanism is not supported by monitoring-ui-api.');
+    throw httpError(500, 'kafka_event_browser_config_invalid', 'EventBrowser.SaslMechanism must be Plain, ScramSha256, or ScramSha512 for a SASL Kafka protocol.');
   }
 
   if (isBlank(eventBrowser.Username) || isBlank(eventBrowser.Password)) {
@@ -3351,15 +3370,6 @@ function kafkaSaslOptions(eventBrowser) {
     username: eventBrowser.Username,
     password: eventBrowser.Password
   };
-}
-
-function kafkaSaslMechanism(value) {
-  const normalized = String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  return {
-    plain: 'plain',
-    scramsha256: 'scram-sha-256',
-    scramsha512: 'scram-sha-512'
-  }[normalized];
 }
 
 async function disconnectKafka(client) {
@@ -4145,9 +4155,137 @@ async function readZabbixVersion(apiEndpoint) {
   }
 }
 
-async function syncCmdbuildCatalog(session) {
+function createCmdbuildCatalogSyncJob() {
+  return {
+    id: '',
+    status: 'idle',
+    phase: 'idle',
+    timeoutSeconds: cmdbuildCatalogSyncTimeoutSeconds(),
+    startedAt: null,
+    completedAt: null,
+    progress: {},
+    error: null
+  };
+}
+
+function publicCmdbuildCatalogSyncJob() {
+  const job = cmdbuildCatalogSyncJob;
+  const startedAtMs = Date.parse(job.startedAt ?? '');
+  const endedAtMs = job.completedAt ? Date.parse(job.completedAt) : Date.now();
+  const elapsedMs = Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
+    ? Math.max(0, endedAtMs - startedAtMs)
+    : 0;
+  return {
+    operationId: job.id || null,
+    status: job.status,
+    phase: job.phase,
+    timeoutSeconds: job.timeoutSeconds,
+    startedAt: job.startedAt,
+    completedAt: job.completedAt,
+    elapsedMs,
+    progress: { ...job.progress },
+    error: job.error ? { ...job.error } : null
+  };
+}
+
+function startCmdbuildCatalogSync(session) {
+  if (cmdbuildCatalogSyncJob.status === 'running') {
+    return publicCmdbuildCatalogSyncJob();
+  }
+
+  const credentials = snapshotCmdbuildSessionCredentials(session);
+  const job = {
+    id: randomUUID(),
+    status: 'running',
+    phase: 'starting',
+    timeoutSeconds: cmdbuildCatalogSyncTimeoutSeconds(),
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    progress: {},
+    error: null
+  };
+  cmdbuildCatalogSyncJob = job;
+  void runCmdbuildCatalogSyncJob(job, credentials);
+  return publicCmdbuildCatalogSyncJob();
+}
+
+function snapshotCmdbuildSessionCredentials(session) {
+  const credentials = requireCmdbuildSessionCredentials(session);
+  return {
+    baseUrl: credentials.baseUrl ?? '',
+    username: credentials.username ?? '',
+    password: credentials.password ?? '',
+    accessToken: credentials.accessToken ?? ''
+  };
+}
+
+async function runCmdbuildCatalogSyncJob(job, credentials) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(httpError(
+      408,
+      'cmdbuild_catalog_sync_timeout',
+      `CMDBuild catalog synchronization exceeded ${job.timeoutSeconds} seconds.`));
+  }, job.timeoutSeconds * 1000);
   try {
-    const catalog = await syncCmdbuildCatalogCore(session);
+    await syncCmdbuildCatalogNow(null, {
+      credentials,
+      signal: controller.signal,
+      onProgress: progress => updateCmdbuildCatalogSyncJob(job, progress)
+    });
+    updateCmdbuildCatalogSyncJob(job, {
+      status: 'succeeded',
+      phase: 'completed',
+      completedAt: new Date().toISOString()
+    });
+    logger.info('CMDBuild catalog synchronization completed', {
+      operationId: job.id,
+      timeoutSeconds: job.timeoutSeconds,
+      elapsedMs: Date.now() - Date.parse(job.startedAt),
+      progress: job.progress
+    });
+  } catch (error) {
+    const statusCode = error?.statusCode ?? 500;
+    updateCmdbuildCatalogSyncJob(job, {
+      status: 'failed',
+      phase: 'failed',
+      completedAt: new Date().toISOString(),
+      error: {
+        code: error?.code ?? 'cmdbuild_catalog_sync_failed',
+        message: error instanceof Error ? error.message : 'CMDBuild catalog synchronization failed.',
+        statusCode
+      }
+    });
+    logger.warn('CMDBuild catalog synchronization failed', {
+      operationId: job.id,
+      timeoutSeconds: job.timeoutSeconds,
+      elapsedMs: Date.now() - Date.parse(job.startedAt),
+      code: error?.code ?? 'cmdbuild_catalog_sync_failed',
+      statusCode
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function updateCmdbuildCatalogSyncJob(job, update) {
+  if (cmdbuildCatalogSyncJob.id !== job.id) {
+    return;
+  }
+
+  if (update.progress) {
+    Object.assign(job.progress, update.progress);
+  }
+  for (const field of ['status', 'phase', 'completedAt', 'error']) {
+    if (update[field] !== undefined) {
+      job[field] = update[field];
+    }
+  }
+}
+
+async function syncCmdbuildCatalogNow(session, options = {}) {
+  try {
+    const catalog = await syncCmdbuildCatalogCore(session, options);
     incrementCounter('cmdbuild_catalog_sync_success');
     return catalog;
   } catch (error) {
@@ -4156,11 +4294,16 @@ async function syncCmdbuildCatalog(session) {
   }
 }
 
-async function syncCmdbuildCatalogCore(session) {
-  const credentials = requireCmdbuildSessionCredentials(session);
+async function syncCmdbuildCatalogCore(session, options = {}) {
+  const credentials = options.credentials ?? requireCmdbuildSessionCredentials(session);
+  const signal = options.signal;
+  const reportProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
   const catalogScope = config.Cmdbuild.Catalog.IncludeInactiveClasses ? 'administration' : 'management';
-  const classesResult = await cmdbuildGet(baseUrl, cmdbuildRestPath('/classes', catalogScope), credentials);
+  const get = path => cmdbuildGet(baseUrl, path, credentials, {}, { signal });
+  assertCmdbuildCatalogSyncActive(signal);
+  reportProgress({ phase: 'classes' });
+  const classesResult = await get(cmdbuildRestPath('/classes', catalogScope));
   const classes = normalizeCmdbuildList(classesResult).map(item => ({
     name: item.name ?? item._id ?? item.id,
     description: item.description ?? item.label ?? '',
@@ -4173,46 +4316,51 @@ async function syncCmdbuildCatalogCore(session) {
     ? classes
     : classes.filter(item => item.active !== false);
   const attributes = [];
-  for (const cmdbClass of selectedClasses.slice(0, 250)) {
+  const selectedClassSlice = selectedClasses.slice(0, 250);
+  reportProgress({ phase: 'attributes', classesTotal: selectedClassSlice.length, classesCompleted: 0 });
+  for (const [index, cmdbClass] of selectedClassSlice.entries()) {
+    assertCmdbuildCatalogSyncActive(signal);
     try {
-      const attributesResult = await cmdbuildGet(
-        baseUrl,
-        cmdbuildRestPath(`/classes/${encodeURIComponent(cmdbClass.name)}/attributes`, catalogScope),
-        credentials);
+      const attributesResult = await get(cmdbuildRestPath(`/classes/${encodeURIComponent(cmdbClass.name)}/attributes`, catalogScope));
       attributes.push({
         className: cmdbClass.name,
         items: normalizeCmdbuildList(attributesResult)
       });
     } catch (error) {
+      assertCmdbuildCatalogSyncActive(signal);
       attributes.push({
         className: cmdbClass.name,
         error: error instanceof Error ? error.message : 'request_failed',
         items: []
       });
     }
+    reportProgress({ classesCompleted: index + 1 });
   }
 
   let lookups = [];
   if (config.Cmdbuild.Catalog.IncludeLookupValues) {
     try {
-      const lookupTypes = normalizeCmdbuildList(await cmdbuildGet(baseUrl, cmdbuildRestPath('/lookup_types'), credentials));
-      for (const lookup of lookupTypes.slice(0, 500)) {
+      assertCmdbuildCatalogSyncActive(signal);
+      const lookupTypes = normalizeCmdbuildList(await get(cmdbuildRestPath('/lookup_types')));
+      const lookupTypeSlice = lookupTypes.slice(0, 500);
+      reportProgress({ phase: 'lookup-values', lookupTypesTotal: lookupTypeSlice.length, lookupTypesCompleted: 0 });
+      for (const [index, lookup] of lookupTypeSlice.entries()) {
+        assertCmdbuildCatalogSyncActive(signal);
         const lookupName = lookup.name ?? lookup._id ?? lookup.id;
         if (isBlank(lookupName)) {
+          reportProgress({ lookupTypesCompleted: index + 1 });
           continue;
         }
 
         try {
-          const valuesResult = await cmdbuildGet(
-            baseUrl,
-            cmdbuildRestPath(`/lookup_types/${encodeURIComponent(lookupName)}/values`),
-            credentials);
+          const valuesResult = await get(cmdbuildRestPath(`/lookup_types/${encodeURIComponent(lookupName)}/values`));
           lookups.push({
             ...lookup,
             name: lookup.name ?? lookupName,
             values: normalizeCmdbuildList(valuesResult)
           });
         } catch (error) {
+          assertCmdbuildCatalogSyncActive(signal);
           lookups.push({
             ...lookup,
             name: lookup.name ?? lookupName,
@@ -4220,25 +4368,29 @@ async function syncCmdbuildCatalogCore(session) {
             valuesError: error instanceof Error ? error.message : 'request_failed'
           });
         }
+        reportProgress({ lookupTypesCompleted: index + 1 });
       }
-    } catch {
+    } catch (error) {
+      assertCmdbuildCatalogSyncActive(signal);
       lookups = [];
     }
   }
 
   let domains = [];
   try {
-    const domainSummaries = normalizeCmdbuildList(await cmdbuildGet(baseUrl, cmdbuildRestPath('/domains'), credentials));
-    for (const summary of domainSummaries.slice(0, 500)) {
+    assertCmdbuildCatalogSyncActive(signal);
+    const domainSummaries = normalizeCmdbuildList(await get(cmdbuildRestPath('/domains')));
+    const domainSlice = domainSummaries.slice(0, 500);
+    reportProgress({ phase: 'domains', domainsTotal: domainSlice.length, domainsCompleted: 0 });
+    for (const [index, summary] of domainSlice.entries()) {
+      assertCmdbuildCatalogSyncActive(signal);
       const domainName = summary.name ?? summary._id ?? summary.id ?? '';
       let item = summary;
       if (!isBlank(domainName)) {
         try {
-          item = normalizeCmdbuildItem(await cmdbuildGet(
-            baseUrl,
-            cmdbuildRestPath(`/domains/${encodeURIComponent(domainName)}`),
-            credentials)) ?? summary;
+          item = normalizeCmdbuildItem(await get(cmdbuildRestPath(`/domains/${encodeURIComponent(domainName)}`))) ?? summary;
         } catch (error) {
+          assertCmdbuildCatalogSyncActive(signal);
           item = {
             ...summary,
             detailError: error instanceof Error ? error.message : 'request_failed'
@@ -4247,10 +4399,12 @@ async function syncCmdbuildCatalogCore(session) {
       }
 
       domains.push(normalizeCmdbuildDomain(item));
+      reportProgress({ domainsCompleted: index + 1 });
     }
 
     domains = domains.filter(item => !isBlank(item.name) || !isBlank(item.source) || !isBlank(item.destination));
-  } catch {
+  } catch (error) {
+    assertCmdbuildCatalogSyncActive(signal);
     domains = [];
   }
 
@@ -4263,9 +4417,18 @@ async function syncCmdbuildCatalogCore(session) {
     lookups,
     domains
   };
+  assertCmdbuildCatalogSyncActive(signal);
   await writeCatalogCache(config.Cmdbuild.Catalog.CacheFilePath, catalog);
 
   return catalog;
+}
+
+function assertCmdbuildCatalogSyncActive(signal) {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : httpError(408, 'cmdbuild_catalog_sync_timeout', 'CMDBuild catalog synchronization timed out.');
+  }
 }
 
 async function applyCmdbuildLookupBulkChange(session, payload = {}) {
@@ -4849,7 +5012,7 @@ async function analyzeCmdbuildAuditModel(session, payload = {}) {
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
   const rules = await readCurrentRules();
-  const catalog = await syncCmdbuildCatalog(session);
+  const catalog = await syncCmdbuildCatalogNow(session);
   const parentClass = stringOrDefault(payload.parentClass, defaultAuditBindingParentClass(catalog));
   const plan = buildCmdbuildAuditModelPlan(rules.content ?? rules, catalog, parentClass);
 
@@ -4871,7 +5034,7 @@ async function applyCmdbuildAuditModel(session, payload = {}) {
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
   const rules = await readCurrentRules();
-  let catalog = await syncCmdbuildCatalog(session);
+  let catalog = await syncCmdbuildCatalogNow(session);
   const parentClass = stringOrDefault(payload.parentClass, defaultAuditBindingParentClass(catalog));
   const before = buildCmdbuildAuditModelPlan(rules.content ?? rules, catalog, parentClass);
   const results = [];
@@ -4936,7 +5099,7 @@ async function applyCmdbuildAuditModel(session, payload = {}) {
     });
   }
 
-  catalog = await syncCmdbuildCatalog(session);
+  catalog = await syncCmdbuildCatalogNow(session);
   const after = buildCmdbuildAuditModelPlan(rules.content ?? rules, catalog, parentClass);
   return {
     appliedAt: new Date().toISOString(),
@@ -4961,7 +5124,7 @@ async function runQuickAudit(session, payload = {}) {
   const zabbixEndpoint = zabbixCredentials.apiEndpoint || config.Zabbix.ApiEndpoint;
   const rulesDocument = await readCurrentRules();
   const rules = rulesDocument.content ?? rulesDocument;
-  const cmdbuildCatalog = await syncCmdbuildCatalog(session);
+  const cmdbuildCatalog = await syncCmdbuildCatalogNow(session);
   const zabbixToken = await resolveZabbixToken(zabbixEndpoint, zabbixCredentials);
   const scope = quickAuditScope(cmdbuildCatalog, rules, payload);
   const maxCardsPerClass = clampInt(payload.maxCards, 100, 1, 500);
@@ -6171,8 +6334,8 @@ async function zabbixRawCall(apiEndpoint, token, body) {
   return json;
 }
 
-async function cmdbuildGet(baseUrl, path, credentials, headers = {}) {
-  return cmdbuildRequest(baseUrl, path, credentials, { headers });
+async function cmdbuildGet(baseUrl, path, credentials, headers = {}, options = {}) {
+  return cmdbuildRequest(baseUrl, path, credentials, { ...options, headers });
 }
 
 async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
@@ -6196,6 +6359,7 @@ async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
   const authorization = !isBlank(credentials.accessToken)
     ? `Bearer ${credentials.accessToken}`
     : `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`;
+  const requestTimeout = AbortSignal.timeout(10000);
   const response = await fetch(`${withoutTrailingSlash(endpoint)}${requestPath}`, {
     method: options.method ?? 'GET',
     headers: {
@@ -6205,7 +6369,7 @@ async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
       authorization
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
-    signal: AbortSignal.timeout(10000)
+    signal: options.signal ? AbortSignal.any([options.signal, requestTimeout]) : requestTimeout
   });
 
   if (response.status === 401) {
@@ -6255,7 +6419,16 @@ async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
   try {
     return JSON.parse(text);
   } catch {
-    return text;
+    throw httpError(
+      502,
+      'cmdbuild_invalid_response',
+      `CMDBuild returned a non-JSON response for ${requestPath}.`,
+      {
+        service: 'cmdbuild',
+        path: requestPath,
+        statusCode: response.status,
+        contentType: response.headers.get('content-type') ?? ''
+      });
   }
 }
 
@@ -6426,11 +6599,16 @@ async function saveRuntimeSettings(payload) {
 
   const nextConfig = structuredClone(config);
   applyRuntimeSettings(nextConfig, runtime);
+  applyEventBrowserTopicsEnvironmentOverride(nextConfig, { environment });
   validateCmdbuildApiConfig(nextConfig);
   validateRuntimeSecurityConfig(nextConfig);
+  validateEventBrowserConfiguration(nextConfig.EventBrowser);
 
   delete persisted.auth;
   Object.assign(persisted, runtime);
+  if (hasDeploymentEventTopicsOverride()) {
+    delete persisted.eventBrowser?.topics;
+  }
   await writePersistedUiSettings(persisted);
   clearResolvedSecretReferences([
     'Zabbix.ApiToken',
@@ -6439,6 +6617,7 @@ async function saveRuntimeSettings(payload) {
     'EventBrowser.Password'
   ]);
   applyRuntimeSettings(config, runtime);
+  applyEventBrowserTopicsEnvironmentOverride(config, { environment });
   await resolveSecretReferences(config, 'monitoring-ui-api');
 
   return publicRuntimeSettings();
@@ -6571,10 +6750,13 @@ function normalizeRuntimeSettingsPayload(payload = {}) {
   const zabbix = payload.zabbix ?? {};
   const auditStorage = payload.auditStorage ?? {};
   const currentMaxTraversalDepth = cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth);
+  const currentCatalogSyncTimeout = cmdbuildCatalogSyncTimeoutSeconds(config.Cmdbuild?.Catalog?.SyncTimeoutSeconds);
   const result = {
     cmdbuild: {
       baseUrl: cmdbuild.baseUrl ?? '',
-      maxTraversalDepth: cmdbuildTraversalMaxDepth(cmdbuild.maxTraversalDepth ?? currentMaxTraversalDepth)
+      maxTraversalDepth: cmdbuildTraversalMaxDepth(cmdbuild.maxTraversalDepth ?? currentMaxTraversalDepth),
+      catalogSyncTimeoutSeconds: cmdbuildCatalogSyncTimeoutSeconds(
+        cmdbuild.catalogSyncTimeoutSeconds ?? currentCatalogSyncTimeout)
     },
     zabbix: {
       apiEndpoint: zabbix.apiEndpoint ?? '',
@@ -6739,6 +6921,8 @@ function applyRuntimeSettings(target, persisted = {}) {
     target.Cmdbuild.ApiVersion = 'v4';
     target.Cmdbuild.Catalog.MaxTraversalDepth = cmdbuildTraversalMaxDepth(
       persisted.cmdbuild.maxTraversalDepth ?? target.Cmdbuild.Catalog.MaxTraversalDepth);
+    target.Cmdbuild.Catalog.SyncTimeoutSeconds = cmdbuildCatalogSyncTimeoutSeconds(
+      persisted.cmdbuild.catalogSyncTimeoutSeconds ?? target.Cmdbuild.Catalog.SyncTimeoutSeconds);
     delete target.Cmdbuild.UseIdp;
     delete target.Cmdbuild.ServiceAccount;
   }
@@ -7463,7 +7647,8 @@ function publicRuntimeSettings() {
     usersFilePath: publicUsersFilePath(),
     cmdbuild: {
       baseUrl: config.Cmdbuild.BaseUrl ?? '',
-      maxTraversalDepth: cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth)
+      maxTraversalDepth: cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth),
+      catalogSyncTimeoutSeconds: cmdbuildCatalogSyncTimeoutSeconds(config.Cmdbuild?.Catalog?.SyncTimeoutSeconds)
     },
     zabbix: {
       apiEndpoint: config.Zabbix.ApiEndpoint ?? '',
@@ -7490,7 +7675,8 @@ function publicRuntimeSettings() {
       sslRejectUnauthorized: eventBrowser.SslRejectUnauthorized !== false,
       maxMessages: eventBrowser.MaxMessages ?? 50,
       readTimeoutMs: eventBrowser.ReadTimeoutMs ?? 2500,
-      topics: publicEventTopics()
+      topics: publicEventTopics(),
+      topicsManagedByDeployment: hasDeploymentEventTopicsOverride()
     }
   };
 }
@@ -8201,8 +8387,15 @@ async function tryReadCatalogCache(cachePath) {
 
 async function writeCatalogCache(cachePath, catalog) {
   const fullPath = resolveServiceFile(cachePath);
+  const temporaryPath = `${fullPath}.${randomUUID()}.tmp`;
   await mkdir(resolveServicePath(cachePath, true), { recursive: true });
-  await writeFile(fullPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
+    await rename(temporaryPath, fullPath);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => {});
+    throw error;
+  }
 }
 
 function withCatalogDefaults(catalog) {
@@ -9542,6 +9735,10 @@ function stringOrDefault(value, fallback) {
 
 function cmdbuildTraversalMaxDepth(value) {
   return clampInt(value, 2, 2, 5);
+}
+
+function cmdbuildCatalogSyncTimeoutSeconds(value = config?.Cmdbuild?.Catalog?.SyncTimeoutSeconds) {
+  return clampInt(value, 300, 60, 1800);
 }
 
 function sleep(ms) {
