@@ -1,28 +1,51 @@
 # Карта метрик
 
-Все backend-сервисы публикуют Prometheus text format на `GET /metrics`. Базовый контракт:
+## Контракт сбора
 
-- `cmdb2monitoring_service_started_at_seconds{service}` - время старта сервиса;
-- `cmdb2monitoring_events_total{service,name}` - счетчики событий сервиса;
-- `cmdb2monitoring_queue_*` - queue lag / DLQ depth gauges, которые публикует `monitoring-ui-api` по настройкам `QueueMonitor`.
+Prometheus выполняет pull-сбор с `GET /metrics` всех backend-сервисов. Endpoint отвечает в Prometheus text format (`text/plain; version=0.0.4; charset=utf-8`). Период scrape, retention и контурный адрес Prometheus определяет deployment; для текущих dev endpoint значений периода нет, поэтому он обозначен как `Требует согласования`.
+
+| Collection ID | Information flow | Коллектор | Источник | Endpoint dev | Протокол и ожидаемый ответ | Период | Поведение при ошибке | Назначение |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| MC-001 | IF-023 | Prometheus | cmdbwebhooks2kafka | `GET http://localhost:5080/metrics` | HTTP, Prometheus text format | Требует согласования | target становится недоступен; `Cmdb2MonitoringServiceMetricsMissing` срабатывает после 3 минут отсутствия базовой метрики | Контроль приема CMDBuild webhook |
+| MC-002 | IF-023 | Prometheus | cmdbkafka2zabbix | `GET http://localhost:5081/metrics` | HTTP, Prometheus text format | Требует согласования | target становится недоступен; `Cmdb2MonitoringServiceMetricsMissing` срабатывает после 3 минут отсутствия базовой метрики | Контроль конвертации и Kafka pipeline |
+| MC-003 | IF-023 | Prometheus | zabbixrequests2api | `GET http://localhost:5082/metrics` | HTTP, Prometheus text format | Требует согласования | target становится недоступен; `Cmdb2MonitoringServiceMetricsMissing` срабатывает после 3 минут отсутствия базовой метрики | Контроль вызовов Zabbix API |
+| MC-004 | IF-023 | Prometheus | zabbixbindings2cmdbuild | `GET http://localhost:5083/metrics` | HTTP, Prometheus text format | Требует согласования | target становится недоступен; `Cmdb2MonitoringServiceMetricsMissing` срабатывает после 3 минут отсутствия базовой метрики | Контроль обратной записи Zabbix binding в CMDBuild |
+| MC-005 | IF-023 | Prometheus | monitoring-ui-api | `GET http://localhost:5090/metrics` | HTTP, Prometheus text format | Требует согласования | target становится недоступен; для queue state error предусмотрен `Cmdb2MonitoringQueueStateError` | Контроль BFF, catalog sync и Kafka queue monitor |
+
+`/metrics` не заменяет `/health` и `/ready`: отсутствие scrape означает недоступность наблюдаемости, но не является проверкой доступности внешних Kafka, CMDBuild или Zabbix. Их ошибки отражаются сервисными метриками и отдельными smoke-проверками.
+
+## Правила проектирования
+
+- Counter используется для накопленных событий, gauge - для текущего состояния или величины, histogram - для длительности в секундах.
+- Разрешены только ограниченные labels из кода или deployment-конфигурации: `service`, `name`, `pipeline`, `topic`, `mode`, `threshold`, а для планируемых метрик - `role`, `category`, `dependency`, `operation`, `result`, `version`, `revision`, `provenance`.
+- `topic` допустим только для конечного списка pipeline/topic из `QueueMonitor` deployment-конфигурации. Нельзя добавлять в labels идентификаторы объектов, пользователей, payload, текст ошибок, токены либо динамически обнаруженные topic.
+- Поле `name` у `cmdb2monitoring_events_total` - конечное перечисление имен событий, определенное кодом. Новое значение должно быть добавлено в эту карту и проверено на отсутствие роста cardinality.
 
 Prometheus alert rules находятся в `deploy/observability/prometheus/cmdb2monitoring-alerts.yml`, Grafana dashboard - в `deploy/observability/grafana/cmdb2monitoring-dashboard.json`.
 
-| Metric ID | Связанные потоки | Компонент | Метрика | Назначение | Статус |
-| --- | --- | --- | --- | --- | --- |
-| M-001 | IF-001, IF-002 | cmdbwebhooks2kafka | `cmdb2monitoring_events_total{name="webhook_accepted"}` | Количество принятых webhook | Реализовано |
-| M-002 | IF-001 | cmdbwebhooks2kafka | `cmdb2monitoring_events_total{name=~"webhook_rejected_.*"}` | Ошибки авторизации, rate limit и JSON | Реализовано |
-| M-003 | IF-002, IF-003 | cmdbkafka2zabbix | `cmdb2monitoring_events_total{name="conversion_published"}` | Успешные публикации Zabbix request | Реализовано |
-| M-004 | IF-002 | cmdbkafka2zabbix | `cmdb2monitoring_events_total{name="conversion_skipped"}` | Некорректные/неподдерживаемые события | Реализовано |
-| M-005 | IF-004, IF-005 | zabbixrequests2api | `cmdb2monitoring_events_total{name="zabbix_request_success"}` | Успешные вызовы Zabbix API | Реализовано |
-| M-006 | IF-003, IF-004, IF-005 | zabbixrequests2api | `cmdb2monitoring_events_total{name="zabbix_request_failed"}` | Ошибки API/валидации | Реализовано |
-| M-007 | IF-003, IF-004, IF-005 | zabbixrequests2api | processing latency | Время обработки объекта | Backlog |
-| M-008 | IF-002, IF-003, IF-005 | monitoring-ui-api / Kafka | `cmdb2monitoring_queue_lag{mode="Lag"}` | Отставание consumer pipeline по high watermark и worker state | Реализовано |
-| M-009 | IF-009 | monitoring-ui-api | active session count | Количество активных server-side sessions | Backlog |
-| M-010 | IF-010 | monitoring-ui-api | `cmdb2monitoring_events_total{name=~"auth_.*|authorization_failure"}` | Контроль локальной, LDAP и IdP авторизации | Реализовано |
-| M-011 | IF-011, IF-012, IF-014 | monitoring-ui-api | `cmdb2monitoring_events_total{name=~".*_catalog_sync_.*"}` | Контроль синхронизации CMDBuild/Zabbix catalog | Реализовано |
-| M-012 | IF-013, IF-014, IF-019 | monitoring-ui-api | `cmdb2monitoring_events_total{name=~"rules_reload_.*"}` | Контроль reload conversion rules через UI/BFF | Реализовано |
-| M-013 | IF-018 | cmdbkafka2zabbix | cmdb resolver duration/error count | Контроль чтения CMDBuild reference/lookup/domain leaf-значений | Backlog |
-| M-014 | IF-021, IF-022 | zabbixbindings2cmdbuild | `cmdb2monitoring_events_total{name=~"binding_.*"}` | Контроль обратной записи `zabbix_main_hostid` и `ZabbixHostBinding` | Реализовано |
-| M-015 | IF-002, IF-003, IF-005 | cmdbkafka2zabbix / zabbixrequests2api | `cmdb2monitoring_events_total{name="dead_letter_published"}` | Контроль публикации DLQ сообщений | Реализовано |
-| M-016 | IF-002, IF-003, IF-005 | monitoring-ui-api / Kafka | `cmdb2monitoring_queue_lag{mode="TopicDepth"}` | DLQ depth по Kafka low/high watermark | Реализовано |
+## Каталог метрик
+
+| Metric ID | Связанные потоки | Компонент | Метрика, тип, единица | Допустимые labels | Назначение | Alert/dashboard | Статус |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| M-001 | IF-001, IF-002, IF-023 | cmdbwebhooks2kafka | `cmdb2monitoring_events_total{name="webhook_accepted"}`, counter, события | `service`, `name` | Количество принятых webhook | Grafana `Service events` | Реализовано |
+| M-002 | IF-001, IF-023 | cmdbwebhooks2kafka | `cmdb2monitoring_events_total{name=~"webhook_rejected_.*"}`, counter, события | `service`, `name` | Ошибки авторизации, rate limit и JSON | `Cmdb2MonitoringWebhookAuthRejected`; Grafana `Service events` | Реализовано |
+| M-003 | IF-002, IF-003, IF-023 | cmdbkafka2zabbix | `cmdb2monitoring_events_total{name="conversion_published"}`, counter, события | `service`, `name` | Успешные публикации Zabbix request | Grafana `Service events` | Реализовано |
+| M-004 | IF-002, IF-023 | cmdbkafka2zabbix | `cmdb2monitoring_events_total{name="conversion_skipped"}`, counter, события | `service`, `name` | Некорректные или неподдерживаемые события | Grafana `Service events` | Реализовано |
+| M-005 | IF-004, IF-005, IF-023 | zabbixrequests2api | `cmdb2monitoring_events_total{name="zabbix_request_success"}`, counter, события | `service`, `name` | Успешные вызовы Zabbix API | Grafana `Service events` | Реализовано |
+| M-006 | IF-003, IF-004, IF-005, IF-023 | zabbixrequests2api | `cmdb2monitoring_events_total{name="zabbix_request_failed"}`, counter, события | `service`, `name` | Ошибки API или валидации | `Cmdb2MonitoringZabbixRequestFailures`; Grafana `Service events` | Реализовано |
+| M-007 | IF-003, IF-004, IF-005, IF-023 | zabbixrequests2api | `cmdb2monitoring_zabbix_request_duration_seconds`, histogram, секунды | `service`, `operation`, `result` | Длительность запросов к Zabbix API | Требует alert/dashboard по SLO | Требуется реализация |
+| M-008 | IF-002, IF-003, IF-005, IF-023 | monitoring-ui-api / Kafka | `cmdb2monitoring_queue_lag{mode="Lag"}`, gauge, сообщения | `service`, `pipeline`, `topic`, `mode` | Отставание consumer pipeline по high watermark и worker state | `Cmdb2MonitoringQueueCritical`, `Cmdb2MonitoringQueueStateError`; Grafana `Kafka queue lag` | Реализовано |
+| M-009 | IF-009, IF-023 | monitoring-ui-api | `cmdb2monitoring_active_sessions`, gauge, сессии | `service` | Количество активных server-side sessions | Требует dashboard | Требуется реализация |
+| M-010 | IF-010, IF-023 | monitoring-ui-api | `cmdb2monitoring_events_total{name=~"auth_.*|authorization_failure"}`, counter, события | `service`, `name` | Контроль локальной, LDAP и IdP авторизации | `Cmdb2MonitoringUiAuthFailures`; Grafana `Authentication failures` | Реализовано |
+| M-011 | IF-011, IF-012, IF-014, IF-023 | monitoring-ui-api | `cmdb2monitoring_events_total{name=~".*_catalog_sync_.*"}`, counter, события | `service`, `name` | Контроль синхронизации CMDBuild/Zabbix catalog | `Cmdb2MonitoringCatalogSyncFailures`; Grafana `Catalog and rules operations` | Реализовано |
+| M-012 | IF-013, IF-014, IF-019, IF-023 | monitoring-ui-api | `cmdb2monitoring_events_total{name=~"rules_reload_.*"}`, counter, события | `service`, `name` | Контроль reload conversion rules через UI/BFF | `Cmdb2MonitoringRulesReloadFailures`; Grafana `Catalog and rules operations` | Реализовано |
+| M-013 | IF-018, IF-023 | cmdbkafka2zabbix | `cmdb2monitoring_cmdb_resolver_duration_seconds`, histogram, секунды; `cmdb2monitoring_cmdb_resolver_errors_total`, counter, события | `service`, `result` | Контроль чтения CMDBuild reference/lookup/domain leaf-значений | Требует alert/dashboard по SLO и ошибкам | Требуется реализация |
+| M-014 | IF-021, IF-022, IF-023 | zabbixbindings2cmdbuild | `cmdb2monitoring_events_total{name=~"binding_.*"}`, counter, события | `service`, `name` | Контроль обратной записи `zabbix_main_hostid` и `ZabbixHostBinding` | Grafana `Service events` | Реализовано |
+| M-015 | IF-002, IF-003, IF-005, IF-023 | cmdbkafka2zabbix / zabbixrequests2api | `cmdb2monitoring_events_total{name="dead_letter_published"}`, counter, события | `service`, `name` | Контроль публикации DLQ сообщений | `Cmdb2MonitoringDeadLetterPublished`; Grafana `DLQ messages` | Реализовано |
+| M-016 | IF-002, IF-003, IF-005, IF-023 | monitoring-ui-api / Kafka | `cmdb2monitoring_queue_lag{mode="TopicDepth"}`, gauge, сообщения | `service`, `pipeline`, `topic`, `mode` | DLQ depth по Kafka low/high watermark | `Cmdb2MonitoringDeadLetterDepth`; Grafana `Kafka queue lag` | Реализовано |
+| M-017 | IF-002, IF-003, IF-005, IF-015, IF-023 | Kafka consumers/producers | `cmdb2monitoring_kafka_connection_attempts_total`, counter, попытки; `cmdb2monitoring_kafka_connection_errors_total`, counter, ошибки | `service`, `role`, `category`; `category`: `dns`, `timeout`, `tls`, `sasl_auth`, `broker_unavailable` | Диагностика доступности и авторизации Kafka без записи текста ошибки в label | Требует alert/dashboard по категориям | Требуется реализация |
+| M-018 | IF-002, IF-003, IF-005, IF-015, IF-023 | Kafka consumers/producers | `cmdb2monitoring_kafka_connection_duration_seconds`, histogram, секунды | `service`, `role`, `result` | Длительность установления соединения с Kafka | Требует dashboard по latency | Требуется реализация |
+| M-019 | IF-002, IF-003, IF-005, IF-015, IF-023 | Kafka consumers | `cmdb2monitoring_queue_oldest_event_age_seconds`, gauge, секунды | `service`, `pipeline` | Возраст самого старого необработанного события в поддерживаемом pipeline | Требует alert по допустимому возрасту | Требуется реализация |
+| M-020 | IF-011, IF-012, IF-018, IF-020, IF-022, IF-023 | monitoring-ui-api / cmdbkafka2zabbix / zabbixbindings2cmdbuild | `cmdb2monitoring_external_request_duration_seconds`, histogram, секунды; `cmdb2monitoring_external_requests_total`, counter, запросы | `service`, `dependency`, `operation`, `result` | Длительность и результат вызовов CMDBuild и Zabbix API | Требует alert/dashboard по SLO | Требуется реализация |
+| M-021 | IF-023 | Все сервисы | `cmdb2monitoring_build_info`, gauge, `1` | `service`, `version`, `revision`, `provenance` | Идентификация развернутой сборки и происхождения образа | Требует dashboard release inventory | Требуется реализация |
+| M-022 | IF-023 | Все сервисы | `cmdb2monitoring_service_started_at_seconds`, gauge, Unix seconds | `service` | Время старта сервиса и базовый признак доступности метрик | `Cmdb2MonitoringServiceMetricsMissing`; Grafana `Service metrics availability` | Реализовано |
