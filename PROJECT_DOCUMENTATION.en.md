@@ -68,13 +68,7 @@ The additional `monitoring-ui-api` component provides an operator frontend/BFF f
 | Kafka host access | `localhost:9092` |
 | Kafka Docker-network access | `kafka:29092` |
 
-CMDBuild runs in Docker, so the CMDBuild webhook URL must point to a host address reachable from the Docker network:
-
-```text
-http://192.168.202.35:5080/webhooks/cmdbuild
-```
-
-For local development, `cmdbwebhooks2kafka` listens on `0.0.0.0:5080`. If it listens only on `localhost:5080`, the CMDBuild container cannot call it.
+The current production Compose does not include CMDBuild in its network. Before starting Compose, set the required `CMDBUILD_WEBHOOK_TARGET_URL=https://<reachable-fqdn>/webhooks/cmdbuild` to a receiver URL reachable from CMDBuild. `localhost`, loopback, and a dev-host IP are not production target URLs. Compose DNS `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` is valid only in a separate deployment overlay with an explicitly declared shared network and CMDBuild.
 
 ## Transport Security
 

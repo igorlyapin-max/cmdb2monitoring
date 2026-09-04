@@ -108,10 +108,9 @@ SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles
 | `Kafka:SecurityProtocol`, `Kafka:Ssl*` | Plaintext/SASL/TLS режим и Kafka certificates | При включении авторизации/TLS Kafka |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK или смене log topic |
 
-Dev запуск:
-- `launchSettings.json` должен использовать `http://0.0.0.0:5080`;
-- CMDBuild-контейнер вызывает webhook по `http://192.168.202.35:5080/webhooks/cmdbuild`;
-- `http://localhost:5080` доступен только с dev host и не подходит как URL внутри CMDBuild-контейнера.
+Webhook target задаётся BFF deployment-конфигурацией: `Cmdbuild:Webhooks:TargetUrl` / `CMDBUILD_WEBHOOK_TARGET_URL`. В текущем production Compose переменная обязательна, потому что CMDBuild не входит в его сеть; задаётся HTTPS FQDN/reverse proxy, достижимый из CMDBuild. Compose DNS допустим только в отдельном overlay с явно объявленной общей сетью. `localhost`, loopback и IP dev host не являются production target URL.
+
+Dev запуск receiver: `launchSettings.json` должен использовать `http://0.0.0.0:5080`; URL выбирается по достижимости из Docker/host сети CMDBuild.
 
 Пример env override:
 

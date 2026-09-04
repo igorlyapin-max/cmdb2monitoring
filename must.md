@@ -41,7 +41,7 @@
 - Для сервисов с обработкой Kafka offset коммитится только после успешной обработки, публикации результата или осознанного skip/error response.
 - Сервисы, которые могут упасть при обработке, должны писать последний обработанный объект и Kafka input offset в state-файл.
 - При старте consumer должен читать state-файл и начинать чтение с `lastInputOffset + 1` для соответствующего topic/partition. State-файл не должен быть только диагностическим логом.
-- Если сервис запускается на dev host, а источник работает в Docker, HTTP endpoint должен слушать не только loopback. Для текущего webhook-сервиса dev bind: `0.0.0.0:5080`, CMDBuild вызывает `http://192.168.202.35:5080/webhooks/cmdbuild`.
+- HTTP callback/webhook URL не должен быть hardcoded в приложении, правилах или поставляемой документации. Его задает deployment-конфигурация; автоматический default допустим только как service DNS известной orchestration network. Для CMDBuild lifecycle webhook используется `CMDBUILD_WEBHOOK_TARGET_URL`, с Compose default `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild`; внешний CMDBuild требует reachable FQDN/reverse proxy override.
 - HTTP/TLS transport выбирается конфигурацией. Dev может использовать HTTP, production должен использовать HTTPS/TLS или явный insecure override (`AllowPlainHttp`, `AllowPlaintextKafka`, `AllowInsecureHttp`).
 - Для `monitoring-ui-api` внешние CMDBuild, Zabbix, IdP SAML/OAuth2 и включенный PAM/AAPM endpoint в production не используют insecure override: требуется HTTPS и точный hostname allowlist deployment-конфигурации; browser session не может изменить endpoint.
 - `AllowedHosts="*"` в production запрещен без явного `HostSecurity:AllowWildcardAllowedHosts=true`.

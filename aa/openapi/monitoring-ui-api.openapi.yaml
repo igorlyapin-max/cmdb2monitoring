@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: cmdb2monitoring monitoring UI API
   version: 0.5.0
+  x-information-flow: OAPI2
   description: >
     Backend-for-frontend API for dashboard, server-side sessions, Kafka event
     browsing, rules validation, dry-run, browser save-as, runtime settings, authorization settings,

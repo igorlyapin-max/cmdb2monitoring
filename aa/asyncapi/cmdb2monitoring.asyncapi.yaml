@@ -14,6 +14,7 @@ servers:
     description: Локальная Kafka dev-контура
 channels:
   cmdbuild.webhooks.dev:
+    x-information-flow: AAPI0
     description: Нормализованные события CMDBuild.
     publish:
       operationId: publishCmdbWebhookEvent
@@ -26,6 +27,7 @@ channels:
       message:
         $ref: '#/components/messages/CmdbWebhookEnvelope'
   zabbix.host.requests.dev:
+    x-information-flow: AAPI1
     description: JSON-RPC запросы к Zabbix API.
     publish:
       operationId: publishZabbixRequest
@@ -38,6 +40,7 @@ channels:
       message:
         $ref: '#/components/messages/ZabbixJsonRpcRequest'
   zabbix.host.responses.dev:
+    x-information-flow: AAPI2
     description: Результаты вызовов Zabbix API.
     publish:
       operationId: publishZabbixResponse
@@ -45,6 +48,7 @@ channels:
       message:
         $ref: '#/components/messages/ZabbixProcessingResponse'
   zabbix.host.bindings.dev:
+    x-information-flow: AAPI4
     description: События связи CMDBuild card/profile -> Zabbix hostid после успешного вызова Zabbix API.
     publish:
       operationId: publishZabbixBinding
@@ -71,26 +75,31 @@ channels:
       message:
         $ref: '#/components/messages/DeadLetterMessage'
   cmdbwebhooks2kafka.logs.dev:
+    x-information-flow: L0
     description: Structured JSON logs первого сервиса.
     publish:
       message:
         $ref: '#/components/messages/StructuredLog'
   cmdbkafka2zabbix.logs.dev:
+    x-information-flow: L0
     description: Structured JSON logs второго сервиса.
     publish:
       message:
         $ref: '#/components/messages/StructuredLog'
   zabbixrequests2api.logs.dev:
+    x-information-flow: L0
     description: Structured JSON logs третьего сервиса.
     publish:
       message:
         $ref: '#/components/messages/StructuredLog'
   zabbixbindings2cmdbuild.logs.dev:
+    x-information-flow: L0
     description: Structured JSON logs сервиса обратной записи binding-ов.
     publish:
       message:
         $ref: '#/components/messages/StructuredLog'
   monitoring-ui-api.logs.dev:
+    x-information-flow: L0
     description: Structured JSON logs frontend/BFF.
     publish:
       message:

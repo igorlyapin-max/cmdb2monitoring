@@ -10,7 +10,6 @@ import {
 } from './condition-expression.js';
 
 const defaultManagedPrefix = 'cmdbwebhooks2kafka-';
-const defaultWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
 const defaultManagedIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
 const defaultManagedCodeSegment = 'zabbix-host';
 
@@ -73,7 +72,7 @@ export function buildDesiredCmdbuildWebhooks(rules = {}, cmdbuildCatalog = {}, c
         eventType: event.eventType,
         target: classRequirements.className,
         method: current?.method || defaults.method,
-        url: current?.url || defaults.url,
+        url: defaults.url,
         headers: current?.headers ?? defaults.headers,
         body: webhookBodyForRequirements(event, prefix, current?.body, classRequirements.fields, classRequirements.className, options),
         requirements: classRequirements.fields,
@@ -622,7 +621,7 @@ function currentWebhookDefaults(currentHooks, options) {
   const sample = managed.find(hook => hook.url) ?? managed[0] ?? {};
   return {
     method: sample.method || 'post',
-    url: sample.url || options.defaultUrl || defaultWebhookUrl,
+    url: requiredWebhookUrl(options),
     headers: sample.headers ?? {},
     language: sample.language ?? '',
     placeholderPrefix: currentWebhookPlaceholderPrefix(sample) || 'card'
@@ -738,9 +737,17 @@ function managedIdentifier(options = {}) {
 
 function ownedWebhookUrls(options = {}) {
   return uniqueTokens([
-    options.defaultUrl || defaultWebhookUrl,
+    options.defaultUrl,
     ...(Array.isArray(options.ownedUrls) ? options.ownedUrls : [])
   ].filter(Boolean).map(normalizeWebhookUrl));
+}
+
+function requiredWebhookUrl(options = {}) {
+  const value = String(options.defaultUrl ?? '').trim().replace(/\/+$/, '');
+  if (!value) {
+    throw new Error('CMDBuild webhook target URL is not configured.');
+  }
+  return value;
 }
 
 function normalizeWebhookUrl(value) {

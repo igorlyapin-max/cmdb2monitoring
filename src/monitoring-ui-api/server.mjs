@@ -1,6 +1,6 @@
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
-import { connect as connectNet } from 'node:net';
+import { connect as connectNet, isIP } from 'node:net';
 import { connect as connectTls } from 'node:tls';
 import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -23,6 +23,7 @@ import {
   kafkaSaslMechanism,
   validateEventBrowserConfiguration
 } from './lib/event-browser-config.mjs';
+import { EventBrowserReadError, readKafkaTopicMessages } from './lib/event-browser-reader.mjs';
 import {
   assertConfiguredEndpointOverride,
   assertOutboundEndpoint,
@@ -49,6 +50,7 @@ let logger = createBootstrapLogger();
 const config = await loadConfig();
 logger = createStructuredLogger(config);
 validateCmdbuildApiConfig(config);
+validateCmdbuildWebhookTargetConfig(config);
 validateRuntimeSecurityConfig(config);
 logger.info('Health endpoints configured', {
   count: config.Services?.HealthEndpoints?.length ?? 0,
@@ -1664,6 +1666,7 @@ function applyEnvOverrides(target) {
     CMDBUILD_API_VERSION: ['Cmdbuild', 'ApiVersion'],
     CMDBUILD_ALLOW_INSECURE_HTTP: ['Cmdbuild', 'Tls', 'AllowInsecureHttp'],
     CMDBUILD_TLS_REJECT_UNAUTHORIZED: ['Cmdbuild', 'Tls', 'RejectUnauthorized'],
+    CMDBUILD_WEBHOOK_TARGET_URL: ['Cmdbuild', 'Webhooks', 'TargetUrl'],
     CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER: ['Cmdbuild', 'Webhooks', 'AuthorizationHeader'],
     CMDBUILD_WEBHOOK_BEARER_TOKEN: ['Cmdbuild', 'Webhooks', 'BearerToken'],
     ZABBIX_API_ENDPOINT: ['Zabbix', 'ApiEndpoint'],
@@ -1807,6 +1810,79 @@ function validateCmdbuildApiConfig(target) {
   if (!isBlank(target.Cmdbuild.BaseUrl) && !isCmdbuildRestV4BaseUrl(target.Cmdbuild.BaseUrl)) {
     throw new Error('CMDBuild BaseUrl must point to /cmdbuild/services/rest/v4.');
   }
+}
+
+function validateCmdbuildWebhookTargetConfig(target) {
+  const configuredTargetUrl = String(target.Cmdbuild?.Webhooks?.TargetUrl ?? '').trim();
+  const targetUrl = configuredTargetUrl;
+  if (!targetUrl) {
+    if (environment === 'Production') {
+      throw new Error('Production CMDBuild Webhooks.TargetUrl must be configured by deployment.');
+    }
+    return;
+  }
+
+  if (!URL.canParse(targetUrl)) {
+    throw new Error('CMDBuild Webhooks.TargetUrl must be an absolute HTTP or HTTPS URL.');
+  }
+
+  const parsed = new URL(targetUrl);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('CMDBuild Webhooks.TargetUrl must use HTTP or HTTPS.');
+  }
+  if (parsed.pathname.replace(/\/+$/, '') !== '/webhooks/cmdbuild') {
+    throw new Error('CMDBuild Webhooks.TargetUrl must end with /webhooks/cmdbuild.');
+  }
+  if (environment === 'Production' && isLocalOrUnspecifiedHostname(parsed.hostname)) {
+    throw new Error('Production CMDBuild Webhooks.TargetUrl must not use a loopback or unspecified host.');
+  }
+
+  target.Cmdbuild.Webhooks.TargetUrl = targetUrl.replace(/\/+$/, '');
+}
+
+function isLocalOrUnspecifiedHostname(hostname) {
+  const normalized = String(hostname ?? '').trim().toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/, '');
+  if (normalized === 'localhost') {
+    return true;
+  }
+
+  const family = isIP(normalized);
+  if (family === 4) {
+    const octets = normalized.split('.').map(Number);
+    return octets[0] === 127 || octets.every(octet => octet === 0);
+  }
+  if (family !== 6) {
+    return false;
+  }
+
+  const address = ipv6AddressAsBigInt(normalized);
+  if (address === null || address === 0n || address === 1n) {
+    return true;
+  }
+  const ipv4MappedPrefix = 0xffffn;
+  if ((address >> 32n) !== ipv4MappedPrefix) {
+    return false;
+  }
+  const mappedIpv4 = Number(address & 0xffffffffn);
+  return ((mappedIpv4 >>> 24) === 127) || mappedIpv4 === 0;
+}
+
+function ipv6AddressAsBigInt(value) {
+  const [left, right] = value.split('::');
+  if (value.split('::').length > 2) {
+    return null;
+  }
+  const leftParts = left ? left.split(':') : [];
+  const rightParts = right ? right.split(':') : [];
+  const parts = value.includes('::')
+    ? [...leftParts, ...Array(8 - leftParts.length - rightParts.length).fill('0'), ...rightParts]
+    : leftParts;
+  if (parts.length !== 8 || parts.some(part => !/^[0-9a-f]{1,4}$/i.test(part))) {
+    return null;
+  }
+  return parts.reduce((result, part) => (result << 16n) + BigInt(`0x${part}`), 0n);
 }
 
 function normalizeCmdbuildApiVersion(value) {
@@ -3184,7 +3260,45 @@ async function readKafkaEvents(url) {
 
   const maxMessages = clampInt(url.searchParams.get('maxMessages'), eventBrowser.MaxMessages ?? 50, 1, 500);
   const readTimeoutMs = clampInt(url.searchParams.get('readTimeoutMs'), eventBrowser.ReadTimeoutMs ?? 2500, 500, 30000);
-  const items = await readKafkaTopicMessages(topic, maxMessages, readTimeoutMs);
+  const eventReadId = randomUUID();
+  let items;
+  try {
+    items = await readKafkaTopicMessages({
+      kafka: createKafkaClient(),
+      topic,
+      maxMessages,
+      readTimeoutMs,
+      groupId: `${config.EventBrowser.ClientId || 'monitoring-ui-api-events'}-${randomUUID()}`,
+      onStage: (stage, labels = {}) => {
+        const error = labels.error;
+        logger.debugBasic('Event Browser Kafka read stage', {
+          eventReadId,
+          topic: topic.name,
+          stage,
+          partition: labels.partition
+        });
+        if (error) {
+          logger.error('Event Browser Kafka consumer crashed', {
+            eventReadId,
+            topic: topic.name,
+            stage,
+            kafkaErrorType: error.name
+          }, error);
+        }
+      }
+    });
+  } catch (error) {
+    const cause = error instanceof EventBrowserReadError && error.cause instanceof Error ? error.cause : error;
+    logger.error('Event Browser Kafka read failed', {
+      eventReadId,
+      topic: topic.name,
+      stage: error instanceof EventBrowserReadError ? error.stage : 'client-create',
+      kafkaErrorType: cause instanceof Error ? cause.name : 'UnknownError'
+    }, cause instanceof Error ? cause : null);
+    throw httpError(502, 'kafka_event_browser_error', 'Kafka event browsing failed. Use the diagnostic ID in service logs.', {
+      eventReadId
+    });
+  }
 
   return {
     items,
@@ -3198,120 +3312,6 @@ async function readKafkaEvents(url) {
     },
     message: items.length === 0 ? 'Topic has no readable messages in the selected offset window.' : ''
   };
-}
-
-async function readKafkaTopicMessages(topic, maxMessages, readTimeoutMs) {
-  const kafka = createKafkaClient();
-  const admin = kafka.admin();
-  const consumer = kafka.consumer({
-    groupId: `${config.EventBrowser.ClientId || 'monitoring-ui-api-events'}-${randomUUID()}`
-  });
-  const partitionTargets = new Map();
-  const items = [];
-  let done = false;
-  let resolveDone = () => {};
-
-  try {
-    await admin.connect();
-    const offsets = await admin.fetchTopicOffsets(topic.name);
-    for (const partitionOffset of offsets) {
-      const high = BigInt(partitionOffset.high ?? partitionOffset.offset ?? '0');
-      const low = BigInt(partitionOffset.low ?? '0');
-      if (high <= low) {
-        continue;
-      }
-
-      const requestedStart = high - BigInt(maxMessages);
-      const start = requestedStart > low ? requestedStart : low;
-      partitionTargets.set(Number(partitionOffset.partition), {
-        start,
-        high,
-        done: false
-      });
-    }
-  } finally {
-    await disconnectKafka(admin);
-  }
-
-  if (partitionTargets.size === 0) {
-    return [];
-  }
-
-  const donePromise = new Promise(resolvePromise => {
-    resolveDone = resolvePromise;
-  });
-
-  try {
-    await consumer.connect();
-    await consumer.subscribe({ topic: topic.name, fromBeginning: true });
-    await consumer.run({
-      autoCommit: false,
-      eachMessage: async ({ partition, message }) => {
-        const target = partitionTargets.get(Number(partition));
-        if (!target) {
-          return;
-        }
-
-        const offset = BigInt(message.offset);
-        if (offset < target.start || offset >= target.high) {
-          return;
-        }
-
-        items.push({
-          topic: topic.name,
-          service: topic.service,
-          direction: topic.direction,
-          partition,
-          offset: message.offset,
-          timestamp: message.timestamp ? new Date(Number(message.timestamp)).toISOString() : '',
-          key: message.key?.toString('utf8') ?? '',
-          value: message.value?.toString('utf8') ?? '',
-          headers: headersToObject(message.headers)
-        });
-
-        if (offset >= target.high - 1n) {
-          target.done = true;
-        }
-
-        if (items.length >= maxMessages || [...partitionTargets.values()].every(item => item.done)) {
-          done = true;
-          resolveDone();
-        }
-      }
-    });
-
-    for (const [partition, target] of partitionTargets) {
-      consumer.seek({
-        topic: topic.name,
-        partition,
-        offset: target.start.toString()
-      });
-    }
-
-    await Promise.race([donePromise, sleep(readTimeoutMs)]);
-  } catch (error) {
-    throw httpError(502, 'kafka_event_browser_error', error instanceof Error ? error.message : 'Kafka event browsing failed.');
-  } finally {
-    if (!done) {
-      resolveDone();
-    }
-
-    await disconnectKafka(consumer);
-  }
-
-  return items
-    .sort((left, right) => {
-      if (left.topic !== right.topic) {
-        return left.topic.localeCompare(right.topic);
-      }
-
-      if (left.partition !== right.partition) {
-        return left.partition - right.partition;
-      }
-
-      return Number(BigInt(left.offset) - BigInt(right.offset));
-    })
-    .slice(-maxMessages);
 }
 
 function createKafkaClient() {
@@ -3378,15 +3378,6 @@ async function disconnectKafka(client) {
   } catch {
     // Ignore cleanup errors after read timeout or failed connection attempts.
   }
-}
-
-function headersToObject(headers = {}) {
-  return Object.fromEntries(Object.entries(headers).map(([key, value]) => [
-    key,
-    Array.isArray(value)
-      ? value.map(item => item?.toString('utf8') ?? '')
-      : value?.toString('utf8') ?? ''
-  ]));
 }
 
 async function readCurrentRules() {
@@ -4782,6 +4773,13 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     throw httpError(400, 'empty_webhook_operations', 'No selected CMDBuild webhook operations were provided.');
   }
 
+  for (const operation of operations) {
+    const action = String(operation?.action ?? '').trim().toLowerCase();
+    if (action === 'create' || action === 'update') {
+      assertDeploymentOwnedCmdbuildWebhookTarget(operation?.desired);
+    }
+  }
+
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
   const existingByCode = await readCmdbuildWebhooksByCode(baseUrl, credentials);
@@ -4843,6 +4841,18 @@ async function applyCmdbuildWebhookOperations(session, payload) {
     count: results.length,
     results
   };
+}
+
+function assertDeploymentOwnedCmdbuildWebhookTarget(desired) {
+  const requestedUrl = normalizeWebhookUrl(desired?.url);
+  const configuredUrl = normalizeWebhookUrl(config.Cmdbuild?.Webhooks?.TargetUrl);
+  if (!configuredUrl || requestedUrl !== configuredUrl) {
+    throw httpError(
+      400,
+      'webhook_target_url_not_deployment_owned',
+      'CMDBuild webhook URL must match the deployment-owned target URL.'
+    );
+  }
 }
 
 async function syncCmdbuildWebhookAuthorization(session, payload = {}) {
@@ -7700,6 +7710,9 @@ function clearResolvedSecretReferences(paths) {
 
 function publicRuntimeCapabilities() {
   return {
+    cmdbuild: {
+      webhookTargetUrl: config.Cmdbuild?.Webhooks?.TargetUrl ?? ''
+    },
     zabbix: {
       allowDynamicTagsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicTagsFromCmdbLeaf),
       allowDynamicHostGroupsFromCmdbLeaf: Boolean(config.Zabbix.AllowDynamicHostGroupsFromCmdbLeaf)

@@ -71,7 +71,7 @@ The service exposes:
 - `GET /health`;
 - `POST /webhooks/cmdbuild`.
 
-Development binding is `0.0.0.0:5080`, because CMDBuild runs in Docker and must reach the host service through `http://192.168.202.35:5080/webhooks/cmdbuild`.
+Development binding is `0.0.0.0:5080`. The webhook target is selected from CMDBuild network reachability: Compose default is `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild`; an external CMDBuild uses `CMDBUILD_WEBHOOK_TARGET_URL`.
 
 4.2. Webhook Input Format
 

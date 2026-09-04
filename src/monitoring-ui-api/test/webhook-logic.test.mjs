@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  buildCmdbuildWebhookOperations,
+  buildCmdbuildWebhookOperations as buildCmdbuildWebhookOperationsImpl,
   buildWebhookRequirements,
   webhookDiffFields
 } from '../public/lib/webhook-logic.js';
@@ -30,8 +30,16 @@ const catalog = {
     }
   ]
 };
-const defaultWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
+const defaultWebhookUrl = 'http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild';
 const managedIdentifier = 'cmdb2monitoring-zabbix-host-lifecycle';
+
+function buildCmdbuildWebhookOperations(...args) {
+  const options = args[3] ?? {};
+  return buildCmdbuildWebhookOperationsImpl(...args.slice(0, 3), {
+    defaultUrl: defaultWebhookUrl,
+    ...options
+  });
+}
 
 function baseRules(overrides = {}) {
   return {
@@ -414,7 +422,7 @@ test('unmanaged current webhooks are not matched, deleted, or used as defaults',
   assert.equal(operations.length, 1);
   assert.equal(operations[0].action, 'create');
   assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
-  assert.equal(operations[0].desired.url, 'http://192.168.202.35:5080/webhooks/cmdbuild');
+  assert.equal(operations[0].desired.url, defaultWebhookUrl);
   assert.equal(operations.some(item => item.code === 'other-system-class-update'), false);
 });
 
@@ -425,6 +433,25 @@ test('new managed webhooks use zabbix host code segment', () => {
   assert.equal(operations.length, 1);
   assert.equal(operations[0].action, 'create');
   assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
+});
+
+test('deployment target URL replaces the URL of an owned webhook', () => {
+  const targetUrl = 'https://monitoring-webhook.example.local/webhooks/cmdbuild';
+  const operations = buildCmdbuildWebhookOperations(baseRules(), catalog, [
+    currentNamespacedUpdateWebhook({ managedIdentifier })
+  ], { defaultUrl: targetUrl });
+  const update = operations.find(item => item.action === 'update');
+
+  assert.ok(update);
+  assert.equal(update.desired.url, targetUrl);
+  assert.ok(update.diff.includes('url'));
+});
+
+test('webhook planning rejects an absent deployment target URL', () => {
+  assert.throws(
+    () => buildCmdbuildWebhookOperationsImpl(baseRules(), catalog, []),
+    /CMDBuild webhook target URL is not configured/
+  );
 });
 
 test('managed webhooks do not reuse a foreign class placeholder prefix', () => {

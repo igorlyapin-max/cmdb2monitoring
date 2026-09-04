@@ -4,37 +4,37 @@
 
 | ID | Источник | Приемник | Канал | Данные |
 | --- | --- | --- | --- | --- |
-| IF-001 | CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild`, dev URL `http://192.168.202.35:5080/webhooks/cmdbuild` | CMDBuild webhook payload |
-| IF-002 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | topic `cmdbuild.webhooks.*` | Нормализованный CMDB event envelope |
-| IF-003 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
-| IF-004 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |
-| IF-005 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.responses.*` | Результат вызова Zabbix API |
-| IF-006 | Микросервисы `:5080/:5081/:5082/:5083` и `monitoring-ui-api` `:5090` | Kafka `:9092` | `*.logs.*` topics | Structured JSON logs для будущего ELK |
-| IF-007 | cmdbkafka2zabbix `:5081` | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
-| IF-008 | Микросервисы `:5080/:5081/:5082/:5083` | Local FS | `state/*.json` | Последний обработанный объект |
-| IF-009 | Browser | monitoring-ui-api `:5090` | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
-| IF-010 | monitoring-ui-api `:5090` | IdP/SAML2/OAuth2 и MS AD LDAP/LDAPS `:443/:80/:636/:389` | Redirect/POST SAML2, OAuth2 Authorization Code, LDAP bind/search | AuthnRequest, SAMLResponse, metadata, OAuth2 code/token/userinfo, LDAP user/groups |
-| IF-011 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP | Classes, attributes, lookup types, optional session credentials |
-| IF-012 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC | Templates, host groups, template groups, known tags, template item keys/LLD/inventory metadata, existing host templates |
-| IF-013 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
-| IF-014 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json`, `state/users.json` | Catalog cache, persisted UI settings и local users; runtime/state-файлы не попадают в git |
-| IF-015 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `zabbix.host.bindings.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
-| IF-016 | monitoring-ui-api `:5090` | .NET services `:5080/:5081/:5082/:5083` | HTTP GET `/health` | Проверка готовности микросервисов на dashboard |
-| IF-017 | Browser | Local downloads | rules JSON и `*-webhook-bodies.txt` | `Управление правилами конвертации` / `Save file as`: draft rules и webhook Body/DELETE-инструкции только по изменениям текущей UI-сессии |
-| IF-018 | cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP GET `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/classes/{class}/cards/{id}/relations`, `/lookup_types/{type}/values` | Подъем reference/lookup/domain leaf-значений по `source.fields[].cmdbPath` |
-| IF-019 | monitoring-ui-api `:5090` | cmdbkafka2zabbix `:5081` | HTTP POST `/admin/reload-rules` с Bearer token | Сигнал перечитывания conversion rules через provider abstraction |
-| IF-020 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT/DELETE `/etl/webhook/` | Чтение и применение выбранного плана CMDBuild webhooks в разделе `Настройка webhooks` |
-| IF-021 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.bindings.*` | Событие связи CMDBuild card/profile -> Zabbix hostid после успешного host.create/update/delete |
-| IF-022 | zabbixbindings2cmdbuild `:5083` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT `/classes/.../cards` | Запись `zabbix_main_hostid` или карточки `ZabbixHostBinding` |
-| IF-023 | Prometheus | Микросервисы `:5080/:5081/:5082/:5083` и `monitoring-ui-api` `:5090` | HTTP GET `/metrics` | Prometheus text metrics: service uptime, event counters, queue lag/DLQ depth gauges |
+| OAPI0 | CMDBuild `:8090` | cmdbwebhooks2kafka `:5080` | HTTP POST `/webhooks/cmdbuild`, dev URL `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` | CMDBuild webhook payload |
+| AAPI0 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | topic `cmdbuild.webhooks.*` | Нормализованный CMDB event envelope |
+| AAPI1 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | topic `zabbix.host.requests.*` | Zabbix JSON-RPC request |
+| OAPI1 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP POST `/api_jsonrpc.php` | `host.create`, `host.get`, `host.update`, `host.delete` |
+| AAPI2 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.responses.*` | Результат вызова Zabbix API |
+| L0 | Микросервисы `:5080/:5081/:5082/:5083` и `monitoring-ui-api` `:5090` | Kafka `:9092` | `*.logs.*` topics | Structured JSON logs для будущего ELK |
+| IF0 | cmdbkafka2zabbix `:5081` | Git working copy | файл `rules/cmdbuild-to-zabbix-host-create.json` | Rules и T4 templates |
+| IF1 | Микросервисы `:5080/:5081/:5082/:5083` | Local FS | `state/*.json` | Последний обработанный объект |
+| OAPI2 | Browser | monitoring-ui-api `:5090` | HTTP UI/API | Session, dashboard, rules actions, catalog actions |
+| OAPI3 | monitoring-ui-api `:5090` | IdP/SAML2/OAuth2 и MS AD LDAP/LDAPS `:443/:80/:636/:389` | Redirect/POST SAML2, OAuth2 Authorization Code, LDAP bind/search | AuthnRequest, SAMLResponse, metadata, OAuth2 code/token/userinfo, LDAP user/groups |
+| OAPI4 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP | Classes, attributes, lookup types, optional session credentials |
+| OAPI5 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC | Templates, host groups, template groups, known tags, template item keys/LLD/inventory metadata, existing host templates |
+| IF2 | monitoring-ui-api | Git working copy | файл rules JSON | Rules validate, dry-run, upload |
+| IF3 | monitoring-ui-api | Local FS | `data/*.json`, `state/ui-settings.json`, `state/users.json` | Catalog cache, persisted UI settings и local users; runtime/state-файлы не попадают в git |
+| AAPI3 | monitoring-ui-api `:5090` | Kafka `:9092` | read-only topics `cmdbuild.webhooks.*`, `zabbix.host.requests.*`, `zabbix.host.responses.*`, `zabbix.host.bindings.*`, `*.logs.*` | Просмотр событий в UI Events через BFF |
+| H0 | monitoring-ui-api `:5090` и deployment/monitoring platform | .NET services `:5080/:5081/:5082/:5083` и monitoring-ui-api `:5090` | HTTP GET `/health`, `GET /ready` | Dashboard health и platform health/readiness probes |
+| IF4 | Browser | Local downloads | rules JSON и `*-webhook-bodies.txt` | `Управление правилами конвертации` / `Save file as`: draft rules и webhook Body/DELETE-инструкции только по изменениям текущей UI-сессии |
+| OAPI6 | cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP GET `/classes/{class}/attributes`, `/classes/{class}/cards/{id}`, `/classes/{class}/cards/{id}/relations`, `/lookup_types/{type}/values` | Подъем reference/lookup/domain leaf-значений по `source.fields[].cmdbPath` |
+| OAPI7 | monitoring-ui-api `:5090` | cmdbkafka2zabbix `:5081` | HTTP POST `/admin/reload-rules` с Bearer token | Сигнал перечитывания conversion rules через provider abstraction |
+| OAPI8 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT/DELETE `/etl/webhook/` | Чтение и применение выбранного плана CMDBuild webhooks в разделе `Настройка webhooks` |
+| AAPI4 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.bindings.*` | Событие связи CMDBuild card/profile -> Zabbix hostid после успешного host.create/update/delete |
+| OAPI9 | zabbixbindings2cmdbuild `:5083` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT `/classes/.../cards` | Запись `zabbix_main_hostid` или карточки `ZabbixHostBinding` |
+| M0 | Prometheus | Микросервисы `:5080/:5081/:5082/:5083` и `monitoring-ui-api` `:5090` | HTTP GET `/metrics` | Prometheus text metrics: service uptime, event counters, queue lag/DLQ depth gauges |
 
 ## Срез бизнес-описания
 
-Основной бизнес-срез включает IF-001..IF-005. Он описывает жизненный цикл host в Zabbix по событиям CMDBuild.
+Основной бизнес-срез включает `OAPI0`, `AAPI0`, `AAPI1`, `OAPI1`, `AAPI2`. Он описывает жизненный цикл host в Zabbix по событиям CMDBuild.
 
 ## Срез поддержки и ИБ
 
-Срез поддержки включает IF-006..IF-022:
+Срез поддержки и ИБ включает `L0`, `IF0`-`IF4`, `OAPI2`-`OAPI9`, `AAPI3`, `AAPI4`, `H0`, `M0`:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;
@@ -89,7 +89,7 @@
 
 При `update/delete` `cmdbkafka2zabbix` сначала использует explicit `zabbix_hostid` из события/rules, затем сохраненную CMDBuild связь `zabbix_main_hostid` или `ZabbixHostBinding`, и только после этого fallback `host.get` по technical host name.
 
-Zabbix template metadata из IF-012 хранится рядом с catalog cache и содержит `itemKeys`, `discoveryRuleKeys`, `inventoryLinks`, parent templates, existing host templates и индекс конфликтов. UI использует индекс для предупреждений и блокировок в редакторе rules и Logical Control, а `zabbixrequests2api` повторяет проверку непосредственно перед `host.create/update`.
+Zabbix template metadata из OAPI5 хранится рядом с catalog cache и содержит `itemKeys`, `discoveryRuleKeys`, `inventoryLinks`, parent templates, existing host templates и индекс конфликтов. UI использует индекс для предупреждений и блокировок в редакторе rules и Logical Control, а `zabbixrequests2api` повторяет проверку непосредственно перед `host.create/update`.
 
 ### Zabbix response
 

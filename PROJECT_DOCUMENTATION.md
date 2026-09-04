@@ -62,13 +62,7 @@
 | Kafka host access | `localhost:9092` |
 | Kafka docker network access | `kafka:29092` |
 
-CMDBuild работает в Docker, поэтому webhook URL в CMDBuild должен указывать на адрес host-сервиса, доступный из Docker-сети:
-
-```text
-http://192.168.202.35:5080/webhooks/cmdbuild
-```
-
-Для локального запуска `cmdbwebhooks2kafka` слушает `0.0.0.0:5080`; если запустить его только на `localhost:5080`, CMDBuild-контейнер не сможет вызвать webhook.
+Текущий production Compose не включает CMDBuild в свою сеть. До запуска Compose обязательно задайте `CMDBUILD_WEBHOOK_TARGET_URL=https://<reachable-fqdn>/webhooks/cmdbuild`: это URL receiver, достижимый из сети CMDBuild. `localhost`, loopback и IP dev host не являются production target URL. Для локального запуска receiver слушает `0.0.0.0:5080`, а URL выбирается из сети CMDBuild. Compose DNS `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` допустим только в отдельном deployment overlay с явно объявленной общей сетью и CMDBuild.
 
 ## Transport Security
 
@@ -207,6 +201,8 @@ Node.js `monitoring-ui-api` использует `config/appsettings*.json` и �
 | `Kafka` | Bootstrap servers, output topic, client id, auth/security |
 | `ElkLogging` | Kafka log sink или будущий ELK endpoint |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Indeed PAM/AAPM account path/name |
+
+`monitoring-ui-api` создает ETL webhooks только с URL из deployment-owned `Cmdbuild:Webhooks:TargetUrl` / `CMDBUILD_WEBHOOK_TARGET_URL`. В текущем production Compose переменная обязательна и должна содержать reachable FQDN/reverse proxy URL; браузер не может подменить этот URL при применении webhook.
 
 Для локального Docker Kafka внутри сети использовать:
 
@@ -487,6 +483,7 @@ Events:
 - для `SaslSsl` и `SaslPlaintext` обязательны `EventBrowser:SecurityProtocol`, `SaslMechanism`, `Username`, `Password`; допустимые `SaslMechanism`: `Plain`, `ScramSha256`, `ScramSha512`. Проверка выполняется при сохранении Runtime-настроек и перед чтением Kafka, поэтому отключенный Event Browser не блокирует запуск BFF.
 - вывод по умолчанию показывает последние сообщения выбранного topic, сортировка выполняется от более новых сообщений к более старым;
 - раскрытие topic показывает timestamp, сводку service/partition/offset/key и value.
+- при ошибке чтения UI возвращает безопасный `eventReadId`; по нему в structured logs `monitoring-ui-api` ищется первичная Kafka-причина и этап (`admin-offsets`, `consumer-connect`, `consumer-subscribe`, `consumer-run`, `consumer-seek`, `consumer-crash` или `read-timeout`). Ошибка Events не доказывает недоставку webhook: цепочку проверяют по `webhook_accepted`, topic/lag `cmdbuild.webhooks` и `conversion_published` у `cmdbkafka2zabbix`.
 
 Управление правилами конвертации:
 - `schemaVersion: "0.2"` использует единый обязательный формат условия `when.expression`. Операторы групп: `all`, `any`, `not`; листовые операторы: `always`, `equals`, `notEquals`, `regex`, `notRegex`, `exists`, `empty`. `not` содержит ровно один элемент, `all`/`any` - один или больше. `equals`/`notEquals` и regex-варианты не срабатывают на пустом значении; для пустоты используется только `empty`.
@@ -749,7 +746,9 @@ node scripts/live-smoke.mjs --execute --code C2M-SMOKE-001 --confirm C2M-SMOKE-0
 
 Поддержанные уровни: `Basic` и `Verbose`. События расширенного режима пишутся через основной structured logging pipeline на уровне `Information`, поэтому попадают в Docker stdout/stderr, Kafka log topic при `ElkLogging:Mode=Kafka`, ELK при включенном ELK sink и в syslog, если Docker настроен с syslog logging driver.
 
-`Basic` включает диагностическую трассу прохождения события между webhook, Kafka, converter, Zabbix API, обратной записью binding в CMDBuild и startup/runtime состоянием BFF. `Verbose` дополнительно пишет только безопасные metadata payload: размер, SHA-256 fingerprint и имена полей; исходные CMDB/Zabbix значения, `Authorization`, tokens, passwords, secrets, API keys, private keys и connection strings в него не попадают. Включать его нужно только на время диагностики.
+`Basic` включает диагностическую трассу прохождения события между webhook, Kafka, converter, Zabbix API, обратной записью binding в CMDBuild и startup/runtime состоянием BFF, включая этапы чтения Event Browser и `eventReadId`. `Verbose` дополнительно пишет только безопасные metadata payload: размер, SHA-256 fingerprint и имена полей; исходные CMDB/Zabbix значения, `Authorization`, tokens, passwords, secrets, API keys, private keys и connection strings в него не попадают. Включать его нужно только на время диагностики.
+
+Для диагностики ошибки вкладки Events временно задать `MONITORING_UI_DEBUG_LOGGING_ENABLED=true` и `MONITORING_UI_DEBUG_LOGGING_LEVEL=Basic`, пересоздать только `monitoring-ui-api`, повторить чтение проблемного topic и найти в stdout/stderr или внешнем log sink запись с `eventReadId` из ответа API. Запись `Event Browser Kafka read failed` содержит первичную Kafka error type/message и этап чтения. После получения данных вернуть `MONITORING_UI_DEBUG_LOGGING_ENABLED=false` и пересоздать `monitoring-ui-api`; worker-сервисы и Kafka ACL эта процедура не изменяет.
 
 ## Проверки перед commit/push
 

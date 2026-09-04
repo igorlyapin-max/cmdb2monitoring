@@ -28,7 +28,9 @@ test('publish rejects a stale active-rules revision without overwriting the file
     }]
   }), 'utf8');
 
-  const process = startServer(port, directory, activeRulesPath, usersPath);
+  const process = startServer(port, directory, activeRulesPath, usersPath, {
+    CMDBUILD_WEBHOOK_TARGET_URL: 'https://monitoring-webhook.example.local/webhooks/cmdbuild'
+  });
   try {
     await waitForReady(port, process);
     const login = await request(port, '/api/auth/login', {
@@ -69,6 +71,26 @@ test('publish rejects a stale active-rules revision without overwriting the file
     assert.equal(tooManyWebhookOperations.body.error, 'too_many_webhook_operations');
     assert.equal(tooManyWebhookOperations.body.limit, 100);
 
+    const tamperedWebhookTarget = await request(port, '/api/cmdbuild/webhooks/apply', {
+      method: 'POST',
+      headers: {
+        cookie,
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: {
+        operations: [{
+          action: 'create',
+          desired: {
+            code: 'cmdbwebhooks2kafka-test-update',
+            url: 'https://untrusted.example.local/webhooks/cmdbuild',
+            body: { managedIdentifier: 'cmdb2monitoring-zabbix-host-lifecycle' }
+          }
+        }]
+      }
+    });
+    assert.equal(tamperedWebhookTarget.status, 400);
+    assert.equal(tamperedWebhookTarget.body.error, 'webhook_target_url_not_deployment_owned');
+
     const current = await request(port, '/api/rules/current', {
       headers: { cookie }
     });
@@ -93,6 +115,89 @@ test('publish rejects a stale active-rules revision without overwriting the file
     assert.equal(publish.status, 409);
     assert.equal(publish.body.error, 'rules_revision_conflict');
     assert.equal(await readFile(activeRulesPath, 'utf8'), externalContent);
+  } finally {
+    process.kill('SIGTERM');
+    await onceExit(process);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('production requires a deployment-owned non-loopback CMDBuild webhook target', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-webhook-target-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const usersPath = join(directory, 'users.json');
+  const baseOverrides = productionRuntimeOverrides();
+
+  try {
+    for (const [targetUrl, expectedMessage] of [
+      ['', 'Production CMDBuild Webhooks.TargetUrl must be configured by deployment.'],
+      ['http://localhost./webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
+      ['http://127.0.0.1/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
+      ['http://[::1]/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
+      ['http://[::ffff:127.0.0.1]/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
+      ['http://0.0.0.0/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
+      ['http://[::]/webhooks/cmdbuild', 'must not use a loopback or unspecified host']
+    ]) {
+      const process = startServer(port, directory, activeRulesPath, usersPath, {
+        ...baseOverrides,
+        CMDBUILD_WEBHOOK_TARGET_URL: targetUrl
+      });
+      try {
+        const output = await waitForExitOutput(process);
+        assert.match(output, new RegExp(expectedMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      } finally {
+        if (process.exitCode === null) {
+          process.kill('SIGTERM');
+          await onceExit(process);
+        }
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Event Browser API returns a diagnostic id that is written to structured logs', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-event-browser-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const usersPath = join(directory, 'users.json');
+  const rules = await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8');
+  const password = 'test-local-admin-password';
+  await writeFile(activeRulesPath, rules, 'utf8');
+  await writeFile(usersPath, JSON.stringify({
+    version: 1,
+    users: [{
+      username: 'admin',
+      displayName: 'Test Admin',
+      role: 'admin',
+      password: passwordHash(password),
+      mustChangePassword: false
+    }]
+  }), 'utf8');
+
+  const process = startServer(port, directory, activeRulesPath, usersPath, {
+    MONITORING_UI_EVENTS_ENABLED: 'true',
+    MONITORING_UI_EVENTS_TOPICS: 'test.events',
+    MONITORING_UI_KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:1',
+    MONITORING_UI_KAFKA_ALLOW_PLAINTEXT: 'true',
+    MONITORING_UI_EVENTS_READ_TIMEOUT_MS: '500'
+  });
+  try {
+    await waitForReady(port, process);
+    const login = await request(port, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password }
+    });
+    const events = await request(port, '/api/events?topic=test.events&readTimeoutMs=500', {
+      headers: { cookie: login.headers.get('set-cookie') }
+    });
+    assert.equal(events.status, 502);
+    assert.equal(events.body.error, 'kafka_event_browser_error');
+    assert.match(events.body.eventReadId, /^[0-9a-f-]{36}$/i);
+    await waitFor(() => process.output.includes(events.body.eventReadId));
+    assert.match(process.output, /Event Browser Kafka read failed/);
   } finally {
     process.kill('SIGTERM');
     await onceExit(process);
@@ -191,6 +296,7 @@ test('production rejects an insecure SAML metadata endpoint before settings are 
     MONITORING_UI_KAFKA_ALLOW_PLAINTEXT: 'true',
     MONITORING_UI_LOGS_ENABLED: 'false',
     CMDBUILD_BASE_URL: 'https://cmdbuild.example.local/cmdbuild/services/rest/v4',
+    CMDBUILD_WEBHOOK_TARGET_URL: 'https://monitoring-webhook.example.local/webhooks/cmdbuild',
     ZABBIX_API_ENDPOINT: 'https://zabbix.example.local/api_jsonrpc.php',
     MONITORING_UI_OUTBOUND_ALLOWED_HOSTS: 'cmdbuild.example.local,zabbix.example.local,idp.example.local',
     MONITORING_UI_HEALTH_ENDPOINTS_JSON: JSON.stringify([
@@ -213,6 +319,12 @@ test('production rejects an insecure SAML metadata endpoint before settings are 
       body: { username: 'admin', password }
     });
     assert.equal(login.status, 200);
+
+    const capabilities = await request(port, '/api/settings/runtime-capabilities', {
+      headers: { cookie: login.headers.get('set-cookie') }
+    });
+    assert.equal(capabilities.status, 200);
+    assert.equal(capabilities.body.cmdbuild.webhookTargetUrl, 'https://monitoring-webhook.example.local/webhooks/cmdbuild');
 
     const update = await request(port, '/api/settings/idp', {
       method: 'PUT',
@@ -255,7 +367,7 @@ function passwordHash(password) {
 }
 
 function startServer(port, directory, activeRulesPath, usersPath, overrides = {}) {
-  return spawn(process.execPath, ['server.mjs'], {
+  const child = spawn(process.execPath, ['server.mjs'], {
     cwd: serviceRoot,
     env: {
       ...process.env,
@@ -273,6 +385,10 @@ function startServer(port, directory, activeRulesPath, usersPath, overrides = {}
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
+  child.output = '';
+  child.stdout.on('data', chunk => { child.output += chunk.toString(); });
+  child.stderr.on('data', chunk => { child.output += chunk.toString(); });
+  return child;
 }
 
 async function reservePort() {
@@ -287,17 +403,9 @@ async function reservePort() {
 }
 
 async function waitForReady(port, child) {
-  let output = '';
-  child.stdout.on('data', chunk => {
-    output += chunk.toString();
-  });
-  child.stderr.on('data', chunk => {
-    output += chunk.toString();
-  });
-
   for (let attempt = 0; attempt < 40; attempt += 1) {
     if (child.exitCode !== null) {
-      throw new Error('monitoring-ui-api exited before readiness: ' + output);
+      throw new Error('monitoring-ui-api exited before readiness: ' + child.output);
     }
     try {
       const response = await fetch('http://127.0.0.1:' + port + '/ready');
@@ -310,7 +418,50 @@ async function waitForReady(port, child) {
     await new Promise(resolvePromise => setTimeout(resolvePromise, 100));
   }
 
-  throw new Error('monitoring-ui-api did not become ready: ' + output);
+  throw new Error('monitoring-ui-api did not become ready: ' + child.output);
+}
+
+function productionRuntimeOverrides() {
+  return {
+    NODE_ENV: 'Production',
+    MONITORING_UI_TRANSPORT_ALLOW_PLAIN_HTTP: 'true',
+    MONITORING_UI_EVENTS_ENABLED: 'false',
+    MONITORING_UI_KAFKA_ALLOW_PLAINTEXT: 'true',
+    MONITORING_UI_LOGS_ENABLED: 'false',
+    CMDBUILD_BASE_URL: 'https://cmdbuild.example.local/cmdbuild/services/rest/v4',
+    ZABBIX_API_ENDPOINT: 'https://zabbix.example.local/api_jsonrpc.php',
+    MONITORING_UI_OUTBOUND_ALLOWED_HOSTS: 'cmdbuild.example.local,zabbix.example.local,idp.example.local',
+    MONITORING_UI_HEALTH_ENDPOINTS_JSON: JSON.stringify([
+      { Name: 'cmdbwebhooks2kafka', Url: 'http://cmdbwebhooks2kafka:8080/health' },
+      {
+        Name: 'cmdbkafka2zabbix',
+        Url: 'http://cmdbkafka2zabbix:8080/health',
+        RulesReloadUrl: 'http://cmdbkafka2zabbix:8080/admin/reload-rules',
+        RulesReloadToken: 'test-rules-token',
+        RulesStatusUrl: 'http://cmdbkafka2zabbix:8080/admin/rules-status'
+      },
+      { Name: 'zabbixrequests2api', Url: 'http://zabbixrequests2api:8080/health' },
+      { Name: 'zabbixbindings2cmdbuild', Url: 'http://zabbixbindings2cmdbuild:8080/health' }
+    ])
+  };
+}
+
+async function waitForExitOutput(child) {
+  await Promise.race([
+    onceExit(child),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('monitoring-ui-api did not fail fast')), 3000))
+  ]);
+  return child.output;
+}
+
+async function waitFor(predicate, timeoutMs = 3000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('Condition was not met before timeout.');
+    }
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 25));
+  }
 }
 
 async function request(port, path, options = {}) {

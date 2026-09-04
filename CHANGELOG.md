@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Production CMDBuild webhook callback URL is now an explicit deployment-owned `CMDBUILD_WEBHOOK_TARGET_URL`; the BFF rejects browser-side URL substitution, fails fast for a missing/loopback callback target, and documents the external CMDBuild topology.
+- Event Browser Kafka read failures now return a safe diagnostic identifier to the localized UI and write the same identifier with the failure stage and cause to structured logs.
 - Production Event Browser now inherits `KAFKA_SASL_MECHANISM` and receives the complete deployment-owned pipeline, DLQ, and structured-log topic list; stale Runtime Settings can no longer replace deployed topic names.
 - Production Compose now initializes `monitoring-ui-data` for the non-root UI runtime user before starting `monitoring-ui-api`, preventing catalog-cache `EACCES` failures on externally created volumes.
 - CMDBuild catalog credentials are validated against REST v4 before saving; rejected credentials and missing CMDBuild permissions now return distinct UI diagnostics.

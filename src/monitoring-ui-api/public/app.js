@@ -130,7 +130,6 @@ const roleViews = {
   administrator: ['dashboard', 'events', 'systemAudit', 'profiles', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
-const defaultCmdbuildWebhookUrl = 'http://192.168.202.35:5080/webhooks/cmdbuild';
 const sessionIndicatorDefinitions = [
   { key: 'webhooks', labelKey: 'sessionTraffic.webhooks' },
   { key: 'zabbixCatalog', labelKey: 'sessionTraffic.zabbixCatalog' },
@@ -426,6 +425,8 @@ const translations = {
     'webhooks.currentDetailsHint': 'Загруженные из CMDB webhooks показаны ниже. Нажмите "Проанализировать rules", чтобы построить план операций.',
     'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
     'webhooks.ownershipNote': 'Операции create/update/delete применяются только к owned managed webhooks cmdb2monitoring; чужие webhooks остаются вне плана.',
+    'webhooks.targetNotConfigured': 'URL получателя CMDBuild webhook не задан. Укажите CMDBUILD_WEBHOOK_TARGET_URL в deployment-конфигурации.',
+    'events.readFailed': 'Не удалось прочитать события Kafka. Идентификатор диагностики: {eventReadId}.',
     'audit.storageIntro': 'Аудит будет использовать хранилище, выбранное в Runtime-настройках. PostgreSQL предназначен для средних и крупных инсталляций, SQLite - для разработки и небольших инсталляций.',
     'audit.quickTitle': 'Быстрый аудит',
     'audit.quickIntro': 'Быстрый аудит читает CMDBuild и Zabbix, сравнивает основные параметры постановки на мониторинг и не меняет управляемые системы.',
@@ -1213,6 +1214,8 @@ const translations = {
     'webhooks.currentDetailsHint': 'Loaded CMDB webhooks are shown below. Click "Analyze rules" to build the operation plan.',
     'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
     'webhooks.ownershipNote': 'Create/update/delete operations apply only to owned managed cmdb2monitoring webhooks; foreign webhooks stay outside the plan.',
+    'webhooks.targetNotConfigured': 'CMDBuild webhook receiver URL is not configured. Set CMDBUILD_WEBHOOK_TARGET_URL in deployment configuration.',
+    'events.readFailed': 'Kafka events could not be read. Diagnostic ID: {eventReadId}.',
     'audit.storageIntro': 'Audit will use the storage selected in Runtime settings. PostgreSQL targets medium and large installations; SQLite is for development and small installations.',
     'audit.quickTitle': 'Quick audit',
     'audit.quickIntro': 'Quick audit reads CMDBuild and Zabbix, compares the main monitoring placement parameters, and does not modify managed systems.',
@@ -4295,6 +4298,7 @@ async function loadCmdbuildWebhooks() {
 }
 
 async function analyzeCmdbuildWebhooks() {
+  await loadRuntimeCapabilities();
   state.currentRules = await api('/api/rules/current');
   setSessionIndicator(
     'gitRules',
@@ -5084,27 +5088,23 @@ async function deleteSelectedCmdbuildWebhooks() {
 function buildCmdbuildWebhookOperations(rules, cmdbuildCatalog, currentHooks) {
   return buildCmdbuildWebhookOperationsFromRequirements(rules, cmdbuildCatalog, currentHooks, {
     managedPrefix: managedWebhookPrefix,
-    defaultUrl: defaultCmdbuildWebhookUrl
+    defaultUrl: configuredCmdbuildWebhookTargetUrl()
   });
 }
 
 function buildDesiredCmdbuildWebhooks(rules, cmdbuildCatalog, currentHooks) {
   return buildDesiredCmdbuildWebhooksFromRequirements(rules, cmdbuildCatalog, currentHooks, {
     managedPrefix: managedWebhookPrefix,
-    defaultUrl: defaultCmdbuildWebhookUrl
+    defaultUrl: configuredCmdbuildWebhookTargetUrl()
   });
 }
 
-function currentWebhookDefaults(currentHooks) {
-  const managed = currentHooks.map(normalizeWebhookItem).filter(isManagedWebhook);
-  const sample = managed.find(hook => hook.url) ?? managed[0] ?? {};
-  return {
-    method: sample.method || 'post',
-    url: sample.url || defaultCmdbuildWebhookUrl,
-    headers: sample.headers ?? {},
-    language: sample.language ?? '',
-    placeholderPrefix: currentWebhookPlaceholderPrefix(sample) || 'card'
-  };
+function configuredCmdbuildWebhookTargetUrl() {
+  const targetUrl = String(state.runtimeSettings?.cmdbuild?.webhookTargetUrl ?? '').trim();
+  if (!targetUrl) {
+    throw new Error(t('webhooks.targetNotConfigured'));
+  }
+  return targetUrl;
 }
 
 function webhookPlaceholderPrefixMatchesClass(prefix, className) {
@@ -7188,6 +7188,14 @@ function mappingTargetSelectionKey(type, value) {
     const target = parseMappingTargetValue(value);
     if (!target || typeof target !== 'object') {
       return '';
+    }
+    if (type === 'templates') {
+      const templateId = normalizeToken(target.templateid);
+      if (templateId) {
+        return `templateid:${templateId}`;
+      }
+      const templateName = normalizeToken(target.name || target.host);
+      return templateName ? `template:${templateName}` : '';
     }
     return stableJson(stripMappingTargetStringTemplate(type, target));
   } catch {
@@ -10705,7 +10713,7 @@ function buildWebhookBodiesFile(rules, cmdbuildCatalog, validation, changes) {
     '# Authorization: Bearer XXXXX нужно заменить согласованным токеном микросервиса при ручной настройке.',
     '# Если рядом уже есть рабочие webhook-записи, можно взять из них блок Authorization и использовать тот же подход.',
     '# Method в CMDBuild выбирайте POST. Он должен совпадать с HTTP-интерфейсом микросервиса: POST /webhooks/cmdbuild.',
-    '# Dev URL сейчас обычно: http://192.168.202.35:5080/webhooks/cmdbuild. Для другого окружения замените URL.',
+    `# URL: ${configuredCmdbuildWebhookTargetUrl()}. Он задан deployment-конфигурацией через CMDBUILD_WEBHOOK_TARGET_URL.`,
     '# Content-Type вручную лучше не добавлять в headers CMDBuild: CMDBuild сам выставляет его для JSON body.',
     '#',
     validation.issues.length > 0
@@ -10835,7 +10843,7 @@ function appendWebhookBodiesForClass(lines, rules, cmdbuildCatalog, className, e
       `## ${actionLabel} / ${classItem.name} / ${event.eventType}`,
       '# Action: ADD or UPDATE CMDBuild webhook Body',
       '# Method: POST',
-      '# URL: http://192.168.202.35:5080/webhooks/cmdbuild',
+      `# URL: ${configuredCmdbuildWebhookTargetUrl()}`,
       '# Headers: Authorization: Bearer XXXXX',
       ...pathComments,
       JSON.stringify(body, null, 2),
@@ -10865,7 +10873,7 @@ function appendWebhookDeleteInstructions(lines, className, events, actionLabel, 
     '# Body для удаления не нужен. Удалите/отключите webhook-записи со следующими событиями:',
     ...visibleEvents.map(event => `# - ${event.eventType}: ${event.cmdbuildEvent}`),
     '# Method у удаляемых записей: POST',
-    '# URL у удаляемых записей: http://192.168.202.35:5080/webhooks/cmdbuild',
+    `# URL у удаляемых записей: ${configuredCmdbuildWebhookTargetUrl()}`,
     ''
   );
 }
@@ -14344,6 +14352,7 @@ async function currentRulesContentForGitExport() {
 }
 
 async function buildWebhookArtifactForGitExport(rules) {
+  await loadRuntimeCapabilities();
   if (!state.webhooksCmdbuildCatalog) {
     state.webhooksCmdbuildCatalog = await api('/api/cmdbuild/catalog');
     setSessionIndicator('cmdbuildCatalog', 'loaded', 'sessionTraffic.loaded');
@@ -15083,7 +15092,11 @@ async function api(path, options = {}) {
       });
     }
 
-    const error = new Error(payload.message ?? payload.error ?? `HTTP ${response.status}`);
+    const eventReadId = typeof payload.eventReadId === 'string' ? payload.eventReadId.trim() : '';
+    const message = payload.error === 'kafka_event_browser_error' && eventReadId
+      ? tf('events.readFailed', { eventReadId })
+      : (payload.message ?? payload.error ?? `HTTP ${response.status}`);
+    const error = new Error(message);
     error.status = response.status;
     error.payload = payload;
     throw error;

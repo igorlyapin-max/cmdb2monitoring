@@ -26,7 +26,7 @@ Run .NET commands through the repository wrapper:
 
 Dev HTTP ports:
 
-- `cmdbwebhooks2kafka`: `http://localhost:5080`, bind `0.0.0.0:5080` so CMDBuild in Docker can call `http://192.168.202.35:5080/webhooks/cmdbuild`.
+- `cmdbwebhooks2kafka`: `http://localhost:5080`, bind `0.0.0.0:5080`. Production Compose requires `CMDBUILD_WEBHOOK_TARGET_URL` with the receiver URL reachable from CMDBuild.
 - `cmdbkafka2zabbix`: `http://localhost:5081`.
 - `zabbixrequests2api`: `http://localhost:5082`.
 - `zabbixbindings2cmdbuild`: `http://localhost:5083`.
@@ -82,6 +82,8 @@ docker compose --env-file deploy/production.env.example -f deploy/compose.produc
 ```
 
 `monitoring-ui-api` reads dashboard health endpoints from `MONITORING_UI_HEALTH_ENDPOINTS_JSON` before startup. Production requires all four declared internal Compose services on their DNS names and port `8080`; `localhost:5080..5083` is development-only. Paths and token env references remain configurable in the deployment `.env` without source changes.
+
+CMDBuild ETL webhook URL is deployment-owned and mandatory in this production Compose: set `CMDBUILD_WEBHOOK_TARGET_URL` to the receiver URL reachable from CMDBuild. The UI does not persist or edit this topology setting. Compose DNS is valid only in a separately declared shared-network deployment overlay that also contains CMDBuild.
 
 Observability artifacts are under `deploy/observability/`. Validate them with:
 

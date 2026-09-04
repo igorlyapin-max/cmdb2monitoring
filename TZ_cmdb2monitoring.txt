@@ -456,7 +456,7 @@ http://localhost:8090/cmdbuild/services/rest/v4
 
 Webhook URL для текущего локального сервиса:
 
-http://192.168.202.35:5080/webhooks/cmdbuild
+http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild
 
 Если сервис запускается в другом окружении, URL необходимо заменить в CMDBuild webhook settings.
 
@@ -1655,7 +1655,7 @@ CMDBuild работает в Docker-контейнере и не может об
 
 Текущий dev endpoint webhook:
 
-http://192.168.202.35:5080/webhooks/cmdbuild
+http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild
 
 `cmdbwebhooks2kafka` должен слушать `0.0.0.0:5080`.
 Запуск только на `localhost:5080` считается ошибочной конфигурацией для текущего dev-контура, потому что webhook из CMDBuild не дойдет до сервиса.
@@ -1663,7 +1663,7 @@ http://192.168.202.35:5080/webhooks/cmdbuild
 Healthcheck:
 
 http://localhost:5080/health
-http://192.168.202.35:5080/health
+http://cmdbwebhooks2kafka:8080/health
 
 20.2. Kafka state и восстановление после рестарта
 

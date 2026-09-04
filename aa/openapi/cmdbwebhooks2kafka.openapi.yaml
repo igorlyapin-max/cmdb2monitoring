@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: cmdbwebhooks2kafka HTTP API
   version: 0.4.0
+  x-information-flow: OAPI0
   description: >
     Receives flat CMDBuild webhook payloads. Reference, lookup, and domain-path fields can
     carry numeric ids; leaf interpretation is driven by conversion rules
@@ -9,7 +10,7 @@ info:
 servers:
   - url: http://localhost:5080
     description: Dev server from host
-  - url: http://192.168.202.35:5080
+  - url: http://cmdbwebhooks2kafka:8080
     description: Dev server from CMDBuild Docker container
 security:
   - bearerAuth: []

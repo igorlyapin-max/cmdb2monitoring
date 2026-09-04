@@ -20,6 +20,7 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
   const rules = JSON.parse(await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.json'), 'utf8'));
   const cmdbuildCatalog = browserTestCmdbuildCatalog();
   const zabbixCatalog = browserTestZabbixCatalog();
+  addBrowserTemplateRule(rules);
   await writeFile(activeRulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
 
   const server = startServer(port, directory, activeRulesPath);
@@ -33,7 +34,9 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     await waitForReady(port, server);
     const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
     page.setDefaultTimeout(10000);
-    await mockApi(page, rules, cmdbuildCatalog, zabbixCatalog);
+    await mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, {
+      eventBrowserFailure: 'event-read-browser-test'
+    });
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
 
     await page.locator('[data-view="profiles"]').click();
@@ -57,6 +60,37 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     await setLeaf(page, 'root/1/1', 'aRMCritical', 'notEquals', '2');
     await assertVisible(page, '[data-condition-path="root/1/1"][data-condition-property="value"]');
 
+    await page.locator('#mappingEditAction').selectOption('modify');
+    await page.locator('#mappingRuleProfile').selectOption('arm-main');
+    const templateRule = page.locator('#mappingModifyRule option', { hasText: 'browser-template-rule' });
+    assert.equal(await templateRule.count(), 1);
+    await page.locator('#mappingModifyRule').selectOption(await templateRule.getAttribute('value'));
+    const selectedTemplate = JSON.parse(await page.locator('#mappingEditZabbixObject').inputValue());
+    assert.equal(selectedTemplate.templateid, '90001');
+    assert.equal(selectedTemplate.parentTemplates[0].templateid, '90000');
+    assert.doesNotMatch(await page.locator('#mappingEditZabbixObject option:checked').textContent(), /Текущий target rule/);
+    await page.locator('#mappingEditPriority').fill('101');
+    await assertVisible(page, '#mappingAddRule');
+    assert.equal(await page.locator('#mappingAddRule').isEnabled(), true);
+
+    await page.locator('[data-view="webhooks"]').click();
+    await page.locator('#webhooksAnalyze').click();
+    await page.locator('[data-webhook-detail-kind="operation"]').first().click();
+    await assertVisible(page, '#webhooksDetails');
+    assert.match(await page.locator('#webhooksDetails').textContent(), /http:\/\/cmdbwebhooks2kafka:8080\/webhooks\/cmdbuild/);
+
+    await page.locator('[data-view="events"]').click();
+    await page.locator('#refreshEvents').click();
+    await page.locator('#toast').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#toast').textContent(), /Идентификатор диагностики: event-read-browser-test/);
+
+    await page.locator('[data-view="mapping"]').click();
+
+    const missingTemplateRule = page.locator('#mappingModifyRule option', { hasText: 'browser-missing-template-rule' });
+    assert.equal(await missingTemplateRule.count(), 1);
+    await page.locator('#mappingModifyRule').selectOption(await missingTemplateRule.getAttribute('value'));
+    assert.match(await page.locator('#mappingEditZabbixObject option:checked').textContent(), /Текущий target rule/);
+
     await page.setViewportSize({ width: 390, height: 844 });
     await assertUsableMobileGeometry(page);
     await page.screenshot({ path: '/tmp/c2m-mapping-editor-browser.png', fullPage: true });
@@ -70,6 +104,12 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     await page.getByLabel('Condition operator').first().selectOption('any');
     assert.equal(await page.locator('[data-condition-path="root"][data-condition-property="operator"] option:checked').textContent(), 'OR');
     assert.ok(await page.getByLabel('Condition field').count() > 0);
+
+    await page.locator('[data-view="events"]').click();
+    await page.locator('#refreshEvents').click();
+    await page.locator('#toast').waitFor({ state: 'visible' });
+    await assertVisible(page, '#toast');
+    assert.match(await page.locator('#toast').textContent(), /Diagnostic ID: event-read-browser-test/);
 
     const credentialsScenario = {};
     await page.unroute('**/api/**');
@@ -127,6 +167,18 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
       });
       return;
     }
+    if (path === '/api/events' && options.eventBrowserFailure) {
+      await route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'kafka_event_browser_error',
+          message: 'Kafka event browsing failed. Use the diagnostic ID in service logs.',
+          eventReadId: options.eventBrowserFailure
+        })
+      });
+      return;
+    }
     const payload = path === '/api/auth/status'
       ? {
         authenticated: true,
@@ -143,7 +195,10 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
         : path === '/api/queue/status'
           ? { enabled: false, refreshIntervalMs: 0 }
           : path === '/api/settings/runtime-capabilities'
-            ? { zabbix: { allowDynamicTagsFromCmdbLeaf: false, allowDynamicHostGroupsFromCmdbLeaf: false } }
+            ? {
+              cmdbuild: { webhookTargetUrl: 'http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild' },
+              zabbix: { allowDynamicTagsFromCmdbLeaf: false, allowDynamicHostGroupsFromCmdbLeaf: false }
+            }
             : path === '/api/rules/current'
               ? { source: 'active', rulesVersion: rules.rulesVersion, content: rules }
               : path === '/api/cmdbuild/catalog'
@@ -172,7 +227,14 @@ function browserTestCmdbuildCatalog() {
 function browserTestZabbixCatalog() {
   return {
     hostGroups: [],
-    templates: [],
+    templates: [{
+      templateid: '90001',
+      name: 'Template browser catalog match',
+      host: 'Template browser catalog match',
+      parentTemplates: [{ templateid: '90000', name: 'Parent template' }],
+      templategroups: [{ groupid: '1', name: 'Templates' }],
+      items: [{ itemid: '1', key_: 'agent.ping' }]
+    }],
     templateGroups: [],
     proxies: [],
     proxyGroups: [],
@@ -185,6 +247,46 @@ function browserTestZabbixCatalog() {
     maintenances: [],
     valueMaps: []
   };
+}
+
+function addBrowserTemplateRule(rules) {
+  rules.templateSelectionRules = [
+    ...(rules.templateSelectionRules ?? []),
+    {
+      name: 'browser-template-rule',
+      priority: 100,
+      when: {
+        expression: {
+          operator: 'all',
+          items: [
+            { operator: 'equals', field: 'hostProfile', value: 'arm-main' },
+            { operator: 'equals', field: 'aRMCritical', value: '1' }
+          ]
+        }
+      },
+      templates: [{
+        templateid: '90001',
+        name: 'Template browser catalog match'
+      }]
+    },
+    {
+      name: 'browser-missing-template-rule',
+      priority: 100,
+      when: {
+        expression: {
+          operator: 'all',
+          items: [
+            { operator: 'equals', field: 'hostProfile', value: 'arm-main' },
+            { operator: 'equals', field: 'aRMCritical', value: '2' }
+          ]
+        }
+      },
+      templates: [{
+        templateid: '90002',
+        name: 'Template browser missing'
+      }]
+    }
+  ];
 }
 
 async function setLeaf(page, path, field, operator, value) {
