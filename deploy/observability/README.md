@@ -2,7 +2,7 @@
 
 Artifacts:
 
-- `prometheus/cmdb2monitoring-alerts.yml` - Prometheus alert rules for service metrics, queue lag, DLQ depth, auth failures, catalog sync failures, rules reload failures, DLQ publication, and Zabbix request failures.
+- `prometheus/cmdb2monitoring-alerts.yml` - Prometheus alert rules for each service's metrics, queue lag, DLQ depth, auth failures, catalog sync failures, rules reload failures, DLQ publication, and Zabbix request failures.
 - `grafana/cmdb2monitoring-dashboard.json` - Grafana dashboard using Prometheus datasource variable `DS_PROMETHEUS`.
 
 Expected scrape targets:

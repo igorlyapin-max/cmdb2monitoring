@@ -4,7 +4,9 @@
 
 ### Fixed
 
-- Production CMDBuild webhook callback URL is now an explicit deployment-owned `CMDBUILD_WEBHOOK_TARGET_URL`; the BFF rejects browser-side URL substitution, fails fast for a missing/loopback callback target, and documents the external CMDBuild topology.
+- CMDBuild webhook callback URL is now an admin Runtime setting persisted in `state/ui-settings.json`, not a Compose env variable. A blank value permits BFF startup but blocks webhook plan/export/apply; Production rejects loopback and unspecified targets, and a URL change offers managed-webhook replanning without automatic CMDBuild apply.
+- Runtime Settings persistence now uses an atomically replaced state file, production Compose initializes both BFF state and data volumes for UID/GID `10001`, and the image smoke proves settings survive restart. Webhook URLs reject credentials, query parameters, and fragments; generated snippets no longer ship a hardcoded Compose DNS URL.
+- Event Browser now returns the latest topic messages across Kafka partitions by timestamp, and Prometheus alerts detect missing base metrics independently for every service.
 - Event Browser Kafka read failures now return a safe diagnostic identifier to the localized UI and write the same identifier with the failure stage and cause to structured logs.
 - Production Event Browser now inherits `KAFKA_SASL_MECHANISM` and receives the complete deployment-owned pipeline, DLQ, and structured-log topic list; stale Runtime Settings can no longer replace deployed topic names.
 - Production Compose now initializes `monitoring-ui-data` for the non-root UI runtime user before starting `monitoring-ui-api`, preventing catalog-cache `EACCES` failures on externally created volumes.

@@ -425,7 +425,7 @@ const translations = {
     'webhooks.currentDetailsHint': 'Загруженные из CMDB webhooks показаны ниже. Нажмите "Проанализировать rules", чтобы построить план операций.',
     'webhooks.summaryLoaded': 'CMDB webhooks загружены: {current}. План операций еще не построен.',
     'webhooks.ownershipNote': 'Операции create/update/delete применяются только к owned managed webhooks cmdb2monitoring; чужие webhooks остаются вне плана.',
-    'webhooks.targetNotConfigured': 'URL получателя CMDBuild webhook не задан. Укажите CMDBUILD_WEBHOOK_TARGET_URL в deployment-конфигурации.',
+    'webhooks.targetNotConfigured': 'URL получателя CMDBuild webhook не задан. Укажите его в Runtime-настройках.',
     'events.readFailed': 'Не удалось прочитать события Kafka. Идентификатор диагностики: {eventReadId}.',
     'audit.storageIntro': 'Аудит будет использовать хранилище, выбранное в Runtime-настройках. PostgreSQL предназначен для средних и крупных инсталляций, SQLite - для разработки и небольших инсталляций.',
     'audit.quickTitle': 'Быстрый аудит',
@@ -517,6 +517,8 @@ const translations = {
     'settings.settingsFile': 'Файл настроек',
     'settings.usersFile': 'Файл пользователей',
     'settings.cmdbuildUrl': 'CMDBuild URL',
+    'settings.cmdbuildWebhookTargetUrl': 'CMDBuild webhook URL',
+    'settings.cmdbuildWebhookTargetUrlNote': 'URL должен быть достижим из CMDBuild и заканчиваться на /webhooks/cmdbuild. После изменения можно пересобрать план управляемых webhook; применение в CMDBuild выполняется отдельной командой.',
     'settings.maxTraversalDepth': 'Максимальная глубина рекурсии domains&reference&lookups',
     'settings.catalogSyncTimeout': 'Таймаут синхронизации CMDBuild catalog, сек.',
     'settings.maxTraversalDepthNote': 'Изменение заработает только после logout и пересинхронизации CMDBuild catalog.',
@@ -630,6 +632,8 @@ const translations = {
     'settings.runtimeStatusDirty': 'Есть несохраненные Runtime-настройки. Нажмите "Сохранить runtime", чтобы применить изменения, или "Загрузить", чтобы вернуть значения из файла.',
     'settings.runtimeStatusSaveFailed': 'Runtime-настройки не сохранены: {message}',
     'settings.runtimeStatusLoadFailed': 'Runtime-настройки не загружены: {message}',
+    'settings.webhookTargetRebuildConfirm': 'CMDBuild webhook URL изменен. Загрузить управляемые webhooks и пересобрать план обновления? Изменения в CMDBuild не будут применены автоматически.',
+    'settings.webhookTargetRebuildSkipped': 'URL сохранен. План CMDBuild webhook не пересобран.',
     'settings.runtimeUnsavedConfirm': 'Есть несохраненные Runtime-настройки. Покинуть страницу без сохранения?',
     'settings.runtimeDiscardConfirm': 'Есть несохраненные Runtime-настройки. Загрузить значения из файла и сбросить текущие изменения?',
     'about.title': 'About',
@@ -1214,7 +1218,7 @@ const translations = {
     'webhooks.currentDetailsHint': 'Loaded CMDB webhooks are shown below. Click "Analyze rules" to build the operation plan.',
     'webhooks.summaryLoaded': 'CMDB webhooks loaded: {current}. The operation plan has not been built yet.',
     'webhooks.ownershipNote': 'Create/update/delete operations apply only to owned managed cmdb2monitoring webhooks; foreign webhooks stay outside the plan.',
-    'webhooks.targetNotConfigured': 'CMDBuild webhook receiver URL is not configured. Set CMDBUILD_WEBHOOK_TARGET_URL in deployment configuration.',
+    'webhooks.targetNotConfigured': 'CMDBuild webhook receiver URL is not configured. Set it in Runtime settings.',
     'events.readFailed': 'Kafka events could not be read. Diagnostic ID: {eventReadId}.',
     'audit.storageIntro': 'Audit will use the storage selected in Runtime settings. PostgreSQL targets medium and large installations; SQLite is for development and small installations.',
     'audit.quickTitle': 'Quick audit',
@@ -1306,6 +1310,8 @@ const translations = {
     'settings.settingsFile': 'Settings file',
     'settings.usersFile': 'Users file',
     'settings.cmdbuildUrl': 'CMDBuild URL',
+    'settings.cmdbuildWebhookTargetUrl': 'CMDBuild webhook URL',
+    'settings.cmdbuildWebhookTargetUrlNote': 'The URL must be reachable from CMDBuild and end with /webhooks/cmdbuild. After a change, you can rebuild the managed webhook plan; applying it to CMDBuild remains a separate command.',
     'settings.maxTraversalDepth': 'Max recursion depth for domains&reference&lookups',
     'settings.catalogSyncTimeout': 'CMDBuild catalog sync timeout, sec',
     'settings.maxTraversalDepthNote': 'The change takes effect only after logout and CMDBuild catalog resync.',
@@ -1418,6 +1424,8 @@ const translations = {
     'settings.runtimeStatusDirty': 'There are unsaved Runtime settings. Click "Save runtime" to apply changes, or "Load" to restore values from the file.',
     'settings.runtimeStatusSaveFailed': 'Runtime settings were not saved: {message}',
     'settings.runtimeStatusLoadFailed': 'Runtime settings were not loaded: {message}',
+    'settings.webhookTargetRebuildConfirm': 'The CMDBuild webhook URL changed. Load managed webhooks and rebuild the update plan? Changes will not be applied to CMDBuild automatically.',
+    'settings.webhookTargetRebuildSkipped': 'URL saved. The CMDBuild webhook plan was not rebuilt.',
     'settings.runtimeUnsavedConfirm': 'There are unsaved Runtime settings. Leave this page without saving?',
     'settings.runtimeDiscardConfirm': 'There are unsaved Runtime settings. Load values from the file and discard current changes?',
     'about.title': 'About',
@@ -5105,6 +5113,22 @@ function configuredCmdbuildWebhookTargetUrl() {
     throw new Error(t('webhooks.targetNotConfigured'));
   }
   return targetUrl;
+}
+
+function normalizeWebhookTargetUrl(value) {
+  return String(value ?? '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
+function clearCmdbuildWebhookPlan() {
+  state.webhooksOperations = [];
+  state.webhooksRequirements = [];
+  state.webhooksHistory = [];
+  state.webhooksHistoryIndex = -1;
+  state.webhooksSelectedIndex = -1;
+  state.webhooksDetailRow = { kind: '', index: -1 };
+  if (state.webhooksLoaded) {
+    renderWebhooks(t('webhooks.summaryLoaded'));
+  }
 }
 
 function webhookPlaceholderPrefixMatchesClass(prefix, className) {
@@ -10713,7 +10737,7 @@ function buildWebhookBodiesFile(rules, cmdbuildCatalog, validation, changes) {
     '# Authorization: Bearer XXXXX нужно заменить согласованным токеном микросервиса при ручной настройке.',
     '# Если рядом уже есть рабочие webhook-записи, можно взять из них блок Authorization и использовать тот же подход.',
     '# Method в CMDBuild выбирайте POST. Он должен совпадать с HTTP-интерфейсом микросервиса: POST /webhooks/cmdbuild.',
-    `# URL: ${configuredCmdbuildWebhookTargetUrl()}. Он задан deployment-конфигурацией через CMDBUILD_WEBHOOK_TARGET_URL.`,
+    `# URL: ${configuredCmdbuildWebhookTargetUrl()}. Он задан в Runtime-настройках monitoring-ui-api.`,
     '# Content-Type вручную лучше не добавлять в headers CMDBuild: CMDBuild сам выставляет его для JSON body.',
     '#',
     validation.issues.length > 0
@@ -13955,6 +13979,7 @@ function mergeRuntimeSettings(current = {}, update = {}) {
 
 async function saveRuntimeSettings() {
   const previousDepth = clampNumber(state.runtimeSettings?.cmdbuild?.maxTraversalDepth, 2, 2, 5);
+  const previousWebhookTargetUrl = normalizeWebhookTargetUrl(state.runtimeSettings?.cmdbuild?.webhookTargetUrl);
   try {
     const body = readRuntimeSettingsForm();
     const result = await api('/api/settings/runtime', {
@@ -13963,12 +13988,23 @@ async function saveRuntimeSettings() {
     });
     state.runtimeSettings = result;
     const nextDepth = clampNumber(result.cmdbuild?.maxTraversalDepth, 2, 2, 5);
+    const nextWebhookTargetUrl = normalizeWebhookTargetUrl(result.cmdbuild?.webhookTargetUrl);
     const statusKey = nextDepth !== previousDepth
       ? 'settings.runtimeStatusSavedResyncRequired'
       : 'settings.runtimeStatusSaved';
     fillRuntimeSettingsForm(result, { statusKey, statusLevel: 'success' });
     renderEventTopics(result.eventBrowser?.topics ?? [], $('#eventsTopic').value);
     toast(nextDepth !== previousDepth ? t('toast.runtimeSavedResyncRequired') : t('toast.runtimeSaved'));
+    if (nextWebhookTargetUrl !== previousWebhookTargetUrl) {
+      clearCmdbuildWebhookPlan();
+      if (nextWebhookTargetUrl && window.confirm(t('settings.webhookTargetRebuildConfirm'))) {
+        showView('webhooks');
+        await loadCmdbuildWebhooks();
+        await analyzeCmdbuildWebhooks();
+      } else if (nextWebhookTargetUrl) {
+        toast(t('settings.webhookTargetRebuildSkipped'));
+      }
+    }
     return result;
   } catch (error) {
     setRuntimeSettingsStatus('settings.runtimeStatusSaveFailed', 'error', { message: error.message });
@@ -14004,6 +14040,7 @@ function fillRuntimeSettingsForm(settings, options = {}) {
   }
   form.elements.usersFilePath.value = settings.usersFilePath ?? '';
   form.elements.cmdbuildBaseUrl.value = cmdbuild.baseUrl ?? '';
+  form.elements.cmdbuildWebhookTargetUrl.value = cmdbuild.webhookTargetUrl ?? '';
   form.elements.cmdbuildMaxTraversalDepth.value = clampNumber(cmdbuild.maxTraversalDepth, 2, 2, 5);
   form.elements.cmdbuildCatalogSyncTimeoutSeconds.value = clampNumber(cmdbuild.catalogSyncTimeoutSeconds, 300, 60, 1800);
   form.elements.zabbixApiEndpoint.value = zabbix.apiEndpoint ?? '';
@@ -14440,6 +14477,7 @@ function readRuntimeSettingsForm() {
   return {
     cmdbuild: {
       baseUrl: cmdbuildBaseUrl,
+      webhookTargetUrl: form.get('cmdbuildWebhookTargetUrl'),
       maxTraversalDepth: Number(form.get('cmdbuildMaxTraversalDepth') || 2),
       catalogSyncTimeoutSeconds: Number(form.get('cmdbuildCatalogSyncTimeoutSeconds') || 300)
     },
@@ -15095,7 +15133,9 @@ async function api(path, options = {}) {
     const eventReadId = typeof payload.eventReadId === 'string' ? payload.eventReadId.trim() : '';
     const message = payload.error === 'kafka_event_browser_error' && eventReadId
       ? tf('events.readFailed', { eventReadId })
-      : (payload.message ?? payload.error ?? `HTTP ${response.status}`);
+      : payload.error === 'webhook_target_url_not_configured'
+        ? t('webhooks.targetNotConfigured')
+        : (payload.message ?? payload.error ?? `HTTP ${response.status}`);
     const error = new Error(message);
     error.status = response.status;
     error.payload = payload;

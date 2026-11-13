@@ -62,7 +62,7 @@
 | Kafka host access | `localhost:9092` |
 | Kafka docker network access | `kafka:29092` |
 
-Текущий production Compose не включает CMDBuild в свою сеть. До запуска Compose обязательно задайте `CMDBUILD_WEBHOOK_TARGET_URL=https://<reachable-fqdn>/webhooks/cmdbuild`: это URL receiver, достижимый из сети CMDBuild. `localhost`, loopback и IP dev host не являются production target URL. Для локального запуска receiver слушает `0.0.0.0:5080`, а URL выбирается из сети CMDBuild. Compose DNS `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` допустим только в отдельном deployment overlay с явно объявленной общей сетью и CMDBuild.
+Текущий production Compose не включает CMDBuild в свою сеть. После запуска Compose администратор задает в `Runtime-настройках` `CMDBuild webhook URL=https://<reachable-fqdn>/webhooks/cmdbuild`: это URL receiver, достижимый из сети CMDBuild. Пустое значение не мешает старту BFF, но блокирует формирование, экспорт и применение webhook plan. `localhost`, loopback и unspecified host не являются production target URL; credentials, query parameters и fragment в URL запрещены. Для локального запуска receiver слушает `0.0.0.0:5080`, а URL выбирается из сети CMDBuild. Compose DNS `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` допустим только в отдельном deployment overlay с явно объявленной общей сетью и CMDBuild. После изменения URL UI предлагает загрузить managed webhook и пересобрать plan; применение в CMDBuild остается отдельной командой.
 
 ## Transport Security
 
@@ -96,7 +96,7 @@ Compose закрепляет:
 - structured JSON logs в stdout/stderr и Kafka log topics; Docker logging driver выбирается платформой, а syslog подключается отдельным overlay;
 - обязательные production env/secret inputs для webhook token, rules reload token, Kafka, CMDBuild, Zabbix и audit storage.
 
-Перед запуском `monitoring-ui-api` сервис `monitoring-ui-data-init` подготавливает shared volume `/app/data` для non-root runtime UID/GID `10001:10001`. Он завершается до запуска BFF; при ошибке `chown` BFF намеренно не стартует. Это устраняет `EACCES` при записи `data/zabbix-catalog-cache.json` и `data/cmdbuild-catalog-cache.json`. Для bind mount оператор должен разрешить изменение владельца UID/GID `10001:10001`; на filesystem с root squash это является deployment blocker, а не причиной запускать BFF от root. Диагностика: `docker compose -f deploy/compose.production.yml logs monitoring-ui-data-init`, затем `GET /ready` у BFF должен показать writable checks для обоих catalog cache. При подключении `deploy/compose.logging-syslog.yml` stderr init-сервиса направляется в тот же syslog sink, что и runtime сервисы.
+Перед запуском `monitoring-ui-api` сервис `monitoring-ui-storage-init` подготавливает shared volume `/app/data` и persistent `/app/state` для non-root runtime UID/GID `10001:10001`. Он завершается до запуска BFF; при ошибке `chown` BFF намеренно не стартует. Это устраняет `EACCES` при записи catalog cache и `state/ui-settings.json`. Для bind mount оператор должен разрешить изменение владельца UID/GID `10001:10001`; на filesystem с root squash это является deployment blocker, а не причиной запускать BFF от root. Диагностика: `docker compose -f deploy/compose.production.yml logs monitoring-ui-storage-init`, затем `GET /ready` у BFF должен показать writable checks для catalog cache и UI settings. При подключении `deploy/compose.logging-syslog.yml` stderr init-сервиса направляется в тот же syslog sink, что и runtime сервисы.
 
 При запросе CMDBuild или Zabbix credentials BFF показывает deployment-configured endpoint справочно. Пользователь вводит только login/password; endpoint в browser request не передается и не может сменить deployment topology.
 
@@ -202,7 +202,7 @@ Node.js `monitoring-ui-api` использует `config/appsettings*.json` и �
 | `ElkLogging` | Kafka log sink или будущий ELK endpoint |
 | `Secrets` | `None` или `IndeedPamAapm`; mapping `secret://id` на Indeed PAM/AAPM account path/name |
 
-`monitoring-ui-api` создает ETL webhooks только с URL из deployment-owned `Cmdbuild:Webhooks:TargetUrl` / `CMDBUILD_WEBHOOK_TARGET_URL`. В текущем production Compose переменная обязательна и должна содержать reachable FQDN/reverse proxy URL; браузер не может подменить этот URL при применении webhook.
+`monitoring-ui-api` создает ETL webhooks только с URL из сохраненных `Runtime-настроек` (`Cmdbuild:Webhooks:TargetUrl` в `state/ui-settings.json`). Пустой URL fail-closed блокирует создание plan, экспорт и apply. При применении BFF сверяет URL каждой create/update операции с сохраненным runtime-значением, поэтому браузер не может подменить target. В Production значение должно быть reachable HTTP(S) FQDN/reverse proxy URL и не может использовать loopback, unspecified host, credentials, query parameters или fragment.
 
 Для локального Docker Kafka внутри сети использовать:
 

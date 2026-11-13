@@ -923,6 +923,11 @@ components:
           properties:
             baseUrl:
               type: string
+            webhookTargetUrl:
+              type: string
+              format: uri
+              nullable: true
+              description: Optional CMDBuild-reachable HTTP(S) receiver URL. Must end with /webhooks/cmdbuild and must not contain credentials, query parameters, or a fragment. Production rejects loopback and unspecified hosts. A blank value disables webhook plan, export, and apply.
             maxTraversalDepth:
               type: integer
               minimum: 2

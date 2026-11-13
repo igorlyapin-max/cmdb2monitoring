@@ -71,7 +71,7 @@ The service exposes:
 - `GET /health`;
 - `POST /webhooks/cmdbuild`.
 
-Development binding is `0.0.0.0:5080`. The webhook target is selected from CMDBuild network reachability: Compose default is `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild`; an external CMDBuild uses `CMDBUILD_WEBHOOK_TARGET_URL`.
+Development binding is `0.0.0.0:5080`. The webhook target is selected from CMDBuild network reachability and saved in monitoring-ui-api Runtime settings; an external CMDBuild requires a reachable FQDN/reverse-proxy URL. A blank target permits BFF startup but blocks webhook planning and apply.
 
 4.2. Webhook Input Format
 
@@ -441,6 +441,7 @@ monitoring-ui-api provides:
 - Conversion Rules Management;
 - Logical Control of Conversion Rules;
 - Webhook Setup for CMDBuild webhook planning and apply;
+- CMDBuild webhook URL in BFF admin Runtime settings rather than Compose env; a blank URL does not block BFF startup but blocks webhook plan/export/apply, and changing it offers rebuilding the owned managed-webhook plan without automatic CMDBuild apply;
 - a maximum of 100 CMDBuild webhook operations per apply batch, rejected before CMDBuild is called when exceeded;
 - Runtime Settings, Git Settings, and Authorization settings.
 

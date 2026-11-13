@@ -17,7 +17,7 @@ services:
   zabbixbindings2cmdbuild:
     logging: *syslog_logging
 
-  monitoring-ui-data-init:
+  monitoring-ui-storage-init:
     logging: *syslog_logging
 
   monitoring-ui-api:

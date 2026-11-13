@@ -2,13 +2,54 @@ groups:
   - name: cmdb2monitoring.runtime
     rules:
       - alert: Cmdb2MonitoringServiceMetricsMissing
-        expr: absent(cmdb2monitoring_service_started_at_seconds{service=~"cmdbwebhooks2kafka|cmdbkafka2zabbix|zabbixrequests2api|zabbixbindings2cmdbuild|monitoring-ui-api"})
+        expr: absent(cmdb2monitoring_service_started_at_seconds{service="cmdbwebhooks2kafka"})
         for: 3m
         labels:
           severity: critical
+          service: cmdbwebhooks2kafka
         annotations:
-          summary: cmdb2monitoring metrics are missing
-          description: No cmdb2monitoring service metrics were scraped for more than 3 minutes.
+          summary: cmdbwebhooks2kafka metrics are missing
+          description: cmdbwebhooks2kafka has not exposed its base metrics for more than 3 minutes.
+
+      - alert: Cmdb2MonitoringServiceMetricsMissing
+        expr: absent(cmdb2monitoring_service_started_at_seconds{service="cmdbkafka2zabbix"})
+        for: 3m
+        labels:
+          severity: critical
+          service: cmdbkafka2zabbix
+        annotations:
+          summary: cmdbkafka2zabbix metrics are missing
+          description: cmdbkafka2zabbix has not exposed its base metrics for more than 3 minutes.
+
+      - alert: Cmdb2MonitoringServiceMetricsMissing
+        expr: absent(cmdb2monitoring_service_started_at_seconds{service="zabbixrequests2api"})
+        for: 3m
+        labels:
+          severity: critical
+          service: zabbixrequests2api
+        annotations:
+          summary: zabbixrequests2api metrics are missing
+          description: zabbixrequests2api has not exposed its base metrics for more than 3 minutes.
+
+      - alert: Cmdb2MonitoringServiceMetricsMissing
+        expr: absent(cmdb2monitoring_service_started_at_seconds{service="zabbixbindings2cmdbuild"})
+        for: 3m
+        labels:
+          severity: critical
+          service: zabbixbindings2cmdbuild
+        annotations:
+          summary: zabbixbindings2cmdbuild metrics are missing
+          description: zabbixbindings2cmdbuild has not exposed its base metrics for more than 3 minutes.
+
+      - alert: Cmdb2MonitoringServiceMetricsMissing
+        expr: absent(cmdb2monitoring_service_started_at_seconds{service="monitoring-ui-api"})
+        for: 3m
+        labels:
+          severity: critical
+          service: monitoring-ui-api
+        annotations:
+          summary: monitoring-ui-api metrics are missing
+          description: monitoring-ui-api has not exposed its base metrics for more than 3 minutes.
 
       - alert: Cmdb2MonitoringQueueCritical
         expr: max by (pipeline, topic, mode) (cmdb2monitoring_queue_status{service="monitoring-ui-api"} == 3) > 0

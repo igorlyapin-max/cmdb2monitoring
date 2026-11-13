@@ -20,6 +20,7 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
   const rules = JSON.parse(await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.json'), 'utf8'));
   const cmdbuildCatalog = browserTestCmdbuildCatalog();
   const zabbixCatalog = browserTestZabbixCatalog();
+  const runtimeScenario = {};
   addBrowserTemplateRule(rules);
   await writeFile(activeRulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
 
@@ -35,7 +36,9 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
     page.setDefaultTimeout(10000);
     await mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, {
-      eventBrowserFailure: 'event-read-browser-test'
+      eventBrowserFailure: 'event-read-browser-test',
+      role: 'admin',
+      runtimeScenario
     });
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
 
@@ -79,9 +82,24 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     await assertVisible(page, '#webhooksDetails');
     assert.match(await page.locator('#webhooksDetails').textContent(), /http:\/\/cmdbwebhooks2kafka:8080\/webhooks\/cmdbuild/);
 
+    await page.locator('[data-view="runtimeSettings"]').click();
+    await assertVisible(page, '#runtimeSettingsForm input[name="cmdbuildWebhookTargetUrl"]');
+    await page.locator('#runtimeSettingsForm input[name="cmdbuildWebhookTargetUrl"]').fill('https://monitoring-webhook.example.local/webhooks/cmdbuild');
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator('#saveRuntimeSettings').click();
+    await page.locator('#webhooks.active').waitFor({ state: 'visible' });
+    await page.locator('#webhooksOperationsTable').waitFor({ state: 'visible' });
+    assert.ok((await page.locator('#webhooksOperationsTable tr').count()) > 0);
+    await page.locator('[data-webhook-detail-kind="operation"]').first().click();
+    assert.match(await page.locator('#webhooksDetails').textContent(), /https:\/\/monitoring-webhook\.example\.local\/webhooks\/cmdbuild/);
+    assert.doesNotMatch(await page.locator('#webhooksDetails').textContent(), /cmdbwebhooks2kafka:8080/);
+    assert.equal(runtimeScenario.savedWebhookTargetUrl, 'https://monitoring-webhook.example.local/webhooks/cmdbuild');
+    assert.ok(runtimeScenario.webhookLoadCount >= 2);
+    assert.equal(runtimeScenario.applyCount ?? 0, 0);
+
     await page.locator('[data-view="events"]').click();
     await page.locator('#refreshEvents').click();
-    await page.locator('#toast').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('#toast')?.textContent?.includes('event-read-browser-test'));
     assert.match(await page.locator('#toast').textContent(), /Идентификатор диагностики: event-read-browser-test/);
 
     await page.locator('[data-view="mapping"]').click();
@@ -107,7 +125,7 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
 
     await page.locator('[data-view="events"]').click();
     await page.locator('#refreshEvents').click();
-    await page.locator('#toast').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('#toast')?.textContent?.includes('event-read-browser-test'));
     await assertVisible(page, '#toast');
     assert.match(await page.locator('#toast').textContent(), /Diagnostic ID: event-read-browser-test/);
 
@@ -142,8 +160,40 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
 
 async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}) {
   let cmdbuildCredentialsRequested = false;
+  const role = options.role ?? 'editor';
+  const runtimeScenario = options.runtimeScenario ?? {};
+  const runtimeSettings = {
+    filePath: 'state/ui-settings.json',
+    usersFilePath: 'state/users.json',
+    cmdbuild: {
+      baseUrl: 'http://localhost:8090/cmdbuild/services/rest/v4',
+      webhookTargetUrl: 'http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild',
+      maxTraversalDepth: 2,
+      catalogSyncTimeoutSeconds: 300
+    },
+    zabbix: { apiEndpoint: '', apiToken: '', allowDynamicTagsFromCmdbLeaf: false, allowDynamicHostGroupsFromCmdbLeaf: false },
+    auditStorage: { provider: 'sqlite', connectionString: '', schema: '', autoMigrate: false, commandTimeoutSeconds: 30 },
+    eventBrowser: { enabled: false, bootstrapServers: '', clientId: '', securityProtocol: 'Plaintext', saslMechanism: '', username: '', password: '', sslRejectUnauthorized: true, maxMessages: 50, readTimeoutMs: 2500, topics: [] }
+  };
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/settings/runtime' && route.request().method() === 'PUT') {
+      const submitted = JSON.parse(route.request().postData() ?? '{}');
+      runtimeSettings.cmdbuild = { ...runtimeSettings.cmdbuild, ...(submitted.cmdbuild ?? {}) };
+      runtimeScenario.savedWebhookTargetUrl = runtimeSettings.cmdbuild.webhookTargetUrl;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(runtimeSettings) });
+      return;
+    }
+    if (path === '/api/cmdbuild/webhooks/apply') {
+      runtimeScenario.applyCount = (runtimeScenario.applyCount ?? 0) + 1;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ count: 0 }) });
+      return;
+    }
+    if (path === '/api/cmdbuild/webhooks') {
+      runtimeScenario.webhookLoadCount = (runtimeScenario.webhookLoadCount ?? 0) + 1;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+      return;
+    }
     if (path === '/api/cmdbuild/catalog'
       && options.requireCmdbuildCredentials
       && !cmdbuildCredentialsRequested) {
@@ -163,7 +213,7 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
       options.credentialsScenario.body = JSON.parse(route.request().postData() ?? '{}');
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ user: { role: 'editor', roleLabel: 'Editor' } })
+        body: JSON.stringify({ user: { role, roleLabel: role } })
       });
       return;
     }
@@ -184,8 +234,8 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
         authenticated: true,
         user: {
           identity: { login: 'browser-test', displayName: 'Browser Test' },
-          role: 'editor',
-          roleLabel: 'Editor',
+          role,
+          roleLabel: role,
           authMethod: 'local'
         },
         csrfToken: 'browser-test'
@@ -194,9 +244,11 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
         ? { items: [], managementRules: {} }
         : path === '/api/queue/status'
           ? { enabled: false, refreshIntervalMs: 0 }
-          : path === '/api/settings/runtime-capabilities'
+          : path === '/api/settings/runtime'
+            ? runtimeSettings
+            : path === '/api/settings/runtime-capabilities'
             ? {
-              cmdbuild: { webhookTargetUrl: 'http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild' },
+              cmdbuild: { webhookTargetUrl: runtimeSettings.cmdbuild.webhookTargetUrl },
               zabbix: { allowDynamicTagsFromCmdbLeaf: false, allowDynamicHostGroupsFromCmdbLeaf: false }
             }
             : path === '/api/rules/current'

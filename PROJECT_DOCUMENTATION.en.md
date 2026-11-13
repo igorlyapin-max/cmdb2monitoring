@@ -68,7 +68,7 @@ The additional `monitoring-ui-api` component provides an operator frontend/BFF f
 | Kafka host access | `localhost:9092` |
 | Kafka Docker-network access | `kafka:29092` |
 
-The current production Compose does not include CMDBuild in its network. Before starting Compose, set the required `CMDBUILD_WEBHOOK_TARGET_URL=https://<reachable-fqdn>/webhooks/cmdbuild` to a receiver URL reachable from CMDBuild. `localhost`, loopback, and a dev-host IP are not production target URLs. Compose DNS `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` is valid only in a separate deployment overlay with an explicitly declared shared network and CMDBuild.
+The current production Compose does not include CMDBuild in its network. After Compose starts, an administrator sets `CMDBuild webhook URL=https://<reachable-fqdn>/webhooks/cmdbuild` in Runtime settings to a receiver URL reachable from CMDBuild. A blank value permits BFF startup but blocks webhook planning, export, and apply. `localhost`, loopback, unspecified hosts, credentials, query parameters, and fragments are not valid production target URL components. Compose DNS `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` is valid only in a separate deployment overlay with an explicitly declared shared network and CMDBuild. After a URL change the UI offers to reload managed webhooks and rebuild the plan; applying to CMDBuild remains a separate command.
 
 ## Transport Security
 

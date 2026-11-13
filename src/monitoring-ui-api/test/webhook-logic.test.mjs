@@ -435,7 +435,7 @@ test('new managed webhooks use zabbix host code segment', () => {
   assert.equal(operations[0].code, 'cmdbwebhooks2kafka-zabbix-host-class-update');
 });
 
-test('deployment target URL replaces the URL of an owned webhook', () => {
+test('configured target URL replaces the URL of an owned webhook', () => {
   const targetUrl = 'https://monitoring-webhook.example.local/webhooks/cmdbuild';
   const operations = buildCmdbuildWebhookOperations(baseRules(), catalog, [
     currentNamespacedUpdateWebhook({ managedIdentifier })
@@ -447,7 +447,7 @@ test('deployment target URL replaces the URL of an owned webhook', () => {
   assert.ok(update.diff.includes('url'));
 });
 
-test('webhook planning rejects an absent deployment target URL', () => {
+test('webhook planning rejects an absent configured target URL', () => {
   assert.throws(
     () => buildCmdbuildWebhookOperationsImpl(baseRules(), catalog, []),
     /CMDBuild webhook target URL is not configured/

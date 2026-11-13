@@ -4,7 +4,7 @@ import { connect as connectNet, isIP } from 'node:net';
 import { connect as connectTls } from 'node:tls';
 import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile, stat, unlink, rename } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile, stat, unlink, rename } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Kafka, logLevel } from 'kafkajs';
@@ -52,6 +52,9 @@ logger = createStructuredLogger(config);
 validateCmdbuildApiConfig(config);
 validateCmdbuildWebhookTargetConfig(config);
 validateRuntimeSecurityConfig(config);
+if (isBlank(config.Cmdbuild?.Webhooks?.TargetUrl)) {
+  logger.warn('CMDBuild webhook target URL is not configured; webhook planning and apply are disabled.');
+}
 logger.info('Health endpoints configured', {
   count: config.Services?.HealthEndpoints?.length ?? 0,
   names: (config.Services?.HealthEndpoints ?? []).map(endpoint => endpoint.Name)
@@ -1325,6 +1328,7 @@ async function loadConfig() {
     ? mergeObjects(base, JSON.parse(await readFile(environmentConfigPath, 'utf8')))
     : base;
 
+  applyUiSettingsFileEnvOverride(merged);
   await applyPersistedUiSettings(merged);
   applyEnvOverrides(merged);
   applyEventBrowserTopicsEnvironmentOverride(merged, { environment });
@@ -1584,7 +1588,12 @@ async function applyPersistedUiSettings(target) {
     return;
   }
 
-  const persisted = JSON.parse(await readFile(settingsPath, 'utf8'));
+  let persisted;
+  try {
+    persisted = JSON.parse(await readFile(settingsPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Persisted UI settings file is invalid JSON: ${settingsPath}`, { cause: error });
+  }
   if (persisted.idp) {
     applyIdpSettings(target, persisted.idp);
   }
@@ -1666,7 +1675,6 @@ function applyEnvOverrides(target) {
     CMDBUILD_API_VERSION: ['Cmdbuild', 'ApiVersion'],
     CMDBUILD_ALLOW_INSECURE_HTTP: ['Cmdbuild', 'Tls', 'AllowInsecureHttp'],
     CMDBUILD_TLS_REJECT_UNAUTHORIZED: ['Cmdbuild', 'Tls', 'RejectUnauthorized'],
-    CMDBUILD_WEBHOOK_TARGET_URL: ['Cmdbuild', 'Webhooks', 'TargetUrl'],
     CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER: ['Cmdbuild', 'Webhooks', 'AuthorizationHeader'],
     CMDBUILD_WEBHOOK_BEARER_TOKEN: ['Cmdbuild', 'Webhooks', 'BearerToken'],
     ZABBIX_API_ENDPOINT: ['Zabbix', 'ApiEndpoint'],
@@ -1743,6 +1751,15 @@ function applyEnvOverrides(target) {
   }
 }
 
+function applyUiSettingsFileEnvOverride(target) {
+  const settingsFile = String(process.env.MONITORING_UI_SETTINGS_FILE ?? '').trim();
+  if (!settingsFile) {
+    return;
+  }
+  target.UiSettings ??= {};
+  target.UiSettings.FilePath = settingsFile;
+}
+
 function applyPamCompatibilityEnvironment(target) {
   target.Secrets ??= {};
   target.Secrets.IndeedPamAapm ??= {};
@@ -1816,28 +1833,35 @@ function validateCmdbuildWebhookTargetConfig(target) {
   const configuredTargetUrl = String(target.Cmdbuild?.Webhooks?.TargetUrl ?? '').trim();
   const targetUrl = configuredTargetUrl;
   if (!targetUrl) {
-    if (environment === 'Production') {
-      throw new Error('Production CMDBuild Webhooks.TargetUrl must be configured by deployment.');
-    }
+    target.Cmdbuild ??= {};
+    target.Cmdbuild.Webhooks ??= {};
+    target.Cmdbuild.Webhooks.TargetUrl = '';
     return;
   }
 
   if (!URL.canParse(targetUrl)) {
-    throw new Error('CMDBuild Webhooks.TargetUrl must be an absolute HTTP or HTTPS URL.');
+    throw invalidCmdbuildWebhookTarget('CMDBuild Webhooks.TargetUrl must be an absolute HTTP or HTTPS URL.');
   }
 
   const parsed = new URL(targetUrl);
   if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error('CMDBuild Webhooks.TargetUrl must use HTTP or HTTPS.');
+    throw invalidCmdbuildWebhookTarget('CMDBuild Webhooks.TargetUrl must use HTTP or HTTPS.');
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw invalidCmdbuildWebhookTarget('CMDBuild Webhooks.TargetUrl must not contain credentials, query parameters, or a fragment.');
   }
   if (parsed.pathname.replace(/\/+$/, '') !== '/webhooks/cmdbuild') {
-    throw new Error('CMDBuild Webhooks.TargetUrl must end with /webhooks/cmdbuild.');
+    throw invalidCmdbuildWebhookTarget('CMDBuild Webhooks.TargetUrl must end with /webhooks/cmdbuild.');
   }
   if (environment === 'Production' && isLocalOrUnspecifiedHostname(parsed.hostname)) {
-    throw new Error('Production CMDBuild Webhooks.TargetUrl must not use a loopback or unspecified host.');
+    throw invalidCmdbuildWebhookTarget('Production CMDBuild Webhooks.TargetUrl must not use a loopback or unspecified host.');
   }
 
   target.Cmdbuild.Webhooks.TargetUrl = targetUrl.replace(/\/+$/, '');
+}
+
+function invalidCmdbuildWebhookTarget(message) {
+  return httpError(400, 'invalid_cmdbuild_webhook_target', message);
 }
 
 function isLocalOrUnspecifiedHostname(hostname) {
@@ -4846,11 +4870,18 @@ async function applyCmdbuildWebhookOperations(session, payload) {
 function assertDeploymentOwnedCmdbuildWebhookTarget(desired) {
   const requestedUrl = normalizeWebhookUrl(desired?.url);
   const configuredUrl = normalizeWebhookUrl(config.Cmdbuild?.Webhooks?.TargetUrl);
-  if (!configuredUrl || requestedUrl !== configuredUrl) {
+  if (!configuredUrl) {
     throw httpError(
       400,
-      'webhook_target_url_not_deployment_owned',
-      'CMDBuild webhook URL must match the deployment-owned target URL.'
+      'webhook_target_url_not_configured',
+      'CMDBuild webhook target URL is not configured in Runtime Settings.'
+    );
+  }
+  if (requestedUrl !== configuredUrl) {
+    throw httpError(
+      400,
+      'webhook_target_url_not_runtime_owned',
+      'CMDBuild webhook URL must match the Runtime Settings target URL.'
     );
   }
 }
@@ -6611,8 +6642,10 @@ async function saveRuntimeSettings(payload) {
   applyRuntimeSettings(nextConfig, runtime);
   applyEventBrowserTopicsEnvironmentOverride(nextConfig, { environment });
   validateCmdbuildApiConfig(nextConfig);
+  validateCmdbuildWebhookTargetConfig(nextConfig);
   validateRuntimeSecurityConfig(nextConfig);
   validateEventBrowserConfiguration(nextConfig.EventBrowser);
+  runtime.cmdbuild.webhookTargetUrl = nextConfig.Cmdbuild?.Webhooks?.TargetUrl ?? '';
 
   delete persisted.auth;
   Object.assign(persisted, runtime);
@@ -6763,7 +6796,8 @@ function normalizeRuntimeSettingsPayload(payload = {}) {
   const currentCatalogSyncTimeout = cmdbuildCatalogSyncTimeoutSeconds(config.Cmdbuild?.Catalog?.SyncTimeoutSeconds);
   const result = {
     cmdbuild: {
-      baseUrl: cmdbuild.baseUrl ?? '',
+      baseUrl: cmdbuild.baseUrl ?? config.Cmdbuild?.BaseUrl ?? '',
+      webhookTargetUrl: cmdbuild.webhookTargetUrl ?? config.Cmdbuild?.Webhooks?.TargetUrl ?? '',
       maxTraversalDepth: cmdbuildTraversalMaxDepth(cmdbuild.maxTraversalDepth ?? currentMaxTraversalDepth),
       catalogSyncTimeoutSeconds: cmdbuildCatalogSyncTimeoutSeconds(
         cmdbuild.catalogSyncTimeoutSeconds ?? currentCatalogSyncTimeout)
@@ -6927,7 +6961,9 @@ function applyRuntimeSettings(target, persisted = {}) {
   if (persisted.cmdbuild) {
     target.Cmdbuild ??= {};
     target.Cmdbuild.Catalog ??= {};
+    target.Cmdbuild.Webhooks ??= {};
     target.Cmdbuild.BaseUrl = normalizeCmdbuildRestV4BaseUrl(persisted.cmdbuild.baseUrl ?? target.Cmdbuild.BaseUrl);
+    target.Cmdbuild.Webhooks.TargetUrl = persisted.cmdbuild.webhookTargetUrl ?? target.Cmdbuild.Webhooks.TargetUrl ?? '';
     target.Cmdbuild.ApiVersion = 'v4';
     target.Cmdbuild.Catalog.MaxTraversalDepth = cmdbuildTraversalMaxDepth(
       persisted.cmdbuild.maxTraversalDepth ?? target.Cmdbuild.Catalog.MaxTraversalDepth);
@@ -7013,8 +7049,23 @@ async function readPersistedUiSettings() {
 
 async function writePersistedUiSettings(settings) {
   const settingsPath = resolveUiSettingsFile(config);
-  await mkdir(dirname(settingsPath), { recursive: true });
-  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  const settingsDirectory = dirname(settingsPath);
+  const temporaryPath = join(settingsDirectory, `.${basename(settingsPath)}.${randomUUID()}.tmp`);
+  await mkdir(settingsDirectory, { recursive: true });
+
+  try {
+    const temporaryFile = await open(temporaryPath, 'w', 0o600);
+    try {
+      await temporaryFile.writeFile(`${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+      await temporaryFile.sync();
+    } finally {
+      await temporaryFile.close();
+    }
+    await rename(temporaryPath, settingsPath);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => {});
+    throw error;
+  }
 }
 
 async function createSamlSession(profile) {
@@ -7657,6 +7708,7 @@ function publicRuntimeSettings() {
     usersFilePath: publicUsersFilePath(),
     cmdbuild: {
       baseUrl: config.Cmdbuild.BaseUrl ?? '',
+      webhookTargetUrl: config.Cmdbuild?.Webhooks?.TargetUrl ?? '',
       maxTraversalDepth: cmdbuildTraversalMaxDepth(config.Cmdbuild?.Catalog?.MaxTraversalDepth),
       catalogSyncTimeoutSeconds: cmdbuildCatalogSyncTimeoutSeconds(config.Cmdbuild?.Catalog?.SyncTimeoutSeconds)
     },

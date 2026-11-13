@@ -60,6 +60,7 @@ Frontend/BFF: monitoring-ui-api.
 - выполнять dry-run правил конвертации;
 - визуализировать управление правилами конвертации CMDBuild -> rules -> Zabbix;
 - предоставлять раздел `Настройка webhooks` для ролей `editor` и `admin`: читать текущие CMDBuild webhooks, анализировать rules, предлагать create/update/delete и применять выбранные операции в CMDBuild;
+- хранить CMDBuild webhook URL в admin Runtime-настройках BFF, а не в Compose env; пустой URL не блокирует старт BFF, но блокирует webhook plan/export/apply; после изменения URL UI предлагает пересобрать plan owned managed webhook без автоматического применения в CMDBuild;
 - ограничивать один batch применения CMDBuild webhooks 100 операциями и отклонять превышение до обращения к CMDBuild;
 - посылать авторизованный сигнал `cmdbkafka2zabbix` на перечитывание правил конвертации;
 - поддерживать session draft редактирование правил конвертации: добавление/удаление rules, undo/redo и save-as;
@@ -454,11 +455,7 @@ REST base URL:
 
 http://localhost:8090/cmdbuild/services/rest/v4
 
-Webhook URL для текущего локального сервиса:
-
-http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild
-
-Если сервис запускается в другом окружении, URL необходимо заменить в CMDBuild webhook settings.
+Webhook URL задается в Runtime-настройках monitoring-ui-api и должен быть достижим из сети CMDBuild. В отдельном Docker overlay с общей сетью CMDBuild допускается `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild`; в остальных контурах используется reachable FQDN или reverse-proxy URL.
 
 В текущем dev-окружении как пример заведены webhook-записи:
 - для классов Notebook, PC, Server, tk;
@@ -1653,9 +1650,7 @@ src/monitoring-ui-api/scripts/validate-config.mjs
 
 CMDBuild работает в Docker-контейнере и не может обращаться к `localhost` dev host.
 
-Текущий dev endpoint webhook:
-
-http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild
+Dev endpoint webhook выбирается по сетевой достижимости CMDBuild. `http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild` допустим только при общей Docker network с CMDBuild; иначе Runtime-настройки содержат внешний FQDN/reverse-proxy URL.
 
 `cmdbwebhooks2kafka` должен слушать `0.0.0.0:5080`.
 Запуск только на `localhost:5080` считается ошибочной конфигурацией для текущего dev-контура, потому что webhook из CMDBuild не дойдет до сервиса.
@@ -1663,7 +1658,7 @@ http://cmdbwebhooks2kafka:8080/webhooks/cmdbuild
 Healthcheck:
 
 http://localhost:5080/health
-http://cmdbwebhooks2kafka:8080/health
+http://cmdbwebhooks2kafka:8080/health (только в общей Docker network)
 
 20.2. Kafka state и восстановление после рестарта
 

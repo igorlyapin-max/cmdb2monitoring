@@ -30,6 +30,9 @@ require_file "$DASHBOARD_FILE"
 require_file "$SMOKE_SCRIPT"
 
 require_pattern "cmdb2monitoring_events_total" "$ALERTS_FILE" "Alert rules must use service event counters."
+for service in cmdbwebhooks2kafka cmdbkafka2zabbix zabbixrequests2api zabbixbindings2cmdbuild monitoring-ui-api; do
+  require_pattern "cmdb2monitoring_service_started_at_seconds\\{service=\\\"${service}\\\"\\}" "$ALERTS_FILE" "Alert rules must detect missing metrics for ${service}."
+done
 require_pattern "cmdb2monitoring_queue_lag" "$ALERTS_FILE" "Alert rules must cover Kafka lag/DLQ depth."
 require_pattern "webhook_rejected_auth" "$ALERTS_FILE" "Alert rules must cover webhook authorization failures."
 require_pattern "auth_failure" "$ALERTS_FILE" "Alert rules must cover UI auth failures."

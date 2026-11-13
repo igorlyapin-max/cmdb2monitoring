@@ -28,9 +28,7 @@ test('publish rejects a stale active-rules revision without overwriting the file
     }]
   }), 'utf8');
 
-  const process = startServer(port, directory, activeRulesPath, usersPath, {
-    CMDBUILD_WEBHOOK_TARGET_URL: 'https://monitoring-webhook.example.local/webhooks/cmdbuild'
-  });
+  const process = startServer(port, directory, activeRulesPath, usersPath);
   try {
     await waitForReady(port, process);
     const login = await request(port, '/api/auth/login', {
@@ -71,6 +69,41 @@ test('publish rejects a stale active-rules revision without overwriting the file
     assert.equal(tooManyWebhookOperations.body.error, 'too_many_webhook_operations');
     assert.equal(tooManyWebhookOperations.body.limit, 100);
 
+    const missingWebhookTarget = await request(port, '/api/cmdbuild/webhooks/apply', {
+      method: 'POST',
+      headers: {
+        cookie,
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: {
+        operations: [{
+          action: 'create',
+          desired: {
+            code: 'cmdbwebhooks2kafka-test-update',
+            url: 'https://monitoring-webhook.example.local/webhooks/cmdbuild',
+            body: { managedIdentifier: 'cmdb2monitoring-zabbix-host-lifecycle' }
+          }
+        }]
+      }
+    });
+    assert.equal(missingWebhookTarget.status, 400);
+    assert.equal(missingWebhookTarget.body.error, 'webhook_target_url_not_configured');
+
+    const savedRuntime = await request(port, '/api/settings/runtime', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: {
+        cmdbuild: {
+          webhookTargetUrl: 'https://monitoring-webhook.example.local/webhooks/cmdbuild'
+        }
+      }
+    });
+    assert.equal(savedRuntime.status, 200);
+    assert.equal(savedRuntime.body.cmdbuild.webhookTargetUrl, 'https://monitoring-webhook.example.local/webhooks/cmdbuild');
+
     const tamperedWebhookTarget = await request(port, '/api/cmdbuild/webhooks/apply', {
       method: 'POST',
       headers: {
@@ -89,7 +122,7 @@ test('publish rejects a stale active-rules revision without overwriting the file
       }
     });
     assert.equal(tamperedWebhookTarget.status, 400);
-    assert.equal(tamperedWebhookTarget.body.error, 'webhook_target_url_not_deployment_owned');
+    assert.equal(tamperedWebhookTarget.body.error, 'webhook_target_url_not_runtime_owned');
 
     const current = await request(port, '/api/rules/current', {
       headers: { cookie }
@@ -122,38 +155,116 @@ test('publish rejects a stale active-rules revision without overwriting the file
   }
 });
 
-test('production requires a deployment-owned non-loopback CMDBuild webhook target', async () => {
+test('production permits a blank CMDBuild webhook target but rejects unsafe runtime values', async () => {
   const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-webhook-target-'));
   const port = await reservePort();
   const activeRulesPath = join(directory, 'rules.json');
   const usersPath = join(directory, 'users.json');
   const baseOverrides = productionRuntimeOverrides();
+  const password = 'test-local-admin-password';
+  await writeFile(usersPath, JSON.stringify({
+    version: 1,
+    users: [{
+      username: 'admin',
+      displayName: 'Test Admin',
+      role: 'admin',
+      password: passwordHash(password),
+      mustChangePassword: false
+    }]
+  }), 'utf8');
+  await writeFile(
+    activeRulesPath,
+    await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8'),
+    'utf8'
+  );
+  let process = null;
 
   try {
-    for (const [targetUrl, expectedMessage] of [
-      ['', 'Production CMDBuild Webhooks.TargetUrl must be configured by deployment.'],
-      ['http://localhost./webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
-      ['http://127.0.0.1/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
-      ['http://[::1]/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
-      ['http://[::ffff:127.0.0.1]/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
-      ['http://0.0.0.0/webhooks/cmdbuild', 'must not use a loopback or unspecified host'],
-      ['http://[::]/webhooks/cmdbuild', 'must not use a loopback or unspecified host']
-    ]) {
-      const process = startServer(port, directory, activeRulesPath, usersPath, {
-        ...baseOverrides,
-        CMDBUILD_WEBHOOK_TARGET_URL: targetUrl
+    process = startServer(port, directory, activeRulesPath, usersPath, baseOverrides);
+    try {
+      await waitForReady(port, process);
+      const login = await request(port, '/api/auth/login', {
+        method: 'POST',
+        body: { username: 'admin', password }
       });
-      try {
-        const output = await waitForExitOutput(process);
-        assert.match(output, new RegExp(expectedMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      } finally {
-        if (process.exitCode === null) {
-          process.kill('SIGTERM');
-          await onceExit(process);
-        }
+      assert.equal(login.status, 200);
+      const headers = {
+        cookie: login.headers.get('set-cookie'),
+        'x-csrf-token': login.body.csrfToken
+      };
+      const initial = await request(port, '/api/settings/runtime', { headers: { cookie: headers.cookie } });
+      assert.equal(initial.status, 200);
+      assert.equal(initial.body.cmdbuild.webhookTargetUrl, '');
+
+      for (const targetUrl of [
+        'http://localhost./webhooks/cmdbuild',
+        'http://127.0.0.1/webhooks/cmdbuild',
+        'http://[::1]/webhooks/cmdbuild',
+        'http://[::ffff:127.0.0.1]/webhooks/cmdbuild',
+        'http://0.0.0.0/webhooks/cmdbuild',
+        'http://[::]/webhooks/cmdbuild',
+        'https://token@monitoring-webhook.example.local/webhooks/cmdbuild',
+        'https://monitoring-webhook.example.local/webhooks/cmdbuild?token=value',
+        'https://monitoring-webhook.example.local/webhooks/cmdbuild#fragment'
+      ]) {
+        const update = await request(port, '/api/settings/runtime', {
+          method: 'PUT',
+          headers,
+          body: { cmdbuild: { webhookTargetUrl: targetUrl } }
+        });
+        assert.equal(update.status, 400);
+        assert.equal(update.body.error, 'invalid_cmdbuild_webhook_target');
       }
+      const saved = await request(port, '/api/settings/runtime', {
+        method: 'PUT',
+        headers,
+        body: { cmdbuild: { webhookTargetUrl: 'https://monitoring-webhook.example.local/webhooks/cmdbuild/' } }
+      });
+      assert.equal(saved.status, 200);
+      assert.equal(saved.body.cmdbuild.webhookTargetUrl, 'https://monitoring-webhook.example.local/webhooks/cmdbuild');
+    } finally {
+      process.kill('SIGTERM');
+      await onceExit(process);
+      process = null;
     }
+    process = startServer(port, directory, activeRulesPath, usersPath, baseOverrides);
+    await waitForReady(port, process);
+    const login = await request(port, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password }
+    });
+    const restored = await request(port, '/api/settings/runtime', { headers: { cookie: login.headers.get('set-cookie') } });
+    assert.equal(restored.status, 200);
+    assert.equal(restored.body.cmdbuild.webhookTargetUrl, 'https://monitoring-webhook.example.local/webhooks/cmdbuild');
+    process.kill('SIGTERM');
+    await onceExit(process);
+    process = null;
   } finally {
+    if (process?.exitCode === null) {
+      process.kill('SIGTERM');
+      await onceExit(process);
+    }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('fails startup with a clear error when persisted UI settings are invalid JSON', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-invalid-settings-'));
+  const port = await reservePort();
+  const settingsPath = join(directory, 'settings.json');
+  let process = null;
+
+  try {
+    await writeFile(settingsPath, '{invalid json\n', 'utf8');
+    process = startServer(port, directory, join(directory, 'rules.json'), join(directory, 'users.json'));
+    const output = await waitForExitOutput(process);
+    assert.notEqual(process.exitCode, 0);
+    assert.match(output, /Persisted UI settings file is invalid JSON/);
+  } finally {
+    if (process?.exitCode === null) {
+      process.kill('SIGTERM');
+      await onceExit(process);
+    }
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -296,7 +407,6 @@ test('production rejects an insecure SAML metadata endpoint before settings are 
     MONITORING_UI_KAFKA_ALLOW_PLAINTEXT: 'true',
     MONITORING_UI_LOGS_ENABLED: 'false',
     CMDBUILD_BASE_URL: 'https://cmdbuild.example.local/cmdbuild/services/rest/v4',
-    CMDBUILD_WEBHOOK_TARGET_URL: 'https://monitoring-webhook.example.local/webhooks/cmdbuild',
     ZABBIX_API_ENDPOINT: 'https://zabbix.example.local/api_jsonrpc.php',
     MONITORING_UI_OUTBOUND_ALLOWED_HOSTS: 'cmdbuild.example.local,zabbix.example.local,idp.example.local',
     MONITORING_UI_HEALTH_ENDPOINTS_JSON: JSON.stringify([
@@ -324,7 +434,7 @@ test('production rejects an insecure SAML metadata endpoint before settings are 
       headers: { cookie: login.headers.get('set-cookie') }
     });
     assert.equal(capabilities.status, 200);
-    assert.equal(capabilities.body.cmdbuild.webhookTargetUrl, 'https://monitoring-webhook.example.local/webhooks/cmdbuild');
+    assert.equal(capabilities.body.cmdbuild.webhookTargetUrl, '');
 
     const update = await request(port, '/api/settings/idp', {
       method: 'PUT',

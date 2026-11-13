@@ -623,6 +623,8 @@
                 <label><span data-i18n="settings.settingsFile">Файл настроек</span><input name="filePath" readonly></label>
                 <label><span data-i18n="settings.usersFile">Файл пользователей</span><input name="usersFilePath" readonly></label>
                 <label><span data-i18n="settings.cmdbuildUrl">CMDBuild URL</span><input name="cmdbuildBaseUrl"></label>
+                <label class="wide-field"><span data-i18n="settings.cmdbuildWebhookTargetUrl">CMDBuild webhook URL</span><input name="cmdbuildWebhookTargetUrl" type="url" placeholder="https://monitoring-webhook.example.local/webhooks/cmdbuild" spellcheck="false"></label>
+                <p class="settings-note wide-field" data-i18n="settings.cmdbuildWebhookTargetUrlNote">URL должен быть достижим из CMDBuild и заканчиваться на /webhooks/cmdbuild. После изменения можно пересобрать план управляемых webhook; применение в CMDBuild выполняется отдельной командой.</p>
                 <label><span data-i18n="settings.maxTraversalDepth">Максимальная глубина рекурсии domains&reference&lookups</span><input name="cmdbuildMaxTraversalDepth" type="number" min="2" max="5"></label>
                 <label><span data-i18n="settings.catalogSyncTimeout">Таймаут синхронизации CMDBuild catalog, сек.</span><input name="cmdbuildCatalogSyncTimeoutSeconds" type="number" min="60" max="1800"></label>
                 <p class="settings-note wide-field" data-i18n="settings.maxTraversalDepthNote">Изменение заработает только после logout и пересинхронизации CMDBuild catalog.</p>

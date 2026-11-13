@@ -108,7 +108,7 @@ SASLPASSWORDSECRET=AAA.LOCAL\PROD.contractorProfiles
 | `Kafka:SecurityProtocol`, `Kafka:Ssl*` | Plaintext/SASL/TLS режим и Kafka certificates | При включении авторизации/TLS Kafka |
 | `ElkLogging:*` | Настройки логирования | При подключении ELK или смене log topic |
 
-Webhook target задаётся BFF deployment-конфигурацией: `Cmdbuild:Webhooks:TargetUrl` / `CMDBUILD_WEBHOOK_TARGET_URL`. В текущем production Compose переменная обязательна, потому что CMDBuild не входит в его сеть; задаётся HTTPS FQDN/reverse proxy, достижимый из CMDBuild. Compose DNS допустим только в отдельном overlay с явно объявленной общей сетью. `localhost`, loopback и IP dev host не являются production target URL.
+Webhook target задается администратором в `Runtime-настройках` BFF и сохраняется как `Cmdbuild:Webhooks:TargetUrl` в `state/ui-settings.json`; `CMDBUILD_WEBHOOK_TARGET_URL` в Compose не используется. Пустое значение разрешает запуск BFF, но fail-closed блокирует webhook plan, export и apply. Для production задается HTTP(S) FQDN/reverse proxy, достижимый из CMDBuild; `localhost`, loopback, unspecified host, credentials, query parameters и fragment не допускаются. Compose DNS допустим только в отдельном overlay с явно объявленной общей сетью. После изменения URL UI может загрузить owned managed webhook и пересобрать plan без автоматического применения.
 
 Dev запуск receiver: `launchSettings.json` должен использовать `http://0.0.0.0:5080`; URL выбирается по достижимости из Docker/host сети CMDBuild.
 

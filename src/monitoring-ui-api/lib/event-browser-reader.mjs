@@ -102,6 +102,7 @@ export async function readKafkaTopicMessages({
           direction: topic.direction,
           partition,
           offset: message.offset,
+          timestampMs: kafkaTimestampMs(message.timestamp),
           timestamp: message.timestamp ? new Date(Number(message.timestamp)).toISOString() : '',
           key: message.key?.toString('utf8') ?? '',
           value: message.value?.toString('utf8') ?? '',
@@ -112,7 +113,7 @@ export async function readKafkaTopicMessages({
           target.done = true;
         }
 
-        if (items.length >= maxMessages || [...partitionTargets.values()].every(item => item.done)) {
+        if ([...partitionTargets.values()].every(item => item.done)) {
           done = true;
           resolveDone();
         }
@@ -161,15 +162,21 @@ export async function readKafkaTopicMessages({
 
   return items
     .sort((left, right) => {
-      if (left.topic !== right.topic) {
-        return left.topic.localeCompare(right.topic);
+      if (left.timestampMs !== right.timestampMs) {
+        return left.timestampMs - right.timestampMs;
       }
       if (left.partition !== right.partition) {
         return left.partition - right.partition;
       }
       return Number(BigInt(left.offset) - BigInt(right.offset));
     })
-    .slice(-maxMessages);
+    .slice(-maxMessages)
+    .map(({ timestampMs, ...item }) => item);
+}
+
+function kafkaTimestampMs(value) {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 async function disconnectKafka(client) {
