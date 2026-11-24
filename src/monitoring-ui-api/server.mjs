@@ -4779,6 +4779,10 @@ async function readCmdbuildWebhooks(session) {
     cmdbuildEndpoint: baseUrl,
     managedPrefix: managedCmdbuildWebhookPrefix,
     items: normalizeCmdbuildList(result).map(normalizeCmdbuildWebhook).filter(item => item.code)
+      .map(({ raw, ...webhook }) => ({
+        ...webhook,
+        headers: setCmdbuildWebhookAuthorization(webhook.headers, '')
+      }))
   };
 }
 
@@ -4896,6 +4900,13 @@ async function syncCmdbuildWebhookAuthorization(session, payload = {}) {
     );
   }
 
+  const targetUrl = webhookAuthorizationSyncTarget(config.Cmdbuild?.Webhooks?.TargetUrl);
+  const allowedHosts = normalizeAllowedOutboundHosts(config.Security?.OutboundAllowedHosts ?? []);
+  if (!targetUrl || (environment === 'Production' && !allowedHosts.includes(new URL(targetUrl).hostname))) {
+    throw httpError(400, 'webhook_authorization_target_not_configured',
+      'Configure an allowed CMDBuild webhook target URL before synchronizing Authorization.');
+  }
+
   const credentials = requireCmdbuildSessionCredentials(session);
   const baseUrl = withoutTrailingSlash(credentials.baseUrl || config.Cmdbuild.BaseUrl);
   const existingByCode = await readCmdbuildWebhooksByCode(baseUrl, credentials);
@@ -4907,8 +4918,12 @@ async function syncCmdbuildWebhookAuthorization(session, payload = {}) {
 
   for (const existing of candidates) {
     const code = existing.code;
+    if (webhookAuthorizationSyncTarget(existing.url) !== targetUrl) {
+      results.push({ action: 'syncAuthorization', code, status: 'skipped_target' });
+      continue;
+    }
     const currentAuthorization = cmdbuildWebhookAuthorization(existing.headers);
-    if (currentAuthorization === authorization) {
+    if (parseWebhookBearerToken(currentAuthorization) === parseWebhookBearerToken(authorization)) {
       results.push({ action: 'syncAuthorization', code, status: 'unchanged' });
       continue;
     }
@@ -4919,22 +4934,38 @@ async function syncCmdbuildWebhookAuthorization(session, payload = {}) {
     });
     requireManagedCmdbuildWebhookPayload(desired, code);
     const id = encodeURIComponent(firstNonBlank(existing._id, existing.id, code));
-    await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
-      method: 'PUT',
-      pathScope: 'administration',
-      body: desired
-    });
-    results.push({ action: 'syncAuthorization', code, status: 'applied' });
+    try {
+      await cmdbuildRequest(baseUrl, `/etl/webhook/${id}/`, credentials, {
+        method: 'PUT',
+        pathScope: 'administration',
+        body: desired,
+        redirect: 'error'
+      });
+      results.push({ action: 'syncAuthorization', code, status: 'applied' });
+    } catch (error) {
+      if (error?.code === 'credentials_required') throw error;
+      logger.warn('CMDBuild webhook Authorization update was not confirmed', { code });
+      results.push({ action: 'syncAuthorization', code, status: 'failed' });
+    }
   }
 
   return {
     appliedAt: new Date().toISOString(),
     cmdbuildEndpoint: baseUrl,
     count: results.filter(item => item.status === 'applied').length,
-    skipped: results.filter(item => item.status === 'unchanged').length,
+    skipped: results.filter(item => item.status === 'unchanged' || item.status === 'skipped_target').length,
+    failed: results.filter(item => item.status === 'failed').length,
     total: results.length,
     results
   };
+}
+
+function webhookAuthorizationSyncTarget(value) {
+  if (typeof value !== 'string' || !URL.canParse(value)) return '';
+  const url = new URL(value);
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return '';
+  url.pathname = url.pathname.replace(/\/+$/, '');
+  return url.pathname === '/webhooks/cmdbuild' ? url.href : '';
 }
 
 async function readCmdbuildWebhooksByCode(baseUrl, credentials) {
@@ -5016,17 +5047,25 @@ function configuredCmdbuildWebhookAuthorization() {
     webhooksConfig.Authorization,
     webhooksConfig.authorization
   );
-  if (!isBlank(explicitHeader)) {
-    return String(explicitHeader).trim();
-  }
-
-  const bearerToken = firstNonBlank(
+  const bearerToken = String(firstNonBlank(
     webhooksConfig.BearerToken,
     webhooksConfig.bearerToken,
     config.CmdbWebhook?.BearerToken,
     config.CmdbWebhook?.bearerToken
-  );
-  return isBlank(bearerToken) ? '' : `Bearer ${String(bearerToken).trim()}`;
+  ) ?? '').trim();
+  const explicitToken = parseWebhookBearerToken(explicitHeader);
+  if ((!isBlank(explicitHeader) && !explicitToken) || /\s/.test(bearerToken)) {
+    throw httpError(400, 'webhook_authorization_invalid', 'Configure a valid Bearer token for CMDBuild webhook synchronization.');
+  }
+  if (bearerToken && explicitToken && bearerToken !== explicitToken) {
+    throw httpError(400, 'webhook_authorization_conflict', 'CMDBuild webhook Bearer token and Authorization header disagree.');
+  }
+  const token = bearerToken || explicitToken;
+  return token ? `Bearer ${token}` : '';
+}
+
+function parseWebhookBearerToken(authorization) {
+  return /^Bearer[ \t]+([^\s]+)$/i.exec(String(authorization ?? '').trim())?.[1] ?? '';
 }
 
 function cmdbuildWebhookAuthorization(headers) {
@@ -6403,6 +6442,7 @@ async function cmdbuildRequest(baseUrl, path, credentials, options = {}) {
   const requestTimeout = AbortSignal.timeout(10000);
   const response = await fetch(`${withoutTrailingSlash(endpoint)}${requestPath}`, {
     method: options.method ?? 'GET',
+    redirect: options.redirect,
     headers: {
       accept: 'application/json',
       ...(options.body ? { 'content-type': 'application/json' } : {}),

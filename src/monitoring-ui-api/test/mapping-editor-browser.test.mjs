@@ -97,6 +97,33 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     assert.ok(runtimeScenario.webhookLoadCount >= 2);
     assert.equal(runtimeScenario.applyCount ?? 0, 0);
 
+    runtimeScenario.webhooks = [{
+      _id: '123', code: 'cmdbwebhooks2kafka-test-hook', event: 'card_update_after', target: 'ARM',
+      url: runtimeScenario.savedWebhookTargetUrl,
+      body: { managedIdentifier: 'cmdb2monitoring-zabbix-host-lifecycle' }
+    }];
+    const webhookListResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/cmdbuild/webhooks');
+    await page.locator('#webhooksLoadCmdb').click();
+    await webhookListResponse;
+    const syncButton = page.locator('#webhooksSyncAuthorization');
+    await assertVisible(page, '#webhooksSyncAuthorization');
+    await syncButton.waitFor({ state: 'visible' });
+    for (const scenario of [
+      { status: 400, payload: { error: 'webhook_authorization_not_configured' }, expected: /Не настроен секрет/ },
+      { status: 200, payload: { count: 1, skipped: 2, failed: 1 }, expected: /не завершена: изменено 1, пропущено 2, не подтверждено 1/ },
+      { status: 200, payload: { count: 1, skipped: 3, failed: 0 }, expected: /завершена: изменено 1, пропущено 3/ }
+    ]) {
+      runtimeScenario.syncResponse = scenario;
+      page.once('dialog', dialog => dialog.accept());
+      await syncButton.click();
+      const toast = page.locator('#toast', { hasText: scenario.expected });
+      await toast.waitFor({ state: 'visible' });
+      assert.equal(await toast.isVisible(), true);
+      await page.locator('#webhooksSyncAuthorization:not([aria-busy="true"])').waitFor();
+    }
+    assert.deepEqual(runtimeScenario.syncRequests, [{}, {}, {}]);
+    assert.equal(runtimeScenario.applyCount ?? 0, 0);
+
     await page.locator('[data-view="events"]').click();
     await page.locator('#refreshEvents').click();
     await page.waitForFunction(() => document.querySelector('#toast')?.textContent?.includes('event-read-browser-test'));
@@ -191,7 +218,13 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
     }
     if (path === '/api/cmdbuild/webhooks') {
       runtimeScenario.webhookLoadCount = (runtimeScenario.webhookLoadCount ?? 0) + 1;
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: runtimeScenario.webhooks ?? [] }) });
+      return;
+    }
+    if (path === '/api/cmdbuild/webhooks/sync-authorization') {
+      (runtimeScenario.syncRequests ??= []).push(JSON.parse(route.request().postData() ?? '{}'));
+      const { status, payload } = runtimeScenario.syncResponse;
+      await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(payload) });
       return;
     }
     if (path === '/api/cmdbuild/catalog'

@@ -588,7 +588,8 @@ paths:
       description: >
         Requires an editor or admin session and CMDBuild session credentials.
         Reads `/etl/webhook/?detailed=true` from CMDBuild and returns normalized
-        webhook objects. Browser clients do not connect to CMDBuild directly.
+        webhook objects without the Authorization header or the raw record.
+        Browser clients do not connect to CMDBuild directly.
       responses:
         "200":
           description: CMDBuild webhook list.
@@ -621,6 +622,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CmdbuildWebhookApplyResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
+  /api/cmdbuild/webhooks/sync-authorization:
+    post:
+      summary: Synchronize Authorization on owned CMDBuild webhooks
+      description: >-
+        Requires an editor or admin session and CMDBuild session credentials.
+        Updates mismatched Authorization headers only on owned webhooks at the
+        configured receiver URL. The deployment Bearer token is not returned.
+        A per-record failure is reported in the result, not counted as success.
+      responses:
+        "200":
+          description: Synchronization results, including any unconfirmed writes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, skipped, failed, total, results]
+                properties:
+                  count: { type: integer, minimum: 0 }
+                  skipped: { type: integer, minimum: 0 }
+                  failed: { type: integer, minimum: 0 }
+                  total: { type: integer, minimum: 0 }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, status]
+                      properties:
+                        code: { type: string }
+                        status: { type: string, enum: [applied, unchanged, skipped_target, failed] }
         "400":
           $ref: "#/components/responses/Error"
         "428":

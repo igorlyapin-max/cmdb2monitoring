@@ -203,6 +203,10 @@ docker compose --env-file production.env -f deploy/compose.production.yml up -d
 
 The Compose file publishes only webhook/UI bind ports from env, runs Docker healthchecks against `/ready`, and persists worker state in Docker volumes. Structured JSON logs always go to stdout/stderr; the customer platform or Docker daemon selects the Docker logging driver. Kafka log topics stay enabled as the project's primary structured logging sink. With the syslog overlay, `monitoring-ui-data-init` stderr reaches the same sink, making `/app/data` preparation failures observable before the BFF starts.
 
+Set `CMDB_WEBHOOK_BEARER_TOKEN` once through the deployment secret provider. Compose gives the same value to `cmdbwebhooks2kafka` as `CmdbWebhook__BearerToken` and to `monitoring-ui-api` as `CMDBUILD_WEBHOOK_BEARER_TOKEN`. Do not configure a different `CMDBUILD_WEBHOOK_AUTHORIZATION_HEADER`. Set the receiver URL in Runtime Settings and include its hostname in `MONITORING_UI_OUTBOUND_ALLOWED_HOSTS`. Use HTTPS outside isolated networks.
+
+Use **Sync Authorization** to update mismatched headers on owned webhooks that use this receiver URL. Regular rule uploads do not synchronize headers. When the receiver already uses the deployment token, recreate only `monitoring-ui-api` with `up -d --no-deps --force-recreate monitoring-ui-api` using the existing env file and Compose profile.
+
 For a large CMDBuild catalog, the operator can set the total deadline of the next catalog-sync job in Runtime Settings: `Cmdbuild.Catalog.SyncTimeoutSeconds`, UI field `CMDBuild catalog sync timeout, sec`; default `300`, range `60..1800`. This does not configure Nginx: gateway route `/api/cmdbuild/catalog/sync` needs `proxy_read_timeout`/`proxy_send_timeout` of at least `300s` and must pass `/api/...` to the BFF without stripping the prefix.
 
 To send container stdout/stderr to syslog, attach the explicit overlay. `SYSLOG_ADDRESS` has no loopback default and must point to a reachable infrastructure endpoint:

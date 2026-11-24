@@ -393,7 +393,12 @@ const translations = {
     'webhooks.statusSelectionChanged': 'Выбор операций изменен.',
     'webhooks.statusApplied': 'Операции применены в CMDB: {count}.',
     'webhooks.statusDeleted': 'Удаление применено в CMDB: {count}.',
-    'webhooks.statusAuthorizationSynced': 'Authorization синхронизирован: изменено {count}, без изменений {skipped}.',
+    'webhooks.statusAuthorizationSynced': 'Синхронизация Authorization завершена: изменено {count}, пропущено {skipped}.',
+    'webhooks.statusAuthorizationIncomplete': 'Синхронизация Authorization не завершена: изменено {count}, пропущено {skipped}, не подтверждено {failed}.',
+    'webhooks.authorizationNotConfigured': 'Не настроен секрет для синхронизации Authorization. Проверьте конфигурацию monitoring-ui-api.',
+    'webhooks.authorizationInvalid': 'В конфигурации синхронизации Authorization задан некорректный Bearer token.',
+    'webhooks.authorizationConflict': 'В настройках синхронизации Authorization указаны два разных токена. Проверьте конфигурацию monitoring-ui-api.',
+    'webhooks.authorizationTargetNotConfigured': 'Укажите разрешённый адрес получателя webhook в настройках среды выполнения.',
     'webhooks.confirmApply': 'Применить выбранные операции к CMDBuild webhooks? Это изменит управляемую систему. Операций: {count}.',
     'webhooks.confirmSyncAuthorization': 'Синхронизировать Authorization у всех наших CMDBuild webhooks? Это отдельная операция: payload/rules не меняются. Загружено записей: {count}.',
     'webhooks.confirmNoSelection': 'Выберите хотя бы одну операцию.',
@@ -1186,7 +1191,12 @@ const translations = {
     'webhooks.statusSelectionChanged': 'Operation selection changed.',
     'webhooks.statusApplied': 'Operations applied to CMDB: {count}.',
     'webhooks.statusDeleted': 'Delete operations applied to CMDB: {count}.',
-    'webhooks.statusAuthorizationSynced': 'Authorization synchronized: changed {count}, unchanged {skipped}.',
+    'webhooks.statusAuthorizationSynced': 'Authorization sync complete: changed {count}, skipped {skipped}.',
+    'webhooks.statusAuthorizationIncomplete': 'Authorization sync incomplete: changed {count}, skipped {skipped}, not confirmed {failed}.',
+    'webhooks.authorizationNotConfigured': 'The Authorization sync secret is not configured. Check the monitoring-ui-api configuration.',
+    'webhooks.authorizationInvalid': 'The configured Bearer token for Authorization sync is invalid.',
+    'webhooks.authorizationConflict': 'Two different Authorization sync tokens are configured. Check the monitoring-ui-api configuration.',
+    'webhooks.authorizationTargetNotConfigured': 'Configure an allowed webhook receiver URL in Runtime Settings.',
     'webhooks.confirmApply': 'Apply selected operations to CMDBuild webhooks? This changes the managed system. Operations: {count}.',
     'webhooks.confirmSyncAuthorization': 'Synchronize Authorization on all owned CMDBuild webhooks? This is a separate operation: payload/rules are not changed. Loaded records: {count}.',
     'webhooks.confirmNoSelection': 'Select at least one operation.',
@@ -5061,9 +5071,10 @@ async function syncCmdbuildWebhookAuthorization() {
     method: 'POST',
     body: {}
   });
-  toast(tf('webhooks.statusAuthorizationSynced', {
+  toast(tf(result.failed > 0 ? 'webhooks.statusAuthorizationIncomplete' : 'webhooks.statusAuthorizationSynced', {
     count: result.count ?? 0,
-    skipped: result.skipped ?? 0
+    skipped: result.skipped ?? 0,
+    failed: result.failed ?? 0
   }));
   await loadCmdbuildWebhooks();
   if (hadPlan) {
@@ -15131,10 +15142,17 @@ async function api(path, options = {}) {
     }
 
     const eventReadId = typeof payload.eventReadId === 'string' ? payload.eventReadId.trim() : '';
+    const webhookErrors = {
+      webhook_target_url_not_configured: 'webhooks.targetNotConfigured',
+      webhook_authorization_not_configured: 'webhooks.authorizationNotConfigured',
+      webhook_authorization_invalid: 'webhooks.authorizationInvalid',
+      webhook_authorization_conflict: 'webhooks.authorizationConflict',
+      webhook_authorization_target_not_configured: 'webhooks.authorizationTargetNotConfigured'
+    };
     const message = payload.error === 'kafka_event_browser_error' && eventReadId
       ? tf('events.readFailed', { eventReadId })
-      : payload.error === 'webhook_target_url_not_configured'
-        ? t('webhooks.targetNotConfigured')
+      : Object.hasOwn(webhookErrors, payload.error)
+        ? t(webhookErrors[payload.error])
         : (payload.message ?? payload.error ?? `HTTP ${response.status}`);
     const error = new Error(message);
     error.status = response.status;

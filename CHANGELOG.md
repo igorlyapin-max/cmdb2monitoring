@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- CMDBuild webhook Authorization synchronization now uses the deployment webhook token, updates only owned webhook records at the configured receiver URL, reports unconfirmed writes, and never exposes existing Authorization values through the BFF API.
 - CMDBuild webhook callback URL is now an admin Runtime setting persisted in `state/ui-settings.json`, not a Compose env variable. A blank value permits BFF startup but blocks webhook plan/export/apply; Production rejects loopback and unspecified targets, and a URL change offers managed-webhook replanning without automatic CMDBuild apply.
 - Runtime Settings persistence now uses an atomically replaced state file, production Compose initializes both BFF state and data volumes for UID/GID `10001`, and the image smoke proves settings survive restart. Webhook URLs reject credentials, query parameters, and fragments; generated snippets no longer ship a hardcoded Compose DNS URL.
 - Event Browser now returns the latest topic messages across Kafka partitions by timestamp, and Prometheus alerts detect missing base metrics independently for every service.
