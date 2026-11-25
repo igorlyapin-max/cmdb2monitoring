@@ -180,6 +180,7 @@ builder.Services.AddSingleton<IZabbixRequestPublisher, ZabbixRequestPublisher>()
 builder.Services.AddSingleton<IKafkaDeadLetterPublisher, KafkaDeadLetterPublisher>();
 builder.Services.AddSingleton<IProcessingStateStore, FileProcessingStateStore>();
 builder.Services.AddSingleton<IServiceMetrics, ServiceMetrics>();
+builder.Services.AddSingleton<KafkaConsumerReadiness>();
 builder.Services.AddSingleton<IReadinessCheck>(services =>
 {
     var options = services.GetRequiredService<IOptions<ProcessingStateOptions>>();
@@ -187,6 +188,7 @@ builder.Services.AddSingleton<IReadinessCheck>(services =>
         "processing-state",
         () => (options.Value.FilePath, options.Value.BaseDirectory));
 });
+builder.Services.AddSingleton<IReadinessCheck>(services => services.GetRequiredService<KafkaConsumerReadiness>());
 builder.Services.AddHostedService<KafkaConversionWorker>();
 
 var app = builder.Build();
@@ -253,7 +255,15 @@ if (!string.IsNullOrWhiteSpace(serviceOptions.RulesStatusRoute))
             var statusToken = string.IsNullOrWhiteSpace(currentOptions.RulesStatusToken)
                 ? currentOptions.RulesReloadToken
                 : currentOptions.RulesStatusToken;
-            if (!string.IsNullOrWhiteSpace(statusToken) && !IsBearerTokenValid(context.Request, statusToken))
+            if (string.IsNullOrWhiteSpace(statusToken))
+            {
+                return Results.Problem(
+                    "Rules status token is not configured.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Rules status is not configured");
+            }
+
+            if (!IsBearerTokenValid(context.Request, statusToken))
             {
                 return Results.Unauthorized();
             }

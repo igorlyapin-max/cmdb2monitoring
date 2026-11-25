@@ -2769,10 +2769,76 @@ async function readServicesHealth() {
   }));
 
   items.sort((left, right) => left.name.localeCompare(right.name));
+  const managementRules = await managementRulesPromise;
+  for (const item of items) {
+    item.rulesVerification = describeRulesVerification(item, managementRules);
+  }
   return {
     items,
-    managementRules: await managementRulesPromise
+    managementRules
   };
+}
+
+function describeRulesVerification(item, managementRules) {
+  if (!item.rulesStatusSupported) {
+    return { ok: true, reason: 'not_applicable' };
+  }
+
+  const rulesStatus = item.rulesStatus ?? {};
+  const verification = {
+    ok: false,
+    reason: '',
+    healthUrl: sanitizeDiagnosticUrl(item.url),
+    healthStatusCode: item.statusCode ?? null,
+    healthError: redactSecretString(item.error ?? ''),
+    rulesStatusUrl: sanitizeDiagnosticUrl(rulesStatus.url),
+    rulesStatusCode: rulesStatus.statusCode ?? null,
+    rulesStatusError: redactSecretString(rulesStatus.error ?? ''),
+    managementPath: managementRules?.resolvedPath ?? managementRules?.path ?? '',
+    converterPath: rulesStatus?.rules?.location ?? '',
+    managementSha256: String(managementRules?.contentSha256 ?? managementRules?.revision ?? '').toLowerCase(),
+    converterSha256: String(rulesStatus?.rules?.contentSha256 ?? '').toLowerCase()
+  };
+
+  if (!item.ok) {
+    verification.reason = 'healthcheck_failed';
+    return verification;
+  }
+  if (managementRules?.ok === false) {
+    verification.reason = 'management_rules_unavailable';
+    verification.managementError = redactSecretString(managementRules.error ?? '');
+    return verification;
+  }
+  if (!rulesStatus.ok) {
+    verification.reason = 'rules_status_unavailable';
+    return verification;
+  }
+  if (!verification.converterSha256) {
+    verification.reason = 'converter_does_not_report_sha256';
+    return verification;
+  }
+  if (!verification.managementSha256 || verification.managementSha256 !== verification.converterSha256) {
+    verification.reason = 'content_sha256_mismatch';
+    return verification;
+  }
+
+  return { ...verification, ok: true, reason: 'ok' };
+}
+
+function sanitizeDiagnosticUrl(value) {
+  if (isBlank(value)) {
+    return '';
+  }
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
 }
 
 async function readQueueMonitorStatus() {
@@ -3159,8 +3225,7 @@ async function readServiceRulesStatus(endpoint) {
       ok: result.ok,
       statusCode: result.status,
       latencyMs: Date.now() - startedAt,
-      rules: payload?.rules ?? null,
-      body: payload,
+      rules: publicRulesStatus(payload?.rules),
       error: result.ok ? null : (payload?.detail || payload?.title || payload?.message || `Rules status returned HTTP ${result.status}.`)
     };
   } catch (error) {
@@ -3173,6 +3238,19 @@ async function readServiceRulesStatus(endpoint) {
       error: error instanceof Error ? error.message : 'request_failed'
     };
   }
+}
+
+function publicRulesStatus(rules) {
+  if (!isPlainObject(rules)) {
+    return null;
+  }
+  return {
+    name: String(rules.name ?? ''),
+    schemaVersion: String(rules.schemaVersion ?? ''),
+    rulesVersion: String(rules.rulesVersion ?? ''),
+    contentSha256: String(rules.contentSha256 ?? '').toLowerCase(),
+    location: String(rules.location ?? '')
+  };
 }
 
 async function readRulesApplicationStatus(serviceName, expectedSha256) {

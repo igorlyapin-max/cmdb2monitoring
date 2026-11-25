@@ -227,6 +227,18 @@ test('dashboard marks converter failed when the loaded rules SHA-256 differs', a
               contentSha256: 'b'.repeat(64),
               location: '/app/rules/customer.json'
             }
+          },
+          rulesVerification: {
+            ok: false,
+            reason: 'content_sha256_mismatch',
+            healthUrl: 'http://cmdbkafka2zabbix:8080/health',
+            healthStatusCode: 200,
+            rulesStatusUrl: 'http://cmdbkafka2zabbix:8080/admin/rules-status',
+            rulesStatusCode: 200,
+            managementPath: '/app/rules/customer.json',
+            converterPath: '/app/rules/customer.json',
+            managementSha256: 'a'.repeat(64),
+            converterSha256: 'b'.repeat(64)
           }
         }],
         managementRules: {
@@ -243,11 +255,100 @@ test('dashboard marks converter failed when the loaded rules SHA-256 differs', a
     await assertVisible(page, '#healthGrid .metric');
     assert.equal(await card.locator('.metric-value').textContent(), 'FAIL');
     await assertVisible(page, '.rules-version-warning.status-bad');
-    assert.match(await card.textContent(), /Содержимое rules отличается/);
+    assert.match(await card.textContent(), /UI и микросервис используют rules с разным содержимым/);
+    assert.match(await card.textContent(), /Причина rules FAIL: \[content_sha256_mismatch\]/);
+    assert.match(await card.textContent(), /health: 200 http:\/\/cmdbkafka2zabbix:8080\/health/);
+    assert.match(await card.textContent(), /UI: \/app\/rules\/customer\.json; sha256 a{12}/);
+    assert.match(await card.textContent(), /converter: \/app\/rules\/customer\.json; sha256 b{12}/);
     assert.match(await card.textContent(), /файл: customer\.json; путь: \/app\/rules\/customer\.json/);
     assert.equal(await card.getByRole('button', { name: 'Перечитать правила конвертации' }).count(), 0);
     const box = await card.boundingBox();
     assert.ok(box && box.width > 0 && box.height > 0);
+    const verificationBox = await card.locator('.rules-version-warning.status-bad').boundingBox();
+    assert.ok(verificationBox && verificationBox.width > 0 && verificationBox.height > 0);
+  } finally {
+    await browser.close();
+    server.kill('SIGTERM');
+    await onceExit(server);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('dashboard renders every failed rules verification reason for a viewer', async () => {
+  assert.ok(chromeExecutable, 'Set BROWSER_EXECUTABLE_PATH to a Chrome or Chromium executable.');
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.rules-dashboard-reasons-browser-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const rules = JSON.parse(await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8'));
+  await writeFile(activeRulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
+  const server = startServer(port, directory, activeRulesPath);
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: chromeExecutable,
+    args: ['--no-sandbox']
+  });
+  const cases = [
+    ['healthcheck_failed', 'Healthcheck микросервиса неуспешен.'],
+    ['rules_status_unavailable', 'Микросервис недоступен для проверки загруженного rules artifact.'],
+    ['management_rules_unavailable', 'Система управления не смогла прочитать активный rules-файл.'],
+    ['converter_does_not_report_sha256', 'Микросервис не возвращает contentSha256. Требуется обновление образа converter.']
+  ];
+
+  try {
+    await waitForReady(port, server);
+    for (const [reason, message] of cases) {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const verification = {
+        ok: false,
+        reason,
+        healthUrl: 'http://cmdbkafka2zabbix:8080/ready',
+        healthStatusCode: reason === 'healthcheck_failed' ? 503 : 200,
+        rulesStatusUrl: 'http://cmdbkafka2zabbix:8080/admin/rules-status',
+        rulesStatusCode: reason === 'rules_status_unavailable' ? 503 : 200,
+        managementPath: '/app/rules/customer.json',
+        converterPath: '/app/rules/customer.json',
+        managementSha256: 'a'.repeat(64),
+        converterSha256: reason === 'converter_does_not_report_sha256' ? '' : 'a'.repeat(64),
+        managementError: reason === 'management_rules_unavailable' ? 'Rules file is unavailable.' : '',
+        healthError: reason === 'healthcheck_failed' ? 'Service is not ready.' : '',
+        rulesStatusError: reason === 'rules_status_unavailable' ? 'Rules status is unavailable.' : ''
+      };
+      await mockApi(page, rules, browserTestCmdbuildCatalog(), browserTestZabbixCatalog(), {
+        role: 'viewer',
+        health: {
+          items: [{
+            name: 'cmdbkafka2zabbix',
+            url: verification.healthUrl,
+            ok: reason !== 'healthcheck_failed',
+            statusCode: verification.healthStatusCode,
+            latencyMs: 4,
+            rulesReloadSupported: true,
+            rulesStatusSupported: true,
+            rulesStatus: {
+              ok: reason !== 'rules_status_unavailable',
+              statusCode: verification.rulesStatusCode,
+              rules: { rulesVersion: rules.rulesVersion, schemaVersion: rules.schemaVersion, contentSha256: verification.converterSha256, location: verification.converterPath }
+            },
+            rulesVerification: verification
+          }],
+          managementRules: reason === 'management_rules_unavailable'
+            ? { ok: false, error: verification.managementError }
+            : { ok: true, rulesVersion: rules.rulesVersion, schemaVersion: rules.schemaVersion, contentSha256: verification.managementSha256, resolvedPath: verification.managementPath }
+        }
+      });
+      await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+      const card = page.locator('#healthGrid .metric', { hasText: 'cmdbkafka2zabbix' });
+      const warning = card.locator('.rules-version-warning.status-bad');
+      await assertVisible(page, '#healthGrid .metric');
+      await assertVisible(page, '.rules-version-warning.status-bad');
+      assert.equal(await card.locator('.metric-value').textContent(), 'FAIL');
+      assert.match(await warning.textContent(), new RegExp(`\\[${reason}\\]`));
+      assert.match(await warning.textContent(), new RegExp(message.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')));
+      assert.equal(await card.getByRole('button', { name: 'Перечитать правила конвертации' }).count(), 0);
+      const box = await warning.boundingBox();
+      assert.ok(box && box.width > 0 && box.height > 0);
+      await page.close();
+    }
   } finally {
     await browser.close();
     server.kill('SIGTERM');

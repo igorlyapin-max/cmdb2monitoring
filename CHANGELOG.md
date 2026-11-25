@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 00.00.00.12 - 2026-11-25
+
+### Fixed
+
+- Converter readiness now waits for Kafka partition assignment, so the dashboard does not report a healthy conversion service before it can consume its input topic.
+- Rules-status checks now fail closed when their token is absent, and the BFF exposes only an allowlisted diagnostic subset instead of converter transport details.
+- The rules-artifact contract smoke now verifies active artifact propagation and malformed Kafka input delivery to the converter DLQ.
+
 ### Fixed
 
 - Conversion rules now reject duplicate event routes and active profiles without an effective publish-enabled route; dashboard reload/retry no longer reports success until `cmdbkafka2zabbix` confirms the same SHA-256 artifact.

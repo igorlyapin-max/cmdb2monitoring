@@ -47,15 +47,39 @@ compose config -q
 phase 'start UI and converter with one rules mount'
 compose up --detach
 
+phase 'create isolated Kafka topics'
+for _ in $(seq 1 30); do
+  if compose exec --no-TTY kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1; then
+    for topic in rules-artifact-input rules-artifact-output rules-artifact-dlq; do
+      compose exec --no-TTY kafka /opt/kafka/bin/kafka-topics.sh \
+        --bootstrap-server kafka:9092 --create --if-not-exists --topic "$topic" --partitions 1 --replication-factor 1
+    done
+    break
+  fi
+  sleep 1
+done
+
+if ! compose exec --no-TTY kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic rules-artifact-input >/dev/null 2>&1; then
+  echo 'Kafka broker did not become ready.' >&2
+  exit 1
+fi
+
+ready=false
 for _ in $(seq 1 30); do
   if compose exec --no-TTY monitoring-ui-api sh -ec '
     wget -qO- http://127.0.0.1:5090/ready | grep -q ready \
       && wget -qO- http://cmdbkafka2zabbix:8080/ready | grep -q ready
   '; then
+    ready=true
     break
   fi
   sleep 1
 done
+
+if [[ "$ready" != true ]]; then
+  echo 'UI or converter did not become ready.' >&2
+  exit 1
+fi
 
 phase 'publish active rules and verify the loaded converter artifact'
 compose exec --no-TTY monitoring-ui-api sh -ec '
@@ -73,6 +97,7 @@ compose exec --no-TTY monitoring-ui-api sh -ec '
     const current = await fetch("http://127.0.0.1:5090/api/rules/current", { headers: { cookie } });
     if (!current.ok) throw new Error(`rules read failed: ${current.status}`);
     const document = await current.json();
+    document.content.rulesVersion = "rules-artifact-contract-e2e";
     const publish = await fetch("http://127.0.0.1:5090/api/rules/publish", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, "x-csrf-token": session.csrfToken },
@@ -86,4 +111,21 @@ compose exec --no-TTY monitoring-ui-api sh -ec '
   '\'' "$password"
 '
 
-phase 'rules artifact contract smoke passed'
+phase 'prove worker consumed the published artifact through Kafka'
+printf '%s\n' '{invalid-json' | compose exec --no-TTY kafka /opt/kafka/bin/kafka-console-producer.sh \
+  --bootstrap-server kafka:9092 --topic rules-artifact-input
+dlq_payload="$(compose exec --no-TTY kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server kafka:9092 --topic rules-artifact-dlq --from-beginning --max-messages 1 --timeout-ms 15000)"
+printf '%s' "$dlq_payload" | node -e '
+  let payload = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", chunk => { payload += chunk; });
+  process.stdin.on("end", () => {
+    const message = JSON.parse(payload.trim());
+    if (message.service !== "cmdbkafka2zabbix") throw new Error("unexpected DLQ service");
+    if (message.errorCode !== "invalid_json") throw new Error("worker did not process invalid Kafka payload");
+    if (message.rulesVersion !== "rules-artifact-contract-e2e") throw new Error("worker did not use the published rules artifact");
+  });
+'
+
+phase 'rules artifact Kafka consumer contract smoke passed'

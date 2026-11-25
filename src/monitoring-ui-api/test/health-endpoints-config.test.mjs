@@ -12,7 +12,7 @@ function productionEndpoints(converter = {}) {
     { Name: 'cmdbwebhooks2kafka', Url: 'http://cmdbwebhooks2kafka:8080/health' },
     {
       Name: 'cmdbkafka2zabbix',
-      Url: 'http://cmdbkafka2zabbix:8080/health',
+      Url: 'http://cmdbkafka2zabbix:8080/ready',
       RulesReloadUrl: 'http://cmdbkafka2zabbix:8080/admin/reload-rules',
       RulesReloadTokenEnv: 'MONITORING_UI_RULES_RELOAD_TOKEN',
       RulesStatusUrl: 'http://cmdbkafka2zabbix:8080/admin/rules-status',
@@ -57,6 +57,7 @@ test('production JSON override uses all Compose services and separate token envi
 
   const converter = target.Services.HealthEndpoints.find(endpoint => endpoint.Name === 'cmdbkafka2zabbix');
   assert.equal(target.Services.HealthEndpoints.length, 4);
+  assert.equal(converter.Url, 'http://cmdbkafka2zabbix:8080/ready');
   assert.equal(converter.RulesReloadToken, 'test-reload-token');
   assert.equal(converter.RulesStatusToken, 'test-status-token');
 });
@@ -86,7 +87,7 @@ test('production rejects incomplete or non-Compose endpoint topology', () => {
 
 test('production rejects duplicate names and reload without token', () => {
   const endpoints = productionEndpoints();
-  endpoints[3] = { Name: 'CMDBKAFKA2ZABBIX', Url: 'http://cmdbkafka2zabbix:8080/health' };
+  endpoints[3] = { Name: 'CMDBKAFKA2ZABBIX', Url: 'http://cmdbkafka2zabbix:8080/ready' };
   assert.throws(() => normalizeHealthEndpoints(endpoints, { environment: 'Production', environmentVariables: productionEnvironment }), /duplicates/);
   assert.throws(
     () => normalizeHealthEndpoints(productionEndpoints({ RulesReloadTokenEnv: '' }), { environment: 'Production' }),

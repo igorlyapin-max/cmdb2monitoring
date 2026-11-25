@@ -106,7 +106,7 @@
 | cmdbkafka2zabbix | Git repository/working copy | local FS или git |
 | zabbixrequests2api `:5082` | Kafka `:9092` | Kafka protocol |
 
-`scripts/smoke-rules-artifact-contract.sh` собирает реальные UI/converter images, монтирует один временный rules directory в оба контейнера и проверяет `publish -> reload -> applied=true` с равными SHA-256 и `/app/rules/...` путями. Сценарий не публикует host ports и не использует customer Kafka/CMDBuild.
+`scripts/smoke-rules-artifact-contract.sh` собирает реальные UI/converter images, поднимает изолированный Kafka broker без host ports, монтирует один временный rules directory в оба контейнера и проверяет `publish -> reload -> applied=true` с равными SHA-256 и `/app/rules/...` путями. Затем он отправляет invalid JSON в test input topic и подтверждает DLQ message с опубликованной `rulesVersion`; это доказывает, что Kafka worker загрузил активный artifact. Сценарий не использует customer Kafka/CMDBuild.
 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP JSON-RPC |
 | zabbixbindings2cmdbuild `:5083` | Kafka `:9092` | Kafka protocol |
 | zabbixbindings2cmdbuild `:5083` | CMDBuild REST API `:8090` | HTTP для записи binding-ов |

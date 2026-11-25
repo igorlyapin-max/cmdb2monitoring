@@ -264,11 +264,11 @@ Rules-файл отвечает за:
 
 Rules reload:
 - `POST /admin/reload-rules` в `cmdbkafka2zabbix` перечитывает conversion rules через `IConversionRulesProvider`;
-- `GET /admin/rules-status` возвращает текущие `name`, `schemaVersion`, `rulesVersion`, `contentSha256`, location и git/version текущего provider без reload; `contentSha256` вычисляется по байтам JSON, которые converter фактически загрузил;
+- `GET /admin/rules-status` возвращает текущие `name`, `schemaVersion`, `rulesVersion`, `contentSha256`, location и git/version текущего provider без reload; `contentSha256` вычисляется по байтам JSON, которые converter фактически загрузил. Если не задан ни `RulesStatusToken`, ни `RulesReloadToken`, endpoint отвечает `503`, а не раскрывает status без bearer token;
 - endpoint не содержит Git-логики: текущий provider делает `git pull --ff-only` только если включены `ConversionRules:ReadFromGit=true` и `ConversionRules:PullOnReload=true`;
 - авторизация endpoint выполняется через `Authorization: Bearer <Service:RulesReloadToken>`;
 - `monitoring-ui-api` вызывает этот endpoint из dashboard-карточки `cmdbkafka2zabbix` кнопкой `Перечитать правила конвертации` для ролей `editor` и `admin`; success показывается только если converter подтвердил тот же SHA-256, иначе retry остается доступен и UI показывает причину;
-- dashboard всех ролей показывает две read-only строки: имя/путь rules-файла UI и имя/путь rules-файла, который загрузил converter, а также `rulesVersion/schemaVersion/contentSha256`. Карточка converter показывает `FAIL`, если status недоступен или SHA-256 отличается, даже когда `rulesVersion` совпадает;
+- dashboard всех ролей получает только allowlisted status: имя, версии, SHA-256 и путь rules-файла. Карточка converter использует `GET /ready`, поэтому показывает `FAIL`, если consumer Kafka не назначен, status недоступен или SHA-256 отличается, даже когда `rulesVersion` совпадает;
 - `GET /admin/rules-status` также показывает источник rules, git repository/path, runtime git flags, template engine/name и trusted artifact settings;
 - при смене места хранения правил нужно заменить/настроить provider, не меняя HTTP-контракт кнопки и BFF.
 

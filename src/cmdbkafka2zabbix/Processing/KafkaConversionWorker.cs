@@ -22,6 +22,7 @@ public sealed class KafkaConversionWorker(
     IKafkaDeadLetterPublisher deadLetterPublisher,
     IProcessingStateStore stateStore,
     IServiceMetrics metrics,
+    KafkaConsumerReadiness consumerReadiness,
     IOptions<WorkerRuntimeOptions> workerOptions,
     IOptions<ExtendedDebugLoggingOptions> debugLoggingOptions,
     ILogger<KafkaConversionWorker> logger) : BackgroundService
@@ -78,6 +79,7 @@ public sealed class KafkaConversionWorker(
         using var consumer = new ConsumerBuilder<string, string>(inputOptions.BuildConsumerConfig())
             .SetPartitionsAssignedHandler((_, partitions) =>
             {
+                consumerReadiness.MarkAssigned(partitions.Count);
                 var assignments = BuildPartitionAssignments(partitions, previousState);
                 foreach (var assignment in assignments.Where(item => item.Offset != Offset.Unset))
                 {
@@ -90,6 +92,7 @@ public sealed class KafkaConversionWorker(
 
                 return assignments;
             })
+            .SetPartitionsRevokedHandler((_, _) => consumerReadiness.MarkUnavailable())
             .Build();
         consumer.Subscribe(inputOptions.Topic);
 
@@ -140,6 +143,7 @@ public sealed class KafkaConversionWorker(
                 }
                 catch (ConsumeException ex)
                 {
+                    consumerReadiness.MarkUnavailable();
                     logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -166,6 +170,7 @@ public sealed class KafkaConversionWorker(
         }
         finally
         {
+            consumerReadiness.MarkUnavailable();
             consumer.Close();
         }
     }

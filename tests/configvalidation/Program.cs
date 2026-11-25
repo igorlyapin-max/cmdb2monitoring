@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CmdbKafka2Zabbix.Conversion;
+using CmdbKafka2Zabbix.Processing;
 using CmdbKafka2Zabbix.Rules;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Zabbix;
@@ -43,6 +44,7 @@ ValidateTopicChain(configs, "development", errors);
 ValidateRulesFile(repositoryRoot, errors);
 ValidateProfileScopedRuleContract(errors);
 ValidateEventRoutingRuleContract(errors);
+await ValidateKafkaConsumerReadiness(errors);
 ValidateProductionRulesStarter(repositoryRoot, errors);
 ValidateDevelopmentRulesStarter(repositoryRoot, errors);
 await ValidateRulesT4Rendering(repositoryRoot, errors);
@@ -2005,6 +2007,27 @@ static void ValidateEventRoutingRuleContract(List<string> errors)
     if (!missingUpdateErrors.Any(error => error.Contains("createOnUpdateWhenMissing requires a publish-enabled update", StringComparison.Ordinal)))
     {
         errors.Add("Event routing contract accepted createOnUpdateWhenMissing without an update route.");
+    }
+}
+
+static async Task ValidateKafkaConsumerReadiness(List<string> errors)
+{
+    var readiness = new KafkaConsumerReadiness();
+    if ((await readiness.CheckAsync(CancellationToken.None)).Ready)
+    {
+        errors.Add("Kafka consumer readiness must remain false before partition assignment.");
+    }
+
+    readiness.MarkAssigned(1);
+    if (!(await readiness.CheckAsync(CancellationToken.None)).Ready)
+    {
+        errors.Add("Kafka consumer readiness must become true after partition assignment.");
+    }
+
+    readiness.MarkUnavailable();
+    if ((await readiness.CheckAsync(CancellationToken.None)).Ready)
+    {
+        errors.Add("Kafka consumer readiness must become false after consumer unavailability.");
     }
 }
 

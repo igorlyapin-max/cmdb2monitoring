@@ -317,6 +317,17 @@ const translations = {
     'dashboard.rulesVersionMismatch': 'Версии отличаются. Проверьте активный rules-файл и путь, который использует микросервис.',
     'dashboard.rulesContentMismatch': 'Содержимое rules отличается. Файл UI не применен в converter.',
     'dashboard.rulesStatusUnavailable': 'Не удалось подтвердить rules artifact на микросервисе.',
+    'dashboard.rulesVerificationTitle': 'Причина rules FAIL',
+    'dashboard.rulesReason.healthcheck_failed': 'Healthcheck микросервиса неуспешен.',
+    'dashboard.rulesReason.rules_status_unavailable': 'Микросервис недоступен для проверки загруженного rules artifact.',
+    'dashboard.rulesReason.management_rules_unavailable': 'Система управления не смогла прочитать активный rules-файл.',
+    'dashboard.rulesReason.content_sha256_mismatch': 'UI и микросервис используют rules с разным содержимым.',
+    'dashboard.rulesReason.converter_does_not_report_sha256': 'Микросервис не возвращает contentSha256. Требуется обновление образа converter.',
+    'dashboard.rulesVerification.health': 'health',
+    'dashboard.rulesVerification.status': 'rules status',
+    'dashboard.rulesVerification.uiArtifact': 'UI',
+    'dashboard.rulesVerification.converterArtifact': 'converter',
+    'dashboard.rulesVerification.error': 'ошибка',
     'dashboard.serviceHelp': 'Проверка сервиса "{name}". Показывает HTTP-статус, задержку, проверяемый URL и версии rules, если сервис их отдает.',
     'dashboard.queueTitle': 'Очереди обработки',
     'dashboard.queueDisabled': 'Мониторинг очереди выключен',
@@ -1120,6 +1131,17 @@ const translations = {
     'dashboard.rulesVersionMismatch': 'Versions differ. Check the active rules file and the path used by the microservice.',
     'dashboard.rulesContentMismatch': 'Rules content differs. The UI file is not applied in the converter.',
     'dashboard.rulesStatusUnavailable': 'The rules artifact could not be confirmed on the microservice.',
+    'dashboard.rulesVerificationTitle': 'Rules FAIL reason',
+    'dashboard.rulesReason.healthcheck_failed': 'The microservice healthcheck is unsuccessful.',
+    'dashboard.rulesReason.rules_status_unavailable': 'The microservice cannot be reached to verify its loaded rules artifact.',
+    'dashboard.rulesReason.management_rules_unavailable': 'The management service could not read the active rules file.',
+    'dashboard.rulesReason.content_sha256_mismatch': 'The UI and microservice use rules with different content.',
+    'dashboard.rulesReason.converter_does_not_report_sha256': 'The microservice does not return contentSha256. Update the converter image.',
+    'dashboard.rulesVerification.health': 'health',
+    'dashboard.rulesVerification.status': 'rules status',
+    'dashboard.rulesVerification.uiArtifact': 'UI',
+    'dashboard.rulesVerification.converterArtifact': 'converter',
+    'dashboard.rulesVerification.error': 'error',
     'dashboard.serviceHelp': 'Service "{name}" probe. Shows HTTP status, latency, checked URL, and rules versions when the service exposes them.',
     'dashboard.queueTitle': 'Processing Queues',
     'dashboard.queueDisabled': 'Queue monitoring is disabled',
@@ -2728,7 +2750,9 @@ async function loadDashboard() {
   const grid = $('#healthGrid');
   clear(grid);
   for (const item of health.items) {
-    const rulesApplied = !item.rulesStatusSupported || rulesArtifactsMatch(item.rulesStatus, health.managementRules);
+    const rulesApplied = !item.rulesStatusSupported
+      || item.rulesVerification?.ok === true
+      || (!item.rulesVerification && rulesArtifactsMatch(item.rulesStatus, health.managementRules));
     const displayOk = item.ok && rulesApplied;
     const node = document.createElement('div');
     node.className = 'metric';
@@ -2745,7 +2769,7 @@ async function loadDashboard() {
         reloadButton.addEventListener('click', () => reloadConversionRules(item.name, reloadButton));
         actions.append(reloadButton);
       }
-      actions.append(renderDashboardRulesVersions(item.rulesStatus, health.managementRules));
+      actions.append(renderDashboardRulesVersions(item.rulesStatus, health.managementRules, item.rulesVerification));
       node.append(actions);
     }
     setHelp(node, tf('dashboard.serviceHelp', { name: item.name }));
@@ -2995,7 +3019,7 @@ async function reloadConversionRules(serviceName, button) {
   }, { statusSelector: '#dashboardActionStatus' });
 }
 
-function renderDashboardRulesVersions(serviceRulesStatus, managementRules) {
+function renderDashboardRulesVersions(serviceRulesStatus, managementRules, verification = null) {
   const container = el('div', 'rules-version-summary', '');
   container.append(
     renderDashboardRulesVersionRow(t('dashboard.rulesVersionMicroservice'), serviceRulesStatus?.rules, serviceRulesStatus),
@@ -3007,7 +3031,9 @@ function renderDashboardRulesVersions(serviceRulesStatus, managementRules) {
   const managementSha256 = managementRules?.contentSha256 ?? managementRules?.revision ?? '';
   const mismatch = (serviceVersion && managementVersion && serviceVersion !== managementVersion)
     || (serviceSha256 && managementSha256 && serviceSha256 !== managementSha256);
-  if (mismatch) {
+  if (verification && verification.ok === false) {
+    container.append(renderRulesVerification(verification));
+  } else if (mismatch) {
     const contentMismatch = serviceSha256 && managementSha256 && serviceSha256 !== managementSha256;
     const message = contentMismatch ? t('dashboard.rulesContentMismatch') : t('dashboard.rulesVersionMismatch');
     const warning = el('div', 'rules-version-warning status-bad', message);
@@ -3019,6 +3045,41 @@ function renderDashboardRulesVersions(serviceRulesStatus, managementRules) {
     container.append(warning);
   }
   return container;
+}
+
+function renderRulesVerification(verification) {
+  const reason = String(verification?.reason ?? 'rules_status_unavailable');
+  const message = t(`dashboard.rulesReason.${reason}`);
+  const parts = [`[${reason}] ${message}`];
+  if (verification.healthUrl || verification.healthStatusCode !== null) {
+    parts.push(`${t('dashboard.rulesVerification.health')}: ${verification.healthStatusCode ?? '-'} ${verification.healthUrl ?? ''}`.trim());
+  }
+  if (verification.rulesStatusUrl || verification.rulesStatusCode !== null) {
+    parts.push(`${t('dashboard.rulesVerification.status')}: ${verification.rulesStatusCode ?? '-'} ${verification.rulesStatusUrl ?? ''}`.trim());
+  }
+  if (verification.managementError) {
+    parts.push(`${t('dashboard.rulesVerification.uiArtifact')} ${t('dashboard.rulesVerification.error')}: ${verification.managementError}`);
+  }
+  if (verification.healthError) {
+    parts.push(`${t('dashboard.rulesVerification.health')} ${t('dashboard.rulesVerification.error')}: ${verification.healthError}`);
+  }
+  if (verification.rulesStatusError) {
+    parts.push(`${t('dashboard.rulesVerification.status')} ${t('dashboard.rulesVerification.error')}: ${verification.rulesStatusError}`);
+  }
+  if (verification.managementPath || verification.managementSha256) {
+    parts.push(`${t('dashboard.rulesVerification.uiArtifact')}: ${verification.managementPath || '-'}; sha256 ${shortDiagnosticHash(verification.managementSha256)}`);
+  }
+  if (verification.converterPath || verification.converterSha256) {
+    parts.push(`${t('dashboard.rulesVerification.converterArtifact')}: ${verification.converterPath || '-'}; sha256 ${shortDiagnosticHash(verification.converterSha256)}`);
+  }
+  const warning = el('div', 'rules-version-warning status-bad', `${t('dashboard.rulesVerificationTitle')}: ${parts.join(' | ')}`);
+  warning.title = warning.textContent;
+  return warning;
+}
+
+function shortDiagnosticHash(value) {
+  const normalized = String(value ?? '');
+  return normalized ? normalized.slice(0, 12) : '-';
 }
 
 function rulesArtifactsMatch(serviceRulesStatus, managementRules) {

@@ -72,7 +72,7 @@ require_pattern "RULES_ACTIVE_FILE_PATH: .*CONVERSION_RULES_FILE_PATH.*productio
 require_pattern "MONITORING_UI_HEALTH_ENDPOINTS_JSON:" "$COMPOSE_FILE" "Production compose must configure health endpoints through one JSON environment variable."
 require_pattern "MONITORING_UI_OUTBOUND_ALLOWED_HOSTS:" "$COMPOSE_FILE" "Production compose must require an outbound host allowlist."
 require_pattern "http://cmdbwebhooks2kafka:8080/health" "$COMPOSE_FILE" "Production health endpoints must use Compose service DNS."
-require_pattern "http://cmdbkafka2zabbix:8080/health" "$COMPOSE_FILE" "Production converter health endpoint must use Compose service DNS."
+require_pattern "http://cmdbkafka2zabbix:8080/ready" "$COMPOSE_FILE" "Production converter readiness endpoint must use Compose service DNS."
 require_pattern "http://zabbixrequests2api:8080/health" "$COMPOSE_FILE" "Production Zabbix request health endpoint must use Compose service DNS."
 require_pattern "http://zabbixbindings2cmdbuild:8080/health" "$COMPOSE_FILE" "Production binding health endpoint must use Compose service DNS."
 require_pattern "MONITORING_UI_RULES_RELOAD_TOKEN:" "$COMPOSE_FILE" "Production UI must receive its rules reload token through an environment variable."

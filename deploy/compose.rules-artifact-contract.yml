@@ -1,4 +1,21 @@
 services:
+  kafka:
+    image: apache/kafka:3.9.2
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
   cmdbkafka2zabbix:
     image: ${RULES_ARTIFACT_CONVERTER_IMAGE:?set RULES_ARTIFACT_CONVERTER_IMAGE}
     environment:
@@ -10,13 +27,23 @@ services:
       ConversionRules__RepositoryPath: /app
       ConversionRules__RulesFilePath: rules/cmdbuild-to-zabbix-host-create.json
       ConversionRules__ReadFromGit: "false"
-      Kafka__Input__BootstrapServers: kafka:1
+      Kafka__Input__BootstrapServers: kafka:9092
+      Kafka__Input__Topic: rules-artifact-input
+      Kafka__Input__GroupId: rules-artifact-converter
+      Kafka__Input__ClientId: rules-artifact-converter
       Kafka__Input__SecurityProtocol: Plaintext
       Kafka__Input__AllowPlaintextKafka: "true"
-      Kafka__Output__BootstrapServers: kafka:1
+      Kafka__Output__BootstrapServers: kafka:9092
+      Kafka__Output__Topic: rules-artifact-output
+      Kafka__Output__ClientId: rules-artifact-output
       Kafka__Output__SecurityProtocol: Plaintext
       Kafka__Output__AllowPlaintextKafka: "true"
+      DeadLetter__Enabled: "true"
+      DeadLetter__Topic: rules-artifact-dlq
       ElkLogging__Enabled: "false"
+    depends_on:
+      kafka:
+        condition: service_started
     volumes:
       - ${RULES_ARTIFACT_RULES_HOST_PATH:?set RULES_ARTIFACT_RULES_HOST_PATH}:/app/rules:ro
 
@@ -32,7 +59,7 @@ services:
       MONITORING_UI_EVENTS_ENABLED: "false"
       MONITORING_UI_LOGS_ENABLED: "false"
       MONITORING_UI_HEALTH_ENDPOINTS_JSON: >-
-        [{"Name":"cmdbkafka2zabbix","Url":"http://cmdbkafka2zabbix:8080/health","RulesReloadUrl":"http://cmdbkafka2zabbix:8080/admin/reload-rules","RulesReloadToken":"${RULES_ARTIFACT_TOKEN:?set RULES_ARTIFACT_TOKEN}","RulesStatusUrl":"http://cmdbkafka2zabbix:8080/admin/rules-status","RulesStatusToken":"${RULES_ARTIFACT_TOKEN:?set RULES_ARTIFACT_TOKEN}"}]
+        [{"Name":"cmdbkafka2zabbix","Url":"http://cmdbkafka2zabbix:8080/ready","RulesReloadUrl":"http://cmdbkafka2zabbix:8080/admin/reload-rules","RulesReloadToken":"${RULES_ARTIFACT_TOKEN:?set RULES_ARTIFACT_TOKEN}","RulesStatusUrl":"http://cmdbkafka2zabbix:8080/admin/rules-status","RulesStatusToken":"${RULES_ARTIFACT_TOKEN:?set RULES_ARTIFACT_TOKEN}"}]
     depends_on:
       cmdbkafka2zabbix:
         condition: service_started

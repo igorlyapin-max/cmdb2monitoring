@@ -914,10 +914,46 @@ components:
         items:
           type: array
           maxItems: 32
-          description: Health probes for configured microservices. Items can include rulesStatus for services that expose rules status.
+          description: Health probes for configured microservices. Items can include rulesStatus and rulesVerification for services that expose rules status. rulesStatus is allowlisted to rule identity, versions, SHA-256 and location; rulesVerification provides a non-secret reason code and diagnostic fields when the UI cannot confirm the active converter artifact.
           items:
             type: object
             additionalProperties: true
+            properties:
+              rulesVerification:
+                type: object
+                description: Verification of the UI active rules artifact against the converter-reported artifact. URL query, user-info, credentials and tokens are excluded.
+                required: [ok, reason]
+                properties:
+                  ok:
+                    type: boolean
+                  reason:
+                    type: string
+                    enum:
+                      - ok
+                      - not_applicable
+                      - healthcheck_failed
+                      - rules_status_unavailable
+                      - management_rules_unavailable
+                      - content_sha256_mismatch
+                      - converter_does_not_report_sha256
+                  healthUrl:
+                    type: string
+                  healthStatusCode:
+                    type: integer
+                    nullable: true
+                  rulesStatusUrl:
+                    type: string
+                  rulesStatusCode:
+                    type: integer
+                    nullable: true
+                  managementPath:
+                    type: string
+                  converterPath:
+                    type: string
+                  managementSha256:
+                    type: string
+                  converterSha256:
+                    type: string
         managementRules:
           type: object
           description: Current conversion-rules version read by monitoring-ui-api.

@@ -249,6 +249,110 @@ test('publish reports saved but not applied when converter reads a different rul
   }
 });
 
+test('health exposes a specific non-secret rules verification reason for each failed artifact state', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-rules-verification-'));
+  const port = await reservePort();
+  const converterPort = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const usersPath = join(directory, 'users.json');
+  const password = 'test-local-admin-password';
+  await writeFile(activeRulesPath, await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8'), 'utf8');
+  await writeFile(usersPath, JSON.stringify({
+    version: 1,
+    users: [{
+      username: 'admin',
+      displayName: 'Test Admin',
+      role: 'admin',
+      password: passwordHash(password),
+      mustChangePassword: false
+    }]
+  }), 'utf8');
+
+  const converterState = { healthStatus: 200, statusStatus: 200, contentSha256: '' };
+  const converter = createServer((request, response) => {
+    response.setHeader('content-type', 'application/json');
+    if (request.url === '/health') {
+      response.statusCode = converterState.healthStatus;
+      response.end(JSON.stringify({ status: converterState.healthStatus === 200 ? 'ok' : 'failed' }));
+      return;
+    }
+    if (request.url?.startsWith('/admin/rules-status')) {
+      response.statusCode = converterState.statusStatus;
+      response.end(JSON.stringify(converterState.statusStatus === 200 ? {
+        rules: {
+          contentSha256: converterState.contentSha256,
+          location: '/app/rules/customer.json',
+          repositoryUrl: 'https://viewer:must-not-leak@git.example.test/customer-rules.git'
+        }
+      } : { detail: 'Rules status is unavailable.' }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end('{}');
+  });
+  await listen(converter, converterPort);
+
+  const process = startServer(port, directory, activeRulesPath, usersPath, {
+    MONITORING_UI_HEALTH_ENDPOINTS_JSON: JSON.stringify([{
+      Name: 'cmdbkafka2zabbix',
+      Url: `http://127.0.0.1:${converterPort}/health`,
+      RulesStatusUrl: `http://127.0.0.1:${converterPort}/admin/rules-status?token=not-for-ui`
+    }])
+  });
+  try {
+    await waitForReady(port, process);
+    const login = await request(port, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password }
+    });
+    const cookie = login.headers.get('set-cookie');
+    const current = await request(port, '/api/rules/current', { headers: { cookie } });
+    converterState.contentSha256 = current.body.revision;
+
+    const initialHealth = await request(port, '/api/services/health', { headers: { cookie } });
+    assert.equal(initialHealth.status, 200, JSON.stringify(initialHealth.body));
+    assert.equal(initialHealth.body.items[0].rulesStatus.rules.repositoryUrl, undefined);
+    assert.doesNotMatch(JSON.stringify(initialHealth.body), /must-not-leak/);
+
+    const readVerification = async () => {
+      const health = await request(port, '/api/services/health', { headers: { cookie } });
+      assert.equal(health.status, 200, JSON.stringify(health.body));
+      return health.body.items[0].rulesVerification;
+    };
+
+    converterState.healthStatus = 503;
+    let verification = await readVerification();
+    assert.equal(verification.reason, 'healthcheck_failed');
+    assert.equal(verification.healthStatusCode, 503);
+
+    converterState.healthStatus = 200;
+    converterState.statusStatus = 401;
+    verification = await readVerification();
+    assert.equal(verification.reason, 'rules_status_unavailable');
+    assert.equal(verification.rulesStatusCode, 401);
+    assert.doesNotMatch(JSON.stringify(verification), /not-for-ui/);
+
+    converterState.statusStatus = 200;
+    converterState.contentSha256 = '';
+    verification = await readVerification();
+    assert.equal(verification.reason, 'converter_does_not_report_sha256');
+
+    converterState.contentSha256 = 'f'.repeat(64);
+    verification = await readVerification();
+    assert.equal(verification.reason, 'content_sha256_mismatch');
+    assert.equal(verification.converterPath, '/app/rules/customer.json');
+
+    await rm(activeRulesPath);
+    verification = await readVerification();
+    assert.equal(verification.reason, 'management_rules_unavailable');
+  } finally {
+    process.kill('SIGTERM');
+    await onceExit(process);
+    await close(converter);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('production permits a blank CMDBuild webhook target but rejects unsafe runtime values', async () => {
   const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-webhook-target-'));
   const port = await reservePort();
