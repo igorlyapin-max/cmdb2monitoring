@@ -15,6 +15,7 @@ import {
   normalizeRuleName,
   normalizeToken,
   regexLiteralValues,
+  removeHostProfileAndDependentConfiguration,
   replaceHostProfileAddressFieldForClass,
   ruleClassConditions,
   sameNormalized,
@@ -305,15 +306,17 @@ const translations = {
     'login.zabbixPassword': 'Zabbix пароль',
     'login.submit': 'Войти',
     'dashboard.reloadRules': 'Перечитать правила конвертации',
-    'dashboard.rulesVersionMicroservice': 'На микросервисе',
-    'dashboard.rulesVersionManagement': 'В системе управления',
+    'dashboard.rulesVersionMicroservice': 'Файл микросервиса',
+    'dashboard.rulesVersionManagement': 'Файл системы управления',
     'dashboard.rulesVersionUnavailable': 'версия недоступна',
     'dashboard.rulesVersionSchema': 'schema',
     'dashboard.rulesSourceActive': 'активный mount',
     'dashboard.rulesSourceDisk': 'диск',
     'dashboard.rulesSourceGit': 'git-копия',
-    'dashboard.rulesSourcePath': 'Источник: {source}, {path}',
+    'dashboard.rulesSourcePath': 'Источник: {source}; файл: {fileName}; путь: {path}',
     'dashboard.rulesVersionMismatch': 'Версии отличаются. Проверьте активный rules-файл и путь, который использует микросервис.',
+    'dashboard.rulesContentMismatch': 'Содержимое rules отличается. Файл UI не применен в converter.',
+    'dashboard.rulesStatusUnavailable': 'Не удалось подтвердить rules artifact на микросервисе.',
     'dashboard.serviceHelp': 'Проверка сервиса "{name}". Показывает HTTP-статус, задержку, проверяемый URL и версии rules, если сервис их отдает.',
     'dashboard.queueTitle': 'Очереди обработки',
     'dashboard.queueDisabled': 'Мониторинг очереди выключен',
@@ -622,6 +625,7 @@ const translations = {
     'toast.rulesFileSaved': 'Файл rules сохранен: {name}',
     'rules.sourceStatus': 'Источник правил: {mode}; версия: {version}',
     'rules.sourceStatusHelp': 'Источник правил: {mode}; версия: {version}; файл: {path}; resolved path: {resolvedPath}',
+    'rules.draftNotApplied': 'Черновик не применен: активный файл и конвертер продолжают использовать опубликованную версию.',
     'rules.sourceActive': 'активный файл',
     'rules.sourceDisk': 'диск',
     'rules.sourceGit': 'git',
@@ -750,7 +754,7 @@ const translations = {
     'mapping.confirm.deleteRulesTitle': 'Удалить выбранные правила из draft JSON ({count})?',
     'mapping.confirm.deleteRulesKeepSources': 'Классы и class attribute fields останутся в rules, чтобы не удалить источник, который может использоваться другими правилами.',
     'mapping.confirm.deleteRulesUndo': 'Действие можно отменить через Undo.',
-    'mapping.confirm.deleteProfile': 'Удалить hostProfile "{profile}" и связанные с ним назначения ({count}) из draft JSON? Это не удаляет Zabbix host в управляемой системе.',
+    'mapping.confirm.deleteProfile': 'Удалить hostProfile "{profile}", назначения ({rules}), source fields ({fields}) и классы ({classes}) из draft JSON? Это не удаляет Zabbix host в управляемой системе.',
     'mapping.confirm.saveIpDnsTitle': 'В rules найдены проблемы связи IP/DNS class attribute field с Zabbix interface structure.',
     'mapping.confirm.saveIpDnsMore': '... еще {count}',
     'mapping.confirm.saveAnyway': 'Сохранить файлы несмотря на ошибки?',
@@ -860,6 +864,8 @@ const translations = {
     'mapping.status.saveWarnings': ' Есть предупреждения: {count}.',
     'mapping.status.publishApplied': 'Активный файл правил сохранен. Конвертер применил версию {version}.',
     'mapping.status.publishReloadPending': 'Активный файл правил сохранен, но reload конвертера не подтвержден: {message}. Повторите применение после устранения причины.',
+    'mapping.status.publishArtifactMismatch': 'Конвертер читает другой rules-файл: UI {uiPath} (sha256 {expectedSha256}), converter {converterPath} (sha256 {actualSha256}).',
+    'mapping.status.reloadNotApplied': 'Конвертер не подтвердил применение rules: {message}.',
     'mapping.status.publishConflict': 'Активный rules-файл изменен другим редактором. Draft сохранен локально; перечитайте правила и объедините изменения перед публикацией.',
     'mapping.option.anyClass': 'Любой класс',
     'mapping.option.chooseClass': 'Выберите класс',
@@ -1103,15 +1109,17 @@ const translations = {
     'login.zabbixPassword': 'Zabbix password',
     'login.submit': 'Login',
     'dashboard.reloadRules': 'Reload conversion rules',
-    'dashboard.rulesVersionMicroservice': 'On microservice',
-    'dashboard.rulesVersionManagement': 'In management system',
+    'dashboard.rulesVersionMicroservice': 'Microservice file',
+    'dashboard.rulesVersionManagement': 'Management file',
     'dashboard.rulesVersionUnavailable': 'version unavailable',
     'dashboard.rulesVersionSchema': 'schema',
     'dashboard.rulesSourceActive': 'active mount',
     'dashboard.rulesSourceDisk': 'disk',
     'dashboard.rulesSourceGit': 'git copy',
-    'dashboard.rulesSourcePath': 'Source: {source}, {path}',
+    'dashboard.rulesSourcePath': 'Source: {source}; file: {fileName}; path: {path}',
     'dashboard.rulesVersionMismatch': 'Versions differ. Check the active rules file and the path used by the microservice.',
+    'dashboard.rulesContentMismatch': 'Rules content differs. The UI file is not applied in the converter.',
+    'dashboard.rulesStatusUnavailable': 'The rules artifact could not be confirmed on the microservice.',
     'dashboard.serviceHelp': 'Service "{name}" probe. Shows HTTP status, latency, checked URL, and rules versions when the service exposes them.',
     'dashboard.queueTitle': 'Processing Queues',
     'dashboard.queueDisabled': 'Queue monitoring is disabled',
@@ -1419,6 +1427,7 @@ const translations = {
     'toast.rulesFileSaved': 'Rules file saved: {name}',
     'rules.sourceStatus': 'Rules source: {mode}; version: {version}',
     'rules.sourceStatusHelp': 'Rules source: {mode}; version: {version}; file: {path}; resolved path: {resolvedPath}',
+    'rules.draftNotApplied': 'Draft not applied: the active file and converter continue to use the published version.',
     'rules.sourceActive': 'active file',
     'rules.sourceDisk': 'disk',
     'rules.sourceGit': 'git',
@@ -1547,7 +1556,7 @@ const translations = {
     'mapping.confirm.deleteRulesTitle': 'Delete selected rules from draft JSON ({count})?',
     'mapping.confirm.deleteRulesKeepSources': 'Classes and class attribute fields will remain in rules so a source used by other rules is not removed.',
     'mapping.confirm.deleteRulesUndo': 'This action can be undone through Undo.',
-    'mapping.confirm.deleteProfile': 'Delete hostProfile "{profile}" and its scoped assignments ({count}) from draft JSON? This does not delete a Zabbix host in the managed system.',
+    'mapping.confirm.deleteProfile': 'Delete hostProfile "{profile}", assignments ({rules}), source fields ({fields}), and classes ({classes}) from draft JSON? This does not delete a Zabbix host in the managed system.',
     'mapping.confirm.saveIpDnsTitle': 'Rules contain IP/DNS class attribute field links with Zabbix interface structure problems.',
     'mapping.confirm.saveIpDnsMore': '... {count} more',
     'mapping.confirm.saveAnyway': 'Save files despite the errors?',
@@ -1657,6 +1666,8 @@ const translations = {
     'mapping.status.saveWarnings': ' Warnings: {count}.',
     'mapping.status.publishApplied': 'The active rules file was saved. The converter applied version {version}.',
     'mapping.status.publishReloadPending': 'The active rules file was saved, but converter reload was not confirmed: {message}. Retry apply after resolving the cause.',
+    'mapping.status.publishArtifactMismatch': 'The converter reads another rules file: UI {uiPath} (sha256 {expectedSha256}), converter {converterPath} (sha256 {actualSha256}).',
+    'mapping.status.reloadNotApplied': 'The converter did not confirm rules application: {message}.',
     'mapping.status.publishConflict': 'The active rules file changed in another editor. The draft is kept locally; reload rules and merge changes before publishing.',
     'mapping.option.anyClass': 'Any class',
     'mapping.option.chooseClass': 'Choose class',
@@ -2717,19 +2728,24 @@ async function loadDashboard() {
   const grid = $('#healthGrid');
   clear(grid);
   for (const item of health.items) {
+    const rulesApplied = !item.rulesStatusSupported || rulesArtifactsMatch(item.rulesStatus, health.managementRules);
+    const displayOk = item.ok && rulesApplied;
     const node = document.createElement('div');
     node.className = 'metric';
     node.append(
       el('div', 'metric-title', item.name),
-      el('div', `metric-value ${item.ok ? 'status-ok' : 'status-bad'}`, item.ok ? 'OK' : 'FAIL'),
+      el('div', `metric-value ${displayOk ? 'status-ok' : 'status-bad'}`, displayOk ? 'OK' : 'FAIL'),
       el('div', 'metric-detail', `${item.statusCode ?? '-'} | ${item.latencyMs} ms | ${item.url}`)
     );
-    if (item.rulesReloadSupported && canUseRules()) {
+    if (item.rulesStatusSupported) {
       const actions = el('div', 'metric-actions rules-actions', '');
-      const reloadButton = el('button', 'secondary', t('dashboard.reloadRules'));
-      reloadButton.type = 'button';
-      reloadButton.addEventListener('click', () => reloadConversionRules(item.name, reloadButton));
-      actions.append(reloadButton, renderDashboardRulesVersions(item.rulesStatus, health.managementRules));
+      if (item.rulesReloadSupported && canUseRules()) {
+        const reloadButton = el('button', 'secondary', t('dashboard.reloadRules'));
+        reloadButton.type = 'button';
+        reloadButton.addEventListener('click', () => reloadConversionRules(item.name, reloadButton));
+        actions.append(reloadButton);
+      }
+      actions.append(renderDashboardRulesVersions(item.rulesStatus, health.managementRules));
       node.append(actions);
     }
     setHelp(node, tf('dashboard.serviceHelp', { name: item.name }));
@@ -2969,7 +2985,11 @@ async function reloadConversionRules(serviceName, button) {
       body: {}
     });
     await loadRules({ syncLoadedRuleEditors: true });
-    toast(t('toast.rulesReloaded'));
+    const message = result.applied === false
+      ? rulesApplicationFailureMessage(result)
+      : t('toast.rulesReloaded');
+    setActionStatus($('#dashboardActionStatus'), message, result.applied === false ? 'warning' : 'success');
+    toast(message);
     await loadDashboard();
     return result;
   }, { statusSelector: '#dashboardActionStatus' });
@@ -2983,12 +3003,31 @@ function renderDashboardRulesVersions(serviceRulesStatus, managementRules) {
   );
   const serviceVersion = serviceRulesStatus?.rules?.rulesVersion ?? '';
   const managementVersion = managementRules?.rulesVersion ?? '';
-  if (serviceVersion && managementVersion && serviceVersion !== managementVersion) {
-    const warning = el('div', 'rules-version-warning status-warn', t('dashboard.rulesVersionMismatch'));
-    warning.title = t('dashboard.rulesVersionMismatch');
+  const serviceSha256 = serviceRulesStatus?.rules?.contentSha256 ?? '';
+  const managementSha256 = managementRules?.contentSha256 ?? managementRules?.revision ?? '';
+  const mismatch = (serviceVersion && managementVersion && serviceVersion !== managementVersion)
+    || (serviceSha256 && managementSha256 && serviceSha256 !== managementSha256);
+  if (mismatch) {
+    const contentMismatch = serviceSha256 && managementSha256 && serviceSha256 !== managementSha256;
+    const message = contentMismatch ? t('dashboard.rulesContentMismatch') : t('dashboard.rulesVersionMismatch');
+    const warning = el('div', 'rules-version-warning status-bad', message);
+    warning.title = message;
+    container.append(warning);
+  } else if (serviceRulesStatus?.ok === false) {
+    const warning = el('div', 'rules-version-warning status-bad', t('dashboard.rulesStatusUnavailable'));
+    warning.title = serviceRulesStatus.error || t('dashboard.rulesStatusUnavailable');
     container.append(warning);
   }
   return container;
+}
+
+function rulesArtifactsMatch(serviceRulesStatus, managementRules) {
+  if (serviceRulesStatus?.ok === false || managementRules?.ok === false) {
+    return false;
+  }
+  const serviceSha256 = serviceRulesStatus?.rules?.contentSha256 ?? '';
+  const managementSha256 = managementRules?.contentSha256 ?? managementRules?.revision ?? '';
+  return Boolean(serviceSha256) && Boolean(managementSha256) && serviceSha256 === managementSha256;
 }
 
 function renderDashboardRulesVersionRow(label, rules, status) {
@@ -3012,14 +3051,16 @@ function renderDashboardRulesVersionRow(label, rules, status) {
 function formatDashboardRulesVersion(rules, status) {
   const rulesVersion = rules?.rulesVersion ?? '';
   const schemaVersion = rules?.schemaVersion ?? '';
+  const contentSha256 = rules?.contentSha256 ?? '';
   if (!rulesVersion && !schemaVersion) {
     return status?.error ? t('dashboard.rulesVersionUnavailable') : '-';
   }
 
   const versionText = rulesVersion || '-';
-  return schemaVersion
+  const version = schemaVersion
     ? versionText + ' / ' + t('dashboard.rulesVersionSchema') + ' ' + schemaVersion
     : versionText;
+  return contentSha256 ? `${version} / sha256 ${String(contentSha256).slice(0, 12)}` : version;
 }
 
 function formatDashboardRulesSource(rules, status) {
@@ -3037,8 +3078,17 @@ function formatDashboardRulesSource(rules, status) {
 
   return tf('dashboard.rulesSourcePath', {
     source: source || '-',
+    fileName: rulesFileName(path),
     path: path || '-'
   });
+}
+
+function rulesFileName(path) {
+  const normalized = String(path ?? '').trim();
+  if (!normalized) {
+    return '-';
+  }
+  return normalized.split(/[\\/]/).filter(Boolean).at(-1) || normalized;
 }
 
 async function loadEvents() {
@@ -3219,6 +3269,7 @@ function renderRulesSourceStatus(selector, rulesDocument) {
 
   if (!rulesDocument) {
     node.textContent = '';
+    node.classList.remove('is-warning');
     return;
   }
 
@@ -3232,8 +3283,10 @@ function renderRulesSourceStatus(selector, rulesDocument) {
     mode: values.mode,
     version: values.version
   });
-  node.textContent = text;
-  setHelp(node, tf('rules.sourceStatusHelp', values));
+  const hasUnappliedDraft = mappingDraftDiffersFromActiveRules();
+  node.textContent = hasUnappliedDraft ? `${text}. ${t('rules.draftNotApplied')}` : text;
+  node.classList.toggle('is-warning', hasUnappliedDraft);
+  setHelp(node, `${tf('rules.sourceStatusHelp', values)}${hasUnappliedDraft ? ` ${t('rules.draftNotApplied')}` : ''}`);
 }
 
 function rulesVersionLabel(rulesDocument) {
@@ -3305,8 +3358,14 @@ function syncLoadedRuleEditorsFromRulesDocument(rulesDocument) {
 }
 
 function isMappingDraftClean() {
-  return state.mappingHistoryIndex <= 0
-    && jsonEqual(state.mappingDraftRules, state.mappingHistory?.[0]);
+  return !mappingDraftDiffersFromActiveRules();
+}
+
+function mappingDraftDiffersFromActiveRules() {
+  return Boolean(state.mappingLoaded
+    && state.mappingDraftRules
+    && state.currentRules?.content
+    && !jsonEqual(state.mappingDraftRules, state.currentRules.content));
 }
 
 function jsonEqual(left, right) {
@@ -4293,10 +4352,8 @@ function redoMappingEdit() {
 }
 
 function rerenderMappingDraft(message = '') {
-  if (state.currentRules) {
-    state.currentRules.content = state.mappingDraftRules;
-  }
   renderMapping(state.mappingDraftRules, state.mappingZabbixCatalog, state.mappingCmdbuildCatalog);
+  renderRulesSourceStatuses();
   updateMappingEditor(message);
 }
 
@@ -8280,13 +8337,19 @@ function deleteMappingHostProfile() {
     return;
   }
 
-  const assignmentCount = countHostProfileScopedRules(currentMappingRules(), profile.name || '');
-  if (!confirm(tf('mapping.confirm.deleteProfile', { profile: profile.name || 'default', count: String(assignmentCount) }))) {
+  const previewRules = cloneJson(state.mappingDraftRules);
+  const preview = removeHostProfileAndDependentConfiguration(previewRules, profile.name || '');
+  if (!confirm(tf('mapping.confirm.deleteProfile', {
+    profile: profile.name || 'default',
+    rules: String(preview.removedRules),
+    fields: String(preview.removedFields.length),
+    classes: String(preview.removedClasses.length)
+  }))) {
     return;
   }
 
   const rules = cloneJson(state.mappingDraftRules);
-  const removedRules = removeHostProfileAndScopedRules(rules, profile.name || '');
+  const removed = removeHostProfileAndDependentConfiguration(rules, profile.name || '');
   pushMappingHistory(rules);
   const profileName = profile.name || 'default';
   state.mappingProfileSelectedName = '';
@@ -8294,7 +8357,7 @@ function deleteMappingHostProfile() {
     state.mappingRuleProfileName = '';
   }
   resetMappingProfileForm({ silent: true });
-  rerenderMappingDraft(tf('mapping.status.profileDeleted', { profile: profileName, count: String(removedRules) }));
+  rerenderMappingDraft(tf('mapping.status.profileDeleted', { profile: profileName, count: String(removed.removedRules) }));
 }
 
 function resetMappingProfileForm(options = {}) {
@@ -8390,21 +8453,6 @@ function renameHostProfileReferences(rules, oldName, newName) {
     }
   }
   return changed;
-}
-
-function removeHostProfileAndScopedRules(rules, profileName) {
-  rules.hostProfiles = asArray(rules.hostProfiles)
-    .filter(profile => !sameNormalized(profile.name, profileName));
-  let removed = 0;
-  for (const collection of mappingRuleCollections().filter(item => item.key !== 'hostProfiles')) {
-    const before = asArray(rules[collection.key]);
-    const after = before.filter(rule => !ruleMatchesHostProfile(rule, profileName));
-    if (before.length !== after.length) {
-      rules[collection.key] = after;
-      removed += before.length - after.length;
-    }
-  }
-  return removed;
 }
 
 function countHostProfileScopedRules(rules, profileName) {
@@ -10321,7 +10369,6 @@ async function saveMappingDraftAsFile() {
   const warningText = validation.issues.length > 0
     ? tf('mapping.status.saveWarnings', { count: validation.issues.length })
     : '';
-  rememberSavedRulesContent(rulesToSave, { updateMapping: true });
   setMappingEditorStatus(tf('mapping.status.filesSaved', {
     rulesName: rulesResult.name,
     webhookName: webhookResult.name,
@@ -10368,9 +10415,7 @@ async function publishMappingDraft() {
     return result;
   }
 
-  const message = tf('mapping.status.publishReloadPending', {
-    message: result.reload?.error ?? 'rules_reload_failed'
-  });
+  const message = rulesApplicationFailureMessage(result);
   setActionStatus($('#mappingActionStatus'), message, 'warning');
   toast(message);
   await loadDashboard();
@@ -10382,14 +10427,36 @@ async function retryMappingRulesReload() {
     method: 'POST',
     body: {}
   });
-  state.mappingReloadPending = false;
+  state.mappingReloadPending = !result.applied;
   await loadRules({ syncLoadedRuleEditors: true });
   updateMappingEditorControls();
-  const message = tf('mapping.status.publishApplied', { version: result.rulesVersion || '-' });
-  setActionStatus($('#mappingActionStatus'), message, 'success');
+  const message = result.applied
+    ? tf('mapping.status.publishApplied', { version: result.rulesVersion || '-' })
+    : rulesApplicationFailureMessage(result);
+  setActionStatus($('#mappingActionStatus'), message, result.applied ? 'success' : 'warning');
   toast(message);
   await loadDashboard();
   return result;
+}
+
+function rulesApplicationFailureMessage(result) {
+  const status = result?.converterStatus ?? {};
+  if (status.reason === 'content_sha256_mismatch') {
+    return tf('mapping.status.publishArtifactMismatch', {
+      uiPath: result?.resolvedPath ?? result?.path ?? '-',
+      converterPath: status.location ?? status.status?.rules?.location ?? '-',
+      expectedSha256: shortSha256(status.expectedSha256),
+      actualSha256: shortSha256(status.actualSha256)
+    });
+  }
+  return tf('mapping.status.reloadNotApplied', {
+    message: result?.reload?.error ?? status.reason ?? 'rules_reload_failed'
+  });
+}
+
+function shortSha256(value) {
+  const hash = String(value ?? '').trim();
+  return hash ? hash.slice(0, 12) : '-';
 }
 
 async function prepareMappingDraftForSave() {
@@ -10607,6 +10674,13 @@ function validateMappingDraftBeforeSave(rules, cmdbuildCatalog) {
   const createUpdateRoutes = (rules.eventRoutingRules ?? [])
     .filter(route => route.publish !== false)
     .filter(route => ['create', 'update'].includes(String(route.eventType ?? '').toLowerCase()));
+  if ((rules.hostProfiles ?? []).length > 0 && createUpdateRoutes.length === 0) {
+    issues.push('Активные hostProfiles не имеют publish-enabled маршрута create или update; события будут пропущены с event_type_not_configured.');
+  }
+  if ((rules.hostProfiles ?? []).some(profile => profile.createOnUpdateWhenMissing)
+    && !createUpdateRoutes.some(route => String(route.eventType ?? '').toLowerCase() === 'update')) {
+    issues.push('hostProfile с createOnUpdateWhenMissing требует publish-enabled маршрута update.');
+  }
   for (const route of createUpdateRoutes) {
     const required = route.requiredFields ?? [];
     if (!required.some(field => ['interfaceaddress', 'ipaddress', 'dnsname'].includes(normalizeToken(field)))) {

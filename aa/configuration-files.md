@@ -139,7 +139,7 @@ ElkLogging__Kafka__Topic=cmdbwebhooks2kafka.logs
 | --- | --- | --- |
 | `Service:RulesReloadRoute` | Management route для перечитывания rules, по умолчанию `/admin/reload-rules` | Если меняется служебный HTTP contract |
 | `Service:RulesReloadToken` | Bearer token для rules reload route | Всегда через secret/env в test/prod |
-| `Service:RulesStatusRoute` | Read-only management route текущей версии rules, по умолчанию `/admin/rules-status` | Если меняется служебный HTTP contract dashboard |
+| `Service:RulesStatusRoute` | Read-only management route фактически загруженных rules (`schemaVersion`, `rulesVersion`, `contentSha256`), по умолчанию `/admin/rules-status` | Если меняется служебный HTTP contract dashboard |
 | `Service:RulesStatusToken` | Bearer token для rules status route; если пустой, используется `RulesReloadToken`, а при пустых обоих токенах status открыт внутри окружения | Через secret/env в test/prod |
 | `Kafka:Input:Topic` | Входной topic CMDB events | Должен совпадать с output первого сервиса |
 | `Kafka:Input:GroupId` | Consumer group | Менять при отдельном независимом потребителе |
@@ -186,7 +186,7 @@ State-файл хранит последний успешно обработан
 
 Сигнал перечитывания rules:
 - `POST /admin/reload-rules` принимает только `Authorization: Bearer <Service:RulesReloadToken>`;
-- `GET /admin/rules-status` возвращает текущие `schemaVersion`/`rulesVersion` на микросервисе и используется dashboard без принудительного reload;
+- `GET /admin/rules-status` возвращает текущие `schemaVersion`/`rulesVersion` и SHA-256 байтов rules JSON на микросервисе; dashboard сравнивает hash с active rules UI и не считает равные версии достаточным доказательством применения;
 - endpoint вызывает `IConversionRulesProvider.ReloadAsync`, поэтому смена Git на другое хранилище требует замены provider/config, а не UI/BFF-контракта;
 - `monitoring-ui-api` хранит `Services:HealthEndpoints[].RulesReloadUrl`/`RulesReloadToken` и `RulesStatusUrl`/`RulesStatusToken`, вызывает endpoint из dashboard-карточки `cmdbkafka2zabbix`.
 

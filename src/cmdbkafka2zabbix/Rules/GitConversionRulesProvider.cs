@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 
@@ -18,6 +20,7 @@ public sealed class GitConversionRulesProvider(
     private DateTimeOffset? cachedLastWriteTime;
     private string? cachedLocation;
     private string? cachedVersion;
+    private string? cachedContentSha256;
     private bool startupPullAttempted;
 
     public async Task<ConversionRulesDocument> GetRulesAsync(CancellationToken cancellationToken)
@@ -32,6 +35,7 @@ public sealed class GitConversionRulesProvider(
             rules.Name,
             rules.SchemaVersion,
             rules.RulesVersion,
+            cachedContentSha256 ?? string.Empty,
             cachedLocation ?? ResolveRulesFilePath(),
             cachedVersion,
             ResolveRepositoryPath(),
@@ -57,6 +61,7 @@ public sealed class GitConversionRulesProvider(
             rules.Name,
             rules.SchemaVersion,
             rules.RulesVersion,
+            cachedContentSha256 ?? string.Empty,
             cachedLocation ?? ResolveRulesFilePath(),
             cachedVersion,
             ResolveRepositoryPath(),
@@ -106,15 +111,17 @@ public sealed class GitConversionRulesProvider(
 
             cachedRules = rules;
             cachedLastWriteTime = lastWriteTime;
+            cachedContentSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rulesJson))).ToLowerInvariant();
 
             var commit = await TryReadGitCommitAsync(cancellationToken);
             cachedLocation = rulesFilePath;
             cachedVersion = commit;
             logger.LogInformation(
-                "Loaded conversion rules {RuleName} schema {SchemaVersion} from {RulesFilePath} at git commit {GitCommit}",
+                "Loaded conversion rules {RuleName} schema {SchemaVersion} from {RulesFilePath} with SHA-256 {ContentSha256} at git commit {GitCommit}",
                 rules.Name,
                 rules.SchemaVersion,
                 rulesFilePath,
+                cachedContentSha256,
                 commit ?? "<unknown>");
 
             return rules;

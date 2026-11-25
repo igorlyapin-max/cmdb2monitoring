@@ -5,6 +5,8 @@
 | HC-001 | H0 | cmdbwebhooks2kafka | `GET http://localhost:5080/health`, из Docker `GET http://cmdbwebhooks2kafka:8080/health` | `{"service":"cmdbwebhooks2kafka-dev","status":"ok"}` | Готовность приема webhook от CMDBuild |
 | HC-002 | H0 | cmdbkafka2zabbix | `GET http://localhost:5081/health` | `{"service":"cmdbkafka2zabbix-dev","status":"ok"}` | Готовность чтения CMDB topic и конвертации |
 | HC-002A | OAPI7 | cmdbkafka2zabbix | `POST http://localhost:5081/admin/reload-rules` + Bearer token | `{"service":"cmdbkafka2zabbix-dev","status":"ok","rules":{...}}` | Ручное перечитывание conversion rules |
+| HC-002B | OAPI10 | cmdbkafka2zabbix | `GET http://localhost:5081/admin/rules-status` + Bearer token | `{"service":"cmdbkafka2zabbix-dev","status":"ok","rules":{"contentSha256":"..."}}` | Подтверждение, что converter загрузил тот же rules artifact, что и UI |
+| HC-002C | OAPI7, OAPI10 | monitoring-ui-api + cmdbkafka2zabbix | `scripts/smoke-rules-artifact-contract.sh` | publish/reload `applied=true`, одинаковые SHA-256 и `/app/rules/...` paths | Compose regression общего writable/read-only rules mount |
 | HC-003 | H0 | zabbixrequests2api | `GET http://localhost:5082/health` | `{"service":"zabbixrequests2api-dev","status":"ok"}` | Готовность вызова Zabbix API |
 | HC-003A | H0 | zabbixbindings2cmdbuild | `GET http://localhost:5083/health` | `{"service":"zabbixbindings2cmdbuild-dev","status":"ok"}` | Готовность обратной записи binding-ов в CMDBuild |
 | HC-004 | H0 | monitoring-ui-api | `GET http://localhost:5090/health` | `{"service":"monitoring-ui-api-dev","status":"ok"}` | Готовность frontend/BFF |

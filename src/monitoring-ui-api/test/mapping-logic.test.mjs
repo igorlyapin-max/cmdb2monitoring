@@ -14,6 +14,7 @@ import {
   isDynamicFromLeafTarget,
   minimalHostProfileInterfaceMode,
   nextRulesVersion,
+  removeHostProfileAndDependentConfiguration,
   replaceHostProfileAddressFieldForClass,
   ruleClassConditions,
   sourceFieldTemplate,
@@ -129,6 +130,70 @@ test('nextRulesVersion falls back to rules name when current version has no suff
   assert.equal(
     nextRulesVersion('', 'CMDBuild to Zabbix Rules', now),
     '2026.05.08-142503-cmdbuild-to-zabbix-rules');
+});
+
+test('removing a last class profile prunes only unreachable class configuration', () => {
+  const rules = {
+    source: {
+      entityClasses: ['tkm_thinCl', 'tkm_kkm'],
+      fields: {
+        thinAddress: { cmdbPath: 'tkm_thinCl.TKM_IPAddress.IpAddr' },
+        kkmReason: { cmdbPath: 'tkm_kkm.brlActualityReason' },
+        sharedLabel: { source: 'Description' }
+      }
+    },
+    hostProfiles: [
+      { name: 'thin-main', when: { expression: { operator: 'equals', field: 'className', value: 'tkm_thinCl' } }, interfaces: [{ valueField: 'thinAddress' }] },
+      { name: 'kkm-main', when: { expression: { operator: 'equals', field: 'className', value: 'tkm_kkm' } }, interfaces: [{ valueField: 'kkmReason' }] }
+    ],
+    templateSelectionRules: [
+      { name: 'kkm-template', when: { expression: { operator: 'all', items: [{ operator: 'equals', field: 'hostProfile', value: 'kkm-main' }] } } }
+    ],
+    eventRoutingRules: [],
+    t4Templates: {
+      hostCreateJsonRpcRequestLines: ['<#= Model.Source("thinAddress") #>']
+    }
+  };
+
+  const removed = removeHostProfileAndDependentConfiguration(rules, 'kkm-main');
+
+  assert.deepEqual(removed.removedClasses, ['tkm_kkm']);
+  assert.equal(removed.removedRules, 1);
+  assert.deepEqual(removed.removedFields, ['kkmReason']);
+  assert.deepEqual(rules.source.entityClasses, ['tkm_thinCl']);
+  assert.deepEqual(Object.keys(rules.source.fields).sort(), ['sharedLabel', 'thinAddress']);
+  assert.deepEqual(rules.hostProfiles.map(profile => profile.name), ['thin-main']);
+});
+
+test('removing one of several profiles for a class does not report that class as deleted', () => {
+  const rules = {
+    source: {
+      entityClasses: ['ARM'],
+      fields: { armAddress: { cmdbPath: 'ARM.Address' } }
+    },
+    hostProfiles: [
+      {
+        name: 'arm-main',
+        when: { expression: { operator: 'equals', field: 'className', value: 'ARM' } }
+      },
+      {
+        name: 'arm-snmp',
+        when: { expression: { operator: 'equals', field: 'className', value: 'ARM' } }
+      }
+    ],
+    templateSelectionRules: [{
+      name: 'arm-template',
+      when: { expression: { operator: 'equals', field: 'hostProfile', value: 'arm-main' } }
+    }]
+  };
+
+  const removed = removeHostProfileAndDependentConfiguration(rules, 'arm-main');
+
+  assert.deepEqual(removed.affectedClasses, ['ARM']);
+  assert.deepEqual(removed.removedClasses, []);
+  assert.deepEqual(rules.source.entityClasses, ['ARM']);
+  assert.deepEqual(Object.keys(rules.source.fields), ['armAddress']);
+  assert.deepEqual(rules.hostProfiles.map(profile => profile.name), ['arm-snmp']);
 });
 
 test('source field catalog attribute compatibility rejects raw reference ids', () => {

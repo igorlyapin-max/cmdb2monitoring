@@ -11,6 +11,7 @@ flowchart TD
     monui -->|GET /health :5082| api
     monui -->|GET /health :5083| bind
     monui -->|POST /admin/reload-rules :5081| conv
+    monui -->|GET /admin/rules-status, SHA-256| conv
     monui -->|Kafka events read-only :9092| kafka
     ui -->|HTTP :8090| cmdb[CMDBuild :8090]
     cmdb -->|POST :5080 /webhooks/cmdbuild| wh[cmdbwebhooks2kafka :5080]

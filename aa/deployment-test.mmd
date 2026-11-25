@@ -30,6 +30,7 @@ flowchart TB
     monui -->|GET /health :5082| api
     monui -->|GET /health :5083| bind
     monui -->|POST /admin/reload-rules :5081| conv
+    monui -->|GET /admin/rules-status :5081, rules SHA-256| conv
     cmdb -->|HTTP webhook :5080 via cmdbwebhooks2kafka:8080| wh
     wh -->|produce :9092| kafka
     kafka -->|consume :9092| conv

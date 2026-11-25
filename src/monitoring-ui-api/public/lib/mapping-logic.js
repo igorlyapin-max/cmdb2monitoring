@@ -1,9 +1,111 @@
 import {
   allCondition,
+  conditionFields,
   conditionLeaf,
+  requiredHostProfileName,
   replaceConditionField,
   ruleMayApplyToClass
 } from './condition-expression.js';
+
+const profileScopedRuleCollections = [
+  'groupSelectionRules',
+  'templateSelectionRules',
+  'interfaceSelectionRules',
+  'tagSelectionRules',
+  'proxySelectionRules',
+  'proxyGroupSelectionRules',
+  'hostMacroSelectionRules',
+  'inventorySelectionRules',
+  'interfaceProfileSelectionRules',
+  'hostStatusSelectionRules',
+  'maintenanceSelectionRules',
+  'tlsPskSelectionRules',
+  'valueMapSelectionRules'
+];
+
+const classScopedRuleCollections = [
+  'monitoringSuppressionRules',
+  'groupSelectionRules',
+  'templateSelectionRules',
+  'templateConflictRules',
+  'interfaceAddressRules',
+  'interfaceSelectionRules',
+  'tagSelectionRules',
+  'proxySelectionRules',
+  'proxyGroupSelectionRules',
+  'hostMacroSelectionRules',
+  'inventorySelectionRules',
+  'interfaceProfileSelectionRules',
+  'hostStatusSelectionRules',
+  'maintenanceSelectionRules',
+  'tlsPskSelectionRules',
+  'valueMapSelectionRules'
+];
+
+export function removeHostProfileAndDependentConfiguration(rules, profileName) {
+  const normalizedProfileName = normalizeToken(profileName);
+  const profile = (rules?.hostProfiles ?? [])
+    .find(item => normalizeToken(item?.name) === normalizedProfileName);
+  if (!profile) {
+    return { removedRules: 0, removedFields: [], removedClasses: [], affectedClasses: [] };
+  }
+
+  const affectedClasses = ruleClassConditions(profile);
+  rules.hostProfiles = (rules.hostProfiles ?? [])
+    .filter(item => normalizeToken(item?.name) !== normalizedProfileName);
+
+  let removedRules = 0;
+  for (const collection of profileScopedRuleCollections) {
+    const before = Array.isArray(rules[collection]) ? rules[collection] : [];
+    const after = before.filter(rule => !requiredHostProfile(rule, normalizedProfileName));
+    rules[collection] = after;
+    removedRules += before.length - after.length;
+  }
+
+  for (const className of affectedClasses) {
+    if (hasHostProfileForClass(rules, className)) {
+      continue;
+    }
+    for (const collection of classScopedRuleCollections) {
+      const before = Array.isArray(rules[collection]) ? rules[collection] : [];
+      const after = before.filter(rule => !isExclusiveClassRule(rule, className));
+      rules[collection] = after;
+      removedRules += before.length - after.length;
+    }
+  }
+
+  const referencedFields = referencedSourceFields(rules);
+  const remainingClasses = configuredClassNames(rules);
+  const removedFields = [];
+  rules.source ??= {};
+  rules.source.fields ??= {};
+  for (const className of affectedClasses) {
+    if (remainingClasses.has(normalizeToken(className))) {
+      continue;
+    }
+    for (const [fieldName, fieldRule] of Object.entries(rules.source.fields)) {
+      if (!sourceFieldBelongsToClass(fieldRule, className) || referencedFields.has(normalizeToken(fieldName))) {
+        continue;
+      }
+      delete rules.source.fields[fieldName];
+      removedFields.push(fieldName);
+    }
+  }
+
+  const removedClasses = [];
+  if (Array.isArray(rules.source.entityClasses)) {
+    rules.source.entityClasses = rules.source.entityClasses.filter(className => {
+      const remove = affectedClasses.some(affected => normalizeToken(affected) === normalizeToken(className))
+        && !remainingClasses.has(normalizeToken(className));
+      if (remove) {
+        removedClasses.push(className);
+      }
+      return !remove;
+    });
+  }
+
+  return { removedRules, removedFields, removedClasses, affectedClasses };
+}
 
 export function ensureMinimalHostProfileForClass(rules, className, fieldKey, fieldRule = {}, target = {}, options = {}) {
   const forceAdditional = Boolean(options.forceAdditional);
@@ -413,6 +515,74 @@ function pad2(value) {
 
 export function ruleClassConditions(rule) {
   return uniqueTokens(conditionClassValues(rule?.when?.expression));
+}
+
+function requiredHostProfile(rule, profileName) {
+  return normalizeToken(requiredHostProfileName(rule)) === normalizeToken(profileName);
+}
+
+function hasHostProfileForClass(rules, className) {
+  return (rules.hostProfiles ?? []).some(profile => hostProfileAppliesToClass(profile, className));
+}
+
+function isExclusiveClassRule(rule, className) {
+  const classes = ruleClassConditions(rule);
+  return classes.length === 1 && normalizeToken(classes[0]) === normalizeToken(className);
+}
+
+function configuredClassNames(rules) {
+  const classes = new Set();
+  for (const profile of rules.hostProfiles ?? []) {
+    ruleClassConditions(profile).forEach(className => classes.add(normalizeToken(className)));
+  }
+  for (const collection of classScopedRuleCollections) {
+    for (const rule of rules[collection] ?? []) {
+      ruleClassConditions(rule).forEach(className => classes.add(normalizeToken(className)));
+    }
+  }
+  return classes;
+}
+
+function sourceFieldBelongsToClass(fieldRule, className) {
+  const root = String(fieldRule?.cmdbPath ?? '').split('.')[0];
+  return Boolean(root) && normalizeToken(root) === normalizeToken(className);
+}
+
+function referencedSourceFields(rules) {
+  const fields = new Set();
+  const collect = value => {
+    if (Array.isArray(value)) {
+      value.forEach(collect);
+      return;
+    }
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+    for (const [key, item] of Object.entries(value)) {
+      if (key === 'when') {
+        conditionFields(item).forEach(field => fields.add(normalizeToken(field)));
+      } else if (key === 'valueField' && item) {
+        fields.add(normalizeToken(item));
+      } else {
+        collect(item);
+      }
+    }
+  };
+
+  for (const collection of classScopedRuleCollections) {
+    collect(rules[collection]);
+  }
+  collect(rules.hostProfiles);
+  for (const lines of Object.values(rules.t4Templates ?? {})) {
+    if (!Array.isArray(lines)) {
+      continue;
+    }
+    const sourceCalls = lines.join('\n').matchAll(/Model\.Source\(\s*["']([^"']+)["']\s*\)/g);
+    for (const match of sourceCalls) {
+      fields.add(normalizeToken(match[1]));
+    }
+  }
+  return fields;
 }
 
 function conditionClassValues(expression, values = []) {

@@ -772,7 +772,7 @@ async function routeApi(request, response, url, path) {
     }
 
     const serviceName = decodeURIComponent(path.slice('/api/services/'.length, -'/reload-rules'.length));
-    sendJson(response, 200, await reloadServiceRules(serviceName));
+    sendJson(response, 200, await reloadServiceRulesAndVerify(serviceName));
     return;
   }
 
@@ -3175,6 +3175,35 @@ async function readServiceRulesStatus(endpoint) {
   }
 }
 
+async function readRulesApplicationStatus(serviceName, expectedSha256) {
+  const endpoint = (config.Services.HealthEndpoints ?? [])
+    .find(item => String(item.Name ?? item.name ?? '').toLowerCase() === String(serviceName ?? '').toLowerCase());
+  if (!endpoint) {
+    return { applied: false, reason: 'service_not_configured', expectedSha256, actualSha256: '' };
+  }
+
+  const status = await readServiceRulesStatus(endpoint);
+  const actualSha256 = String(status?.rules?.contentSha256 ?? '').toLowerCase();
+  const applied = Boolean(status?.ok) && actualSha256 === String(expectedSha256 ?? '').toLowerCase();
+  if (!applied) {
+    logger.warn('Converter rules artifact does not match active management rules', {
+      service: serviceName,
+      expectedSha256,
+      actualSha256,
+      statusCode: status?.statusCode ?? null,
+      location: status?.rules?.location ?? ''
+    });
+  }
+  return {
+    applied,
+    reason: applied ? '' : (status?.ok ? 'content_sha256_mismatch' : 'rules_status_unavailable'),
+    expectedSha256,
+    actualSha256,
+    location: status?.rules?.location ?? '',
+    status
+  };
+}
+
 async function readManagementRulesStatus() {
   try {
     const rules = await readCurrentRules();
@@ -3186,6 +3215,7 @@ async function readManagementRulesStatus() {
       name: rules.name,
       schemaVersion: rules.schemaVersion,
       rulesVersion: rules.rulesVersion,
+      contentSha256: rules.contentSha256,
       valid: Boolean(rules.validation?.valid)
     };
   } catch (error) {
@@ -3244,6 +3274,24 @@ async function reloadServiceRulesCore(serviceName) {
     statusCode: response.status,
     latencyMs: Date.now() - startedAt,
     response: payload
+  };
+}
+
+async function reloadServiceRulesAndVerify(serviceName) {
+  const reload = await reloadServiceRules(serviceName);
+  if (!equalsIgnoreCase(serviceName, 'cmdbkafka2zabbix')) {
+    return { ...reload, applied: true };
+  }
+
+  const document = await readActiveRulesDocument(resolveActiveRulesPath(activeRulesSettings()));
+  const converterStatus = await readRulesApplicationStatus(serviceName, document.revision);
+  return {
+    ...reload,
+    applied: converterStatus.applied,
+    path: activeRulesSettings().filePath,
+    resolvedPath: resolveActiveRulesPath(activeRulesSettings()),
+    revision: document.revision,
+    converterStatus
   };
 }
 
@@ -3414,6 +3462,7 @@ async function readCurrentRules() {
     resolvedPath: path,
     source: 'active',
     revision: document.revision,
+    contentSha256: document.revision,
     publishEnabled: settings.writeEnabled,
     fileName: basename(path),
     schemaVersion: rules.schemaVersion,
@@ -3451,15 +3500,17 @@ async function publishActiveRules(payload) {
     const written = await writeRulesAtomically(path, rules);
     try {
       const reload = await reloadServiceRules('cmdbkafka2zabbix');
+      const converterStatus = await readRulesApplicationStatus('cmdbkafka2zabbix', written.revision);
       return {
         saved: true,
-        applied: true,
+        applied: converterStatus.applied,
         path: settings.filePath,
         resolvedPath: path,
         revision: written.revision,
         rulesVersion: rules.rulesVersion ?? '',
         validation,
-        reload
+        reload,
+        converterStatus
       };
     } catch (error) {
       logger.warn('Conversion rules were saved but the converter reload failed', {
@@ -3491,13 +3542,18 @@ async function retryActiveRulesReload() {
   }
 
   return runActiveRulesOperation(async () => {
-    const document = await readActiveRulesDocument(resolveActiveRulesPath(settings));
+    const path = resolveActiveRulesPath(settings);
+    const document = await readActiveRulesDocument(path);
     const reload = await reloadServiceRules('cmdbkafka2zabbix');
+    const converterStatus = await readRulesApplicationStatus('cmdbkafka2zabbix', document.revision);
     return {
-      applied: true,
+      applied: converterStatus.applied,
+      path: settings.filePath,
+      resolvedPath: path,
       revision: document.revision,
       rulesVersion: document.rules.rulesVersion ?? '',
-      reload
+      reload,
+      converterStatus
     };
   });
 }
@@ -3538,6 +3594,7 @@ async function validateRulesObject(rules) {
     return item.collection + '[' + item.index + '] must declare one known hostProfile with root all/equals scope: '
       + item.reason + profile + '.';
   }));
+  errors.push(...validateActiveProfileRoutes(rules));
 
   for (const eventType of ['create', 'update', 'delete']) {
     if (!rules.eventRoutingRules?.some(route => equalsIgnoreCase(route.eventType, eventType))) {
@@ -3570,6 +3627,36 @@ async function validateRulesObject(rules) {
     errors,
     warnings
   };
+}
+
+function validateActiveProfileRoutes(rules) {
+  const duplicateEventTypes = (rules.eventRoutingRules ?? [])
+    .map((route, index) => ({ eventType: String(route.eventType ?? '').trim(), index }))
+    .filter(route => route.eventType)
+    .reduce((duplicates, route) => {
+      const key = route.eventType.toLowerCase();
+      const entries = duplicates.get(key) ?? [];
+      entries.push(route);
+      duplicates.set(key, entries);
+      return duplicates;
+    }, new Map());
+  const errors = [...duplicateEventTypes.values()]
+    .filter(routes => routes.length > 1)
+    .map(routes => `eventRoutingRules declares duplicate eventType '${routes[0].eventType}' at indexes ${routes.map(route => route.index).join(', ')}.`);
+  const profiles = (rules.hostProfiles ?? []).filter(profile => profile.enabled !== false);
+  if (profiles.length === 0) {
+    return errors;
+  }
+  const enabledRoutes = (rules.eventRoutingRules ?? [])
+    .filter(route => route.publish !== false)
+    .map(route => String(route.eventType ?? '').toLowerCase());
+  if (!enabledRoutes.some(eventType => eventType === 'create' || eventType === 'update')) {
+    errors.push('Active hostProfiles require a publish-enabled create or update event route.');
+  }
+  if (profiles.some(profile => profile.createOnUpdateWhenMissing) && !enabledRoutes.includes('update')) {
+    errors.push('A hostProfile with createOnUpdateWhenMissing requires a publish-enabled update event route.');
+  }
+  return errors;
 }
 
 async function validateRulesAgainstCatalogs(rules, errors, warnings) {

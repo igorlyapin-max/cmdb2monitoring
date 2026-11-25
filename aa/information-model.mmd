@@ -12,6 +12,7 @@ flowchart LR
     ui -->|H0 GET /health :5083| bind
     ui -->|IF4 save-as rules/webhook files| downloads[(Local downloads)]
     ui -->|OAPI7 POST /admin/reload-rules :5081| conv
+    ui -->|OAPI10 GET /admin/rules-status :5081, rules SHA-256| conv
     conv -->|OAPI6 reference/lookup/domain resolver :8090| cmdb
     cmdb[CMDBuild :8090] -->|OAPI0 HTTP webhook :5080| wh[cmdbwebhooks2kafka :5080]
     wh -->|AAPI0 cmdbuild.webhooks.* :9092| kafka[(Kafka :9092)]

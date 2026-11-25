@@ -6,7 +6,7 @@
 | EV-002 | OAPI0 | cmdbwebhooks2kafka | Ошибка авторизации webhook | Warning | remote endpoint, reason |
 | EV-003 | OAPI0 | cmdbwebhooks2kafka | Ошибка JSON | Warning/Error | route, exception |
 | EV-004 | AAPI0 | cmdbwebhooks2kafka | Kafka publish success | Information | topic, partition, offset |
-| EV-005 | IF0 | cmdbkafka2zabbix | Rules загружены | Information | rules path, schemaVersion, git commit |
+| EV-005 | IF0 | cmdbkafka2zabbix | Rules загружены | Information | rules path, schemaVersion, rulesVersion, contentSha256, git commit |
 | EV-006 | AAPI0, AAPI1 | cmdbkafka2zabbix | Событие сконвертировано | Information | eventType, entityId, host, hostProfile, publishedCount |
 | EV-007 | AAPI0 | cmdbkafka2zabbix | Событие пропущено | Information/Warning | entityId, hostProfile, skipReason |
 | EV-008 | AAPI1, OAPI1 | zabbixrequests2api | Validation error | Warning | method, entityId, errorCode |
@@ -22,7 +22,7 @@
 | EV-018 | IF4 | monitoring-ui-api frontend | Conversion rules save-as draft/webhook instructions | UI status | session change count, validation warnings |
 | EV-019 | OAPI6 | cmdbkafka2zabbix | Lookup/reference/domain field resolution | Warning | fieldName, cmdbPath, reason |
 | EV-020 | OAPI2 | monitoring-ui-api frontend | Interface language changed | UI state | language, cookie |
-| EV-021 | OAPI7 | cmdbkafka2zabbix / monitoring-ui-api | Conversion rules reload requested | Information/Warning/Error | service, rules name, schemaVersion, version, result |
+| EV-021 | OAPI7, OAPI10 | cmdbkafka2zabbix / monitoring-ui-api | Conversion rules reload/status verification | Information/Warning/Error | service, rules name, schemaVersion, rulesVersion, contentSha256, expectedSha256, result |
 | EV-022 | AAPI4 | zabbixrequests2api | Binding event published/skipped | Information/Warning/Error | sourceClass, sourceCardId, hostProfile, zabbixHostId, topic, reason |
 | EV-023 | OAPI9 | zabbixbindings2cmdbuild | Binding applied to CMDBuild | Information/Error | sourceClass, sourceCardId, hostProfile, bindingStatus, zabbixHostId |
 

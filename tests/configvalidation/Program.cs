@@ -42,6 +42,7 @@ ValidateTopicChain(configs, "base", errors);
 ValidateTopicChain(configs, "development", errors);
 ValidateRulesFile(repositoryRoot, errors);
 ValidateProfileScopedRuleContract(errors);
+ValidateEventRoutingRuleContract(errors);
 ValidateProductionRulesStarter(repositoryRoot, errors);
 ValidateDevelopmentRulesStarter(repositoryRoot, errors);
 await ValidateRulesT4Rendering(repositoryRoot, errors);
@@ -1882,6 +1883,7 @@ static void ValidateProfileScopedRuleContract(List<string> errors)
             "name": "arm-main",
             "when": { "expression": { "operator": "regex", "field": "className", "pattern": "(?i)^ARM$" } }
           }],
+          "eventRoutingRules": [{ "eventType": "update", "publish": true }],
           "templateSelectionRules": [{
             "when": { "expression": { "operator": "all", "items": [
               { "operator": "equals", "field": "hostProfile", "value": "arm-main" },
@@ -1902,6 +1904,7 @@ static void ValidateProfileScopedRuleContract(List<string> errors)
             "name": "arm-main",
             "when": { "expression": { "operator": "equals", "field": "className", "value": "ARM" } }
           }],
+          "eventRoutingRules": [{ "eventType": "update", "publish": true }],
           "templateSelectionRules": [{
             "when": { "expression": { "operator": "all", "items": [
               { "operator": "equals", "field": "hostProfile", "value": "arm-main" },
@@ -1915,6 +1918,7 @@ static void ValidateProfileScopedRuleContract(List<string> errors)
         {
           "hostProfiles": [{
             "name": "arm-main",
+            "enabled": false,
             "when": { "expression": { "operator": "equals", "field": "className", "value": "ARM" } }
           }],
           "templateSelectionRules": [{
@@ -1956,6 +1960,51 @@ static void ValidateProfileScopedRuleContract(List<string> errors)
     if (ProfileScopedRulePolicy.FindIgnoredRules(legacyRules) is not [{ Collection: "templateSelectionRules", Index: 0, Reason: "host_profile_required" }])
     {
         errors.Add("Legacy unscoped rule was not marked as ignored.");
+    }
+}
+
+static void ValidateEventRoutingRuleContract(List<string> errors)
+{
+    const string duplicateRoutesJson = """
+        {
+          "eventRoutingRules": [
+            { "eventType": "update", "publish": false },
+            { "eventType": "UPDATE", "publish": true }
+          ]
+        }
+        """;
+    const string missingUpdateJson = """
+        {
+          "hostProfiles": [{
+            "name": "arm-main",
+            "createOnUpdateWhenMissing": true,
+            "when": { "expression": { "operator": "equals", "field": "className", "value": "ARM" } }
+          }],
+          "eventRoutingRules": [{ "eventType": "create", "publish": true }]
+        }
+        """;
+    var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+    var duplicateRules = JsonSerializer.Deserialize<ConversionRulesDocument>(duplicateRoutesJson, options);
+    var missingUpdateRules = JsonSerializer.Deserialize<ConversionRulesDocument>(missingUpdateJson, options);
+    if (duplicateRules is null || missingUpdateRules is null)
+    {
+        errors.Add("Event routing contract test cannot deserialize fixture.");
+        return;
+    }
+
+    var duplicateErrors = ConversionRulesSchemaValidator.Validate(duplicateRoutesJson, duplicateRules);
+    if (!duplicateErrors.Any(error => error.Contains("duplicate eventType 'update'", StringComparison.OrdinalIgnoreCase)))
+    {
+        errors.Add("Event routing contract accepted duplicate eventType values.");
+    }
+
+    var missingUpdateErrors = ConversionRulesSchemaValidator.Validate(missingUpdateJson, missingUpdateRules);
+    if (!missingUpdateErrors.Any(error => error.Contains("createOnUpdateWhenMissing requires a publish-enabled update", StringComparison.Ordinal)))
+    {
+        errors.Add("Event routing contract accepted createOnUpdateWhenMissing without an update route.");
     }
 }
 

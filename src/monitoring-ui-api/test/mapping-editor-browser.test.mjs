@@ -75,6 +75,12 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
     await page.locator('#mappingEditPriority').fill('101');
     await assertVisible(page, '#mappingAddRule');
     assert.equal(await page.locator('#mappingAddRule').isEnabled(), true);
+    await page.locator('#mappingAddRule').click();
+    await assertVisible(page, '#mappingRulesSourceStatus.is-warning');
+    assert.match(
+      await page.locator('#mappingRulesSourceStatus').textContent(),
+      /Черновик не применен/
+    );
 
     await page.locator('[data-view="webhooks"]').click();
     await page.locator('#webhooksAnalyze').click();
@@ -185,6 +191,71 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
   }
 });
 
+test('dashboard marks converter failed when the loaded rules SHA-256 differs', async () => {
+  assert.ok(chromeExecutable, 'Set BROWSER_EXECUTABLE_PATH to a Chrome or Chromium executable.');
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.rules-dashboard-browser-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const rules = JSON.parse(await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8'));
+  await writeFile(activeRulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
+  const server = startServer(port, directory, activeRulesPath);
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: chromeExecutable,
+    args: ['--no-sandbox']
+  });
+
+  try {
+    await waitForReady(port, server);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await mockApi(page, rules, browserTestCmdbuildCatalog(), browserTestZabbixCatalog(), {
+      role: 'viewer',
+      health: {
+        items: [{
+          name: 'cmdbkafka2zabbix',
+          url: 'http://cmdbkafka2zabbix:8080/health',
+          ok: true,
+          statusCode: 200,
+          latencyMs: 4,
+          rulesReloadSupported: true,
+          rulesStatusSupported: true,
+          rulesStatus: {
+            ok: true,
+            rules: {
+              rulesVersion: rules.rulesVersion,
+              schemaVersion: rules.schemaVersion,
+              contentSha256: 'b'.repeat(64),
+              location: '/app/rules/customer.json'
+            }
+          }
+        }],
+        managementRules: {
+          ok: true,
+          rulesVersion: rules.rulesVersion,
+          schemaVersion: rules.schemaVersion,
+          contentSha256: 'a'.repeat(64),
+          resolvedPath: '/app/rules/customer.json'
+        }
+      }
+    });
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+    const card = page.locator('#healthGrid .metric', { hasText: 'cmdbkafka2zabbix' });
+    await assertVisible(page, '#healthGrid .metric');
+    assert.equal(await card.locator('.metric-value').textContent(), 'FAIL');
+    await assertVisible(page, '.rules-version-warning.status-bad');
+    assert.match(await card.textContent(), /Содержимое rules отличается/);
+    assert.match(await card.textContent(), /файл: customer\.json; путь: \/app\/rules\/customer\.json/);
+    assert.equal(await card.getByRole('button', { name: 'Перечитать правила конвертации' }).count(), 0);
+    const box = await card.boundingBox();
+    assert.ok(box && box.width > 0 && box.height > 0);
+  } finally {
+    await browser.close();
+    server.kill('SIGTERM');
+    await onceExit(server);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}) {
   let cmdbuildCredentialsRequested = false;
   const role = options.role ?? 'editor';
@@ -274,7 +345,7 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
         csrfToken: 'browser-test'
       }
       : path === '/api/services/health'
-        ? { items: [], managementRules: {} }
+        ? (options.health ?? { items: [], managementRules: {} })
         : path === '/api/queue/status'
           ? { enabled: false, refreshIntervalMs: 0 }
           : path === '/api/settings/runtime'

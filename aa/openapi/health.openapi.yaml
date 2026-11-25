@@ -113,8 +113,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /admin/rules-status:
+    get:
+      summary: Read currently loaded cmdbkafka2zabbix conversion rules
+      description: >
+        Available on cmdbkafka2zabbix. Returns the rules artifact actually
+        loaded by the converter, including its SHA-256 and filesystem location.
+      security:
+        - reloadBearer: []
+      responses:
+        '200':
+          description: Current conversion rules status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RulesStatusResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
+    RulesStatusResponse:
+      type: object
+      required: [service, status, rules]
+      properties:
+        service:
+          type: string
+        status:
+          type: string
+          example: ok
+        rules:
+          type: object
+          required: [name, schemaVersion, rulesVersion, contentSha256, location]
+          properties:
+            name:
+              type: string
+            schemaVersion:
+              type: string
+            rulesVersion:
+              type: string
+            contentSha256:
+              type: string
+              pattern: '^[a-f0-9]{64}$'
+            location:
+              type: string
     ReadinessResponse:
       type: object
       required: [service, status, startedAt, checkedAt, checks]

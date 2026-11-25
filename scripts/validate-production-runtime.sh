@@ -142,6 +142,7 @@ require_pattern "DELIVERY_MODE" "scripts/build-local-registry-images.sh" "Image 
 require_pattern "gkm-runtime-canonical" "scripts/build-local-registry-images.sh" "Canonical image helper must use gkm-runtime-canonical."
 require_pattern "unverified-local" "scripts/build-local-registry-images.sh" "Manual image helper must mark local images as unverified."
 require_file "scripts/smoke-service-image.sh"
+require_file "scripts/smoke-rules-artifact-contract.sh"
 require_file "scripts/verify-gkm-base-trust.sh"
 
 require_pattern "npm --prefix src/monitoring-ui-api test" ".github/workflows/ci.yml" "GitHub CI must run full monitoring-ui-api tests."

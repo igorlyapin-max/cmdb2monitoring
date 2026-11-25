@@ -26,6 +26,7 @@
 | OAPI8 | monitoring-ui-api `:5090` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT/DELETE `/etl/webhook/` | Чтение и применение выбранного плана CMDBuild webhooks в разделе `Настройка webhooks` |
 | AAPI4 | zabbixrequests2api `:5082` | Kafka `:9092` | topic `zabbix.host.bindings.*` | Событие связи CMDBuild card/profile -> Zabbix hostid после успешного host.create/update/delete |
 | OAPI9 | zabbixbindings2cmdbuild `:5083` | CMDBuild REST API `:8090` | HTTP GET/POST/PUT `/classes/.../cards` | Запись `zabbix_main_hostid` или карточки `ZabbixHostBinding` |
+| OAPI10 | monitoring-ui-api `:5090` | cmdbkafka2zabbix `:5081` | HTTP GET `/admin/rules-status` с Bearer token | Фактически загруженные rules: name, schemaVersion, rulesVersion, contentSha256, location |
 | M0 | Prometheus | Микросервисы `:5080/:5081/:5082/:5083` и `monitoring-ui-api` `:5090` | HTTP GET `/metrics` | Prometheus text metrics: service uptime, event counters, queue lag/DLQ depth gauges |
 
 ## Срез бизнес-описания
@@ -34,7 +35,7 @@
 
 ## Срез поддержки и ИБ
 
-Срез поддержки и ИБ включает `L0`, `IF0`-`IF4`, `OAPI2`-`OAPI9`, `AAPI3`, `AAPI4`, `H0`, `M0`:
+Срез поддержки и ИБ включает `L0`, `IF0`-`IF4`, `OAPI2`-`OAPI10`, `AAPI3`, `AAPI4`, `H0`, `M0`:
 - логи для ELK через Kafka topics;
 - state-файлы для восстановления после падения;
 - rules из Git;

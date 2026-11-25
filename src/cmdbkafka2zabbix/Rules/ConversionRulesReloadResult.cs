@@ -4,6 +4,7 @@ public sealed record ConversionRulesReloadResult(
     string RuleName,
     string SchemaVersion,
     string RulesVersion,
+    string ContentSha256,
     string Location,
     string? Version,
     string RepositoryPath,

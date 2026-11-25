@@ -98,12 +98,15 @@
 | monitoring-ui-api `:5090` | Zabbix API `:8081` | HTTP JSON-RPC |
 | monitoring-ui-api `:5090` | .NET services health endpoints `http://<compose-service>:8080/health` | HTTP внутри Compose network; localhost ports только dev |
 | monitoring-ui-api `:5090` | cmdbkafka2zabbix `http://cmdbkafka2zabbix:8080/admin/reload-rules` | HTTP POST с Bearer token внутри Compose network |
+| monitoring-ui-api `:5090` | cmdbkafka2zabbix `http://cmdbkafka2zabbix:8080/admin/rules-status` | HTTP GET с Bearer token внутри Compose network; UI сравнивает `contentSha256` с active rules |
 | monitoring-ui-api | Kafka `localhost:9092` / `kafka:29092` | Kafka protocol, read-only Events |
 | cmdbwebhooks2kafka `:5080` | Kafka `:9092` | Kafka protocol |
 | cmdbkafka2zabbix `:5081` | Kafka `:9092` | Kafka protocol |
 | cmdbkafka2zabbix `:5081` | CMDBuild REST API `:8090` | HTTP для lookup/reference/domain resolver по `cmdbPath` |
 | cmdbkafka2zabbix | Git repository/working copy | local FS или git |
 | zabbixrequests2api `:5082` | Kafka `:9092` | Kafka protocol |
+
+`scripts/smoke-rules-artifact-contract.sh` собирает реальные UI/converter images, монтирует один временный rules directory в оба контейнера и проверяет `publish -> reload -> applied=true` с равными SHA-256 и `/app/rules/...` путями. Сценарий не публикует host ports и не использует customer Kafka/CMDBuild.
 | zabbixrequests2api `:5082` | Zabbix API `:8081` | HTTP JSON-RPC |
 | zabbixbindings2cmdbuild `:5083` | Kafka `:9092` | Kafka protocol |
 | zabbixbindings2cmdbuild `:5083` | CMDBuild REST API `:8090` | HTTP для записи binding-ов |

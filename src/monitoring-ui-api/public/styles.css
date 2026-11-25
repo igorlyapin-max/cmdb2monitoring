@@ -1296,6 +1296,10 @@ h2 {
   font-weight: 600;
 }
 
+.rules-source-status.is-warning {
+  color: #b45309;
+}
+
 .mapping-editor-form-state {
   margin: 0;
   color: var(--muted);

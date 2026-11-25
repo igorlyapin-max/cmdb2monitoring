@@ -155,6 +155,100 @@ test('publish rejects a stale active-rules revision without overwriting the file
   }
 });
 
+test('publish reports saved but not applied when converter reads a different rules artifact', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-rules-mismatch-'));
+  const port = await reservePort();
+  const converterPort = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const usersPath = join(directory, 'users.json');
+  const password = 'test-local-admin-password';
+  await writeFile(activeRulesPath, await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8'), 'utf8');
+  await writeFile(usersPath, JSON.stringify({
+    version: 1,
+    users: [{
+      username: 'admin',
+      displayName: 'Test Admin',
+      role: 'admin',
+      password: passwordHash(password),
+      mustChangePassword: false
+    }]
+  }), 'utf8');
+
+  const converter = createServer((request, response) => {
+    response.setHeader('content-type', 'application/json');
+    if (request.url === '/admin/reload-rules') {
+      response.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+    if (request.url === '/admin/rules-status') {
+      response.end(JSON.stringify({
+        rules: {
+          rulesVersion: 'same-version',
+          schemaVersion: '0.2',
+          contentSha256: '0'.repeat(64),
+          location: '/app/rules/other.json'
+        }
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end('{}');
+  });
+  await listen(converter, converterPort);
+
+  const process = startServer(port, directory, activeRulesPath, usersPath, {
+    MONITORING_UI_HEALTH_ENDPOINTS_JSON: JSON.stringify([{
+      Name: 'cmdbkafka2zabbix',
+      Url: `http://127.0.0.1:${converterPort}/health`,
+      RulesReloadUrl: `http://127.0.0.1:${converterPort}/admin/reload-rules`,
+      RulesReloadToken: 'test-rules-token',
+      RulesStatusUrl: `http://127.0.0.1:${converterPort}/admin/rules-status`
+    }])
+  });
+  try {
+    await waitForReady(port, process);
+    const login = await request(port, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password }
+    });
+    const current = await request(port, '/api/rules/current', { headers: { cookie: login.headers.get('set-cookie') } });
+    const rules = structuredClone(current.body.content);
+    rules.rulesVersion = 'same-version';
+    const publish = await request(port, '/api/rules/publish', {
+      method: 'POST',
+      headers: {
+        cookie: login.headers.get('set-cookie'),
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: { rules, expectedRevision: current.body.revision }
+    });
+
+    assert.equal(publish.status, 200, JSON.stringify(publish.body));
+    assert.equal(publish.body.saved, true);
+    assert.equal(publish.body.applied, false);
+    assert.equal(publish.body.converterStatus.reason, 'content_sha256_mismatch');
+    assert.notEqual(publish.body.converterStatus.expectedSha256, publish.body.converterStatus.actualSha256);
+
+    const retry = await request(port, '/api/rules/retry-reload', {
+      method: 'POST',
+      headers: {
+        cookie: login.headers.get('set-cookie'),
+        'x-csrf-token': login.body.csrfToken
+      },
+      body: {}
+    });
+    assert.equal(retry.status, 200, JSON.stringify(retry.body));
+    assert.equal(retry.body.applied, false);
+    assert.equal(retry.body.converterStatus.reason, 'content_sha256_mismatch');
+    assert.equal(retry.body.resolvedPath, activeRulesPath);
+  } finally {
+    process.kill('SIGTERM');
+    await onceExit(process);
+    await close(converter);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('production permits a blank CMDBuild webhook target but rejects unsafe runtime values', async () => {
   const directory = await mkdtemp(join(serviceRoot, 'state', '.monitoring-ui-api-webhook-target-'));
   const port = await reservePort();
@@ -510,6 +604,17 @@ async function reservePort() {
   const { port } = server.address();
   await new Promise(resolvePromise => server.close(resolvePromise));
   return port;
+}
+
+async function listen(server, port) {
+  await new Promise((resolvePromise, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolvePromise);
+  });
+}
+
+async function close(server) {
+  await new Promise(resolvePromise => server.close(resolvePromise));
 }
 
 async function waitForReady(port, child) {

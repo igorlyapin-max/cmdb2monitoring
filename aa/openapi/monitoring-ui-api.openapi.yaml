@@ -300,7 +300,8 @@ paths:
         Available to editor and admin roles only when Rules.ActiveWriteEnabled
         is enabled. Writes only the active JSON rules file; webhook artifacts
         and git working copies are not changed. A reload failure leaves the
-        new file in place and returns applied=false.
+        new file in place and returns applied=false. Applied is true only after
+        the converter reports the same SHA-256 rules artifact.
       requestBody:
         required: true
         content:
@@ -309,7 +310,7 @@ paths:
               $ref: "#/components/schemas/RulesPublishRequest"
       responses:
         "200":
-          description: Rules were saved; applied shows whether converter reload succeeded.
+          description: Rules were saved; applied shows whether the converter loaded the same rules artifact.
           content:
             application/json:
               schema:
@@ -325,7 +326,7 @@ paths:
       summary: Retry converter reload for the already saved active rules file
       responses:
         "200":
-          description: Converter reloaded the active rules file.
+          description: Converter reload was requested; applied shows whether it loaded the same rules artifact.
           content:
             application/json:
               schema:
@@ -1111,6 +1112,10 @@ components:
           type: string
           pattern: '^[a-f0-9]{64}$'
           description: SHA-256 of the exact active rules JSON read by the editor.
+        contentSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: SHA-256 of the exact active rules JSON read by monitoring-ui-api.
         publishEnabled:
           type: boolean
         fileName:
@@ -1183,6 +1188,27 @@ components:
         reload:
           type: object
           additionalProperties: true
+        converterStatus:
+          $ref: "#/components/schemas/RulesApplicationStatus"
+    RulesApplicationStatus:
+      type: object
+      required: [applied, reason, expectedSha256, actualSha256]
+      properties:
+        applied:
+          type: boolean
+          description: True only when converter status reports the expected SHA-256.
+        reason:
+          type: string
+          enum: ['', content_sha256_mismatch, rules_status_unavailable, service_not_configured]
+        expectedSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        actualSha256:
+          type: string
+          pattern: '^(|[a-f0-9]{64})$'
+        location:
+          type: string
+          description: Rules file path reported by cmdbkafka2zabbix.
     RulesDryRunRequest:
       type: object
       required:

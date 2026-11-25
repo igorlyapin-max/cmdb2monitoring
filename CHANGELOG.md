@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Conversion rules now reject duplicate event routes and active profiles without an effective publish-enabled route; dashboard reload/retry no longer reports success until `cmdbkafka2zabbix` confirms the same SHA-256 artifact.
+- Dashboard diagnostics now show both UI and converter rules file names/paths and SHA-256 to every role, while reload controls remain editor/admin only.
 - CMDBuild webhook Authorization synchronization now uses the deployment webhook token, updates only owned webhook records at the configured receiver URL, reports unconfirmed writes, and never exposes existing Authorization values through the BFF API.
 - CMDBuild webhook callback URL is now an admin Runtime setting persisted in `state/ui-settings.json`, not a Compose env variable. A blank value permits BFF startup but blocks webhook plan/export/apply; Production rejects loopback and unspecified targets, and a URL change offers managed-webhook replanning without automatic CMDBuild apply.
 - Runtime Settings persistence now uses an atomically replaced state file, production Compose initializes both BFF state and data volumes for UID/GID `10001`, and the image smoke proves settings survive restart. Webhook URLs reject credentials, query parameters, and fragments; generated snippets no longer ship a hardcoded Compose DNS URL.

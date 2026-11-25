@@ -36,6 +36,7 @@ public static class ConversionRulesSchemaValidator
         using var document = JsonDocument.Parse(json);
         RejectLegacyProperties(document.RootElement, "$", errors);
         ValidateConditionRules(rules, errors);
+        ValidateEventRoutingRules(rules, errors);
         return errors;
     }
 
@@ -102,6 +103,38 @@ public static class ConversionRulesSchemaValidator
         ValidateConditions(rules.TlsPskSelectionRules, "tlsPskSelectionRules", rule => rule.When, errors);
         ValidateConditions(rules.ValueMapSelectionRules, "valueMapSelectionRules", rule => rule.When, errors);
         ValidateProfileScopedRules(rules, errors);
+    }
+
+    private static void ValidateEventRoutingRules(ConversionRulesDocument rules, List<string> errors)
+    {
+        var duplicateEventTypes = rules.EventRoutingRules
+            .Select((route, index) => new { EventType = (route.EventType ?? string.Empty).Trim(), Index = index })
+            .Where(item => !string.IsNullOrWhiteSpace(item.EventType))
+            .GroupBy(item => item.EventType, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1);
+        foreach (var duplicate in duplicateEventTypes)
+        {
+            errors.Add($"eventRoutingRules declares duplicate eventType '{duplicate.Key}' at indexes {string.Join(", ", duplicate.Select(item => item.Index))}.");
+        }
+
+        var activeProfiles = rules.HostProfiles.Where(profile => profile.Enabled).ToArray();
+        if (activeProfiles.Length == 0)
+        {
+            return;
+        }
+
+        var enabledEventTypes = rules.EventRoutingRules
+            .Where(route => route.Publish)
+            .Select(route => (route.EventType ?? string.Empty).Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!enabledEventTypes.Contains("create") && !enabledEventTypes.Contains("update"))
+        {
+            errors.Add("Active hostProfiles require a publish-enabled create or update event route.");
+        }
+        if (activeProfiles.Any(profile => profile.CreateOnUpdateWhenMissing) && !enabledEventTypes.Contains("update"))
+        {
+            errors.Add("A hostProfile with createOnUpdateWhenMissing requires a publish-enabled update event route.");
+        }
     }
 
     private static void ValidateConditions<TRule>(
