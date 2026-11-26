@@ -129,6 +129,17 @@ test('publish rejects a stale active-rules revision without overwriting the file
     });
     assert.equal(current.status, 200, JSON.stringify(current.body));
 
+    const invalidRoutes = structuredClone(current.body.content);
+    for (const route of invalidRoutes.eventRoutingRules) route.publish = false;
+    const invalidPublish = await request(port, '/api/rules/publish', {
+      method: 'POST',
+      headers: { cookie, 'x-csrf-token': login.body.csrfToken },
+      body: { expectedRevision: current.body.revision, rules: invalidRoutes }
+    });
+    assert.equal(invalidPublish.status, 422);
+    assert.equal(invalidPublish.body.error, 'rules_validation_failed');
+    assert.equal(await readFile(activeRulesPath, 'utf8'), initialRules);
+
     const externalRules = JSON.parse(initialRules);
     externalRules.rulesVersion = 'external-change';
     const externalContent = JSON.stringify(externalRules, null, 2) + '\n';

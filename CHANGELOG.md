@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 00.00.00.14 - 2026-11-26
+
+### Fixed
+
+- The profile editor asks for explicit create/update route activation when the production starter has no usable routes, and rules reload returns a controlled artifact diagnostic on validation failure.
+- Publishing validates server-side blocking errors before asking about warnings, preserves the current draft on validation failure, and warns before leaving with unsaved rules.
+- Rules cache now checks artifact content instead of file timestamps, Kafka consumer readiness detects repeated transient errors, and rules failure logs omit raw exception payloads.
+
 ## 00.00.00.13 - 2026-11-26
 
 ### Fixed

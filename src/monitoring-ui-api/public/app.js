@@ -771,6 +771,13 @@ const translations = {
     'mapping.confirm.deleteRulesKeepSources': 'Классы и class attribute fields останутся в rules, чтобы не удалить источник, который может использоваться другими правилами.',
     'mapping.confirm.deleteRulesUndo': 'Действие можно отменить через Undo.',
     'mapping.confirm.deleteProfile': 'Удалить hostProfile "{profile}", назначения ({rules}), source fields ({fields}) и классы ({classes}) из draft JSON? Это не удаляет Zabbix host в управляемой системе.',
+    'mapping.routes.confirm': 'Для активного профиля нужны маршруты событий. Включить create и update? Это разрешит обработку создания и изменения объектов. Маршрут delete останется без изменений.',
+    'mapping.routes.missing': 'В правилах отсутствуют маршруты create или update. Сначала добавьте их в конфигурацию.',
+    'mapping.routes.cancelled': 'Профиль не сохранён: настройка маршрутов отменена.',
+    'mapping.publish.validationBlocked': 'Правила не применены. Исправьте ошибки и повторите сохранение.',
+    'mapping.publish.warningTitle': 'Обнаружены предупреждения. Продолжить публикацию?',
+    'mapping.publish.routeRequired': 'Активным профилям нужен включённый маршрут create или update.',
+    'mapping.publish.updateRequired': 'Профилю с createOnUpdateWhenMissing нужен включённый маршрут update.',
     'mapping.confirm.saveIpDnsTitle': 'В rules найдены проблемы связи IP/DNS class attribute field с Zabbix interface structure.',
     'mapping.confirm.saveIpDnsMore': '... еще {count}',
     'mapping.confirm.saveAnyway': 'Сохранить файлы несмотря на ошибки?',
@@ -1589,6 +1596,13 @@ const translations = {
     'mapping.confirm.deleteRulesKeepSources': 'Classes and class attribute fields will remain in rules so a source used by other rules is not removed.',
     'mapping.confirm.deleteRulesUndo': 'This action can be undone through Undo.',
     'mapping.confirm.deleteProfile': 'Delete hostProfile "{profile}", assignments ({rules}), source fields ({fields}), and classes ({classes}) from draft JSON? This does not delete a Zabbix host in the managed system.',
+    'mapping.routes.confirm': 'An active profile needs event routes. Enable create and update? Object creation and updates will be processed. The delete route will remain unchanged.',
+    'mapping.routes.missing': 'The create or update route is missing. Add both routes to the configuration first.',
+    'mapping.routes.cancelled': 'The profile was not saved because route configuration was cancelled.',
+    'mapping.publish.validationBlocked': 'Rules were not applied. Fix the errors and retry saving.',
+    'mapping.publish.warningTitle': 'Warnings were found. Continue publication?',
+    'mapping.publish.routeRequired': 'Active profiles require an enabled create or update route.',
+    'mapping.publish.updateRequired': 'A profile with createOnUpdateWhenMissing requires an enabled update route.',
     'mapping.confirm.saveIpDnsTitle': 'Rules contain IP/DNS class attribute field links with Zabbix interface structure problems.',
     'mapping.confirm.saveIpDnsMore': '... {count} more',
     'mapping.confirm.saveAnyway': 'Save files despite the errors?',
@@ -2027,7 +2041,7 @@ function bindNavigation() {
   });
 
   window.addEventListener('beforeunload', event => {
-    if (!state.runtimeSettingsDirty && !state.gitSettingsDirty) {
+    if (!state.runtimeSettingsDirty && !state.gitSettingsDirty && !mappingDraftDiffersFromActiveRules()) {
       return;
     }
     event.preventDefault();
@@ -8343,6 +8357,9 @@ function createMappingHostProfile() {
 
   const rules = cloneJson(state.mappingDraftRules);
   const values = validation.values;
+  if (!ensureProfileEventRoutes(rules, values.createOnUpdateWhenMissing)) {
+    return;
+  }
   ensureMappingEditorClass(rules, values.className);
   ensureMappingProfileSourceField(rules, values.className, values.field);
   const fieldRule = rules.source?.fields?.[values.field] ?? values.fieldRule;
@@ -8386,6 +8403,9 @@ function saveMappingHostProfile() {
   }
 
   const values = validation.values;
+  if (rules.hostProfiles[index].enabled !== false && !ensureProfileEventRoutes(rules, values.createOnUpdateWhenMissing)) {
+    return;
+  }
   ensureMappingEditorClass(rules, values.className);
   ensureMappingProfileSourceField(rules, values.className, values.field);
   rules.hostProfiles[index] = buildUpdatedHostProfile(rules.hostProfiles[index], values);
@@ -8402,6 +8422,25 @@ function saveMappingHostProfile() {
     refs: String(renamedRefs)
   }));
   loadMappingHostProfileIntoForm(values.profileName);
+}
+
+function ensureProfileEventRoutes(rules, requiresUpdate) {
+  const routes = rules.eventRoutingRules ?? [];
+  const create = routes.find(route => String(route.eventType ?? '').toLowerCase() === 'create');
+  const update = routes.find(route => String(route.eventType ?? '').toLowerCase() === 'update');
+  const enabled = route => Boolean(route && route.publish !== false);
+  if ((enabled(create) || enabled(update)) && (!requiresUpdate || enabled(update))) return true;
+  if (!create || !update) {
+    setMappingProfileStatus(t('mapping.routes.missing'), 'warning');
+    return false;
+  }
+  if (!window.confirm(t('mapping.routes.confirm'))) {
+    setMappingProfileStatus(t('mapping.routes.cancelled'), 'warning');
+    return false;
+  }
+  create.publish = true;
+  update.publish = true;
+  return true;
 }
 
 function deleteMappingHostProfile() {
@@ -10451,9 +10490,10 @@ async function saveMappingDraftAsFile() {
   return { rulesResult, webhookResult };
 }
 async function publishMappingDraft() {
-  const prepared = await prepareMappingDraftForSave();
+  const prepared = await prepareMappingDraftForSave({ publish: true });
+  if (prepared?.cancelled) return prepared;
   if (!prepared) {
-    return false;
+    return null;
   }
 
   const { rulesToSave } = prepared;
@@ -10467,6 +10507,10 @@ async function publishMappingDraft() {
       }
     });
   } catch (error) {
+    if (error.status === 422 && error.payload?.error === 'rules_validation_failed') {
+      showRulesPublicationErrors(error.payload.validation ?? error.payload.details?.validation);
+      return null;
+    }
     if (error.status === 409 && error.payload?.error === 'rules_revision_conflict') {
       const message = t('mapping.status.publishConflict');
       setActionStatus($('#mappingActionStatus'), message, 'warning');
@@ -10533,7 +10577,20 @@ function shortSha256(value) {
   return hash ? hash.slice(0, 12) : '-';
 }
 
-async function prepareMappingDraftForSave() {
+function showRulesPublicationErrors(validation) {
+  const translations = {
+    'Active hostProfiles require a publish-enabled create or update event route.': t('mapping.publish.routeRequired'),
+    'A hostProfile with createOnUpdateWhenMissing requires a publish-enabled update event route.': t('mapping.publish.updateRequired')
+  };
+  const errors = Array.isArray(validation?.errors) ? validation.errors : [];
+  const details = errors.map(error => translations[error] ?? String(error));
+  const message = [t('mapping.publish.validationBlocked'), ...details.map(error => `- ${error}`)].join('\n');
+  setActionStatus($('#mappingActionStatus'), message, 'error');
+  setMappingEditorStatusForDraft(message);
+  toast(t('mapping.publish.validationBlocked'));
+}
+
+async function prepareMappingDraftForSave({ publish = false } = {}) {
   if (!state.mappingDraftRules) {
     return null;
   }
@@ -10541,19 +10598,27 @@ async function prepareMappingDraftForSave() {
   const rulesToSave = rulesWithNextRulesVersionForSave(state.mappingDraftRules);
   const validation = validateMappingDraftBeforeSave(rulesToSave, state.mappingCmdbuildCatalog);
   const changes = mappingSessionChanges(initialMappingRules(), state.mappingDraftRules);
+  if (publish) {
+    const serverValidation = await api('/api/rules/validate', { method: 'POST', body: { rules: rulesToSave } });
+    if (!serverValidation.valid) {
+      showRulesPublicationErrors(serverValidation);
+      return null;
+    }
+    validation.issues.push(...(serverValidation.warnings ?? []));
+  }
   if (validation.issues.length > 0) {
     setMappingEditorStatusForDraft(tf('mapping.status.saveIpDnsInconsistent', { count: sessionWebhookChangeCount(changes) }));
     const confirmed = window.confirm([
-      t('mapping.confirm.saveIpDnsTitle'),
+      publish ? t('mapping.publish.warningTitle') : t('mapping.confirm.saveIpDnsTitle'),
       '',
       ...validation.issues.slice(0, 12).map(issue => `- ${issue}`),
       validation.issues.length > 12 ? `- ${tf('mapping.confirm.saveIpDnsMore', { count: validation.issues.length - 12 })}` : '',
       '',
-      t('mapping.confirm.saveAnyway')
+      publish ? '' : t('mapping.confirm.saveAnyway')
     ].filter(Boolean).join('\n'));
     if (!confirmed) {
       setMappingEditorStatus(t('mapping.status.saveCancelledFixIpDns'));
-      return null;
+      return publish ? { cancelled: true } : null;
     }
   }
 

@@ -220,7 +220,17 @@ if (!string.IsNullOrWhiteSpace(serviceOptions.RulesReloadRoute))
                 return Results.StatusCode(StatusCodes.Status401Unauthorized);
             }
 
-            var result = await rulesProvider.ReloadAsync(cancellationToken);
+            ConversionRulesReloadResult result;
+            try
+            {
+                result = await rulesProvider.ReloadAsync(cancellationToken);
+            }
+            catch (RulesArtifactException ex)
+            {
+                var conversion = context.RequestServices.GetRequiredService<IOptions<ConversionRulesOptions>>().Value;
+                RulesStatusEndpoint.LogFailure(app.Logger, ex.FailureCode, ex.Stage, ex.ConfiguredPath, ex.ResolvedPath, conversion.ReadFromGit, ex, ex.InnerException?.GetType().Name ?? ex.GetType().Name);
+                return RulesStatusEndpoint.CreateProblem(ex.FailureCode);
+            }
             return Results.Ok(new
             {
                 service = currentOptions.Name,

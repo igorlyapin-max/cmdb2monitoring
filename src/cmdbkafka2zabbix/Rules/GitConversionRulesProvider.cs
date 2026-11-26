@@ -87,22 +87,31 @@ public sealed class GitConversionRulesProvider(
             var rulesFilePath = ResolveRulesFilePath();
             DateTime lastWriteTime;
             string rulesJson;
+            string contentSha256;
             try
             {
-                await using var stream = new FileStream(
-                    rulesFilePath,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.ReadWrite,
-                    bufferSize: 4096,
-                    FileOptions.Asynchronous);
+                byte[]? stableBytes = null;
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    var first = await File.ReadAllBytesAsync(rulesFilePath, cancellationToken);
+                    var second = await File.ReadAllBytesAsync(rulesFilePath, cancellationToken);
+                    if (first.AsSpan().SequenceEqual(second))
+                    {
+                        stableBytes = second;
+                        break;
+                    }
+                }
+                if (stableBytes is null)
+                {
+                    throw new RulesArtifactException(RulesArtifactFailureCodes.FileUnreadable, "read_unstable", options.Value.RulesFilePath, rulesFilePath);
+                }
+                contentSha256 = Convert.ToHexString(SHA256.HashData(stableBytes)).ToLowerInvariant();
                 lastWriteTime = File.GetLastWriteTimeUtc(rulesFilePath);
-                if (!forceReload && cachedRules is not null && cachedLastWriteTime == lastWriteTime)
+                if (!forceReload && cachedRules is not null && cachedContentSha256 == contentSha256)
                 {
                     return cachedRules;
                 }
-
-                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+                using var reader = new StreamReader(new MemoryStream(stableBytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                 rulesJson = await reader.ReadToEndAsync(cancellationToken);
             }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
@@ -162,7 +171,7 @@ public sealed class GitConversionRulesProvider(
 
             cachedRules = rules;
             cachedLastWriteTime = lastWriteTime;
-            cachedContentSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rulesJson))).ToLowerInvariant();
+            cachedContentSha256 = contentSha256;
 
             var commit = await TryReadGitCommitAsync(cancellationToken);
             cachedLocation = rulesFilePath;

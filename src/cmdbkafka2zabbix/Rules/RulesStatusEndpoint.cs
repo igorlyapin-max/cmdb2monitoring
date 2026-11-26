@@ -91,7 +91,7 @@ public sealed class RulesStatusEndpoint
             && CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
     }
 
-    private static void LogFailure(
+    public static void LogFailure(
         ILogger logger,
         string failureCode,
         string stage,
@@ -102,7 +102,6 @@ public sealed class RulesStatusEndpoint
         string exceptionType)
     {
         logger.LogError(
-            exception,
             "Rules artifact status check failed with {RulesArtifactFailureCode} at {RulesArtifactFailureStage}; configured path {RulesArtifactConfiguredPath}; resolved path {RulesArtifactResolvedPath}; ReadFromGit {RulesArtifactReadFromGit}; exception type {RulesArtifactExceptionType}",
             failureCode,
             stage,
@@ -112,7 +111,7 @@ public sealed class RulesStatusEndpoint
             exceptionType);
     }
 
-    private static IResult CreateProblem(string failureCode)
+    public static IResult CreateProblem(string failureCode)
     {
         return Results.Problem(
             type: $"urn:cmdb2monitoring:rules-status:{failureCode}",

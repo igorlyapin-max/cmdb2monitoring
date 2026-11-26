@@ -51,6 +51,7 @@ ValidateProfileScopedRuleContract(errors);
 ValidateEventRoutingRuleContract(errors);
 await ValidateKafkaConsumerReadiness(errors);
 await ValidateRulesArtifactFailureClassification(errors);
+await ValidateRulesArtifactSameTimestamp(repositoryRoot, errors);
 await ValidateRulesStatusEndpoint(errors);
 ValidateProductionRulesStarter(repositoryRoot, errors);
 ValidateDevelopmentRulesStarter(repositoryRoot, errors);
@@ -255,6 +256,10 @@ static async Task ValidateRulesStatusEndpoint(List<string> errors)
         {
             errors.Add("Rules status endpoint must not expose artifact paths or exception details.");
         }
+        if (response.Logger.Exceptions.Any(ex => ex is not null))
+        {
+            errors.Add("Rules status endpoint must not emit raw exceptions into operational logs.");
+        }
         if (!response.Logger.Entries.Any(entry => entry.TryGetValue("RulesArtifactFailureCode", out var loggedCode)
             && string.Equals(loggedCode?.ToString(), code, StringComparison.Ordinal)
             && entry.ContainsKey("RulesArtifactFailureStage")
@@ -272,6 +277,39 @@ static async Task ValidateRulesStatusEndpoint(List<string> errors)
         || !string.Equals(unexpectedCode, RulesArtifactFailureCodes.StatusFailed, StringComparison.Ordinal))
     {
         errors.Add("Rules status endpoint must map unexpected failures to rules_status_failed.");
+    }
+}
+
+static async Task ValidateRulesArtifactSameTimestamp(string repositoryRoot, List<string> errors)
+{
+    var directory = Path.Combine(Path.GetTempPath(), $"rules-cache-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try
+    {
+        var path = Path.Combine(directory, "rules.json");
+        var original = await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "rules/cmdbuild-to-zabbix-host-create.production-empty.json"));
+        await File.WriteAllTextAsync(path, original);
+        var timestamp = File.GetLastWriteTimeUtc(path);
+        var provider = new GitConversionRulesProvider(Options.Create(new ConversionRulesOptions
+        {
+            BaseDirectory = directory, RepositoryPath = directory, RulesFilePath = "rules.json"
+        }), NullLogger<GitConversionRulesProvider>.Instance);
+        var before = await provider.GetStatusAsync(CancellationToken.None);
+        var replacement = JsonNode.Parse(original)!.AsObject();
+        replacement["rulesVersion"] = "same-timestamp-new-version";
+        var next = Path.Combine(directory, "replacement.json");
+        await File.WriteAllTextAsync(next, replacement.ToJsonString());
+        File.SetLastWriteTimeUtc(next, timestamp);
+        File.Move(next, path, overwrite: true);
+        var after = await provider.GetStatusAsync(CancellationToken.None);
+        if (after.ContentSha256 == before.ContentSha256 || after.RulesVersion != "same-timestamp-new-version")
+        {
+            errors.Add("Rules artifact cache must detect atomic replacement with unchanged timestamp.");
+        }
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
     }
 }
 
@@ -2204,7 +2242,20 @@ static async Task ValidateKafkaConsumerReadiness(List<string> errors)
         errors.Add("Kafka consumer readiness must remain true after a transient consume error.");
     }
 
+    readiness.MarkConsumerError(isFatal: false);
+    readiness.MarkConsumerError(isFatal: false);
+    if ((await readiness.CheckAsync(CancellationToken.None)).Ready)
+    {
+        errors.Add("Kafka consumer readiness must fail after three consecutive consume errors.");
+    }
+    readiness.MarkPollSucceeded();
+    if (!(await readiness.CheckAsync(CancellationToken.None)).Ready)
+    {
+        errors.Add("Kafka consumer readiness must recover after a successful poll with assignment.");
+    }
+
     readiness.MarkConsumerError(isFatal: true);
+    readiness.MarkPollSucceeded();
     if ((await readiness.CheckAsync(CancellationToken.None)).Ready)
     {
         errors.Add("Kafka consumer readiness must become false after a fatal consume error.");
@@ -2714,6 +2765,7 @@ internal sealed class StatusRulesProvider(Exception? exception) : IConversionRul
 internal sealed class CapturingLogger<T> : ILogger<T>
 {
     public List<IReadOnlyDictionary<string, object?>> Entries { get; } = [];
+    public List<Exception?> Exceptions { get; } = [];
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -2721,6 +2773,7 @@ internal sealed class CapturingLogger<T> : ILogger<T>
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
+        Exceptions.Add(exception);
         if (state is IEnumerable<KeyValuePair<string, object?>> values)
         {
             Entries.Add(values.ToDictionary(item => item.Key, item => item.Value));

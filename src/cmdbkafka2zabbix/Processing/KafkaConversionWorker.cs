@@ -110,6 +110,7 @@ public sealed class KafkaConversionWorker(
                 try
                 {
                     consumed = consumer.Consume(TimeSpan.FromMilliseconds(inputOptions.PollTimeoutMs));
+                    consumerReadiness.MarkPollSucceeded();
                     if (consumed is null)
                     {
                         continue;

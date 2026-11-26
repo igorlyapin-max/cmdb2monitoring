@@ -12,6 +12,57 @@ const repositoryRoot = resolve(serviceRoot, '../..');
 const chromeExecutable = process.env.BROWSER_EXECUTABLE_PATH
   ?? ['/usr/bin/google-chrome', '/usr/bin/chromium'].find(existsSync);
 
+test('profile creation from starter requires explicit event route confirmation', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.starter-profile-browser-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const rules = JSON.parse(await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.json'), 'utf8'));
+  rules.hostProfiles = [];
+  for (const route of rules.eventRoutingRules) route.publish = false;
+  await writeFile(activeRulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
+  const server = startServer(port, directory, activeRulesPath);
+  const browser = await chromium.launch({ headless: true, executablePath: chromeExecutable, args: ['--no-sandbox'] });
+  try {
+    await waitForReady(port, server);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    await mockApi(page, rules, browserTestCmdbuildCatalog(), browserTestZabbixCatalog(), {
+      role: 'admin',
+      rulesValidation: { valid: false, errors: ['Active hostProfiles require a publish-enabled create or update event route.'], warnings: [] }
+    });
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+    await page.locator('[data-view="profiles"]').click();
+    await page.locator('#mappingProfileClass').selectOption('ARM');
+    await page.locator('#mappingProfileName').fill('arm-test');
+    const field = page.locator('#mappingProfileField option:not([value=""])').first();
+    await page.locator('#mappingProfileField').selectOption(await field.getAttribute('value'));
+    assert.equal(await page.locator('#mappingProfileCreate').isEnabled(), true, await page.locator('#mappingProfileStatus').textContent());
+    page.once('dialog', dialog => dialog.dismiss());
+    await page.locator('#mappingProfileCreate').click();
+    await page.locator('#mappingProfileStatus').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#mappingProfileStatus').textContent(), /отменена/);
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator('#mappingProfileCreate').click();
+    assert.match(await page.locator('#mappingProfileStatus').textContent(), /загружен в форму/);
+    assert.ok((await page.locator('#mappingProfileStatus').boundingBox()).width > 0);
+    const blocked = await page.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(blocked, true);
+    await page.locator('[data-view="mapping"]').click();
+    await page.locator('#mappingPublish').click();
+    await page.waitForFunction(() => document.querySelector('#mappingActionStatus')?.textContent?.includes('Активным профилям нужен'));
+    assert.match(await page.locator('#mappingActionStatus').textContent(), /Правила не применены/);
+    assert.ok((await page.locator('#mappingActionStatus').boundingBox()).width > 0);
+  } finally {
+    await browser.close();
+    server.kill('SIGTERM');
+    await onceExit(server);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('mapping editor keeps the profile-bound condition flow usable in Russian and English', async () => {
   assert.ok(chromeExecutable, 'Set BROWSER_EXECUTABLE_PATH to a Chrome or Chromium executable.');
   const directory = await mkdtemp(join(serviceRoot, 'state', '.mapping-editor-browser-'));
@@ -508,7 +559,9 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
               zabbix: { allowDynamicTagsFromCmdbLeaf: false, allowDynamicHostGroupsFromCmdbLeaf: false }
             }
             : path === '/api/rules/current'
-              ? { source: 'active', rulesVersion: rules.rulesVersion, content: rules }
+              ? { source: 'active', rulesVersion: rules.rulesVersion, revision: 'a'.repeat(64), publishEnabled: true, content: rules }
+              : path === '/api/rules/validate'
+                ? (options.rulesValidation ?? { valid: true, errors: [], warnings: [] })
               : path === '/api/cmdbuild/catalog'
                 ? cmdbuildCatalog
                 : path === '/api/zabbix/catalog' || path === '/api/zabbix/catalog/mapping'
