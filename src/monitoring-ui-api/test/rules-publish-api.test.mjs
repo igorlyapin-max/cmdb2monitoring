@@ -268,7 +268,7 @@ test('health exposes a specific non-secret rules verification reason for each fa
     }]
   }), 'utf8');
 
-  const converterState = { healthStatus: 200, statusStatus: 200, contentSha256: '' };
+  const converterState = { healthStatus: 200, statusStatus: 200, statusCode: '', contentSha256: '' };
   const converter = createServer((request, response) => {
     response.setHeader('content-type', 'application/json');
     if (request.url === '/health') {
@@ -284,7 +284,10 @@ test('health exposes a specific non-secret rules verification reason for each fa
           location: '/app/rules/customer.json',
           repositoryUrl: 'https://viewer:must-not-leak@git.example.test/customer-rules.git'
         }
-      } : { detail: 'Rules status is unavailable.' }));
+      } : {
+        code: converterState.statusCode,
+        detail: 'Internal mounted rules path must not be exposed by the BFF: /customer/private/rules.json'
+      }));
       return;
     }
     response.statusCode = 404;
@@ -312,6 +315,7 @@ test('health exposes a specific non-secret rules verification reason for each fa
     const initialHealth = await request(port, '/api/services/health', { headers: { cookie } });
     assert.equal(initialHealth.status, 200, JSON.stringify(initialHealth.body));
     assert.equal(initialHealth.body.items[0].rulesStatus.rules.repositoryUrl, undefined);
+    assert.equal(initialHealth.body.items[0].rulesVerification.rulesStatusErrorCode, undefined);
     assert.doesNotMatch(JSON.stringify(initialHealth.body), /must-not-leak/);
 
     const readVerification = async () => {
@@ -330,9 +334,22 @@ test('health exposes a specific non-secret rules verification reason for each fa
     verification = await readVerification();
     assert.equal(verification.reason, 'rules_status_unavailable');
     assert.equal(verification.rulesStatusCode, 401);
+    assert.equal(verification.rulesStatusErrorCode, undefined);
     assert.doesNotMatch(JSON.stringify(verification), /not-for-ui/);
 
+    converterState.statusStatus = 503;
+    converterState.statusCode = 'rules_file_unreadable';
+    verification = await readVerification();
+    assert.equal(verification.reason, 'rules_status_unavailable');
+    assert.equal(verification.rulesStatusErrorCode, 'rules_file_unreadable');
+    assert.doesNotMatch(JSON.stringify(verification), /customer\/private/);
+
+    converterState.statusCode = 'untrusted_converter_code';
+    verification = await readVerification();
+    assert.equal(verification.rulesStatusErrorCode, undefined);
+
     converterState.statusStatus = 200;
+    converterState.statusCode = '';
     converterState.contentSha256 = '';
     verification = await readVerification();
     assert.equal(verification.reason, 'converter_does_not_report_sha256');

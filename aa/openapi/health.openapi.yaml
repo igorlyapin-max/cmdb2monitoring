@@ -135,11 +135,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
-          description: Rules status token is not configured.
+          description: Rules status token is not configured or the converter cannot inspect its active rules artifact.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - $ref: '#/components/schemas/RulesStatusErrorResponse'
 components:
   schemas:
     RulesStatusResponse:
@@ -166,6 +168,26 @@ components:
               pattern: '^[a-f0-9]{64}$'
             location:
               type: string
+    RulesStatusErrorResponse:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          pattern: '^urn:cmdb2monitoring:rules-status:'
+        title:
+          type: string
+        status:
+          type: integer
+          enum: [503]
+        code:
+          type: string
+          enum:
+            - rules_file_missing
+            - rules_file_unreadable
+            - rules_invalid
+            - rules_path_invalid
+            - rules_status_failed
     ReadinessResponse:
       type: object
       required: [service, status, startedAt, checkedAt, checks]

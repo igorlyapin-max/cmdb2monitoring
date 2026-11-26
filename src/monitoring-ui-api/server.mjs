@@ -2799,6 +2799,10 @@ function describeRulesVerification(item, managementRules) {
     managementSha256: String(managementRules?.contentSha256 ?? managementRules?.revision ?? '').toLowerCase(),
     converterSha256: String(rulesStatus?.rules?.contentSha256 ?? '').toLowerCase()
   };
+  const rulesStatusErrorCode = publicRulesStatusErrorCode(rulesStatus.errorCode);
+  if (rulesStatusErrorCode) {
+    verification.rulesStatusErrorCode = rulesStatusErrorCode;
+  }
 
   if (!item.ok) {
     verification.reason = 'healthcheck_failed';
@@ -3220,13 +3224,15 @@ async function readServiceRulesStatus(endpoint) {
       signal: AbortSignal.timeout(3000)
     });
     const payload = await safeJson(result);
+    const errorCode = publicRulesStatusErrorCode(payload?.code);
     return {
       url: statusUrl,
       ok: result.ok,
       statusCode: result.status,
       latencyMs: Date.now() - startedAt,
       rules: publicRulesStatus(payload?.rules),
-      error: result.ok ? null : (payload?.detail || payload?.title || payload?.message || `Rules status returned HTTP ${result.status}.`)
+      errorCode,
+      error: result.ok ? null : (errorCode ? 'Rules artifact status is unavailable.' : `Rules status returned HTTP ${result.status}.`)
     };
   } catch (error) {
     return {
@@ -3235,6 +3241,7 @@ async function readServiceRulesStatus(endpoint) {
       statusCode: null,
       latencyMs: Date.now() - startedAt,
       rules: null,
+      errorCode: '',
       error: error instanceof Error ? error.message : 'request_failed'
     };
   }
@@ -3251,6 +3258,17 @@ function publicRulesStatus(rules) {
     contentSha256: String(rules.contentSha256 ?? '').toLowerCase(),
     location: String(rules.location ?? '')
   };
+}
+
+function publicRulesStatusErrorCode(value) {
+  const code = String(value ?? '');
+  return new Set([
+    'rules_file_missing',
+    'rules_file_unreadable',
+    'rules_invalid',
+    'rules_path_invalid',
+    'rules_status_failed'
+  ]).has(code) ? code : '';
 }
 
 async function readRulesApplicationStatus(serviceName, expectedSha256) {

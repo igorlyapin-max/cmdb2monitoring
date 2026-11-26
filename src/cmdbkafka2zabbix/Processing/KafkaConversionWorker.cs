@@ -143,8 +143,8 @@ public sealed class KafkaConversionWorker(
                 }
                 catch (ConsumeException ex)
                 {
-                    consumerReadiness.MarkUnavailable();
-                    logger.LogError(ex, "Kafka consume error: {KafkaReason}", ex.Error.Reason);
+                    consumerReadiness.MarkConsumerError(ex.Error.IsFatal);
+                    logger.LogError(ex, "Kafka consume error: {KafkaReason}; fatal {KafkaFatal}", ex.Error.Reason, ex.Error.IsFatal);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {

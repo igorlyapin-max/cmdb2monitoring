@@ -10,6 +10,7 @@ rules_dir="$(mktemp -d)"
 token="rules-artifact-contract-token"
 ui_image="cmdb2monitoring/monitoring-ui-api:rules-artifact-contract"
 converter_image="cmdb2monitoring/cmdbkafka2zabbix:rules-artifact-contract"
+rules_artifact_path="$rules_dir/cmdbuild-to-zabbix-host-create.json"
 
 phase() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
@@ -110,6 +111,40 @@ compose exec --no-TTY monitoring-ui-api sh -ec '
     if (result.converterStatus?.location !== "/app/rules/cmdbuild-to-zabbix-host-create.json") throw new Error(`unexpected converter path: ${result.converterStatus?.location}`);
   '\'' "$password"
 '
+
+phase 'verify missing rules artifact returns a safe diagnostic code'
+compose exec --no-TTY monitoring-ui-api node -e '
+  const response = await fetch("http://cmdbkafka2zabbix:8080/admin/rules-status");
+  if (response.status !== 401) throw new Error(`expected unauthenticated 401, got ${response.status}`);
+'
+cp "$rules_artifact_path" "$rules_dir/.rules-artifact-backup.json"
+rm "$rules_artifact_path"
+compose exec --no-TTY monitoring-ui-api node -e '
+  const token = process.argv[1];
+  const response = await fetch("http://cmdbkafka2zabbix:8080/admin/rules-status", {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const body = await response.json();
+  if (response.status !== 503) throw new Error(`expected 503, got ${response.status}`);
+  if (body.code !== "rules_file_missing") throw new Error(`unexpected diagnostic code: ${body.code}`);
+  if (JSON.stringify(body).includes("/app/rules")) throw new Error("rules path leaked through HTTP response");
+' "$token"
+mv "$rules_dir/.rules-artifact-backup.json" "$rules_artifact_path"
+
+phase 'verify unreadable rules artifact returns a safe diagnostic code and structured log'
+chmod 000 "$rules_artifact_path"
+compose exec --no-TTY monitoring-ui-api node -e '
+  const token = process.argv[1];
+  const response = await fetch("http://cmdbkafka2zabbix:8080/admin/rules-status", {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const body = await response.json();
+  if (response.status !== 503) throw new Error(`expected 503, got ${response.status}`);
+  if (body.code !== "rules_file_unreadable") throw new Error(`unexpected diagnostic code: ${body.code}`);
+  if (JSON.stringify(body).includes("/app/rules")) throw new Error("rules path leaked through HTTP response");
+' "$token"
+compose logs --no-color cmdbkafka2zabbix | grep -F 'rules_file_unreadable' | grep -F 'read_file' | grep -F 'exception type'
+chmod a+rwx "$rules_artifact_path"
 
 phase 'prove worker consumed the published artifact through Kafka'
 printf '%s\n' '{invalid-json' | compose exec --no-TTY kafka /opt/kafka/bin/kafka-console-producer.sh \

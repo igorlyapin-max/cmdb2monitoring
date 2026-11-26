@@ -18,6 +18,14 @@ public sealed class KafkaConsumerReadiness : IReadinessCheck
         Volatile.Write(ref assigned, 0);
     }
 
+    public void MarkConsumerError(bool isFatal)
+    {
+        if (isFatal)
+        {
+            MarkUnavailable();
+        }
+    }
+
     public Task<ReadinessCheckResult> CheckAsync(CancellationToken cancellationToken)
     {
         var ready = Volatile.Read(ref assigned) == 1;

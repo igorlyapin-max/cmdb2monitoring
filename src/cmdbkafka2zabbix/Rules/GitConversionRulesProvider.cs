@@ -85,19 +85,70 @@ public sealed class GitConversionRulesProvider(
             }
 
             var rulesFilePath = ResolveRulesFilePath();
-            var lastWriteTime = File.GetLastWriteTimeUtc(rulesFilePath);
-            if (!forceReload && cachedRules is not null && cachedLastWriteTime == lastWriteTime)
+            DateTime lastWriteTime;
+            string rulesJson;
+            try
             {
-                return cachedRules;
+                await using var stream = new FileStream(
+                    rulesFilePath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite,
+                    bufferSize: 4096,
+                    FileOptions.Asynchronous);
+                lastWriteTime = File.GetLastWriteTimeUtc(rulesFilePath);
+                if (!forceReload && cachedRules is not null && cachedLastWriteTime == lastWriteTime)
+                {
+                    return cachedRules;
+                }
+
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+                rulesJson = await reader.ReadToEndAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                throw new RulesArtifactException(
+                    RulesArtifactFailureCodes.FileMissing,
+                    "read_file",
+                    options.Value.RulesFilePath,
+                    rulesFilePath,
+                    ex);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                throw new RulesArtifactException(
+                    RulesArtifactFailureCodes.FileUnreadable,
+                    "read_file",
+                    options.Value.RulesFilePath,
+                    rulesFilePath,
+                    ex);
             }
 
-            var rulesJson = await File.ReadAllTextAsync(rulesFilePath, cancellationToken);
-            var rules = JsonSerializer.Deserialize<ConversionRulesDocument>(rulesJson, JsonOptions)
-                ?? throw new InvalidOperationException($"Conversion rules file '{rulesFilePath}' is empty.");
+            ConversionRulesDocument rules;
+            try
+            {
+                rules = JsonSerializer.Deserialize<ConversionRulesDocument>(rulesJson, JsonOptions)
+                    ?? throw new JsonException("Conversion rules document is empty.");
+            }
+            catch (JsonException ex)
+            {
+                throw new RulesArtifactException(
+                    RulesArtifactFailureCodes.Invalid,
+                    "parse_json",
+                    options.Value.RulesFilePath,
+                    rulesFilePath,
+                    ex);
+            }
+
             var validationErrors = ConversionRulesSchemaValidator.Validate(rulesJson, rules);
             if (validationErrors.Count > 0)
             {
-                throw new InvalidOperationException($"Conversion rules file '{rulesFilePath}' is invalid: {string.Join(" ", validationErrors)}");
+                throw new RulesArtifactException(
+                    RulesArtifactFailureCodes.Invalid,
+                    "validate_schema",
+                    options.Value.RulesFilePath,
+                    rulesFilePath,
+                    new InvalidOperationException(string.Join(" ", validationErrors)));
             }
             foreach (var ignoredRule in ProfileScopedRulePolicy.FindIgnoredRules(rules))
             {
@@ -160,19 +211,29 @@ public sealed class GitConversionRulesProvider(
 
     private string ResolveRulesFilePath()
     {
-        var repositoryPath = ResolveRepositoryPath();
-        var rulesFilePath = Path.IsPathRooted(options.Value.RulesFilePath)
-            ? options.Value.RulesFilePath
-            : Path.Combine(repositoryPath, options.Value.RulesFilePath);
-
-        var fullPath = Path.GetFullPath(rulesFilePath);
-        EnsurePathInsideBase(fullPath);
-        if (!File.Exists(fullPath))
+        try
         {
-            throw new FileNotFoundException("Conversion rules file was not found.", fullPath);
-        }
+            var repositoryPath = ResolveRepositoryPath();
+            var rulesFilePath = Path.IsPathRooted(options.Value.RulesFilePath)
+                ? options.Value.RulesFilePath
+                : Path.Combine(repositoryPath, options.Value.RulesFilePath);
 
-        return fullPath;
+            var fullPath = Path.GetFullPath(rulesFilePath);
+            EnsurePathInsideBase(fullPath);
+            return fullPath;
+        }
+        catch (RulesArtifactException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or InvalidOperationException)
+        {
+            throw new RulesArtifactException(
+                RulesArtifactFailureCodes.PathInvalid,
+                "resolve_path",
+                options.Value.RulesFilePath,
+                innerException: ex);
+        }
     }
 
     private async Task<string?> TryReadGitCommitAsync(CancellationToken cancellationToken)
@@ -277,7 +338,12 @@ public sealed class GitConversionRulesProvider(
         if (!normalizedPath.StartsWith(normalizedBase, StringComparison.Ordinal)
             && !string.Equals(normalizedPath.TrimEnd(Path.DirectorySeparatorChar), normalizedBase.TrimEnd(Path.DirectorySeparatorChar), StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"Conversion rules path '{normalizedPath}' escapes base directory '{basePath}'.");
+            throw new RulesArtifactException(
+                RulesArtifactFailureCodes.PathInvalid,
+                "resolve_path",
+                options.Value.RulesFilePath,
+                normalizedPath,
+                new InvalidOperationException("Conversion rules path escapes base directory."));
         }
     }
 

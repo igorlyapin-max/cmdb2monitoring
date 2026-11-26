@@ -323,6 +323,11 @@ const translations = {
     'dashboard.rulesReason.management_rules_unavailable': 'Система управления не смогла прочитать активный rules-файл.',
     'dashboard.rulesReason.content_sha256_mismatch': 'UI и микросервис используют rules с разным содержимым.',
     'dashboard.rulesReason.converter_does_not_report_sha256': 'Микросервис не возвращает contentSha256. Требуется обновление образа converter.',
+    'dashboard.rulesArtifactError.rules_file_missing': 'Файл правил не найден.',
+    'dashboard.rulesArtifactError.rules_file_unreadable': 'Файл правил недоступен для чтения.',
+    'dashboard.rulesArtifactError.rules_invalid': 'Файл правил имеет недопустимое содержимое.',
+    'dashboard.rulesArtifactError.rules_path_invalid': 'Путь к файлу правил недопустим.',
+    'dashboard.rulesArtifactError.rules_status_failed': 'Статус файла правил не удалось определить.',
     'dashboard.rulesVerification.health': 'health',
     'dashboard.rulesVerification.status': 'rules status',
     'dashboard.rulesVerification.uiArtifact': 'UI',
@@ -1137,6 +1142,11 @@ const translations = {
     'dashboard.rulesReason.management_rules_unavailable': 'The management service could not read the active rules file.',
     'dashboard.rulesReason.content_sha256_mismatch': 'The UI and microservice use rules with different content.',
     'dashboard.rulesReason.converter_does_not_report_sha256': 'The microservice does not return contentSha256. Update the converter image.',
+    'dashboard.rulesArtifactError.rules_file_missing': 'The rules file is missing.',
+    'dashboard.rulesArtifactError.rules_file_unreadable': 'The rules file cannot be read.',
+    'dashboard.rulesArtifactError.rules_invalid': 'The rules file has invalid content.',
+    'dashboard.rulesArtifactError.rules_path_invalid': 'The rules file path is invalid.',
+    'dashboard.rulesArtifactError.rules_status_failed': 'The rules file status could not be determined.',
     'dashboard.rulesVerification.health': 'health',
     'dashboard.rulesVerification.status': 'rules status',
     'dashboard.rulesVerification.uiArtifact': 'UI',
@@ -3065,6 +3075,9 @@ function renderRulesVerification(verification) {
   }
   if (verification.rulesStatusError) {
     parts.push(`${t('dashboard.rulesVerification.status')} ${t('dashboard.rulesVerification.error')}: ${verification.rulesStatusError}`);
+  }
+  if (verification.rulesStatusErrorCode) {
+    parts.push(`${t('dashboard.rulesVerification.status')} ${t('dashboard.rulesVerification.error')}: [${verification.rulesStatusErrorCode}] ${t(`dashboard.rulesArtifactError.${verification.rulesStatusErrorCode}`)}`);
   }
   if (verification.managementPath || verification.managementSha256) {
     parts.push(`${t('dashboard.rulesVerification.uiArtifact')}: ${verification.managementPath || '-'}; sha256 ${shortDiagnosticHash(verification.managementSha256)}`);

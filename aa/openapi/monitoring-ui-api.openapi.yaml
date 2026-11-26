@@ -946,6 +946,15 @@ components:
                   rulesStatusCode:
                     type: integer
                     nullable: true
+                  rulesStatusErrorCode:
+                    type: string
+                    description: Allowlisted converter rules-artifact failure code. No upstream exception detail is exposed.
+                    enum:
+                      - rules_file_missing
+                      - rules_file_unreadable
+                      - rules_invalid
+                      - rules_path_invalid
+                      - rules_status_failed
                   managementPath:
                     type: string
                   converterPath:

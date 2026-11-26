@@ -293,6 +293,13 @@ test('dashboard renders every failed rules verification reason for a viewer', as
     ['management_rules_unavailable', 'Система управления не смогла прочитать активный rules-файл.'],
     ['converter_does_not_report_sha256', 'Микросервис не возвращает contentSha256. Требуется обновление образа converter.']
   ];
+  const artifactFailureCases = [
+    ['rules_file_missing', 'Файл правил не найден.'],
+    ['rules_file_unreadable', 'Файл правил недоступен для чтения.'],
+    ['rules_invalid', 'Файл правил имеет недопустимое содержимое.'],
+    ['rules_path_invalid', 'Путь к файлу правил недопустим.'],
+    ['rules_status_failed', 'Статус файла правил не удалось определить.']
+  ];
 
   try {
     await waitForReady(port, server);
@@ -345,6 +352,50 @@ test('dashboard renders every failed rules verification reason for a viewer', as
       assert.match(await warning.textContent(), new RegExp(`\\[${reason}\\]`));
       assert.match(await warning.textContent(), new RegExp(message.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')));
       assert.equal(await card.getByRole('button', { name: 'Перечитать правила конвертации' }).count(), 0);
+      const box = await warning.boundingBox();
+      assert.ok(box && box.width > 0 && box.height > 0);
+      await page.close();
+    }
+
+    for (const [errorCode, message] of artifactFailureCases) {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const verification = {
+        ok: false,
+        reason: 'rules_status_unavailable',
+        healthUrl: 'http://cmdbkafka2zabbix:8080/ready',
+        healthStatusCode: 200,
+        rulesStatusUrl: 'http://cmdbkafka2zabbix:8080/admin/rules-status',
+        rulesStatusCode: 503,
+        rulesStatusErrorCode: errorCode,
+        rulesStatusError: 'Rules artifact status is unavailable.',
+        managementPath: '/app/rules/customer.json',
+        converterPath: '',
+        managementSha256: 'a'.repeat(64),
+        converterSha256: ''
+      };
+      await mockApi(page, rules, browserTestCmdbuildCatalog(), browserTestZabbixCatalog(), {
+        role: 'viewer',
+        health: {
+          items: [{
+            name: 'cmdbkafka2zabbix',
+            url: verification.healthUrl,
+            ok: true,
+            statusCode: 200,
+            latencyMs: 4,
+            rulesReloadSupported: true,
+            rulesStatusSupported: true,
+            rulesStatus: { ok: false, statusCode: 503, rules: null, errorCode },
+            rulesVerification: verification
+          }],
+          managementRules: { ok: true, rulesVersion: rules.rulesVersion, schemaVersion: rules.schemaVersion, contentSha256: verification.managementSha256, resolvedPath: verification.managementPath }
+        }
+      });
+      await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+      const warning = page.locator('#healthGrid .rules-version-warning.status-bad');
+      await assertVisible(page, '#healthGrid .metric');
+      await assertVisible(page, '#healthGrid .rules-version-warning.status-bad');
+      assert.match(await warning.textContent(), new RegExp(`\\[${errorCode}\\]`));
+      assert.match(await warning.textContent(), new RegExp(message.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')));
       const box = await warning.boundingBox();
       assert.ok(box && box.width > 0 && box.height > 0);
       await page.close();

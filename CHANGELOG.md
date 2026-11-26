@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 00.00.00.13 - 2026-11-26
+
+### Fixed
+
+- Rules artifact status failures now return an allowlisted diagnostic code to the dashboard and structured converter logs include the failure stage, exception type, configured/resolved path, and rules source mode without exposing internal exceptions through the BFF.
+
 ## 00.00.00.12 - 2026-11-25
 
 ### Fixed

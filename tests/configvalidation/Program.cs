@@ -1,8 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CmdbKafka2Zabbix.Conversion;
+using CmdbKafka2Zabbix.Configuration;
 using CmdbKafka2Zabbix.Processing;
 using CmdbKafka2Zabbix.Rules;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ZabbixRequests2Api.Zabbix;
 
@@ -45,6 +50,8 @@ ValidateRulesFile(repositoryRoot, errors);
 ValidateProfileScopedRuleContract(errors);
 ValidateEventRoutingRuleContract(errors);
 await ValidateKafkaConsumerReadiness(errors);
+await ValidateRulesArtifactFailureClassification(errors);
+await ValidateRulesStatusEndpoint(errors);
 ValidateProductionRulesStarter(repositoryRoot, errors);
 ValidateDevelopmentRulesStarter(repositoryRoot, errors);
 await ValidateRulesT4Rendering(repositoryRoot, errors);
@@ -99,6 +106,173 @@ static string FindRepositoryRoot(string startDirectory)
     }
 
     throw new DirectoryNotFoundException("Cannot find repository root with cmdb2monitoring.slnx.");
+}
+
+static async Task ValidateRulesArtifactFailureClassification(List<string> errors)
+{
+    var directory = Path.Combine(Path.GetTempPath(), $"cmdb2monitoring-rules-status-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try
+    {
+        async Task ExpectFailureAsync(string rulesFilePath, string expectedCode, string scenario)
+        {
+            var provider = new GitConversionRulesProvider(
+                Options.Create(new ConversionRulesOptions
+                {
+                    BaseDirectory = directory,
+                    RepositoryPath = directory,
+                    RulesFilePath = rulesFilePath
+                }),
+                NullLogger<GitConversionRulesProvider>.Instance);
+            try
+            {
+                await provider.GetStatusAsync(CancellationToken.None);
+                errors.Add($"Rules artifact diagnostic {scenario} did not fail.");
+            }
+            catch (RulesArtifactException ex) when (ex.FailureCode != expectedCode)
+            {
+                errors.Add($"Rules artifact diagnostic {scenario} returned '{ex.FailureCode}' instead of '{expectedCode}'.");
+            }
+            catch (RulesArtifactException)
+            {
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Rules artifact diagnostic {scenario} returned unexpected {ex.GetType().Name}.");
+            }
+        }
+
+        await ExpectFailureAsync("missing.json", RulesArtifactFailureCodes.FileMissing, "missing file");
+        await File.WriteAllTextAsync(Path.Combine(directory, "invalid.json"), "{ invalid");
+        await ExpectFailureAsync("invalid.json", RulesArtifactFailureCodes.Invalid, "invalid JSON");
+        await ExpectFailureAsync("../outside.json", RulesArtifactFailureCodes.PathInvalid, "path outside base directory");
+        if (OperatingSystem.IsLinux() && !string.Equals(Environment.UserName, "root", StringComparison.OrdinalIgnoreCase))
+        {
+            var unreadablePath = Path.Combine(directory, "unreadable.json");
+            await File.WriteAllTextAsync(unreadablePath, "{}");
+            var originalMode = File.GetUnixFileMode(unreadablePath);
+            try
+            {
+                File.SetUnixFileMode(unreadablePath, UnixFileMode.None);
+                await ExpectFailureAsync("unreadable.json", RulesArtifactFailureCodes.FileUnreadable, "unreadable file");
+            }
+            finally
+            {
+                File.SetUnixFileMode(unreadablePath, originalMode);
+            }
+        }
+
+        var expectedCodes = new[]
+        {
+            RulesArtifactFailureCodes.FileMissing,
+            RulesArtifactFailureCodes.FileUnreadable,
+            RulesArtifactFailureCodes.Invalid,
+            RulesArtifactFailureCodes.PathInvalid,
+            RulesArtifactFailureCodes.StatusFailed
+        };
+        if (expectedCodes.Any(code => !RulesArtifactFailureCodes.IsKnown(code)))
+        {
+            errors.Add("Rules artifact diagnostic allowlist is incomplete.");
+        }
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+}
+
+static async Task ValidateRulesStatusEndpoint(List<string> errors)
+{
+    async Task<(int StatusCode, string Body, CapturingLogger<RulesStatusEndpoint> Logger)> InvokeAsync(
+        Exception? exception = null,
+        bool includeBearer = true,
+        string statusToken = "rules-token")
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        context.RequestServices = new ServiceCollection().AddLogging().AddRouting().BuildServiceProvider();
+        if (includeBearer)
+        {
+            context.Request.Headers.Authorization = "Bearer rules-token";
+        }
+
+        var logger = new CapturingLogger<RulesStatusEndpoint>();
+        var result = await RulesStatusEndpoint.HandleAsync(
+            context,
+            new StatusRulesProvider(exception),
+            Options.Create(new ServiceOptions
+            {
+                Name = "cmdbkafka2zabbix",
+                RulesReloadToken = statusToken
+            }),
+            Options.Create(new ConversionRulesOptions
+            {
+                RulesFilePath = "rules/customer.json",
+                ReadFromGit = false
+            }),
+            logger,
+            CancellationToken.None);
+        await result.ExecuteAsync(context);
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body);
+        return (context.Response.StatusCode, await reader.ReadToEndAsync(), logger);
+    }
+
+    var unauthorized = await InvokeAsync(includeBearer: false);
+    if (unauthorized.StatusCode != StatusCodes.Status401Unauthorized)
+    {
+        errors.Add("Rules status endpoint must reject a missing bearer token.");
+    }
+
+    var tokenMissing = await InvokeAsync(statusToken: string.Empty);
+    if (tokenMissing.StatusCode != StatusCodes.Status503ServiceUnavailable)
+    {
+        errors.Add("Rules status endpoint must fail closed when no status token is configured.");
+    }
+
+    foreach (var code in new[]
+    {
+        RulesArtifactFailureCodes.FileMissing,
+        RulesArtifactFailureCodes.FileUnreadable,
+        RulesArtifactFailureCodes.Invalid,
+        RulesArtifactFailureCodes.PathInvalid
+    })
+    {
+        var response = await InvokeAsync(new RulesArtifactException(
+            code,
+            "read_file",
+            "rules/customer.json",
+            "/app/rules/customer.json",
+            new UnauthorizedAccessException("private details")));
+        var responseCode = ReadElementString(JsonDocument.Parse(response.Body).RootElement, "code");
+        if (response.StatusCode != StatusCodes.Status503ServiceUnavailable
+            || !string.Equals(responseCode, code, StringComparison.Ordinal))
+        {
+            errors.Add($"Rules status endpoint must return 503 with '{code}'.");
+        }
+        if (response.Body.Contains("/app/rules", StringComparison.Ordinal)
+            || response.Body.Contains("private details", StringComparison.Ordinal))
+        {
+            errors.Add("Rules status endpoint must not expose artifact paths or exception details.");
+        }
+        if (!response.Logger.Entries.Any(entry => entry.TryGetValue("RulesArtifactFailureCode", out var loggedCode)
+            && string.Equals(loggedCode?.ToString(), code, StringComparison.Ordinal)
+            && entry.ContainsKey("RulesArtifactFailureStage")
+            && entry.ContainsKey("RulesArtifactConfiguredPath")
+            && entry.ContainsKey("RulesArtifactResolvedPath")
+            && entry.ContainsKey("RulesArtifactExceptionType")))
+        {
+            errors.Add($"Rules status endpoint must log structured fields for '{code}'.");
+        }
+    }
+
+    var unexpected = await InvokeAsync(new InvalidOperationException("private unexpected detail"));
+    var unexpectedCode = ReadElementString(JsonDocument.Parse(unexpected.Body).RootElement, "code");
+    if (unexpected.StatusCode != StatusCodes.Status503ServiceUnavailable
+        || !string.Equals(unexpectedCode, RulesArtifactFailureCodes.StatusFailed, StringComparison.Ordinal))
+    {
+        errors.Add("Rules status endpoint must map unexpected failures to rules_status_failed.");
+    }
 }
 
 static JsonObject? LoadJsonObject(string path, List<string> errors)
@@ -2024,6 +2198,18 @@ static async Task ValidateKafkaConsumerReadiness(List<string> errors)
         errors.Add("Kafka consumer readiness must become true after partition assignment.");
     }
 
+    readiness.MarkConsumerError(isFatal: false);
+    if ((await readiness.CheckAsync(CancellationToken.None)).Ready is false)
+    {
+        errors.Add("Kafka consumer readiness must remain true after a transient consume error.");
+    }
+
+    readiness.MarkConsumerError(isFatal: true);
+    if ((await readiness.CheckAsync(CancellationToken.None)).Ready)
+    {
+        errors.Add("Kafka consumer readiness must become false after a fatal consume error.");
+    }
+
     readiness.MarkUnavailable();
     if ((await readiness.CheckAsync(CancellationToken.None)).Ready)
     {
@@ -2490,6 +2676,57 @@ internal enum ServiceKind
 }
 
 internal sealed record ServiceDefinition(string Name, string RelativePath, ServiceKind Kind);
+
+internal sealed class StatusRulesProvider(Exception? exception) : IConversionRulesProvider
+{
+    public Task<ConversionRulesDocument> GetRulesAsync(CancellationToken cancellationToken) => throw exception ?? new NotSupportedException();
+
+    public Task<ConversionRulesStatusResult> GetStatusAsync(CancellationToken cancellationToken)
+    {
+        if (exception is not null)
+        {
+            throw exception;
+        }
+
+        return Task.FromResult(new ConversionRulesStatusResult(
+            "rules",
+            "0.2",
+            "test",
+            new string('a', 64),
+            "/app/rules/customer.json",
+            null,
+            "/app",
+            string.Empty,
+            false,
+            false,
+            false,
+            "Mono.TextTemplating",
+            "hostCreateJsonRpcRequestLines",
+            string.Empty,
+            false,
+            null,
+            DateTimeOffset.UtcNow));
+    }
+
+    public Task<ConversionRulesReloadResult> ReloadAsync(CancellationToken cancellationToken) => throw exception ?? new NotSupportedException();
+}
+
+internal sealed class CapturingLogger<T> : ILogger<T>
+{
+    public List<IReadOnlyDictionary<string, object?>> Entries { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        if (state is IEnumerable<KeyValuePair<string, object?>> values)
+        {
+            Entries.Add(values.ToDictionary(item => item.Key, item => item.Value));
+        }
+    }
+}
 
 internal sealed class FakeDynamicHostGroupZabbixClient(IReadOnlyDictionary<string, string> createdGroupIds) : IZabbixClient
 {

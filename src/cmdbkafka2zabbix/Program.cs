@@ -15,9 +15,6 @@ using Cmdb2Monitoring.Workers;
 using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
-using System.Net.Http.Headers;
-using System.Security.Cryptography;
-using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 TransportConfigurator.UseConfiguredUrls(builder.WebHost, builder.Configuration, "http://localhost:5081");
@@ -218,9 +215,9 @@ if (!string.IsNullOrWhiteSpace(serviceOptions.RulesReloadRoute))
                     title: "Rules reload is not configured");
             }
 
-            if (!IsBearerTokenValid(context.Request, currentOptions.RulesReloadToken))
+            if (!RulesStatusEndpoint.IsBearerTokenValid(context.Request, currentOptions.RulesReloadToken))
             {
-                return Results.Unauthorized();
+                return Results.StatusCode(StatusCodes.Status401Unauthorized);
             }
 
             var result = await rulesProvider.ReloadAsync(cancellationToken);
@@ -247,55 +244,7 @@ if (!string.IsNullOrWhiteSpace(serviceOptions.RulesReloadRoute))
 
 if (!string.IsNullOrWhiteSpace(serviceOptions.RulesStatusRoute))
 {
-    app.MapGet(
-        serviceOptions.RulesStatusRoute,
-        async (HttpContext context, IConversionRulesProvider rulesProvider, IOptions<ServiceOptions> options, CancellationToken cancellationToken) =>
-        {
-            var currentOptions = options.Value;
-            var statusToken = string.IsNullOrWhiteSpace(currentOptions.RulesStatusToken)
-                ? currentOptions.RulesReloadToken
-                : currentOptions.RulesStatusToken;
-            if (string.IsNullOrWhiteSpace(statusToken))
-            {
-                return Results.Problem(
-                    "Rules status token is not configured.",
-                    statusCode: StatusCodes.Status503ServiceUnavailable,
-                    title: "Rules status is not configured");
-            }
-
-            if (!IsBearerTokenValid(context.Request, statusToken))
-            {
-                return Results.Unauthorized();
-            }
-
-            var result = await rulesProvider.GetStatusAsync(cancellationToken);
-            return Results.Ok(new
-            {
-                service = currentOptions.Name,
-                status = "ok",
-                rules = new
-                {
-                    name = result.RuleName,
-                    schemaVersion = result.SchemaVersion,
-                    rulesVersion = result.RulesVersion,
-                    contentSha256 = result.ContentSha256,
-                    location = result.Location,
-                    version = result.Version,
-                    repositoryPath = result.RepositoryPath,
-                    repositoryUrl = result.RepositoryUrl,
-                    readFromGit = result.ReadFromGit,
-                    pullOnStartup = result.PullOnStartup,
-                    pullOnReload = result.PullOnReload,
-                    runtimeGitEnabled = result.ReadFromGit && (result.PullOnStartup || result.PullOnReload),
-                    templateEngine = result.TemplateEngine,
-                    templateName = result.TemplateName,
-                    trustedArtifactPath = result.TrustedArtifactPath,
-                    requireTrustedArtifactInProduction = result.RequireTrustedArtifactInProduction,
-                    lastWriteTime = result.LastWriteTime,
-                    checkedAt = result.CheckedAt
-                }
-            });
-        });
+    app.MapGet(serviceOptions.RulesStatusRoute, RulesStatusEndpoint.HandleAsync);
 }
 
 app.Run();
@@ -304,19 +253,4 @@ static bool IsSafeProductionGitExecutable(string gitExecutablePath)
 {
     return string.Equals(gitExecutablePath, "git", StringComparison.Ordinal)
         || string.Equals(gitExecutablePath, "/usr/bin/git", StringComparison.Ordinal);
-}
-
-static bool IsBearerTokenValid(HttpRequest request, string expectedToken)
-{
-    if (!AuthenticationHeaderValue.TryParse(request.Headers.Authorization.ToString(), out var header)
-        || !string.Equals(header.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase)
-        || string.IsNullOrWhiteSpace(header.Parameter))
-    {
-        return false;
-    }
-
-    var expectedBytes = Encoding.UTF8.GetBytes(expectedToken);
-    var actualBytes = Encoding.UTF8.GetBytes(header.Parameter);
-    return expectedBytes.Length == actualBytes.Length
-        && CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
 }
