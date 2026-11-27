@@ -59,6 +59,7 @@ builder.Services.AddOptions<KafkaOptions>()
     .Validate(options => ProductionSecurityGuards.AllowsKafkaProtocol(builder.Environment, options.Input.SecurityProtocol, options.Input.AllowPlaintextKafka), "Production Kafka input requires Ssl/SaslSsl unless AllowPlaintextKafka is true.")
     .Validate(options => options.Input.HasValidAutoOffsetReset(), "Kafka input auto offset reset is invalid.")
     .Validate(options => options.Input.PollTimeoutMs > 0, "Kafka input poll timeout must be greater than zero.")
+    .Validate(options => options.Input.ReadinessProbeIntervalMs > 0 && options.Input.ReadinessProbeTimeoutMs > 0, "Kafka readiness probe interval and timeout must be greater than zero.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.BootstrapServers), "Kafka output bootstrap servers are required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.Topic), "Kafka output topic is required.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Output.ClientId), "Kafka output client id is required.")
@@ -187,6 +188,7 @@ builder.Services.AddSingleton<IReadinessCheck>(services =>
 });
 builder.Services.AddSingleton<IReadinessCheck>(services => services.GetRequiredService<KafkaConsumerReadiness>());
 builder.Services.AddHostedService<KafkaConversionWorker>();
+builder.Services.AddHostedService<KafkaReadinessProbeWorker>();
 
 var app = builder.Build();
 var serviceOptions = app.Services.GetRequiredService<IOptions<ServiceOptions>>().Value;

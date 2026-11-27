@@ -146,6 +146,11 @@ public sealed class KafkaConversionWorker(
                 {
                     consumerReadiness.MarkConsumerError(ex.Error.IsFatal);
                     logger.LogError(ex, "Kafka consume error: {KafkaReason}; fatal {KafkaFatal}", ex.Error.Reason, ex.Error.IsFatal);
+                    if (ex.Error.IsFatal)
+                    {
+                        Environment.ExitCode = 1;
+                        throw;
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -153,19 +158,16 @@ public sealed class KafkaConversionWorker(
                 }
                 catch (Exception ex)
                 {
+                    consumerReadiness.MarkUnavailable();
                     logger.LogError(
                         ex,
-                        "Failed to process Kafka message from {Topic}[{Partition}]@{Offset}; message will be retried after restart or next poll",
+                        "Failed to process Kafka message from {Topic}[{Partition}]@{Offset}; stopping consumer for retry after restart",
                         consumed?.Topic ?? "<unknown>",
                         consumed?.Partition.Value,
                         consumed?.Offset.Value);
 
-                    if (stopRequested)
-                    {
-                        break;
-                    }
-
-                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                    Environment.ExitCode = 1;
+                    throw;
                 }
             }
         }
@@ -480,6 +482,7 @@ public sealed class KafkaConversionWorker(
         CancellationToken cancellationToken,
         string? outputTopic = null)
     {
+        consumer.Commit(consumed);
         await stateStore.WriteAsync(new ProcessingStateDocument(
             LastEntityId: entityId,
             LastEventType: eventType,
@@ -491,7 +494,6 @@ public sealed class KafkaConversionWorker(
             SkipReason: skipReason,
             ProcessedAt: DateTimeOffset.UtcNow), cancellationToken);
 
-        consumer.Commit(consumed);
         logger.LogBasic(
             debugLoggingOptions,
             "Committed CMDBuild Kafka event {Topic}[{Partition}]@{Offset}, output published {OutputPublished}, skip reason {SkipReason}",

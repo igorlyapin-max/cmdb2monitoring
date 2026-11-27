@@ -125,10 +125,10 @@ const cmdbuildLookupBulkNetworkRetryAttempts = 6;
 const helpShowDelayMs = 900;
 const largeMappingSectionLimit = 500;
 const roleViews = {
-  viewer: ['dashboard', 'events', 'about', 'help'],
-  editor: ['dashboard', 'events', 'systemAudit', 'profiles', 'mapping', 'webhooks', 'cmdbuild', 'about', 'help'],
-  admin: ['dashboard', 'events', 'systemAudit', 'profiles', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help'],
-  administrator: ['dashboard', 'events', 'systemAudit', 'profiles', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
+  viewer: ['dashboard', 'events', 'eventRoutes', 'about', 'help'],
+  editor: ['dashboard', 'events', 'systemAudit', 'profiles', 'eventRoutes', 'mapping', 'webhooks', 'cmdbuild', 'about', 'help'],
+  admin: ['dashboard', 'events', 'systemAudit', 'profiles', 'eventRoutes', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help'],
+  administrator: ['dashboard', 'events', 'systemAudit', 'profiles', 'eventRoutes', 'mapping', 'webhooks', 'cmdbuild', 'authSettings', 'runtimeSettings', 'gitSettings', 'about', 'help']
 };
 const managedWebhookPrefix = 'cmdbwebhooks2kafka-';
 const sessionIndicatorDefinitions = [
@@ -527,6 +527,17 @@ const translations = {
     'nav.events': 'События',
     'nav.systemAudit': 'Аудит',
     'nav.profiles': 'Профили',
+    'nav.eventRoutes': 'События',
+    'eventRoutes.enabled': 'Включено',
+    'eventRoutes.deleteConfirm': 'Удаление включается глобально. Событие удаления карточки может удалить соответствующий host в Zabbix. Включить delete?',
+    'eventRoutes.updateRequired': 'Активному профилю с createOnUpdateWhenMissing необходим маршрут update.',
+    'eventRoutes.routeRequired': 'Активным профилям нужен хотя бы один маршрут create или update.',
+    'eventRoutes.missing': 'Маршрут отсутствует или задан неоднократно. Исправьте JSON правил.',
+    'eventRoutes.draftChanged': 'Маршрут изменён в draft; изменения не применены.',
+    'eventRoutes.webhooksConfirm': 'Маршруты применены. Перейти к анализу webhooks CMDBuild? Изменения в CMDBuild не будут применены автоматически.',
+    'eventRoutes.draftConfirm': 'Будут опубликованы все изменения общего draft. Изменённые разделы: {sections}. Продолжить?',
+    'eventRoutes.loadFailed': 'Не удалось загрузить draft и каталог. Показаны только активные маршруты: {error}',
+    'eventRoutes.cancelled': 'Публикация отменена. Draft не применён.',
     'nav.mapping': 'Управление правилами конвертации',
     'nav.webhooks': 'Настройка webhooks',
     'nav.cmdbuildAdmin': 'Операции CMDBuild',
@@ -1353,6 +1364,17 @@ const translations = {
     'nav.events': 'Events',
     'nav.systemAudit': 'Audit',
     'nav.profiles': 'Profiles',
+    'nav.eventRoutes': 'Events',
+    'eventRoutes.enabled': 'Enabled',
+    'eventRoutes.deleteConfirm': 'Delete is enabled globally. A card deletion event may delete the corresponding Zabbix host. Enable delete?',
+    'eventRoutes.updateRequired': 'An active profile with createOnUpdateWhenMissing requires the update route.',
+    'eventRoutes.routeRequired': 'Active profiles require at least one create or update route.',
+    'eventRoutes.missing': 'The route is missing or duplicated. Correct the rules JSON.',
+    'eventRoutes.draftChanged': 'Route changed in the draft; changes are not applied.',
+    'eventRoutes.webhooksConfirm': 'Routes were applied. Open the CMDBuild webhook analysis? Changes will not be applied automatically.',
+    'eventRoutes.draftConfirm': 'All changes in the shared draft will be published. Changed sections: {sections}. Continue?',
+    'eventRoutes.loadFailed': 'Could not load the draft and catalog. Only active routes are shown: {error}',
+    'eventRoutes.cancelled': 'Publication cancelled. The draft was not applied.',
     'nav.mapping': 'Conversion Rules Management',
     'nav.webhooks': 'Webhook Setup',
     'nav.cmdbuildAdmin': 'CMDBuild Operations',
@@ -2019,6 +2041,9 @@ function bindNavigation() {
       if (['profiles', 'mapping'].includes(button.dataset.view) && !state.mappingLoaded) {
         await loadMapping();
       }
+      if (button.dataset.view === 'eventRoutes') {
+        await loadEventRoutes();
+      }
       if (button.dataset.view === 'webhooks' && !state.webhooksLoaded) {
         await loadCmdbuildWebhooks();
       }
@@ -2587,6 +2612,10 @@ function bindForms() {
   });
   $('#mappingUndo').addEventListener('click', undoMappingEdit);
   $('#mappingRedo').addEventListener('click', redoMappingEdit);
+  $('#eventRoutesUndo').addEventListener('click', () => { if (canUseRules()) undoMappingEdit(); });
+  $('#eventRoutesRedo').addEventListener('click', () => { if (canUseRules()) redoMappingEdit(); });
+  bindAction('#eventRoutesPublish', publishEventRoutes, { statusSelector: '#eventRoutesStatus', success: false });
+  bindAction('#eventRoutesReload', loadEventRoutes, { statusSelector: '#eventRoutesStatus', success: false });
   bindAction('#mappingSaveAs', saveMappingDraftAsFile, { statusSelector: '#mappingActionStatus' });
   bindAction('#mappingPublish', publishMappingDraft, { statusSelector: '#mappingActionStatus', success: false });
   bindAction('#mappingRetryReload', retryMappingRulesReload, { statusSelector: '#mappingActionStatus', success: false });
@@ -4445,6 +4474,102 @@ function rerenderMappingDraft(message = '') {
   updateMappingEditor(message);
 }
 
+function renderEventRoutes(readOnlyRoutes = null) {
+  const container = $('#eventRoutesList');
+  if (!container) return;
+  const rules = state.mappingDraftRules;
+  const routes = readOnlyRoutes ?? ['create', 'update', 'delete'].map(eventType => {
+    const matches = (rules?.eventRoutingRules ?? []).filter(route => String(route.eventType ?? '').toLowerCase() === eventType);
+    return { eventType, present: matches.length === 1, enabled: matches.length === 1 && matches[0].publish !== false, method: matches[0]?.method ?? '' };
+  });
+  container.replaceChildren(...routes.map(route => {
+    const row = document.createElement('tr');
+    const eventCell = document.createElement('td');
+    const methodCell = document.createElement('td');
+    const controlCell = document.createElement('td');
+    eventCell.textContent = route.eventType;
+    methodCell.textContent = route.method || '-';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = route.enabled;
+    checkbox.disabled = !canUseRules() || !rules || !route.present || Boolean(readOnlyRoutes);
+    checkbox.setAttribute('aria-label', `${route.eventType} -> ${route.method || '-'}`);
+    checkbox.addEventListener('change', () => changeEventRoute(route.eventType, checkbox.checked));
+    controlCell.append(checkbox);
+    if (!route.present) controlCell.append(document.createTextNode(` ${t('eventRoutes.missing')}`));
+    row.append(eventCell, methodCell, controlCell);
+    return row;
+  }));
+  const editable = canUseRules();
+  for (const id of ['eventRoutesUndo', 'eventRoutesRedo', 'eventRoutesPublish']) $(`#${id}`).hidden = !editable;
+  $('#eventRoutesUndo').disabled = !editable || !rules || state.mappingHistoryIndex <= 0;
+  $('#eventRoutesRedo').disabled = !editable || !rules || state.mappingHistoryIndex >= state.mappingHistory.length - 1;
+  $('#eventRoutesPublish').disabled = !editable || !rules || !state.currentRules?.publishEnabled;
+}
+
+async function loadEventRoutes() {
+  try {
+    if (canUseRules() && state.mappingLoaded) { renderEventRoutes(); return; }
+    const active = await api('/api/rules/event-routes');
+    if (!canUseRules()) { renderEventRoutes(active.routes); return; }
+    const loaded = await loadMapping();
+    if (!loaded) {
+      renderEventRoutes(active.routes);
+      setActionStatus($('#eventRoutesStatus'), tf('eventRoutes.loadFailed', { error: $('#mappingCmdbuild')?.textContent ?? '' }), 'error');
+      return;
+    }
+    renderEventRoutes();
+  } catch (error) {
+    setActionStatus($('#eventRoutesStatus'), error.message, 'error');
+  }
+}
+
+function changeEventRoute(eventType, enabled) {
+  if (!canUseRules() || !state.mappingDraftRules) return;
+  const rules = cloneJson(state.mappingDraftRules);
+  const matches = (rules.eventRoutingRules ?? []).filter(route => String(route.eventType ?? '').toLowerCase() === eventType);
+  if (matches.length !== 1) { renderEventRoutes(); return; }
+  if (eventType === 'delete' && enabled && !window.confirm(t('eventRoutes.deleteConfirm'))) { renderEventRoutes(); return; }
+  matches[0].publish = enabled;
+  const activeProfiles = (rules.hostProfiles ?? []).filter(profile => profile.enabled !== false);
+  const routeEnabled = name => (rules.eventRoutingRules ?? []).some(route => String(route.eventType ?? '').toLowerCase() === name && route.publish !== false);
+  let error = '';
+  if (activeProfiles.some(profile => profile.createOnUpdateWhenMissing) && !routeEnabled('update')) error = t('eventRoutes.updateRequired');
+  else if (activeProfiles.length && !routeEnabled('create') && !routeEnabled('update')) error = t('eventRoutes.routeRequired');
+  if (error) {
+    setActionStatus($('#eventRoutesStatus'), error, 'warning');
+    renderEventRoutes();
+    return;
+  }
+  pushMappingHistory(rules);
+  rerenderMappingDraft();
+  setActionStatus($('#eventRoutesStatus'), t('eventRoutes.draftChanged'), 'info');
+}
+
+async function publishEventRoutes() {
+  const before = JSON.stringify(state.currentRules?.content?.eventRoutingRules ?? []);
+  const current = state.currentRules?.content ?? {};
+  const draft = state.mappingDraftRules ?? {};
+  const sections = [...new Set([...Object.keys(current), ...Object.keys(draft)])].filter(key => !jsonEqual(current[key], draft[key]));
+  if (sections.length && !window.confirm(tf('eventRoutes.draftConfirm', { sections: sections.join(', ') }))) {
+    setActionStatus($('#eventRoutesStatus'), t('eventRoutes.cancelled'), 'warning');
+    return null;
+  }
+  const result = await publishMappingDraft();
+  if (result?.cancelled) {
+    setActionStatus($('#eventRoutesStatus'), t('eventRoutes.cancelled'), 'warning');
+    return null;
+  }
+  setActionStatus($('#eventRoutesStatus'), $('#mappingActionStatus').textContent, result?.applied ? 'success' : 'warning');
+  renderEventRoutes();
+  if (result?.applied && before !== JSON.stringify(state.currentRules?.content?.eventRoutingRules ?? [])
+      && window.confirm(t('eventRoutes.webhooksConfirm'))) {
+    showView('webhooks');
+    await analyzeCmdbuildWebhooks();
+  }
+  return result;
+}
+
 async function loadCmdbuildWebhooks() {
   const result = await api('/api/cmdbuild/webhooks');
   state.webhooksCurrent = result.items ?? [];
@@ -5672,6 +5797,7 @@ function updateMappingEditorControls() {
   state.mappingEditAction = action;
   $('#mappingUndo').disabled = !hasDraft || state.mappingHistoryIndex <= 0;
   $('#mappingRedo').disabled = !hasDraft || state.mappingHistoryIndex >= state.mappingHistory.length - 1;
+  renderEventRoutes();
   $('#mappingSaveAs').disabled = !hasDraft;
   $('#mappingPublish').disabled = !hasDraft || !state.currentRules?.publishEnabled;
   $('#mappingRetryReload').disabled = !state.mappingReloadPending || !state.currentRules?.publishEnabled;

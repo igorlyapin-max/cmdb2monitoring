@@ -25,19 +25,20 @@ public sealed class GitConversionRulesProvider(
 
     public async Task<ConversionRulesDocument> GetRulesAsync(CancellationToken cancellationToken)
     {
-        return await LoadRulesAsync(forceReload: false, refreshStorage: false, cancellationToken);
+        return (await LoadRulesAsync(forceReload: false, refreshStorage: false, cancellationToken)).Rules;
     }
 
     public async Task<ConversionRulesStatusResult> GetStatusAsync(CancellationToken cancellationToken)
     {
-        var rules = await LoadRulesAsync(forceReload: false, refreshStorage: false, cancellationToken);
+        var snapshot = await LoadRulesAsync(forceReload: false, refreshStorage: false, cancellationToken);
+        var rules = snapshot.Rules;
         return new ConversionRulesStatusResult(
             rules.Name,
             rules.SchemaVersion,
             rules.RulesVersion,
-            cachedContentSha256 ?? string.Empty,
-            cachedLocation ?? ResolveRulesFilePath(),
-            cachedVersion,
+            snapshot.Sha256,
+            snapshot.Location,
+            snapshot.Version,
             ResolveRepositoryPath(),
             options.Value.RepositoryUrl,
             options.Value.ReadFromGit,
@@ -47,30 +48,35 @@ public sealed class GitConversionRulesProvider(
             options.Value.TemplateName,
             options.Value.TrustedArtifactPath,
             options.Value.RequireTrustedArtifactInProduction,
-            cachedLastWriteTime,
+            snapshot.LastWriteTime,
             DateTimeOffset.UtcNow);
     }
 
     public async Task<ConversionRulesReloadResult> ReloadAsync(CancellationToken cancellationToken)
     {
-        var rules = await LoadRulesAsync(
+        var snapshot = await LoadRulesAsync(
             forceReload: true,
             refreshStorage: options.Value.ReadFromGit && options.Value.PullOnReload,
             cancellationToken);
+        var rules = snapshot.Rules;
         return new ConversionRulesReloadResult(
             rules.Name,
             rules.SchemaVersion,
             rules.RulesVersion,
-            cachedContentSha256 ?? string.Empty,
-            cachedLocation ?? ResolveRulesFilePath(),
-            cachedVersion,
+            snapshot.Sha256,
+            snapshot.Location,
+            snapshot.Version,
             ResolveRepositoryPath(),
             options.Value.RepositoryUrl,
             options.Value.ReadFromGit && options.Value.PullOnReload,
             DateTimeOffset.UtcNow);
     }
 
-    private async Task<ConversionRulesDocument> LoadRulesAsync(
+    private sealed record RulesSnapshot(ConversionRulesDocument Rules, string Sha256, string Location, string? Version, DateTimeOffset? LastWriteTime);
+
+    private RulesSnapshot Snapshot(ConversionRulesDocument rules) => new(rules, cachedContentSha256 ?? string.Empty, cachedLocation ?? ResolveRulesFilePath(), cachedVersion, cachedLastWriteTime);
+
+    private async Task<RulesSnapshot> LoadRulesAsync(
         bool forceReload,
         bool refreshStorage,
         CancellationToken cancellationToken)
@@ -109,7 +115,7 @@ public sealed class GitConversionRulesProvider(
                 lastWriteTime = File.GetLastWriteTimeUtc(rulesFilePath);
                 if (!forceReload && cachedRules is not null && cachedContentSha256 == contentSha256)
                 {
-                    return cachedRules;
+                    return Snapshot(cachedRules);
                 }
                 using var reader = new StreamReader(new MemoryStream(stableBytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                 rulesJson = await reader.ReadToEndAsync(cancellationToken);
@@ -184,7 +190,7 @@ public sealed class GitConversionRulesProvider(
                 cachedContentSha256,
                 commit ?? "<unknown>");
 
-            return rules;
+            return Snapshot(rules);
         }
         finally
         {

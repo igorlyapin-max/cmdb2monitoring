@@ -75,6 +75,8 @@ services:
       Kafka__Input__Topic: ${CMDB_WEBHOOKS_TOPIC:-cmdbuild.webhooks}
       Kafka__Input__GroupId: cmdbkafka2zabbix
       Kafka__Input__ClientId: cmdbkafka2zabbix-consumer
+      Kafka__Input__ReadinessProbeIntervalMs: ${KAFKA_READINESS_PROBE_INTERVAL_MS:-10000}
+      Kafka__Input__ReadinessProbeTimeoutMs: ${KAFKA_READINESS_PROBE_TIMEOUT_MS:-3000}
       Kafka__Input__SecurityProtocol: ${KAFKA_SECURITY_PROTOCOL:-SaslSsl}
       Kafka__Input__AllowPlaintextKafka: ${ALLOW_PLAINTEXT_KAFKA:-false}
       Kafka__Input__SaslMechanism: ${KAFKA_SASL_MECHANISM:-Plain}

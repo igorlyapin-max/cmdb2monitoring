@@ -129,6 +129,11 @@ test('publish rejects a stale active-rules revision without overwriting the file
     });
     assert.equal(current.status, 200, JSON.stringify(current.body));
 
+    const eventRoutes = await request(port, '/api/rules/event-routes', { headers: { cookie } });
+    assert.equal(eventRoutes.status, 200);
+    assert.deepEqual(eventRoutes.body.routes.map(route => route.eventType), ['create', 'update', 'delete']);
+    assert.equal(eventRoutes.body.content, undefined);
+
     const invalidRoutes = structuredClone(current.body.content);
     for (const route of invalidRoutes.eventRoutingRules) route.publish = false;
     const invalidPublish = await request(port, '/api/rules/publish', {

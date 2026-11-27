@@ -2231,6 +2231,11 @@ static async Task ValidateKafkaConsumerReadiness(List<string> errors)
     }
 
     readiness.MarkAssigned(1);
+    if ((await readiness.CheckAsync(CancellationToken.None)).Ready)
+    {
+        errors.Add("Kafka consumer readiness requires successful broker metadata probe.");
+    }
+    readiness.MarkProbeSucceeded();
     if (!(await readiness.CheckAsync(CancellationToken.None)).Ready)
     {
         errors.Add("Kafka consumer readiness must become true after partition assignment.");

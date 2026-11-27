@@ -283,6 +283,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EventList"
+  /api/rules/event-routes:
+    get:
+      summary: Read active event routes without exposing the full rules file
+      description: Available to viewer, editor and admin. Editing uses the existing rules publication API.
+      responses:
+        "200":
+          description: Active create, update and delete route states.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routes]
+                properties:
+                  routes:
+                    type: array
+                    items:
+                      type: object
+                      required: [eventType, present, enabled, method]
+                      properties:
+                        eventType:
+                          type: string
+                          enum: [create, update, delete]
+                        present:
+                          type: boolean
+                        enabled:
+                          type: boolean
+                        method:
+                          type: string
   /api/rules/current:
     get:
       summary: Read active conversion rules from the configured external file

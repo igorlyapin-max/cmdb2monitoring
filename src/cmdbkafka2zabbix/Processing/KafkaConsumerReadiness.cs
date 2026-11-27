@@ -7,6 +7,8 @@ public sealed class KafkaConsumerReadiness : IReadinessCheck
     private int assigned;
     private int consecutiveErrors;
     private int fatal;
+    private long lastProbeSuccessTicks;
+    private long maxProbeAgeTicks = TimeSpan.FromSeconds(13).Ticks;
 
     public string Name => "kafka-consumer";
 
@@ -43,13 +45,21 @@ public sealed class KafkaConsumerReadiness : IReadinessCheck
         }
     }
 
+    public void ConfigureProbe(TimeSpan maxAge) => Volatile.Write(ref maxProbeAgeTicks, maxAge.Ticks);
+
+    public void MarkProbeSucceeded() => Volatile.Write(ref lastProbeSuccessTicks, DateTimeOffset.UtcNow.UtcTicks);
+
+    public void MarkProbeFailed() => Volatile.Write(ref lastProbeSuccessTicks, 0);
+
     public Task<ReadinessCheckResult> CheckAsync(CancellationToken cancellationToken)
     {
-        var ready = Volatile.Read(ref assigned) == 1 && Volatile.Read(ref consecutiveErrors) < 3;
+        var probeTicks = Volatile.Read(ref lastProbeSuccessTicks);
+        var probeReady = probeTicks > 0 && DateTimeOffset.UtcNow.UtcTicks - probeTicks <= Volatile.Read(ref maxProbeAgeTicks);
+        var ready = Volatile.Read(ref assigned) == 1 && Volatile.Read(ref consecutiveErrors) < 3 && probeReady;
         var message = ready
             ? "Kafka consumer has an assigned partition."
             : Volatile.Read(ref assigned) == 1
-                ? "Kafka consumer has repeated consume errors."
+                ? (probeReady ? "Kafka consumer has repeated consume errors." : "Kafka topic metadata probe is unavailable or stale.")
                 : "Kafka consumer has no assigned partition.";
         return Task.FromResult(new ReadinessCheckResult(
             Name,

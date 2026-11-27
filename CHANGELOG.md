@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 00.00.00.15 - 2026-11-27
+
+### Fixed
+
+- Converter stops on processing failures rather than skipping the failed Kafka offset, reports readiness using topic metadata, and returns rules status as an immutable snapshot. Event routes display and confirm the complete shared draft before publishing.
+
+### Added
+
+- Added a monitoring event-routes view with read-only viewer access, shared rules draft, create/update safeguards, and explicit confirmation before enabling delete.
+
 ## 00.00.00.14 - 2026-11-26
 
 ### Fixed

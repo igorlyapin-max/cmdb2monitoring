@@ -12,6 +12,48 @@ const repositoryRoot = resolve(serviceRoot, '../..');
 const chromeExecutable = process.env.BROWSER_EXECUTABLE_PATH
   ?? ['/usr/bin/google-chrome', '/usr/bin/chromium'].find(existsSync);
 
+test('event routes preserve draft and require delete confirmation', async () => {
+  const directory = await mkdtemp(join(serviceRoot, 'state', '.event-routes-browser-'));
+  const port = await reservePort();
+  const activeRulesPath = join(directory, 'rules.json');
+  const rules = JSON.parse(await readFile(join(repositoryRoot, 'rules/cmdbuild-to-zabbix-host-create.production-empty.json'), 'utf8'));
+  await writeFile(activeRulesPath, JSON.stringify(rules), 'utf8');
+  const server = startServer(port, directory, activeRulesPath);
+  const browser = await chromium.launch({ headless: true, executablePath: chromeExecutable, args: ['--no-sandbox'] });
+  try {
+    await waitForReady(port, server);
+    const page = await browser.newPage();
+    await mockApi(page, rules, browserTestCmdbuildCatalog(), browserTestZabbixCatalog(), { role: 'admin' });
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+    await page.locator('[data-view="eventRoutes"]').click();
+    const del = page.getByRole('checkbox', { name: 'delete -> host.delete' });
+    await assertVisible(page, '#eventRoutesList');
+    page.once('dialog', dialog => dialog.dismiss());
+    await del.click();
+    assert.equal(await page.getByRole('checkbox', { name: 'delete -> host.delete' }).isChecked(), false);
+    page.once('dialog', dialog => dialog.accept());
+    await page.getByRole('checkbox', { name: 'delete -> host.delete' }).click();
+    assert.equal(await page.getByRole('checkbox', { name: 'delete -> host.delete' }).isChecked(), true);
+    await page.locator('#eventRoutesUndo').click();
+    assert.equal(await page.getByRole('checkbox', { name: 'delete -> host.delete' }).isChecked(), false);
+    await page.locator('#eventRoutesRedo').click();
+    assert.equal(await page.getByRole('checkbox', { name: 'delete -> host.delete' }).isChecked(), true);
+    const viewer = await browser.newPage();
+    await mockApi(viewer, rules, browserTestCmdbuildCatalog(), browserTestZabbixCatalog(), { role: 'viewer' });
+    await viewer.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+    await viewer.locator('[data-view="eventRoutes"]').click();
+    await assertVisible(viewer, '#eventRoutesList');
+    assert.equal(await viewer.getByRole('checkbox', { name: 'delete -> host.delete' }).isDisabled(), true);
+    assert.equal(await viewer.locator('#eventRoutesPublish').isVisible(), false);
+    await viewer.close();
+  } finally {
+    await browser.close();
+    server.kill('SIGTERM');
+    await onceExit(server);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('profile creation from starter requires explicit event route confirmation', async () => {
   const directory = await mkdtemp(join(serviceRoot, 'state', '.starter-profile-browser-'));
   const port = await reservePort();
@@ -44,6 +86,10 @@ test('profile creation from starter requires explicit event route confirmation',
     await page.locator('#mappingProfileCreate').click();
     assert.match(await page.locator('#mappingProfileStatus').textContent(), /загружен в форму/);
     assert.ok((await page.locator('#mappingProfileStatus').boundingBox()).width > 0);
+    await page.locator('[data-view="eventRoutes"]').click();
+    await page.getByRole('checkbox', { name: 'update -> host.update' }).click();
+    assert.equal(await page.getByRole('checkbox', { name: 'update -> host.update' }).isChecked(), true);
+    assert.match(await page.locator('#eventRoutesStatus').textContent(), /необходим маршрут update/);
     const blocked = await page.evaluate(() => {
       const event = new Event('beforeunload', { cancelable: true });
       window.dispatchEvent(event);
@@ -95,7 +141,7 @@ test('mapping editor keeps the profile-bound condition flow usable in Russian an
 
     await page.locator('[data-view="profiles"]').click();
     await page.locator('#profiles.active #mappingProfilesPanel').waitFor({ state: 'visible' });
-    assert.deepEqual(await rulesNavigationOrder(page), ['profiles', 'mapping']);
+    assert.deepEqual(await rulesNavigationOrder(page), ['profiles', 'eventRoutes', 'mapping']);
     await assertVisible(page, '#mappingProfilesPanel');
 
     await page.locator('[data-view="mapping"]').click();
@@ -560,6 +606,8 @@ async function mockApi(page, rules, cmdbuildCatalog, zabbixCatalog, options = {}
             }
             : path === '/api/rules/current'
               ? { source: 'active', rulesVersion: rules.rulesVersion, revision: 'a'.repeat(64), publishEnabled: true, content: rules }
+              : path === '/api/rules/event-routes'
+                ? { routes: rules.eventRoutingRules.map(route => ({ eventType: route.eventType, present: true, enabled: route.publish !== false, method: route.method })) }
               : path === '/api/rules/validate'
                 ? (options.rulesValidation ?? { valid: true, errors: [], warnings: [] })
               : path === '/api/cmdbuild/catalog'

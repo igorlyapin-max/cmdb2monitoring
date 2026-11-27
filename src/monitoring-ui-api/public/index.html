@@ -137,6 +137,7 @@
             <summary class="nav-section-title" data-i18n="nav.group.rules">Правила мониторинга</summary>
             <div class="nav-section-items">
               <button class="nav-item" data-view="profiles" data-i18n="nav.profiles">Профили</button>
+              <button class="nav-item" data-view="eventRoutes" data-i18n="nav.eventRoutes">События</button>
               <button class="nav-item" data-view="mapping" data-i18n="nav.mapping">Управление правилами конвертации</button>
             </div>
           </details>
@@ -305,6 +306,23 @@
                 </table>
               </div>
             </div>
+          </section>
+
+          <section class="view" id="eventRoutes">
+            <div class="view-header">
+              <h1 data-i18n="nav.eventRoutes">События</h1>
+              <div class="actions">
+                <button id="eventRoutesUndo" class="secondary" type="button" data-i18n="common.undo">Отменить</button>
+                <button id="eventRoutesRedo" class="secondary" type="button" data-i18n="common.redo">Вернуть</button>
+                <button id="eventRoutesPublish" type="button" data-i18n="mapping.publish">Сохранить и применить</button>
+                <button id="eventRoutesReload" class="secondary" type="button" data-i18n="common.load">Загрузить</button>
+              </div>
+            </div>
+            <p id="eventRoutesStatus" class="mapping-editor-status action-status" aria-live="polite"></p>
+            <table>
+              <thead><tr><th>CMDBuild</th><th>Zabbix</th><th data-i18n="eventRoutes.enabled">Включено</th></tr></thead>
+              <tbody id="eventRoutesList"></tbody>
+            </table>
           </section>
 
           <section class="view" id="profiles">

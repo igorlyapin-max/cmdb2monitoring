@@ -14,6 +14,18 @@ public sealed class KafkaInputOptions : KafkaClientOptions
 
     public int PollTimeoutMs { get; init; } = 1000;
 
+    public int ReadinessProbeIntervalMs { get; init; } = 10000;
+
+    public int ReadinessProbeTimeoutMs { get; init; } = 3000;
+
+    public AdminClientConfig BuildAdminConfig()
+    {
+        var config = new AdminClientConfig { BootstrapServers = BootstrapServers, ClientId = $"{ClientId}-readiness", SecurityProtocol = GetSecurityProtocol() };
+        ApplySaslConfig(config);
+        ApplySslConfig(config);
+        return config;
+    }
+
     public ConsumerConfig BuildConsumerConfig()
     {
         var config = new ConsumerConfig

@@ -786,6 +786,19 @@ async function routeApi(request, response, url, path) {
     return;
   }
 
+  if (request.method === 'GET' && path === '/api/rules/event-routes') {
+    requireRole(session, response, ['viewer', 'editor', 'admin']);
+    if (response.writableEnded) return;
+    const document = await readCurrentRules();
+    const routes = ['create', 'update', 'delete'].map(eventType => {
+      const matches = (document.content.eventRoutingRules ?? []).filter(route => equalsIgnoreCase(route.eventType, eventType));
+      const method = matches.length === 1 ? String(matches[0].method ?? '') : '';
+      return { eventType, present: matches.length === 1, enabled: matches.length === 1 && matches[0].publish !== false, method: /^host\.(create|update|delete)$/.test(method) ? method : '' };
+    });
+    sendJson(response, 200, { routes });
+    return;
+  }
+
   if (request.method === 'GET' && path === '/api/rules/current') {
     requireRole(session, response, ['editor', 'admin']);
     if (response.writableEnded) {
